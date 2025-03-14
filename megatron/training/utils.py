@@ -237,6 +237,20 @@ def reduce_max_stat_across_model_parallel_group(stat: float) -> float:
         return stat.item()
 
 
+def reduce_sum_across_data_parallel_group(stat: float) -> float:
+    """Reduce a stat tensor across the data parallel group."""
+    if stat is None:
+        stat = 0.0
+    stat = torch.tensor([stat], dtype=torch.float32, device=torch.cuda.current_device())
+    torch.distributed.all_reduce(
+        stat, op=torch.distributed.ReduceOp.SUM, group=mpu.get_data_parallel_group()
+    )
+    if stat.item() == 0.0:
+        return None
+    else:
+        return stat.item()
+
+
 def logical_and_across_model_parallel_group(input: bool) -> bool:
     """
     This function gathers a bool value across the model parallel group

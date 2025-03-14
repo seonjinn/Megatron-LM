@@ -1885,6 +1885,8 @@ def _add_training_args(parser):
                        help='Total number of iterations to train over all '
                        'training runs. Note that either train-iters or '
                        'train-samples should be provided.')
+    group.add_argument('--train-full-dataset', action='store_true',
+                       help='Train on the full dataset.')
     group.add_argument('--train-samples', type=int, default=None,
                        help='Total number of samples to train over all '
                        'training runs. Note that either train-iters or '

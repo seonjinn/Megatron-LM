@@ -107,6 +107,7 @@ from .utils import (
     check_adlr_autoresume_termination,
     logical_and_across_model_parallel_group,
     reduce_max_stat_across_model_parallel_group,
+    reduce_sum_across_data_parallel_group,
     is_last_rank,
     print_rank_0,
     print_rank_last,
@@ -799,6 +800,21 @@ def pretrain(
         }
     else:
         checkpointing_context = {}
+
+    if args.train_full_dataset:
+        # A hacky way to ensure we only apply this to multimodal datasets.
+        # train_valid_test_dataset_provider expects the size of the dataset as an argument, but 
+        # here we want to create the dataset first and then get the size. I only checked that it
+        # worked for the multimodal train_valid_test_dataset_provider.
+        assert "examples/multimodal/dataloader_provider.py" in train_valid_test_dataset_provider.__code__.co_filename, "train_full_dataset is only supported for the multimodal case so far."
+        assert args.train_iters is None, "train_iters should be None when training on the full dataset"
+        assert args.train_samples is None, "train_samples should be None when training on the full dataset"
+        args.iteration = 0
+        train_data_iterator, _, _ = train_valid_test_dataset_provider(None)
+        train_data_iterator_length = len(train_data_iterator._dataloader) if hasattr(train_data_iterator, '_dataloader') else None
+        train_data_iterator_length = reduce_sum_across_data_parallel_group(train_data_iterator_length)
+        train_data_iterator_length = reduce_max_stat_across_model_parallel_group(train_data_iterator_length)
+        args.train_samples = int(train_data_iterator_length)
 
     # Model, optimizer, and learning rate.
     timers('model-and-optimizer-setup', log_level=0).start(barrier=True)
