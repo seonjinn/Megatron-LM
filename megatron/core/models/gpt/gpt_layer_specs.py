@@ -65,6 +65,12 @@ except ImportError:
     HAVE_APEX = False
 
 
+def warn_on_rank0(warning_msg: str):
+    import torch
+    if torch.distributed.get_rank() == 0:
+        warnings.warn(warning_msg)
+
+
 def get_gpt_layer_with_transformer_engine_spec(
     num_experts: Optional[int] = None,
     moe_grouped_gemm: Optional[bool] = False,
@@ -95,7 +101,7 @@ def get_gpt_layer_with_transformer_engine_spec(
 
     """
     if fp8 is not None:
-        warnings.warn(
+        warn_on_rank0(
             'The fp8 argument in "get_gpt_layer_with_transformer_engine_spec" has been deprecated'
             " and will be removed soon. Please update your code accordingly."
         )
@@ -230,7 +236,7 @@ def get_gpt_layer_local_spec(
         qk_norm = backend.layer_norm(rms_norm=False, for_qk=True)
 
     if fp8 is not None:
-        warnings.warn(
+        warn_on_rank0(
             'The fp8 argument in "get_gpt_layer_local_spec" has been deprecated'
             " and will be removed soon. Please update your code accordingly."
         )
@@ -308,7 +314,7 @@ def _get_mlp_module_spec(
     fp8: Optional[str] = None,  # pylint: disable=unused-argument
     moe_use_legacy_grouped_gemm: Optional[bool] = False,
 ):
-    warnings.warn(
+    warn_on_rank0(
         """This private function is on a deprecation track. Please switch to `get_mlp_module_spec`
         since it will be removed in a future release."""
     )
@@ -332,7 +338,7 @@ def get_mlp_module_spec(
 ) -> ModuleSpec:
     """Helper function to get module spec for MLP/MoE"""
     if fp8 is not None:
-        warnings.warn(
+        warn_on_rank0(
             'The fp8 argument in "_get_mlp_module_spec" has been deprecated'
             " and will be removed soon. Please update your code accordingly."
         )
