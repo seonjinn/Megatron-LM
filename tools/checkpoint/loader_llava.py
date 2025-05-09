@@ -17,6 +17,8 @@ def add_arguments(parser):
 
     group.add_argument('--true-vocab-size', type=int, default=None,
                        help='original size of vocab, if specified will trim padding from embedding table.')
+    group.add_argument('--make-vocab-size-divisible-by', type=int, default=None,
+                       help='Value to make vocab size divisible by. Will pad embedding table if necessary')
     group.add_argument('--vocab-file', type=str, default=None,
                        help='Path to the vocab file. If specified will use this to get vocab size and '
                        'trim padding from the embedding table.')
@@ -138,6 +140,8 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
 
         md.num_query_groups = self.margs.num_query_groups
         md.kv_channels = self.margs.kv_channels
+        if self.args.model_type == 'hybrid':
+            md.mamba_state_dim = getattr(language_config, 'mamba_state_dim', self.margs.mamba_state_dim)
         # Swiglu is used to chunk linear layer weight in a specific way, and this is guarded by the
         # gated_linear_unit config in the MLP code.
         md.swiglu = self.margs.swiglu and language_config.gated_linear_unit
@@ -173,8 +177,8 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
         vp_size = self.margs.virtual_pipeline_model_parallel_size or 1
         encoder_tp_size = self.md.previous_encoder_tensor_parallel_size
 
-        if self.md.vision_model_type not in ("internvit", "siglip", "radio", "radio-g"):
-            raise Exception(f'unrecognized vision model type: {md.vision_model_type}')
+        if self.md.vision_model_type not in ("internvit", "siglip", "radio", "radio-g", "cradio-g"):
+            raise Exception(f'unrecognized vision model type: {self.md.vision_model_type}')
 
         message = {}
         if self.md.vision_model_type in ("internvit", "siglip"):
@@ -186,7 +190,7 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
         if self.md.vision_model_type == "radio-g":
             message["mask token"] = self.all_models[0][0][0].vision_model.mask_token.data
 
-        if self.md.vision_model_type in ("radio", "radio-g"):
+        if self.md.vision_model_type in ("radio", "radio-g", "cradio-g"):
             message["embedder weight"] = torch.cat([self.all_models[0][0][tp_rank].vision_model.embedder.weight.data for tp_rank in range(encoder_tp_size)], dim=0)
             if self.md.vision_model_type == "radio-g":
                 message["embedder bias"] = torch.cat([self.all_models[0][0][tp_rank].vision_model.embedder.bias.data for tp_rank in range(encoder_tp_size)], dim=0)
@@ -196,7 +200,7 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
             message["ln post weight"] = self.all_models[0][0][0].vision_model.ln_post.weight.data
             message["ln post bias"] = self.all_models[0][0][0].vision_model.ln_post.bias.data
 
-        if self.md.vision_model_type in ("internvit", "radio", "radio-g"):
+        if self.md.vision_model_type in ("internvit", "radio", "radio-g", "cradio-g"):
             message["class token"] = self.all_models[0][0][0].vision_model.class_token.data
 
         self.queue_put("vit embeddings", message)
@@ -354,7 +358,7 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
         self.send_vision_projection_over_queue()
 
         schema = get_model_schema(
-            "GPT",
+            self.md.model_type,
             self.margs.transformer_impl,
             self.margs.num_experts,
             self.margs.expert_model_parallel_size,

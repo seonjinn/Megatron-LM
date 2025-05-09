@@ -11,6 +11,7 @@ def get_core_transformer_block_key(model_key):
     return {
         "GPT" : "decoder",
         "BERT" : "encoder",
+        "hybrid" : "decoder",
     }[model_key]
 
 
@@ -126,8 +127,79 @@ class CoreMoETESchema(CoreSchema):
         } | extra_layer_schema, prefix=prefix)
 
 
+class CoreHybridBaseSchema(ModelSchema):
+
+    def __init__(self, model_type, layer_schema, prefix):
+        block_key = get_core_transformer_block_key(model_type)
+        super().__init__({
+            "embeddings" : {
+                "pos" : f"{prefix}embedding.position_embeddings.weight",
+                "word" : f"{prefix}embedding.word_embeddings.weight",
+            },
+            "layer_prefix" : f"{prefix}{block_key}.layers",
+            "layer" : layer_schema,
+            "final_norm" : {
+                "weight" : f"{prefix}{block_key}.final_norm.weight",
+                "bias" : f"{prefix}{block_key}.final_norm.bias",
+            },
+            "output_layer" : {
+                "weight" : f"{prefix}output_layer.weight",
+            },
+            "pooler" : {
+                "weight" : f"{prefix}pooler.dense.weight",
+                "bias" : f"{prefix}pooler.dense.bias",
+            },
+            "lm_head" : {
+                "dense_weight" : f"{prefix}lm_head.dense.weight",
+                "dense_bias" : f"{prefix}lm_head.dense.bias",
+                "norm_weight" : f"{prefix}lm_head.layer_norm.weight",
+                "norm_bias" : f"{prefix}lm_head.layer_norm.bias",
+            },
+            "binary_head" : {
+                "weight" : f"{prefix}binary_head.weight",
+                "bias" : f"{prefix}binary_head.bias",
+            },
+        })
+
+
+class CoreHybridTESchema(CoreHybridBaseSchema):
+
+    def __init__(self, model_type, prefix, extra_layer_schema):
+        super().__init__(model_type, layer_schema={
+
+            # Self attention.
+            "self_attn_norm_weight" : "self_attention.linear_qkv.layer_norm_weight",
+            "self_attn_norm_bias" : "self_attention.linear_qkv.layer_norm_bias",
+            "self_attn_qkv_weight" : "self_attention.linear_qkv.weight",
+            "self_attn_qkv_bias" : "self_attention.linear_qkv.bias",
+
+            "self_attn_proj_weight" : "self_attention.linear_proj.weight",
+            "self_attn_proj_bias" : "self_attention.linear_proj.bias",
+
+            # MLP.
+            "mlp_norm_weight" : "mlp.linear_fc1.layer_norm_weight",
+            "mlp_norm_bias" : "mlp.linear_fc1.layer_norm_bias",
+            "mlp_fc1_weight" : "mlp.linear_fc1.weight",
+            "mlp_fc1_bias" : "mlp.linear_fc1.bias",
+            "mlp_fc2_weight" : "mlp.linear_fc2.weight",
+            "mlp_fc2_bias" : "mlp.linear_fc2.bias",
+
+            # Mixer.
+            "mixer_dt_bias" : "mixer.dt_bias",
+            "mixer_D" : "mixer.D",
+            "mixer_A_log" : "mixer.A_log",
+            "mixer_in_proj_layer_norm_weight" : "mixer.in_proj.layer_norm_weight",
+            "mixer_in_proj_weight" : "mixer.in_proj.weight",
+            "mixer_conv1d_weight" : "mixer.conv1d.weight",
+            "mixer_conv1d_bias" : "mixer.conv1d.bias",
+            "mixer_norm_weight" : "mixer.norm.weight",
+            "mixer_out_proj_weight" : "mixer.out_proj.weight",
+
+        } | extra_layer_schema, prefix=prefix)
+
+
 def get_model_schema(
-    model_type: T.Literal["GPT", "BERT"],
+    model_type: T.Literal["GPT", "BERT", "hybrid"],
     transformer_impl: T.Literal["transformer_engine", "local"],
     num_experts: T.Optional[int] = None,
     expert_model_parallel_size: T.Optional[int] = None,
@@ -139,6 +211,8 @@ def get_model_schema(
         assert transformer_impl == "transformer_engine"
         assert isinstance(expert_model_parallel_size, int)
         return CoreMoETESchema(model_type, num_experts, expert_model_parallel_size, prefix, extra_layer_schema)
+    if model_type == "hybrid":
+        return CoreHybridTESchema(model_type, prefix, extra_layer_schema)
     return {
         "local" : CoreLocalSchema,
         "transformer_engine" : CoreTESchema,

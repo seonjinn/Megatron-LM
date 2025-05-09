@@ -55,6 +55,48 @@ class HFLMSchema(HFSchema):
         }
         super().__init__(schema=schema, layer_schema=layer_schema, prefix=prefix, layer_prefix=layer_prefix)
 
+class HFHybridLMSchema(HFSchema):
+    def __init__(self, prefix, layer_prefix, use_swiglu=False):
+        schema = {
+            "word_embeddings": f"{prefix}backbone.embeddings.weight",
+            "position_embeddings": f"{prefix}embeddings.position_embedding",
+            "final_norm": f"{prefix}backbone.norm_f.weight",
+            "output_layer": f"{prefix}lm_head.weight",
+        }
+
+        layer_schema = {
+            "norm_weight": "norm.weight",
+            "norm_bias": "norm.bias",
+
+            # Self attention
+            "q_proj_weight": "mixer.q_proj.weight",
+            "k_proj_weight": "mixer.k_proj.weight",
+            "v_proj_weight": "mixer.v_proj.weight",
+            "q_proj_bias": "mixer.q_proj.bias",
+            "k_proj_bias": "mixer.k_proj.bias",
+            "v_proj_bias": "mixer.v_proj.bias",
+            "dense_weight": "mixer.o_proj.weight",
+            "dense_bias": "mixer.o_proj.bias",
+
+            # MLP
+            "mlp_l0_weight": "mixer.up_proj.weight",
+            "mlp_l0_bias": "mixer.up_proj.bias",
+            "mlp_l1_weight": "mixer.down_proj.weight",
+            "mlp_l1_bias": "mixer.down_proj.bias",
+
+            # Mixer
+            "mixer_dt_bias": "mixer.dt_bias",
+            "mixer_D": "mixer.D",
+            "mixer_A_log": "mixer.A_log",
+            "mixer_in_proj_weight": "mixer.in_proj.weight",
+            "mixer_norm_weight": "mixer.norm.weight",
+            "mixer_conv1d_weight" : "mixer.conv1d.weight",
+            "mixer_conv1d_bias" : "mixer.conv1d.bias",
+            "mixer_out_proj_weight" : "mixer.out_proj.weight",
+
+        }
+        super().__init__(schema=schema, layer_schema=layer_schema, prefix=prefix, layer_prefix=layer_prefix)
+
 class HFInternViTSchema(HFSchema):
     def __init__(self, prefix, layer_prefix, use_swiglu=False):
         schema = {
@@ -171,8 +213,12 @@ def get_vision_model_schema(
 
 
 def get_language_model_schema(
+    model_type = "GPT",
     prefix: T.Optional[str] = "",
     layer_prefix: T.Optional[str] = "",
     use_swiglu=False,
 ) -> HFSchema:
-    return HFLMSchema(prefix, layer_prefix, use_swiglu=use_swiglu)
+    if model_type == "hybrid":
+        return HFHybridLMSchema(prefix, layer_prefix, use_swiglu=use_swiglu)
+    else:
+        return HFLMSchema(prefix, layer_prefix, use_swiglu=use_swiglu)

@@ -4,8 +4,9 @@ import os
 import sys
 import types
 import torch
+from datetime import timedelta
 
-from utils import _ConverterFakeProcessGroup, print_memory_usage
+from utils import _ConverterFakeProcessGroup, print_memory_usage, combine_in_proj, combine_conv1d
 
 class MegatronCheckpointLoaderBase:
     """Orchestrates loading a Megatron checkpoint and sending
@@ -136,6 +137,7 @@ class MegatronCheckpointLoaderBase:
             from megatron.training.global_vars import set_global_variables
             from megatron.core import mpu
             from megatron.legacy import fused_kernels
+            from megatron.core.tensor_parallel import get_cuda_rng_tracker
         except ModuleNotFoundError as e:
             print(f"Unable to import required Megatron modules: {e}")
             self.queue.put("exit")
@@ -150,8 +152,15 @@ class MegatronCheckpointLoaderBase:
         # For backward compatibility during local parallel states refactoring
         fake_tp_group = _ConverterFakeProcessGroup(size=self.margs.tensor_model_parallel_size)
         fake_ep_group = _ConverterFakeProcessGroup(size=self.margs.expert_model_parallel_size)
+        fake_pp_group = _ConverterFakeProcessGroup(size=self.margs.pipeline_model_parallel_size)
+        fake_cp_group = _ConverterFakeProcessGroup(size=self.margs.context_parallel_size)
         mpu._TENSOR_MODEL_PARALLEL_GROUP = fake_tp_group
         mpu._EXPERT_MODEL_PARALLEL_GROUP = fake_ep_group
+        mpu._PIPELINE_MODEL_PARALLEL_GROUP = fake_pp_group
+        mpu._CONTEXT_PARALLEL_GROUP = fake_cp_group
+
+        get_cuda_rng_tracker().add('model-parallel-rng', self.margs.seed)
+
         fused_kernels.load(self.margs)
 
     def compute_true_vocab_size(self):
@@ -211,6 +220,7 @@ class MegatronCheckpointLoaderBase:
 
                 # Each time we load, we set counters to 0, pass None for optimizer/ LR
                 self.margs.consumed_train_samples = 0
+                self.margs.skipped_train_samples = 0
                 self.margs.consumed_valid_samples = 0
                 self.margs.exit_on_missing_checkpoint = True
                 load_checkpoint(model_list, None, None)
@@ -254,6 +264,89 @@ class MegatronCheckpointLoaderBase:
         msg["name"] = name
         self.queue.put(msg)
 
+    def _send_attention_layer(self, models, layer_idx, schema):
+        """
+        Extract attention layer parameters and return message dictionary.
+        """
+        tp_size = self.margs.tensor_model_parallel_size
+        layer = schema.get_layer(models[0], layer_idx)
+        message = {}
+
+        # Non-parallel params
+        message["input norm weight"] = layer["self_attn_norm_weight"]
+        if self.md.norm_has_bias:
+            message["input norm bias"] = layer["self_attn_norm_bias"]
+        if self.md.linear_bias:
+            message["dense bias"] = layer["self_attn_proj_bias"]
+
+        # Collect parallel parameters
+        qkv_weight, qkv_bias = [], []
+        dense_weight = []
+
+        for model_tp in models:
+            layer_p = schema.get_layer(model_tp, layer_idx)
+            qkv_weight.append(layer_p["self_attn_qkv_weight"])
+            dense_weight.append(layer_p["self_attn_proj_weight"])
+            if self.md.qkv_bias:
+                qkv_bias.append(layer_p["self_attn_qkv_bias"])
+
+        # Standard concatenations
+        message["qkv weight"] = torch.cat(qkv_weight, dim=0)
+        message["dense weight"] = torch.cat(dense_weight, dim=1)
+
+        if self.md.qkv_bias:
+            message["qkv bias"] = torch.cat(qkv_bias, dim=0)
+
+        return message
+
+    def _send_mlp_layer(self, models, layer_idx, schema):
+        """
+        Extract MLP layer parameters and return message dictionary.
+        """
+        tp_size = self.margs.tensor_model_parallel_size
+        layer = schema.get_layer(models[0], layer_idx)
+        message = {}
+
+        # Non-parallel params
+        message["post norm weight"] = layer["mlp_norm_weight"]
+        if self.md.norm_has_bias:
+            message["post norm bias"] = layer["mlp_norm_bias"]
+        if self.md.linear_bias:
+            message["mlp l1 bias"] = layer["mlp_fc2_bias"]
+
+        # Collect parallel parameters
+        mlp_l0_weight, mlp_l0_bias = [], []
+        mlp_l1_weight = []
+
+        for model_tp in models:
+            layer_p = schema.get_layer(model_tp, layer_idx)
+            mlp_l0_weight.append(layer_p["mlp_fc1_weight"])
+            mlp_l1_weight.append(layer_p["mlp_fc2_weight"])
+            if self.md.linear_bias:
+                mlp_l0_bias.append(layer_p["mlp_fc1_bias"])
+
+        # If we are using SwiGLU, chunk each mlp_l0_weight
+        if self.md.swiglu:
+            for i in range(tp_size):
+                mlp_l0_weight[i] = torch.chunk(mlp_l0_weight[i], 2, dim=0)
+            message["mlp l0 weight W"] = torch.cat([w[0] for w in mlp_l0_weight], dim=0)
+            message["mlp l0 weight V"] = torch.cat([w[1] for w in mlp_l0_weight], dim=0)
+        else:
+            message["mlp l0 weight"] = torch.cat(mlp_l0_weight, dim=0)
+
+        message["mlp l1 weight"] = torch.cat(mlp_l1_weight, dim=1)
+
+        if self.md.linear_bias:
+            if self.md.swiglu:
+                for i in range(tp_size):
+                    mlp_l0_bias[i] = torch.chunk(mlp_l0_bias[i], 2, dim=0)
+                message["mlp l0 bias W"] = torch.cat([b[0] for b in mlp_l0_bias], dim=0)
+                message["mlp l0 bias V"] = torch.cat([b[1] for b in mlp_l0_bias], dim=0)
+            else:
+                message["mlp l0 bias"] = torch.cat(mlp_l0_bias, dim=0)
+
+        return message
+
     def send_llm_over_queue(self, schema):
         """
         Using self.all_models, extract model parameters and send them over the queue.
@@ -279,69 +372,84 @@ class MegatronCheckpointLoaderBase:
             assert embeddings[0]["pos"] is None
         self.queue_put("embeddings", message)
 
-        total_layer_num = 0
-        for vp_rank in range(vp_size):
-            for pp_rank in range(pp_size):
-                models = self.all_models[pp_rank][vp_rank]
-                num_layers = schema.get_num_layers(models[0])
-                for layer_idx in range(num_layers):
-                    message = {}
-                    layer = schema.get_layer(models[0], layer_idx)
+        if self.md.model_type == "hybrid":
+            from megatron.core.ssm.mamba_hybrid_layer_allocation import Symbols as LayerSymbols
+            from megatron.core.ssm.mamba_hybrid_layer_allocation import allocate_layers
 
-                    # Non-parallel params
-                    message["input norm weight"] = layer["self_attn_norm_weight"]
-                    message["post norm weight"] = layer["mlp_norm_weight"]
-                    if self.md.norm_has_bias:
-                        message["input norm bias"] = layer["self_attn_norm_bias"]
-                        message["post norm bias"] = layer["mlp_norm_bias"]
-                    if self.md.linear_bias:
-                        message["dense bias"] = layer["self_attn_proj_bias"]
-                        message["mlp l1 bias"] = layer["mlp_fc2_bias"]
+            layer_type_list = allocate_layers(
+                self.md.num_layers,
+                self.margs.hybrid_attention_ratio,
+                self.margs.hybrid_mlp_ratio,
+                self.margs.hybrid_override_pattern,
+            )
 
-                    # Collect parallel parameters
-                    qkv_weight, qkv_bias = [], []
-                    dense_weight = []
-                    mlp_l0_weight, mlp_l0_bias = [], []
-                    mlp_l1_weight = []
+            total_layer_num = 0
+            for vp_rank in range(vp_size):
+                for pp_rank in range(pp_size):
+                    models = self.all_models[pp_rank][vp_rank]
+                    num_layers = schema.get_num_layers(models[0])
+                    for layer_idx in range(num_layers):
+                        layer_type = layer_type_list[layer_idx]
+                        
+                        if layer_type == LayerSymbols.MAMBA:
+                            layer = schema.get_layer(models[0], layer_idx)
+                            message = {}
+                            message["in proj norm weight"] = layer["mixer_in_proj_layer_norm_weight"]
 
-                    for model_tp in models:
-                        layer_p = schema.get_layer(model_tp, layer_idx)
-                        qkv_weight.append(layer_p["self_attn_qkv_weight"])
-                        dense_weight.append(layer_p["self_attn_proj_weight"])
-                        mlp_l0_weight.append(layer_p["mlp_fc1_weight"])
-                        mlp_l1_weight.append(layer_p["mlp_fc2_weight"])
-                        if self.md.qkv_bias:
-                            qkv_bias.append(layer_p["self_attn_qkv_bias"])
-                        if self.md.linear_bias:
-                            mlp_l0_bias.append(layer_p["mlp_fc1_bias"])
+                            dt_bias = []
+                            D = []
+                            A_log = []
+                            in_proj_weight = []
+                            conv_1d_weight, conv_1d_bias = [], []
+                            norm_weight = []
+                            out_proj_weight = []
+                            for model_tp in models:
+                                layer_p = schema.get_layer(model_tp, layer_idx)
+                                dt_bias.append(layer_p["mixer_dt_bias"])
+                                D.append(layer_p["mixer_D"])
+                                A_log.append(layer_p["mixer_A_log"])
+                                in_proj_weight.append(layer_p["mixer_in_proj_weight"])
+                                conv_1d_weight.append(layer_p["mixer_conv1d_weight"])
+                                conv_1d_bias.append(layer_p["mixer_conv1d_bias"])
+                                norm_weight.append(layer_p["mixer_norm_weight"])
+                                out_proj_weight.append(layer_p["mixer_out_proj_weight"])
 
-                    # If we are using SwiGLU, chunk each mlp_l0_weight
-                    if self.md.swiglu:
-                        for i in range(tp_size):
-                            mlp_l0_weight[i] = torch.chunk(mlp_l0_weight[i], 2, dim=0)
-                        message["mlp l0 weight W"] = torch.cat([w[0] for w in mlp_l0_weight], dim=0)
-                        message["mlp l0 weight V"] = torch.cat([w[1] for w in mlp_l0_weight], dim=0)
-                    else:
-                        message["mlp l0 weight"] = torch.cat(mlp_l0_weight, dim=0)
+                            message["dt bias"] = torch.cat(dt_bias, dim=0)
+                            message["D"] = torch.cat(D, dim=0)
+                            message["A log"] = torch.cat(A_log, dim=0)
 
-                    # Standard concatenations
-                    message["qkv weight"] = torch.cat(qkv_weight, dim=0)
-                    message["dense weight"] = torch.cat(dense_weight, dim=1)
-                    message["mlp l1 weight"] = torch.cat(mlp_l1_weight, dim=1)
+                            d_inner = self.md.hidden_size * 2 #TODO: can I know expansion factor?
+                            ngroups = self.margs.mamba_num_groups
+                            d_state = self.md.mamba_state_dim
+                            nheads = self.margs.mamba_num_heads if self.margs.mamba_num_heads is not None else d_inner // self.margs.mamba_head_dim
+                            message["in proj weight"] = combine_in_proj(in_proj_weight, d_inner, ngroups, d_state, nheads, tp_size=tp_size)
+                            message["conv1d weight"] = combine_conv1d(conv_1d_weight, "weight", d_inner, ngroups, d_state, tp_size=tp_size)
+                            message["conv1d bias"] = combine_conv1d(conv_1d_bias, "bias", d_inner, ngroups, d_state, tp_size=tp_size)
+                            message["norm weight"] = torch.cat(norm_weight, dim=0)
+                            message["out proj weight"] = torch.cat(out_proj_weight, dim=1)
+                        elif layer_type == LayerSymbols.ATTENTION:
+                            message = self._send_attention_layer(models, layer_idx, schema)
+                        elif layer_type == LayerSymbols.MLP:
+                            message = self._send_mlp_layer(models, layer_idx, schema)
 
-                    if self.md.qkv_bias:
-                        message["qkv bias"] = torch.cat(qkv_bias, dim=0)
-                    if self.md.linear_bias:
-                        if self.md.swiglu:
-                            for i in range(tp_size):
-                                mlp_l0_bias[i] = torch.chunk(mlp_l0_bias[i], 2, dim=0)
-                            message["mlp l0 bias W"] = torch.cat([b[0] for b in mlp_l0_bias], dim=0)
-                            message["mlp l0 bias V"] = torch.cat([b[1] for b in mlp_l0_bias], dim=0)
-                        else:
-                            message["mlp l0 bias"] = torch.cat(mlp_l0_bias, dim=0)
+                        self.queue_put(f"transformer layer {total_layer_num}", message)
+                        total_layer_num += 1
+        else:
+            total_layer_num = 0
+            for vp_rank in range(vp_size):
+                for pp_rank in range(pp_size):
+                    models = self.all_models[pp_rank][vp_rank]
+                    num_layers = schema.get_num_layers(models[0])
+                    for layer_idx in range(num_layers):
+                        # Combine attention and MLP layer parameters
+                        attention_message = self._send_attention_layer(models, layer_idx, schema)
+                        mlp_message = self._send_mlp_layer(models, layer_idx, schema)
+                        
+                        # Merge both messages
+                        message = {**attention_message, **mlp_message}
 
-                    self.queue_put(f"transformer layer {total_layer_num}", message)
-                    total_layer_num += 1
+                        self.queue_put(f"transformer layer {total_layer_num}", message)
+                        total_layer_num += 1
 
         # 3) Final norm
         final_norm = schema.get("final_norm", models[0])
@@ -415,7 +523,7 @@ class MegatronCheckpointLoaderBase:
 
         # 6) Build metadata
         self.md = self.build_checkpoint_metadata(true_vocab_size)
-
+    
         # 7) Load all model shards
         self.all_models, self.consumed_train_samples, self.consumed_valid_samples = self.load_model_shards(
             model_provider,
@@ -440,6 +548,7 @@ class MegatronCheckpointLoaderBase:
         md.hidden_size = self.margs.hidden_size
         md.seq_length = self.margs.seq_length
         md.num_attention_heads = self.margs.num_attention_heads
+        md.num_query_groups = self.margs.num_query_groups
         md.max_position_embeddings = self.margs.max_position_embeddings
         md.tokenizer_type = self.margs.tokenizer_type
         md.iteration = self.margs.iteration
@@ -457,6 +566,11 @@ class MegatronCheckpointLoaderBase:
         md.make_vocab_size_divisible_by = self.margs.make_vocab_size_divisible_by
         md.checkpoint_args = self.checkpoint_args
         md.use_legacy_models = self.margs.use_legacy_models
+        if self.args.model_type == "hybrid":
+            md.hybrid_attention_ratio = self.margs.hybrid_attention_ratio
+            md.hybrid_mlp_ratio = self.margs.hybrid_mlp_ratio
+            md.hybrid_override_pattern = self.margs.hybrid_override_pattern
+            md.mamba_state_dim = self.margs.mamba_state_dim
         return md
 
     def build_sys_argv(self):

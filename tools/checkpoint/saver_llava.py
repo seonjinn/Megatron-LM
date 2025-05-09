@@ -34,6 +34,8 @@ def add_arguments(parser):
     group.add_argument('--target-pipeline-parallel-size', type=int,
                        help='Target tensor model parallel size, default to the pipeline parall size '
                        'in the input checkpoint if provided by the loader, otherwise to 1')
+    group.add_argument('--make-vocab-size-divisible-by', type=int, default=None,
+                       help='Value to make vocab size divisible by. Will pad embedding table if necessary')
     group.add_argument('--saver-transformer-impl', default='transformer_engine',
                        choices=['local', 'transformer_engine'],
                        help='Which Transformer implementation to use.')
@@ -80,7 +82,6 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
                     print(f"Overwriting default {arg} value {getattr(margs, arg)} with value from checkpoint {value}.")
                     setattr(margs, arg, value)
 
-        print("im here")
         return margs
     def build_sys_argv(self):
         my_argv = ['script.py',
@@ -115,7 +116,9 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
                     '--exit-on-missing-checkpoint',
                     ]
 
-        if self.md.make_vocab_size_divisible_by is not None:
+        if self.args.make_vocab_size_divisible_by is not None:
+            my_argv.extend(['--make-vocab-size-divisible-by', str(self.args.make_vocab_size_divisible_by)])
+        elif self.md.make_vocab_size_divisible_by is not None:
             my_argv.extend(['--make-vocab-size-divisible-by', str(self.md.make_vocab_size_divisible_by)])
         if self.md.params_dtype == torch.float16:
             my_argv.append('--fp16')
@@ -164,6 +167,10 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
         margs.image_break_token = getattr(self.md.checkpoint_args, "image_break_token", None)
         margs.conv_merging = getattr(self.md.checkpoint_args, "conv_merging", False)
         margs.allow_missing_conv_merge_checkpoint = getattr(self.md.checkpoint_args, "allow_missing_conv_merge_checkpoint", False)
+        margs.enable_te_ce = getattr(self.md.checkpoint_args, "enable_te_ce", False)
+        margs.token_merging_variant = getattr(self.md.checkpoint_args, "token_merging_variant", None)
+        margs.token_merging_out_tokens = getattr(self.md.checkpoint_args, "token_merging_out_tokens", None)
+        margs.enable_fusions = getattr(self.md.checkpoint_args, "enable_fusions", False)
 
         return margs
 
@@ -184,6 +191,12 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
             from pretrain_bert import model_provider
             self.margs.model_type = ModelType.encoder_or_decoder
             self.model_provider = model_provider
+        elif self.args.model_type == 'hybrid':
+            sys.path.insert(0, './examples/multimodal')
+            from examples.multimodal.model import model_provider
+            from examples.multimodal.config import get_vision_model_config, get_vision_projection_config
+            self.model_provider = model_provider
+            self.margs.model_type = ModelType.encoder_or_decoder
         else:
             raise Exception(f'unrecognized model type: {self.args.model_type}')
 
@@ -194,7 +207,7 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
         # The ViT embeddings are put on the PP / EP / TP 0 
         vit_embeddings_msg = self.queue_get("vit embeddings")
 
-        if self.md.vision_model_type in ("radio", "radio-g"):
+        if self.md.vision_model_type in ("radio", "radio-g", "cradio-g"):
             embedder_weight = chunk_weight(vit_embeddings_msg["embedder weight"], "column", self.args.target_tensor_parallel_size, self.args.target_expert_parallel_size)
             if self.md.vision_model_type == "radio-g":
                 embedder_bias = chunk_bias(vit_embeddings_msg["embedder bias"], "column", self.args.target_tensor_parallel_size, self.args.target_expert_parallel_size)
@@ -211,7 +224,7 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
                 if self.md.vision_model_type == "radio-g":
                     model.vision_model.mask_token.data.copy_(vit_embeddings_msg["mask token"])
 
-                if self.md.vision_model_type in ("radio", "radio-g"):
+                if self.md.vision_model_type in ("radio", "radio-g", "cradio-g"):
                     model.vision_model.embedder.weight.data.copy_(embedder_weight[tp_rank])
                     if self.md.vision_model_type == "radio-g":
                         model.vision_model.embedder.bias.data.copy_(embedder_bias[tp_rank])
@@ -225,7 +238,7 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
                     model.vision_model.ln_post.weight.data.copy_(vit_embeddings_msg["ln post weight"])
                     model.vision_model.ln_post.bias.data.copy_(vit_embeddings_msg["ln post bias"])
 
-                if self.md.vision_model_type in ("internvit", "clip", "radio", "radio-g"):
+                if self.md.vision_model_type in ("internvit", "clip", "radio", "radio-g", "cradio-g"):
                     model.vision_model.class_token.data.copy_(vit_embeddings_msg["class token"])
 
         # ViT Transformer layers.
