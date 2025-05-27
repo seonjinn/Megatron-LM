@@ -54,8 +54,6 @@ class MultimodalProjector(MegatronModule):
             else:
                 raise Exception(f"Unsupported multimodal projection type {self.projector_type}")
 
-
-
     def forward(self, hidden_states):
         """Run multimodal projector.
 

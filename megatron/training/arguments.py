@@ -172,7 +172,7 @@ def validate_model_config_args_from_heterogeneous_config(args):
     )
 
     n_kv_heads_in_group = [
-        config["attention"]["n_heads_in_group"] for config in hf_config_dict.block_configs 
+        config["attention"]["n_heads_in_group"] for config in hf_config_dict.block_configs
         if config["attention"]["n_heads_in_group"] is not None
     ]
     assert all(num == n_kv_heads_in_group[0] for num in n_kv_heads_in_group), "num query head must be consistent across all layers"
@@ -1140,7 +1140,7 @@ def core_transformer_config_from_args(args, config_class=None):
 
     if args.multi_latent_attention:
         config_class = MLATransformerConfig
-    
+
     if args.heterogeneous_layers_config_path is not None:
         assert not args.multi_latent_attention, "Multi latent attention with heterogeneous layers is not supported."
         config_class = HeterogeneousTransformerConfig
@@ -1257,7 +1257,7 @@ def _add_inference_args(parser):
                        'Requires setting --pipeline-model-parallel-size > 1.'
                        'Setting this to -1 indicates that batch pipelining is not used.')
     group.add_argument('--max-tokens-to-oom',
-                       type=int, default=12000,
+                       type=int, default=32768,
                        help='Maximum number of tokens during inference'
                        'tokens here is # in prompt + # to generate'
                        'Allows us to throw an error before OOM crashes server')
@@ -2377,11 +2377,11 @@ def _add_distributed_args(parser):
                        'layer in the context of partition and placement for pipeline parallelism.')
     group.add_argument('--use-distributed-optimizer', action='store_true',
                        help='Use distributed optimizer.')
-    group.add_argument('--use-nccl-ub', action='store_true', dest='nccl_ub', 
+    group.add_argument('--use-nccl-ub', action='store_true', dest='nccl_ub',
                        help='Use the userbuffer registration for DP/FSDP communication buffers.'
                        'This option will reduce GPU SM usage for the DP/FSDP communication,'
                        'which is improving the performance of the overlapped computation.')
-    group.add_argument('--use-sharp', action='store_true', 
+    group.add_argument('--use-sharp', action='store_true',
                        help='Required to enable SHARP communication.')
     group.add_argument('--use-custom-fsdp', action='store_true',
                        help='Use the Megatron FSDP code path in DDP.')
@@ -2867,9 +2867,9 @@ def _add_mla_args(parser):
 
 def _add_heterogeneous_args(parser):
     """
-    Heterogeneous models refer to transformer architectures where individual layers can differ 
+    Heterogeneous models refer to transformer architectures where individual layers can differ
     in configuration. Specifically:
-        - Attention or MLP layers can be replaced with either a linear layer or a no-op 
+        - Attention or MLP layers can be replaced with either a linear layer or a no-op
         - MLP intermediate dimensions can vary between layers
     We use the format of the HuggingFace config files in llama nemotron models to define the architecture.
     For example, https://huggingface.co/nvidia/Llama-3_3-Nemotron-Super-49B-v1/resolve/main/config.json

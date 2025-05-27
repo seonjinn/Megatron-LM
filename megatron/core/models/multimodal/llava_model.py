@@ -911,7 +911,7 @@ class LLaVAModel(MegatronModule):
         inference_context = deprecate_inference_params(inference_context, inference_params)
 
         # Keep a copy of the original imgs_sizes in case we split to context parallel ranks later.
-        global_imgs_sizes = imgs_sizes.clone()
+        global_imgs_sizes = imgs_sizes.clone() if imgs_sizes is not None else None
 
         use_inference_kv_cache = (
             inference_context is not None

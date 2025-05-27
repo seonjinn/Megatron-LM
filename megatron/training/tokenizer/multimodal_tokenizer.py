@@ -47,6 +47,8 @@ nemotron_custom_template = "{{- bos_token }}{% for message in messages %}{{'<SPE
 
 nemotron_aligned_custom_template = "{{- bos_token}}{% for message in messages %}{{message['role'] + '\n' + message['content'] + '\n' + '[PREFIX]'}}{% endfor %}{% if add_generation_prompt %}{{ 'Assistant\n' }}{% endif %}"
 
+llama_nemotron_template = "{%- if messages[0]['role'] == 'system' -%}{%- set system_message = 'detailed thinking off\n\n' + messages[0]['content'] | trim -%}{%- set messages = messages[1:] -%}{%- else -%}{%- set system_message = 'detailed thinking off' -%}{%- endif -%}{%- if tools is not none -%}{{- '<|begin_of_text|><|start_header_id|>system<|end_header_id|>' + '\n\n' + system_message -}} {{- '\n\n' if system_message else '' -}} {{- '<AVAILABLE_TOOLS>[' -}} {% for t in tools %}{{- (t.function if t.function is defined else t) | tojson() -}}{{- ', ' if not loop.last else '' -}}{%- endfor -%} {{- ']</AVAILABLE_TOOLS>' -}} {{- '<|eot_id|>' -}}{%- else -%}{{- '<|begin_of_text|><|start_header_id|>system<|end_header_id|>' + '\n\n' + system_message + '<|eot_id|>' -}}{%- endif -%}{%- for message in messages -%}{%- if message['role'] == 'user' -%}{{- '<|start_header_id|>user<|end_header_id|>' + '\n\n' + message['content'] | trim + '<|eot_id|>' -}}{%- elif message['role'] == 'tool' -%}{%- set tool_response = '<TOOL_RESPONSE>[' + message['content'] | trim + ']</TOOL_RESPONSE>' -%}{{- '<|start_header_id|>user<|end_header_id|>' + '\n\n' + tool_response + '<|eot_id|>' -}}{%- elif message['role'] == 'assistant' and message.get('tool_calls') is not none -%}{%- set tool_calls = message['tool_calls'] -%}{{- '<|start_header_id|>assistant<|end_header_id|>' + '\n\n' + '<TOOLCALL>[' -}}{%- for tool_call in tool_calls -%}{{ '{' + '\"name\": \"' + tool_call.function.name + '\", \"arguments\": ' + tool_call.function.arguments | tojson + '}' }}{%- if not loop.last -%}{{ ', ' }}{%- else -%}{{ ']</TOOLCALL>' + '<|eot_id|>' }}{%- endif -%}{%- endfor -%}{%- elif message['role'] == 'assistant' -%}{{- '<|start_header_id|>assistant<|end_header_id|>' + '\n\n' + message['content'] | trim + '<|eot_id|>' -}}{%- endif -%}{%- endfor -%}{%- if add_generation_prompt -%}{{ '<|start_header_id|>assistant<|end_header_id|>' + '\n\n' }}{%- endif -%}"
+
 
 @dataclass
 class PromptConfig:
@@ -123,6 +125,15 @@ class MultimodalTokenizer(MegatronTokenizer):
                 assistant_prefix_len=4,
                 pad_token_id=tokenizer.convert_tokens_to_ids("<|finetune_right_pad_id|>"),
                 custom_chat_template=llama3p1_chat_template,
+                has_bos=True,
+                has_system_role=True,
+            )
+        elif prompt_format == "llama_nemotron_8b":
+            # "<|start_header_id|>assistant<|end_header|>\n\n" is the prefix for assistant messages.
+            self._prompt_config = PromptConfig(
+                assistant_prefix_len=4,
+                pad_token_id=tokenizer.convert_tokens_to_ids("<|end_of_text|>"),
+                custom_chat_template=llama_nemotron_template,
                 has_bos=True,
                 has_system_role=True,
             )
@@ -278,7 +289,10 @@ class MultimodalTokenizer(MegatronTokenizer):
             # There should be only one BOS at the very beginning.
             # After the first turn, skip BOS token.
             if self._prompt_config.has_bos and turn_idx > 0:
-                turn_tokens = turn_tokens[1:]
+                if self._prompt_config.custom_chat_template == llama_nemotron_template:
+                    turn_tokens = turn_tokens[10:]
+                else:
+                    turn_tokens = turn_tokens[1:]
 
             turn_len = len(turn_tokens)
 

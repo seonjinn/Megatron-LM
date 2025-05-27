@@ -1511,6 +1511,73 @@ class ExampleInferenceDataset(torch.utils.data.Dataset):
         )
 
 
+class Math500Dataset(torch.utils.data.Dataset):
+    """Dataset wrapper for the text-only MATH-500 benchmark.
+
+    Each sample contains a LaTeX math problem (string) and its ground-truth answer.
+    There is no associated image - the model should operate in text-only mode.
+    For compatibility with the multimodal dataloader we return an **empty** image
+    tensor and a zero-length tile count tensor.
+    """
+
+    def __init__(
+        self,
+        input_image_path,
+        num_samples_per_partition,
+        num_partitions,
+        partition_id,
+    ):
+        import datasets  # local import to avoid mandatory dependency at import time
+        hf_cache = os.environ.get("HF_DATASETS_CACHE", "")
+        if hf_cache == "":
+            raise RuntimeError("Please set the environment variable HF_DATASETS_CACHE.")
+
+        # Allow overriding the dataset location via `input_image_path` so that the
+        # user can point to a local copy (e.g. a jsonl file) if desired.
+        if input_image_path and os.path.exists(input_image_path):
+            dataset = datasets.load_dataset(
+                input_image_path,
+                split="test",
+                cache_dir=hf_cache,
+                verification_mode="no_checks",
+            )
+        else:
+            # Default remote dataset.
+            dataset = datasets.load_dataset(
+                "HuggingFaceH4/MATH-500",
+                split="test",
+                cache_dir=hf_cache,
+            )
+
+        if num_partitions > 0:
+            start_idx, end_idx = _get_partition_bounds(
+                len(dataset), num_samples_per_partition, num_partitions, partition_id
+            )
+            dataset = dataset[start_idx:end_idx]
+
+        self._dataset = dataset
+
+    def __len__(self):
+        return len(self._dataset)
+
+    def __getitem__(self, idx):
+        sample = self._dataset[idx]
+        problem = sample["problem"]
+        answer = sample["answer"]  # string
+
+        # For consistency with other datasets we wrap gt answer in a list.
+        gt_answer = [answer]
+
+        # Return empty image tensors ‑ the core code will handle text-only mode.
+        empty_imgs = torch.tensor([])
+        tile_count = torch.tensor([], dtype=torch.int)
+        sample_id = sample.get("unique_id", idx)
+        metadata = ""
+        imgs_sizes = torch.tensor([[0,0]], dtype=torch.int32)
+
+        return empty_imgs, tile_count, sample_id, problem, gt_answer, metadata, None, None, None
+
+
 def get_evaluation_dataset(
     task,
     input_image_path,
@@ -1547,7 +1614,7 @@ def get_evaluation_dataset(
         min_side=min_side,
         conv_merging=conv_merging,
     )
-    
+
     if task == "TextVQA":
         keys = {
             "image_id": "image_id",
@@ -1701,6 +1768,13 @@ def get_evaluation_dataset(
             image_transform,
             dynamic_resolution=dynamic_resolution,
             patch_dim=patch_dim,
+        )
+    elif task == "Math500":
+        dataset = Math500Dataset(
+            input_image_path,
+            num_samples_per_partition,
+            num_partitions,
+            partition_id,
         )
     elif task == "AI2D":
         dataset = AI2DDataset(

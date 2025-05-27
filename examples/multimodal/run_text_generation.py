@@ -90,7 +90,11 @@ def add_text_generation_args(parser):
             "MotionBench",
             "PhysGameBench",
             "MVBench",
+<<<<<<< HEAD
             "inference",
+=======
+            "Math500",
+>>>>>>> 132e7de14 (10 commits from ksapra/reasoning_attempt2)
         ],
         help="Generation task to run",
     )
@@ -236,7 +240,6 @@ def generate_samples(model, config: EvaluationConfig, print_output):
         )
 
     for idx, (imgs, num_tiles, sample_id, question, answers, metadata, imgs_sizes, vision_cu_lengths, vision_max_lengths) in enumerate(dataloader):
-
         imgs = imgs.to("cuda")
         num_tiles = num_tiles.to("cuda")
         if vision_cu_lengths is not None:
@@ -259,13 +262,13 @@ def generate_samples(model, config: EvaluationConfig, print_output):
             num_img_embeddings = 0
             for img_size in imgs_sizes:
                 num_img_embeddings += get_num_image_embeddings(
-                    img_h=img_size[0], 
-                    img_w=img_size[1], 
-                    patch_dim=args.patch_dim, 
+                    img_h=img_size[0],
+                    img_w=img_size[1],
+                    patch_dim=args.patch_dim,
                     vision_model_type=args.vision_model_type,
-                    disable_vision_class_token=args.disable_vision_class_token, 
+                    disable_vision_class_token=args.disable_vision_class_token,
                     class_token_len=1,
-                    pixel_shuffle=args.pixel_shuffle, 
+                    pixel_shuffle=args.pixel_shuffle,
                     use_tile_tags=args.use_tiling,
                     use_image_break_token=args.image_break_token is not None,
                     conv_merging=args.conv_merging,
@@ -349,7 +352,7 @@ def generate_samples(model, config: EvaluationConfig, print_output):
                 elif config.task == "VideoMME":
                     output_name = "response"
                     output = question
-                elif config.task in ["OCRBench_v2", "RD_TableBench"]:
+                elif config.task in ["OCRBench_v2", "RD_TableBench", "Math500"]:
                     output_name = "predict"
                 else:
                     raise NotImplementedError("no output name defined for", config.task)
@@ -363,7 +366,7 @@ def generate_samples(model, config: EvaluationConfig, print_output):
                     output["prompt"] = prompt
                     output[output_name] = generated
 
-                if config.task in ["captioning", "RD_TableBench"]:
+                if config.task in ["captioning", "RD_TableBench", "Math500"]:
                     output["ground_truth"] = answers
                 elif config.task in (
                     "TextVQA",
@@ -543,7 +546,7 @@ class VLMForwardStep(ForwardStep):
         self._num_img_embeddings = num_img_embeddings
         self.decoder_seq_length = decoder_seq_length
         self._imgs_sizes = imgs_sizes
-        
+
         # Create vision_packed_seq_params if vision_cu_lengths is provided
         self._vision_packed_seq_params = None
         if vision_cu_lengths is not None:
@@ -726,6 +729,12 @@ def get_conversation(task, question, metadata=None):
             {"role": "system", "content": "Answer the questions."},
             {"role": "user", "content": f"{question}"},
         ]
+    elif task == "Math500":
+        conversation = [
+            {"role": "system", "content": "Answer the questions."},
+            {"role": "user", "content": "detailed thinking on\nSolve the following math problem. Make sure to put the answer (and only answer) inside \\boxed{}.\n\n" + question},
+            #{"role": "user", "content": "Solve the following math problem. Make sure to put the answer (and only answer) inside \\boxed{}.\n\n" + question},
+        ]
     else:
         raise NotImplementedError(f"No prompting support for task {task}")
 
@@ -735,7 +744,7 @@ def get_conversation(task, question, metadata=None):
 
 def get_prompt_and_generated(prompt_and_generation, prompt_format):
     """Strip prompt and other unnecessary text from generation."""
-    if prompt_format in ("llama3", "llama3p1"):
+    if prompt_format in ("llama3", "llama3p1", "llama_nemotron_8b"):
         splitted = prompt_and_generation.split("<|start_header_id|>assistant<|end_header_id|>\n\n")
         prompt = splitted[0]
         generated = splitted[1]

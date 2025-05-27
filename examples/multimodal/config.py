@@ -154,6 +154,19 @@ def get_language_model_config(config, enable_fusions=False):
         hf_config = transformers.AutoConfig.from_pretrained(config.language_model_type.split("hf://")[1])
         config.hf_config = hf_config
         config.hidden_size = hf_config.hidden_size
+    elif config.language_model_type == "llama_nemotron_8b":
+        config.activation_func = torch.nn.functional.silu
+        config.add_bias_linear = False
+        config.bias_activation_fusion = False
+        config.gated_linear_unit = True
+        config.apply_query_key_layer_scaling = False
+        config.layernorm_zero_centered_gamma = (
+            False  # Zero centered gamma not supported for RMSNorm
+        )
+        config.bias_dropout_fusion = False
+        config.apply_rope_fusion = False
+        config.attention_softmax_in_fp32 = True
+        config.ffn_hidden_size = 14336
     else:
         raise ValueError(f"unknown language model type {config.language_model_type}")
 
@@ -356,6 +369,12 @@ def get_vision_projection_config(config, hidden_size, enable_fusions=False):
     elif config.language_model_type.startswith("hf://"):
         config.activation_func = torch.nn.functional.gelu
         config.ffn_hidden_size = 4096
+        config.normalization = "LayerNorm"
+    elif config.language_model_type == "llama_nemotron_8b":
+        config.ffn_hidden_size = 14336
+        config.activation_func = torch.nn.functional.gelu
+        config.layernorm_epsilon = 1e-5
+        config.add_bias_linear = True
         config.normalization = "LayerNorm"
     else:
         raise ValueError(f"unknown language model type {config.language_model_type}")
