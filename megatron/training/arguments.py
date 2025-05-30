@@ -10,7 +10,7 @@ from pathlib import Path
 import re
 import types
 import warnings
-
+import yaml
 import torch
 import torch.nn.functional as F
 from packaging.version import Version as PkgVersion
@@ -81,7 +81,7 @@ def add_megatron_arguments(parser: argparse.ArgumentParser):
 
     return parser
 
-def parse_args(extra_args_provider=None, ignore_unknown_args=False):
+def parse_args(extra_args_provider=None, ignore_unknown_args=False, yaml_config=None):
     """Parse all arguments."""
     parser = argparse.ArgumentParser(description='Megatron-LM Arguments',
                                      allow_abbrev=False)
@@ -95,6 +95,23 @@ def parse_args(extra_args_provider=None, ignore_unknown_args=False):
     # Parse.
     if ignore_unknown_args:
         args, _ = parser.parse_known_args()
+    elif yaml_config is not None:
+        # Load YAML configuration
+        with open(yaml_config, 'r') as f:
+            yaml_data = yaml.safe_load(f)
+        # Convert YAML data to a list of strings for argparse
+        yaml_args = []
+        for key, value in yaml_data.items():
+            if isinstance(value, bool):  # Handle store-true arguments
+                if value:
+                    yaml_args.append(f"--{key}")
+            elif isinstance(value, list):
+                yaml_args.append(f"--{key}")
+                yaml_args.extend([str(v) for v in value])
+            else:
+                yaml_args.append(f"--{key}")
+                yaml_args.append(str(value))
+        args = parser.parse_args(yaml_args)
     else:
         args = parser.parse_args()
 

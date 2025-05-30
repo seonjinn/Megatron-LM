@@ -45,6 +45,7 @@ def initialize_megatron(
     get_position_embedding_ranks=None,
     parsed_args=None,
     store=None,
+    yaml_config=None
 ):
     """Set global variables, initialize distributed, and
     set autoresume and random seeds.
@@ -60,7 +61,7 @@ def initialize_megatron(
 
     # Parse arguments
     if parsed_args is None:
-        args = parse_args(extra_args_provider, ignore_unknown_args)
+        args = parse_args(extra_args_provider, ignore_unknown_args, yaml_config)
     else:
         args = parsed_args
 
