@@ -204,6 +204,8 @@ def get_num_image_embeddings(
     use_tile_tags=False,
     max_num_tiles=0,
     tokenizer_type=None,
+    use_image_break_token=False,
+    conv_merging=False,
 ):
     """Get the number of image embeddings per image tile."""
     if vision_model_type == "siglip":
@@ -234,6 +236,18 @@ def get_num_image_embeddings(
 
     if pixel_shuffle:
         num_image_embeddings_per_tile = int(num_image_embeddings_per_tile * (0.5**2))
+
+    if conv_merging:
+        num_image_embeddings_per_tile = int(num_image_embeddings_per_tile * (0.5**2))
+
+    if use_image_break_token:
+        insertion_num = img_h // patch_dim
+        if pixel_shuffle:
+            insertion_num = insertion_num // 2
+        if conv_merging:
+            insertion_num = insertion_num // 2
+        insertion_num = insertion_num - 1
+        num_image_embeddings_per_tile = num_image_embeddings_per_tile + insertion_num
 
     if use_tile_tags:
         if tokenizer_type in ("llama3p1", "chatml", "qwen2p0", "qwen2p5"):

@@ -8,6 +8,7 @@ from typing import Dict, List, Optional
 import torch
 
 from megatron.core.inference.sampling_params import SamplingParams
+from megatron.core.packed_seq_params import PackedSeqParams
 
 
 # class syntax
@@ -75,7 +76,9 @@ class DynamicInferenceRequest(InferenceRequest):
 class VLMInferenceRequest(InferenceRequest):
     """Class for a VLM inference request"""
 
-    num_img_embeddings_per_tile: int
+    num_img_embeddings: int
     imgs: torch.Tensor
     num_tiles: torch.Tensor
+    imgs_sizes: torch.Tensor
+    vision_packed_seq_params: Optional[PackedSeqParams] = None
     decoder_seq_length: int

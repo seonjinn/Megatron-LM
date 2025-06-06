@@ -123,9 +123,10 @@ class TestVLMTextGenerationController:
         )
 
         batch_size: int = 1
-        num_img_embeddings_per_tile: int = 576
+        num_img_embeddings: int = 576
         imgs: torch.Tensor = torch.randn(1, 3, self.img_h, self.img_w).cuda()
         num_tiles: torch.Tensor = torch.Tensor([1]).int()
+        imgs_sizes: torch.Tensor = torch.tensor([[self.img_h, self.img_w]], dtype=torch.int32)
         decoder_seq_length: int = self.language_max_sequence_length
 
         active_requests: Dict[str, InferenceRequest] = OrderedDict()
@@ -147,9 +148,10 @@ class TestVLMTextGenerationController:
                 sampling_params=SamplingParams(num_tokens_to_generate=10),
                 arrival_time=time.time(),
                 prompt_tokens=prompt_tokens,
-                num_img_embeddings_per_tile=num_img_embeddings_per_tile,
+                num_img_embeddings=num_img_embeddings,
                 imgs=imgs,
                 num_tiles=num_tiles,
+                imgs_sizes=imgs_sizes,
                 decoder_seq_length=decoder_seq_length,
                 status=Status.ACTIVE_BUT_NOT_GENERATING_TOKENS,
             )

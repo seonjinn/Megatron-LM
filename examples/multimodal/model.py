@@ -54,29 +54,40 @@ def model_provider(
     use_te = args.use_te
 
     print_rank_0('building a multimodal model ...')
-
-    num_image_embeddings = get_num_image_embeddings(
-        args.img_h,
-        args.img_w,
-        args.patch_dim,
-        args.vision_model_type,
-        args.disable_vision_class_token,
-        1,
-        args.pixel_shuffle,
-        args.use_tile_tags,
-        args.max_num_tiles,
-        args.tokenizer_prompt_format
-    )
-    old_seq_length = args.seq_length
-    args.seq_length = args.encoder_seq_length = num_image_embeddings
-    if old_seq_length != args.seq_length:
-        log_single_rank(
-            logging.getLogger(__name__),
-            logging.WARNING,
-            f"Changed seq_length and encoder_seq_length (vision model sequence length) from {old_seq_length} to num_image_tokens ({num_image_embeddings})"
+    if args.dynamic_resolution:
+        max_num_image_embeddings = args.seq_length
+        num_image_embeddings = args.seq_length
+        if args.pixel_shuffle:
+            max_num_image_embeddings //= 4
+            num_image_embeddings //= 4
+        elif args.conv_merging:
+            max_num_image_embeddings //= 4
+            num_image_embeddings //= 4
+    else:
+        num_image_embeddings = get_num_image_embeddings(
+            img_h=args.img_h,
+            img_w=args.img_w,
+            patch_dim=args.patch_dim,
+            vision_model_type=args.vision_model_type,
+            disable_vision_class_token=args.disable_vision_class_token,
+            class_token_len=1,
+            pixel_shuffle=args.pixel_shuffle,
+            use_tile_tags=args.use_tile_tags,
+            max_num_tiles=args.max_num_tiles,
+            tokenizer_type=args.tokenizer_prompt_format,
+            use_image_break_token=args.image_break_token is not None,
+            conv_merging=args.conv_merging,
         )
+        old_seq_length = args.seq_length
+        args.seq_length = args.encoder_seq_length = num_image_embeddings
+        if old_seq_length != args.seq_length:
+            log_single_rank(
+                logging.getLogger(__name__),
+                logging.WARNING,
+                f"Changed seq_length and encoder_seq_length (vision model sequence length) from {old_seq_length} to num_image_tokens ({num_image_embeddings})"
+            )
 
-    max_num_image_embeddings = max((args.max_num_tiles + int(args.use_thumbnail)), args.num_frames) * num_image_embeddings
+        max_num_image_embeddings = max((args.max_num_tiles + int(args.use_thumbnail)), args.num_frames) * num_image_embeddings
 
     assert (
         args.decoder_seq_length is not None
@@ -219,6 +230,10 @@ def model_provider(
     image_token_index = tokenizer.convert_tokens_to_ids(IMAGE_TOKEN)
     assert image_token_index is not None, f"IMAGE_TOKEN={IMAGE_TOKEN} needs to be added using the --special-tokens arg."
 
+    # Validate that image break token is included in special tokens if specified
+    if args.image_break_token is not None:
+        assert args.image_break_token in args.special_tokens, f"IMAGE_BREAK_TOKEN='{args.image_break_token}' needs to be added to the --special-tokens list."
+
     tile_tags = _get_tile_tags(args, tokenizer)
 
     model = LLaVAModel(
@@ -253,9 +268,13 @@ def model_provider(
         image_token_index=image_token_index,
         pixel_shuffle=args.pixel_shuffle,
         tile_tags=tile_tags,
+        dynamic_resolution=args.dynamic_resolution,
         max_num_tiles=args.max_num_tiles,
         tokenizer_type=args.tokenizer_prompt_format,
         use_vision_backbone_fp8_arch=args.use_vision_backbone_fp8_arch,
+        image_break_token=tokenizer.convert_tokens_to_ids(args.image_break_token) if args.image_break_token is not None else None,
+        conv_merging=args.conv_merging,
+        allow_missing_conv_merge_checkpoint=args.allow_missing_conv_merge_checkpoint,
     )
 
     model.freeze(

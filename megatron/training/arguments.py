@@ -118,7 +118,7 @@ def parse_args(extra_args_provider=None, ignore_unknown_args=False, yaml_config=
     # Experimental yaml
     if args.yaml_cfg is not None:
         from .yaml_arguments import load_yaml
-        assert args.yaml_cfg and not args.use_legacy_models, \
+        assert args.yaml_cfg and not getattr(args, "use_legacy_models", False), \
             "Yaml config is not supported with legacy models."
         args = load_yaml(args.yaml_cfg)
 

@@ -13,6 +13,7 @@ from megatron.core.inference.contexts import StaticInferenceContext
 from megatron.core.inference.model_inference_wrappers.gpt.gpt_inference_wrapper import (
     GPTInferenceWrapper,
 )
+from megatron.core.packed_seq_params import PackedSeqParams
 
 
 # pylint: disable=line-too-long
@@ -62,24 +63,25 @@ class VLMInferenceWrapper(GPTInferenceWrapper):
     def prep_inference_input(
         self,
         prompts_tokens: torch.Tensor,
-        num_img_embeddings_per_tile: int,
+        num_img_embeddings: int,
         images: torch.Tensor,
         num_tiles: torch.Tensor,
+        imgs_sizes: torch.Tensor,
         decoder_seq_length: int,
+        vision_packed_seq_params: Optional[PackedSeqParams] = None,
     ):
         """Prepares the inference input data.
 
         Args:
             prompts_tokens (torch.Tensor): A tensor of shape [batch_size, max_seq_len]
-            num_img_embeddings_per_tile (int): The number of image embeddings per tile
+            num_img_embeddings (int): The number of image embeddings
             images (torch.Tensor): The image embeddings
             num_tiles (torch.Tensor): The number of tiles for each input image
+            imgs_sizes (torch.Tensor): The image sizes
             decoder_seq_length (int): The decoder sequence length
+            vision_packed_seq_params (Optional[PackedSeqParams]): Vision packed sequence parameters
         """
         inference_input = super().prep_inference_input(prompts_tokens)
-
-        total_num_tiles = torch.sum(num_tiles).item()
-        num_img_embeddings = num_img_embeddings_per_tile * total_num_tiles
 
         batch_size, max_sequence_length = prompts_tokens.shape
         self.inference_context = StaticInferenceContext(
@@ -89,6 +91,8 @@ class VLMInferenceWrapper(GPTInferenceWrapper):
         inference_input["images"] = images
         inference_input["num_tiles"] = num_tiles
         inference_input["num_img_embeddings"] = num_img_embeddings
+        inference_input["imgs_sizes"] = imgs_sizes
+        inference_input["vision_packed_seq_params"] = vision_packed_seq_params
         inference_input["decoder_seq_length"] = decoder_seq_length
 
         return inference_input
@@ -116,6 +120,8 @@ class VLMInferenceWrapper(GPTInferenceWrapper):
         images = inference_input["images"]
         num_tiles = inference_input["num_tiles"]
         num_img_embeddings = inference_input["num_img_embeddings"]
+        imgs_sizes = inference_input["imgs_sizes"]
+        vision_packed_seq_params = inference_input["vision_packed_seq_params"]
         decoder_seq_length = inference_input["decoder_seq_length"]
 
         tokens2use = tokens[:, context_start_position:context_end_position]
@@ -127,6 +133,8 @@ class VLMInferenceWrapper(GPTInferenceWrapper):
             "images": images,
             "num_tiles": num_tiles,
             "num_img_embeddings": num_img_embeddings,
+            "imgs_sizes": imgs_sizes,
+            "vision_packed_seq_params": vision_packed_seq_params,
             "decoder_seq_length": decoder_seq_length,
         }
 
@@ -143,6 +151,8 @@ class VLMInferenceWrapper(GPTInferenceWrapper):
         tokens = inference_input["tokens"]
         position_ids = inference_input["position_ids"]
         num_image_tiles = inference_input["num_tiles"]
+        imgs_sizes = inference_input["imgs_sizes"]
+        vision_packed_seq_params = inference_input["vision_packed_seq_params"]
 
         output = self.model(
             images,
@@ -151,6 +161,8 @@ class VLMInferenceWrapper(GPTInferenceWrapper):
             attention_mask=None,
             inference_context=self.inference_context,
             num_image_tiles=num_image_tiles,
+            imgs_sizes=imgs_sizes,
+            vision_packed_seq_params=vision_packed_seq_params,
             runtime_gather_output=True,
         )
         if isinstance(output, tuple):

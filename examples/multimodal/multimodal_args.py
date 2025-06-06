@@ -90,4 +90,21 @@ def add_multimodal_extra_args(parser):
     )
     group.add_argument("--use-mcore-inference", action="store_true", default=False, help="Use the MCore inference API")
     group.add_argument("--use-vision-backbone-fp8-arch", action="store_true", default=False, help="Use the FP8 arch in the vision backbone. This is used to load the FP8 checkpoint when running inference.")
+    group.add_argument(
+        "--dynamic-resolution", action="store_true", default=False, help="Use input image dynamic resolution"
+    )
+    group.add_argument(
+        "--dynamic-resolution-min-patches", type=int, default=0, help="Minimum number of patches per image for dynamic resolution"
+    )
+    group.add_argument(
+        "--dynamic-resolution-min-side", type=int, default=None, help="Minimum side length for dynamic resolution"
+    )
+    group.add_argument(
+        "--image-break-token", type=str, default=None, help="Token to use for image break tokens, must be added to --special-tokens as well"
+    )
+    group.add_argument("--conv-merging", action="store_true", default=False, help="Use convolution merging which uses a convolution to merge tokens after the vision encoder")
+    group.add_argument(
+        "--allow-missing-conv-merge-checkpoint", action="store_true", default=False
+    )
+
     return parser

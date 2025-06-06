@@ -33,8 +33,10 @@ class VLMTextGenerationController(TextGenerationController):
 
         return self.inference_wrapped_model.prep_inference_input(
             prompts_tokens,
-            request.num_img_embeddings_per_tile,
+            request.num_img_embeddings,
             request.imgs,
             request.num_tiles,
+            request.imgs_sizes,
             request.decoder_seq_length,
+            vision_packed_seq_params=request.vision_packed_seq_params,
         )

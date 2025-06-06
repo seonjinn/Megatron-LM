@@ -85,8 +85,16 @@ def model_provider(
         )
 
     num_image_embeddings = get_num_image_embeddings(
-        args.img_h, args.img_w, args.patch_dim, vision_model_type, args.disable_vision_class_token,
-        class_token_len=1, pixel_shuffle=False, use_tile_tags=False
+        img_h=args.img_h, 
+        img_w=args.img_w, 
+        patch_dim=args.patch_dim, 
+        vision_model_type=vision_model_type, 
+        disable_vision_class_token=args.disable_vision_class_token,
+        class_token_len=1, 
+        pixel_shuffle=False, 
+        use_tile_tags=False,
+        use_image_break_token=args.image_break_token is not None,
+        conv_merging=args.conv_merging,
     )
 
     old_seq_length = args.seq_length
@@ -351,8 +359,15 @@ def get_batch(data_iterator):
         vision_model_type = "clip"
         # Calculate the number of image embedding tokens will be added to text tokens
         num_image_embeddings_per_tile = get_num_image_embeddings(
-            args.img_h, args.img_w, args.patch_dim, vision_model_type,
-            args.disable_vision_class_token, 1, False
+            img_h=args.img_h, 
+            img_w=args.img_w, 
+            patch_dim=args.patch_dim, 
+            vision_model_type=vision_model_type,
+            disable_vision_class_token=args.disable_vision_class_token, 
+            class_token_len=1, 
+            pixel_shuffle=False,
+            use_image_break_token=args.image_break_token is not None,
+            conv_merging=args.conv_merging,
         )
         # Pad to make sure the text sequence can be sharded equally by CP chunks.
         image_token_mask = tokens == DEFAULT_IMAGE_TOKEN_INDEX

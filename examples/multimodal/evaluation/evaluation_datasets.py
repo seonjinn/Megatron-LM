@@ -8,7 +8,7 @@ from collections import defaultdict
 
 import numpy as np
 import torch
-from image_processing import ImageTransform
+from image_processing import ImageTransform, process_images
 from PIL import Image
 
 from megatron.training import print_rank_0
@@ -23,6 +23,9 @@ def _get_partition_bounds(
         ]
         return samples_per_partition[partition_id], samples_per_partition[partition_id + 1]
     return num_samples_per_partition * partition_id, num_samples_per_partition * (partition_id + 1)
+
+
+
 
 
 class VQADataset(torch.utils.data.Dataset):
@@ -41,7 +44,9 @@ class VQADataset(torch.utils.data.Dataset):
         use_tiling,
         max_num_tiles,
         use_thumbnail,
-        vision_model_type,
+        image_transform,
+        dynamic_resolution,
+        patch_dim,
         split="validation"
     ):
         samples = json.load(open(gt_path, encoding='utf-8'))
@@ -63,7 +68,9 @@ class VQADataset(torch.utils.data.Dataset):
         self._use_tiling = use_tiling
         self._max_num_tiles = max_num_tiles
         self._use_thumbnail = use_thumbnail
-        self._transform_img = ImageTransform(img_h, vision_model_type)
+        self._dynamic_resolution = dynamic_resolution
+        self._patch_dim = patch_dim
+        self._transform_img = image_transform
         self._split = split
 
     def __len__(self):
@@ -97,13 +104,18 @@ class VQADataset(torch.utils.data.Dataset):
 
         metadata = ""  # Not used.
 
+        images, imgs_sizes, vision_cu_lengths, vision_max_lengths = process_images(imgs, self._patch_dim, self._dynamic_resolution, batch_mode=False)
+
         return (
-            torch.stack(imgs),
+            images,
             tile_count,
             sample_id,
             sample[self._keys["question"]],
             [""] if self._split == "test" else sample[self._keys["answer"]],
             metadata,
+            imgs_sizes,
+            vision_cu_lengths,
+            vision_max_lengths,
         )
 
 
@@ -122,7 +134,9 @@ class CaptioningDataset(torch.utils.data.Dataset):
         use_tiling,
         max_num_tiles,
         use_thumbnail,
-        vision_model_type,
+        image_transform,
+        dynamic_resolution,
+        patch_dim,
     ):
         image_files = sorted(glob.glob(input_image_path + "/*"))
 
@@ -145,7 +159,9 @@ class CaptioningDataset(torch.utils.data.Dataset):
         self._use_tiling = use_tiling
         self._max_num_tiles = max_num_tiles
         self._use_thumbnail = use_thumbnail
-        self._transform_img = ImageTransform(img_h, vision_model_type)
+        self._dynamic_resolution = dynamic_resolution
+        self._patch_dim = patch_dim
+        self._transform_img = image_transform
 
     def __len__(self):
         return len(self._image_files)
@@ -173,7 +189,9 @@ class CaptioningDataset(torch.utils.data.Dataset):
         question = ""  # Fixed for all samples.
         metadata = ""  # Not used.
 
-        return torch.stack(imgs), tile_count, image_id, question, self._answers[image_id], metadata
+        images, imgs_sizes, vision_cu_lengths, vision_max_lengths = process_images(imgs, self._patch_dim, self._dynamic_resolution, batch_mode=False)
+
+        return images, tile_count, image_id, question, self._answers[image_id], metadata, imgs_sizes, vision_cu_lengths, vision_max_lengths
 
 
 class MMMUDataset(torch.utils.data.Dataset):
@@ -191,7 +209,9 @@ class MMMUDataset(torch.utils.data.Dataset):
         max_num_tiles,
         use_thumbnail,
         prompt_style,
-        vision_model_type,
+        image_transform,
+        dynamic_resolution,
+        patch_dim,
         split="validation",
     ):
         import datasets
@@ -250,7 +270,9 @@ class MMMUDataset(torch.utils.data.Dataset):
         self._max_num_tiles = max_num_tiles
         self._use_thumbnail = use_thumbnail
         self._prompt_style = prompt_style
-        self._transform_img = ImageTransform(img_h, vision_model_type)
+        self._dynamic_resolution = dynamic_resolution
+        self._patch_dim = patch_dim
+        self._transform_img = image_transform
 
     def __len__(self):
         return len(self._dataset)
@@ -439,13 +461,18 @@ class MMMUDataset(torch.utils.data.Dataset):
 
         tile_count = torch.tensor(sample_num_tiles, dtype=torch.int)
 
+        images, imgs_sizes, vision_cu_lengths, vision_max_lengths = process_images(sample_imgs, self._patch_dim, self._dynamic_resolution, batch_mode=False)
+
         return (
-            torch.stack(sample_imgs),
+            images,
             tile_count,
             sample["id"],
             prompt,
             sample["answer"],
             metadata,
+            imgs_sizes,
+            vision_cu_lengths,
+            vision_max_lengths,
         )
 
 
@@ -465,7 +492,9 @@ class VideoMMEDataset(torch.utils.data.Dataset):
         max_num_tiles,
         use_thumbnail,
         num_frames,
-        vision_model_type,
+        image_transform,
+        dynamic_resolution,
+        patch_dim,
     ):
         ground_truth_original = json.load(open(gt_path))
         ground_truth = []
@@ -495,7 +524,9 @@ class VideoMMEDataset(torch.utils.data.Dataset):
         self._max_num_tiles = max_num_tiles
         self._use_thumbnail = use_thumbnail
         self._num_frames = num_frames
-        self._transform_img = ImageTransform(img_h, vision_model_type)
+        self._dynamic_resolution = dynamic_resolution
+        self._patch_dim = patch_dim
+        self._transform_img = image_transform
 
     def __len__(self):
         return len(self._ground_truth)
@@ -536,17 +567,21 @@ class VideoMMEDataset(torch.utils.data.Dataset):
             }
 
         num_tiles = torch.tensor([len(imgs)], dtype=torch.int)
+        images, imgs_sizes, vision_cu_lengths, vision_max_lengths = process_images(imgs, self._patch_dim, self._dynamic_resolution, batch_mode=False)
 
         answer = ""
         metadata = ""
 
         return (
-            torch.stack(imgs),
+            images,
             num_tiles,
             question["question_id"],
             question_dict,
             answer,
             metadata,
+            imgs_sizes,
+            vision_cu_lengths,
+            vision_max_lengths,
         )
 
 
@@ -565,7 +600,9 @@ class OCRBenchDataset(torch.utils.data.Dataset):
         use_tiling,
         max_num_tiles,
         use_thumbnail,
-        vision_model_type,
+        image_transform,
+        dynamic_resolution,
+        patch_dim,
     ):
         gt = json.load(open(gt_path, encoding='utf-8'))
 
@@ -582,7 +619,9 @@ class OCRBenchDataset(torch.utils.data.Dataset):
         self._use_tiling = use_tiling
         self._max_num_tiles = max_num_tiles
         self._use_thumbnail = use_thumbnail
-        self._transform_img = ImageTransform(img_h, vision_model_type)
+        self._dynamic_resolution = dynamic_resolution
+        self._patch_dim = patch_dim
+        self._transform_img = image_transform
 
     def __len__(self):
         return len(self._gt)
@@ -608,13 +647,18 @@ class OCRBenchDataset(torch.utils.data.Dataset):
             "data_type": self._gt[idx]["type"],
         }
 
+        images, imgs_sizes, vision_cu_lengths, vision_max_lengths = process_images(imgs, self._patch_dim, self._dynamic_resolution, batch_mode=False)
+
         return (
-            torch.stack(imgs),
+            images,
             tile_count,
             idx,
             self._gt[idx]["question"],
             self._gt[idx]["answers"],
             metadata,
+            imgs_sizes,
+            vision_cu_lengths,
+            vision_max_lengths,
         )
 
 
@@ -632,7 +676,9 @@ class MathVistaDataset(torch.utils.data.Dataset):
         use_tiling,
         max_num_tiles,
         use_thumbnail,
-        vision_model_type,
+        image_transform,
+        dynamic_resolution,
+        patch_dim,
     ):
         import datasets
 
@@ -660,7 +706,9 @@ class MathVistaDataset(torch.utils.data.Dataset):
         self._use_tiling = use_tiling
         self._max_num_tiles = max_num_tiles
         self._use_thumbnail = use_thumbnail
-        self._transform_img = ImageTransform(img_h, vision_model_type)
+        self._dynamic_resolution = dynamic_resolution
+        self._patch_dim = patch_dim
+        self._transform_img = image_transform
 
     def __len__(self):
         return len(self._dataset["pid"])
@@ -713,7 +761,9 @@ class MathVistaDataset(torch.utils.data.Dataset):
             "all_choices": all_choices,
         }
 
-        return torch.stack(imgs), tile_count, question_id, question, answer, metadata
+        images, imgs_sizes, vision_cu_lengths, vision_max_lengths = process_images(imgs, self._patch_dim, self._dynamic_resolution, batch_mode=False)
+
+        return images, tile_count, question_id, question, answer, metadata, imgs_sizes, vision_cu_lengths, vision_max_lengths
 
 
 class AI2DDataset(torch.utils.data.Dataset):
@@ -731,7 +781,9 @@ class AI2DDataset(torch.utils.data.Dataset):
         use_tiling,
         max_num_tiles,
         use_thumbnail,
-        vision_model_type,
+        image_transform,
+        dynamic_resolution,
+        patch_dim,
     ):
         with open(gt_path, 'r') as f:
             jsonl = list(f)
@@ -751,7 +803,9 @@ class AI2DDataset(torch.utils.data.Dataset):
         self._use_tiling = use_tiling
         self._max_num_tiles = max_num_tiles
         self._use_thumbnail = use_thumbnail
-        self._transform_img = ImageTransform(img_h, vision_model_type)
+        self._dynamic_resolution = dynamic_resolution
+        self._patch_dim = patch_dim
+        self._transform_img = image_transform
 
     def __len__(self):
         return len(self._gt)
@@ -774,13 +828,18 @@ class AI2DDataset(torch.utils.data.Dataset):
 
         metadata = ""  # Not used.
 
+        images, imgs_sizes, vision_cu_lengths, vision_max_lengths = process_images(imgs, self._patch_dim, self._dynamic_resolution, batch_mode=False)
+
         return (
-            torch.stack(imgs),
+            images,
             tile_count,
             self._gt[idx]["question_id"],
             self._gt[idx]["question"],
             self._gt[idx]["answer"],
             metadata,
+            imgs_sizes,
+            vision_cu_lengths,
+            vision_max_lengths,
         )
 
 
@@ -797,7 +856,9 @@ class RDTableBenchDataset(torch.utils.data.Dataset):
         use_tiling,
         max_num_tiles,
         use_thumbnail,
-        vision_model_type,
+        image_transform,
+        dynamic_resolution,
+        patch_dim,
     ):
         gt_paths = sorted(glob.glob(os.path.join(gt_path, "*.html")))
         gt = []
@@ -823,7 +884,9 @@ class RDTableBenchDataset(torch.utils.data.Dataset):
         self._use_tiling = use_tiling
         self._max_num_tiles = max_num_tiles
         self._use_thumbnail = use_thumbnail
-        self._transform_img = ImageTransform(img_h, vision_model_type)
+        self._dynamic_resolution = dynamic_resolution
+        self._patch_dim = patch_dim
+        self._transform_img = image_transform
 
     def __len__(self):
         return len(self._gt)
@@ -852,13 +915,18 @@ class RDTableBenchDataset(torch.utils.data.Dataset):
             "Only use table related HTML tags, no additional formatting is required."
         )
 
+        images, imgs_sizes, vision_cu_lengths, vision_max_lengths = process_images(imgs, self._patch_dim, self._dynamic_resolution, batch_mode=False)
+
         return (
-            torch.stack(imgs),
+            images,
             tile_count,
             idx,
             prompt,
             self._gt[idx]["answer"],
             metadata,
+            imgs_sizes,
+            vision_cu_lengths,
+            vision_max_lengths,
         )
 
 
@@ -875,7 +943,9 @@ class RealworldQADataset(torch.utils.data.Dataset):
         use_tiling,
         max_num_tiles,
         use_thumbnail,
-        vision_model_type,
+        image_transform,
+        dynamic_resolution,
+        patch_dim,
     ):
         gt = json.load(open(gt_path, encoding='utf-8'))
 
@@ -893,7 +963,9 @@ class RealworldQADataset(torch.utils.data.Dataset):
         self._use_tiling = use_tiling
         self._max_num_tiles = max_num_tiles
         self._use_thumbnail = use_thumbnail
-        self._transform_img = ImageTransform(img_h, vision_model_type)
+        self._dynamic_resolution = dynamic_resolution
+        self._patch_dim = patch_dim
+        self._transform_img = image_transform
 
 
     def __len__(self):
@@ -938,13 +1010,18 @@ class RealworldQADataset(torch.utils.data.Dataset):
 
         metadata = ""  # Not used.
 
+        images, imgs_sizes, vision_cu_lengths, vision_max_lengths = process_images(imgs, self._patch_dim, self._dynamic_resolution, batch_mode=False)
+
         return (
-            torch.stack(imgs),
+            images,
             tile_count,
             question_id,
             question,
             [answer],
             metadata,
+            imgs_sizes,
+            vision_cu_lengths,
+            vision_max_lengths,
         )
 
 
@@ -963,8 +1040,10 @@ class MotionBenchDataset(torch.utils.data.Dataset):
         max_num_tiles,
         use_thumbnail,
         num_frames,
-        vision_model_type,
-        split
+        image_transform,
+        dynamic_resolution,
+        patch_dim,
+        split,
     ):
 
         with open(gt_path) as f:
@@ -1002,7 +1081,9 @@ class MotionBenchDataset(torch.utils.data.Dataset):
         self._max_num_tiles = max_num_tiles
         self._use_thumbnail = use_thumbnail
         self._num_frames = num_frames
-        self._transform_img = ImageTransform(img_h, vision_model_type)
+        self._dynamic_resolution = dynamic_resolution
+        self._patch_dim = patch_dim
+        self._transform_img = image_transform
 
     def __len__(self):
         return len(self._ground_truth)
@@ -1041,14 +1122,21 @@ class MotionBenchDataset(torch.utils.data.Dataset):
         answer = gt['qa'][0]['answer']
 
         metadata = ""
+
+        images, imgs_sizes, vision_cu_lengths, vision_max_lengths = process_images(imgs, self._patch_dim, self._dynamic_resolution, batch_mode=False)
+
         return (
-            torch.stack(imgs),
+            images,
             num_tiles,
             q_id,
             question,
             answer,
             metadata,
+            imgs_sizes,
+            vision_cu_lengths,
+            vision_max_lengths,
         )
+
 
 # The following class is adapted from
 # https://github.com/PhysGame/PhysGame/blob/main/physvlm/test/PhysGame_bench/utils.py#L27
@@ -1068,8 +1156,10 @@ class PhysGameBenchDataset(torch.utils.data.Dataset):
         max_num_tiles,
         use_thumbnail,
         num_frames,
-        vision_model_type,
-        split
+        image_transform,
+        dynamic_resolution,
+        patch_dim,
+        split,
     ):
 
         ground_truth_original = json.load(open(gt_path, encoding='utf-8'))
@@ -1099,7 +1189,9 @@ class PhysGameBenchDataset(torch.utils.data.Dataset):
         self._max_num_tiles = max_num_tiles
         self._use_thumbnail = use_thumbnail
         self._num_frames = num_frames
-        self._transform_img = ImageTransform(img_h, vision_model_type)
+        self._dynamic_resolution = dynamic_resolution
+        self._patch_dim = patch_dim
+        self._transform_img = image_transform
 
     def __len__(self):
         return len(self._ground_truth)
@@ -1150,13 +1242,18 @@ class PhysGameBenchDataset(torch.utils.data.Dataset):
             'subclass': gt['subclass_anno']
         }
 
+        images, imgs_sizes, vision_cu_lengths, vision_max_lengths = process_images(imgs, self._patch_dim, self._dynamic_resolution, batch_mode=False)
+
         return (
-            torch.stack(imgs),
+            images,
             num_tiles,
             q_id,
             question,
             answer,
             metadata,
+            imgs_sizes,
+            vision_cu_lengths,
+            vision_max_lengths,
         )
 
 
@@ -1178,8 +1275,10 @@ class MVBenchDataset(torch.utils.data.Dataset):
         max_num_tiles,
         use_thumbnail,
         num_frames,
-        vision_model_type,
-        split
+        image_transform,
+        dynamic_resolution,
+        patch_dim,
+        split,
     ):
 
         data_list = {
@@ -1240,7 +1339,9 @@ class MVBenchDataset(torch.utils.data.Dataset):
         self._max_num_tiles = max_num_tiles
         self._use_thumbnail = use_thumbnail
         self._num_frames = num_frames
-        self._transform_img = ImageTransform(img_h, vision_model_type)
+        self._dynamic_resolution = dynamic_resolution
+        self._patch_dim = patch_dim
+        self._transform_img = image_transform
 
     def __len__(self):
         return len(self._ground_truth)
@@ -1329,13 +1430,18 @@ class MVBenchDataset(torch.utils.data.Dataset):
         metadata = {'task_type': data['task_type']}
         question, answer = self.qa_template(data['data'])
 
+        images, imgs_sizes, vision_cu_lengths, vision_max_lengths = process_images(imgs, self._patch_dim, self._dynamic_resolution, batch_mode=False)
+
         return (
-            torch.stack(imgs),
+            images,
             num_tiles,
             q_id,
             question,
             answer,
             metadata,
+            imgs_sizes,
+            vision_cu_lengths,
+            vision_max_lengths,
         )
 
 
@@ -1419,9 +1525,29 @@ def get_evaluation_dataset(
     partition_id,
     num_frames,
     vision_model_type,
+    dynamic_resolution,
+    patch_dim,
+    min_num_patches,
+    seq_length,
+    pixel_shuffle,
+    min_side,
+    conv_merging,
     split="validation",
 ):
     """Get an evaluation dataset."""
+    # Create a single ImageTransform instance to be shared by all dataset classes
+    image_transform = ImageTransform(
+        img_h,
+        vision_model_type,
+        dynamic_resolution=dynamic_resolution,
+        res_step=patch_dim,
+        min_num_patches=min_num_patches,
+        max_num_patches=seq_length,
+        pixel_shuffle=pixel_shuffle,
+        min_side=min_side,
+        conv_merging=conv_merging,
+    )
+    
     if task == "TextVQA":
         keys = {
             "image_id": "image_id",
@@ -1442,7 +1568,10 @@ def get_evaluation_dataset(
             use_tiling,
             max_num_tiles,
             use_thumbnail,
-            vision_model_type,
+            image_transform,
+            dynamic_resolution=dynamic_resolution,
+            patch_dim=patch_dim,
+            split=split,
         )
     elif task == "VQAv2":
         keys = {
@@ -1464,7 +1593,10 @@ def get_evaluation_dataset(
             use_tiling,
             max_num_tiles,
             use_thumbnail,
-            vision_model_type,
+            image_transform,
+            dynamic_resolution=dynamic_resolution,
+            patch_dim=patch_dim,
+            split=split,
         )
     elif task == "ChartQA":
         keys = {"image_id": "imgname", "question": "query", "answer": "label"}
@@ -1481,7 +1613,10 @@ def get_evaluation_dataset(
             use_tiling,
             max_num_tiles,
             use_thumbnail,
-            vision_model_type,
+            image_transform,
+            dynamic_resolution=dynamic_resolution,
+            patch_dim=patch_dim,
+            split=split,
         )
     elif task == "captioning":
         dataset = CaptioningDataset(
@@ -1495,7 +1630,9 @@ def get_evaluation_dataset(
             use_tiling,
             max_num_tiles,
             use_thumbnail,
-            vision_model_type,
+            image_transform,
+            dynamic_resolution=dynamic_resolution,
+            patch_dim=patch_dim,
         )
     elif task == 'MMMU':
         # Note:
@@ -1513,7 +1650,9 @@ def get_evaluation_dataset(
             max_num_tiles,
             use_thumbnail,
             prompt_style="single_image",
-            vision_model_type=vision_model_type,
+            image_transform=image_transform,
+            dynamic_resolution=dynamic_resolution,
+            patch_dim=patch_dim,
             split=split,
         )
     elif task == 'RealworldQA':
@@ -1528,7 +1667,9 @@ def get_evaluation_dataset(
             use_tiling,
             max_num_tiles,
             use_thumbnail,
-            vision_model_type=vision_model_type,
+            image_transform,
+            dynamic_resolution=dynamic_resolution,
+            patch_dim=patch_dim,
         )
     elif task in ["OCRBench", "OCRBench_v2"]:
         dataset = OCRBenchDataset(
@@ -1542,7 +1683,9 @@ def get_evaluation_dataset(
             use_tiling,
             max_num_tiles,
             use_thumbnail,
-            vision_model_type,
+            image_transform,
+            dynamic_resolution=dynamic_resolution,
+            patch_dim=patch_dim,
         )
     elif task == "MathVista":
         dataset = MathVistaDataset(
@@ -1555,7 +1698,9 @@ def get_evaluation_dataset(
             use_tiling,
             max_num_tiles,
             use_thumbnail,
-            vision_model_type,
+            image_transform,
+            dynamic_resolution=dynamic_resolution,
+            patch_dim=patch_dim,
         )
     elif task == "AI2D":
         dataset = AI2DDataset(
@@ -1569,7 +1714,9 @@ def get_evaluation_dataset(
             use_tiling,
             max_num_tiles,
             use_thumbnail,
-            vision_model_type=vision_model_type,
+            image_transform=image_transform,
+            dynamic_resolution=dynamic_resolution,
+            patch_dim=patch_dim,
         )
     elif task == "SPDocVQA":
         keys = {"sample_id": "questionId", "image_id": "image", "question": "question", "answer": "answers"}
@@ -1586,7 +1733,10 @@ def get_evaluation_dataset(
             use_tiling,
             max_num_tiles,
             use_thumbnail,
-            vision_model_type,
+            image_transform,
+            dynamic_resolution=dynamic_resolution,
+            patch_dim=patch_dim,
+            split=split,
         )
     elif task == "InfoVQA":
         keys = {"sample_id": "questionId", "image_id": "image_local_name", "question": "question", "answer": "answers"}
@@ -1603,7 +1753,10 @@ def get_evaluation_dataset(
             use_tiling,
             max_num_tiles,
             use_thumbnail,
-            vision_model_type,
+            image_transform,
+            dynamic_resolution=dynamic_resolution,
+            patch_dim=patch_dim,
+            split=split,
         )
     elif task == "RD_TableBench":
         dataset = RDTableBenchDataset(
@@ -1617,7 +1770,9 @@ def get_evaluation_dataset(
             use_tiling,
             max_num_tiles,
             use_thumbnail,
-            vision_model_type,
+            image_transform,
+            dynamic_resolution=dynamic_resolution,
+            patch_dim=patch_dim,
         )
     ### video QA
     elif task == "VideoMME":
@@ -1633,7 +1788,9 @@ def get_evaluation_dataset(
             max_num_tiles,
             use_thumbnail,
             num_frames,
-            vision_model_type,
+            image_transform,
+            dynamic_resolution=dynamic_resolution,
+            patch_dim=patch_dim,
         )
     elif task == "MotionBench":
         dataset = MotionBenchDataset(
@@ -1648,7 +1805,9 @@ def get_evaluation_dataset(
             max_num_tiles,
             use_thumbnail,
             num_frames,
-            vision_model_type,
+            image_transform,
+            dynamic_resolution=dynamic_resolution,
+            patch_dim=patch_dim,
             split=split
         )
     elif task == "PhysGameBench":
@@ -1664,7 +1823,9 @@ def get_evaluation_dataset(
             max_num_tiles,
             use_thumbnail,
             num_frames,
-            vision_model_type,
+            image_transform,
+            dynamic_resolution=dynamic_resolution,
+            patch_dim=patch_dim,
             split=split
         )
     elif task == "MVBench":
@@ -1680,7 +1841,9 @@ def get_evaluation_dataset(
             max_num_tiles,
             use_thumbnail,
             num_frames,
-            vision_model_type,
+            image_transform,
+            dynamic_resolution=dynamic_resolution,
+            patch_dim=patch_dim,
             split=split
         )
     elif task == "inference":

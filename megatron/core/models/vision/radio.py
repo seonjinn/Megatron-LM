@@ -1,7 +1,7 @@
 # Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
 
 import math
-from typing import Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 import torch
 import torch.nn.functional as F
@@ -9,6 +9,7 @@ from torch import nn
 
 from megatron.core.config_logger import has_config_logger_enabled, log_config_to_disk
 from megatron.core.models.common.vision_module.vision_module import VisionModule
+from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.tensor_parallel.layers import ColumnParallelLinear
 from megatron.core.transformer.enums import ModelType
 from megatron.core.transformer.spec_utils import ModuleSpec, build_module
@@ -63,6 +64,7 @@ class RADIOViTModel(VisionModule):
         pos_dropout: int = 0,
         has_cpe: bool = True,
         embedder_bias: bool = False,
+        dynamic_resolution: bool = False,
     ) -> None:
         super().__init__(config=transformer_config)
 
@@ -121,6 +123,7 @@ class RADIOViTModel(VisionModule):
         )
         self.pos_dropout = pos_dropout
         self.has_cpe = has_cpe
+        self.dynamic_resolution = dynamic_resolution
 
         # Using non-TE version so we can force gather_output
         self.embedder = ColumnParallelLinear(
@@ -129,6 +132,7 @@ class RADIOViTModel(VisionModule):
             bias=embedder_bias,
             config=transformer_config,
             gather_output=True,
+            disable_grad_reduce=True,
             init_method=lambda tensor: torch.nn.init.normal_(tensor, mean=0.0, std=1.0),
         )
 
@@ -167,7 +171,11 @@ class RADIOViTModel(VisionModule):
         self.decoder.set_input_tensor(input_tensor)
 
     def forward(
-        self, x: torch.Tensor, attention_mask: Optional[torch.Tensor] = None
+        self,
+        x: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        imgs_sizes: Optional[List[Tuple[int, int]]] = None,
+        packed_seq_params: Optional[PackedSeqParams] = None,
     ) -> torch.Tensor:
         """Forward function of the RADIO ViT Model. This function passes the input tensors
         through the embedding layer and then the transformer.
@@ -175,41 +183,75 @@ class RADIOViTModel(VisionModule):
         Args:
             x (torch.Tensor): input data of shape [batch, img_h, img_w]
             attention_mask (torch.Tensor with dtype=bool): Attention mask to use.
+            imgs_sizes (List(Tuple[int, int])): Sizes of the images, for dynamic resolution.
+            packed_seq_params (PackedSeqParams): Packed sequence params for attention.
 
         Returns:
             x (torch.Tensor): output after final transformer block of shape [b, s, h].
         """
-
-        if not HAVE_EINOPS:
-            raise ImportError(
-                "einops is required for RADIOViTModel, please install it with `pip install einops`"
+        if not self.dynamic_resolution:
+            input_size = x.shape[2:]
+            py = x.shape[-2] // self.patch_dim
+            px = x.shape[-1] // self.patch_dim
+            x = rearrange(
+                x,
+                'b c (py yy) (px xx) -> b (py px) (c yy xx)',
+                py=py,
+                yy=self.patch_dim,
+                px=px,
+                xx=self.patch_dim,
             )
-
-        input_size = x.shape[2:]
-        py = x.shape[-2] // self.patch_dim
-        px = x.shape[-1] // self.patch_dim
-        x = rearrange(
-            x,
-            "b c (py yy) (px xx) -> b (py px) (c yy xx)",
-            py=py,
-            yy=self.patch_dim,
-            px=px,
-            xx=self.patch_dim,
-        )
         x, _ = self.embedder(x)  # [batch, seq_length, hidden_size]
 
-        x, _ = self.apply_pos_enc(x, input_size=input_size)
+        # in radio pos embedding added before class token
+        if self.dynamic_resolution:
+            # TODO: efficiency? probably a more pytorch way to do this
+            current_length = 0
+            for input_size in imgs_sizes:
+                seq_length = input_size[0] // self.patch_dim * input_size[1] // self.patch_dim
+                x[:, current_length : current_length + seq_length, :], _ = self.apply_pos_enc(
+                    x[:, current_length : current_length + seq_length, :], input_size=input_size
+                )
+                current_length += seq_length
+        else:
+            x, pos_enc = self.apply_pos_enc(x, input_size=input_size)
 
         if self.add_class_token:
             class_token = self.class_token.expand(
                 x.shape[0], -1, -1
             )  # [batch, class_token_len, hidden_size]
+            if self.dynamic_resolution:
+                # TODO: probably better way to do this
+                out = []
+                current_length = 0
+                for input_size in imgs_sizes:
+                    seq_length = input_size[0] // self.patch_dim * input_size[1] // self.patch_dim
+                    out.append(class_token)
+                    out.append(x[:, current_length : current_length + seq_length, :])
+                    current_length += seq_length
+                x = torch.cat(out, dim=1)
+                # Not using += to avoid double adding in situations
+                # where cu_seqlens_q and cu_seqlens_kv are same underlying tensor
+                add_cu = torch.full_like(
+                    packed_seq_params.cu_seqlens_q, self.class_token_len, dtype=torch.int32
+                )
+                add_cu[0] = 0
+                add_cu = torch.cumsum(add_cu, dim=-1, dtype=torch.int32)
+                packed_seq_params.cu_seqlens_q = packed_seq_params.cu_seqlens_q + add_cu
+                packed_seq_params.cu_seqlens_kv = packed_seq_params.cu_seqlens_kv + add_cu
+                packed_seq_params.max_seqlen_q = (
+                    packed_seq_params.max_seqlen_q + self.class_token_len
+                )
+                packed_seq_params.max_seqlen_kv = (
+                    packed_seq_params.max_seqlen_kv + self.class_token_len
+                )
+            else:
+                x = torch.cat(
+                    [class_token, x], dim=1
+                )  # [batch, seq_length + class_token_len, hidden_size]
 
-            x = torch.cat(
-                [class_token, x], dim=1
-            )  # [batch, seq_length + class_token_len, hidden_size]
-
-        assert x.shape[1] == self.seq_length, f"{x.shape[1]} != {self.seq_length}"
+        if not self.dynamic_resolution:
+            assert x.shape[1] == self.seq_length, f"{x.shape[1]} != {self.seq_length}"
 
         if self.ln_pre:
             x = self.ln_pre(x)
@@ -217,7 +259,7 @@ class RADIOViTModel(VisionModule):
         x = x.permute(1, 0, 2)  # [b, s, h] -> [s, b, h]
         x = x.contiguous()
 
-        x = self.decoder(x, attention_mask=attention_mask)
+        x = self.decoder(x, attention_mask=attention_mask, packed_seq_params=packed_seq_params)
 
         x = x.permute(1, 0, 2)  # [s, b, h] -> [b, s, h]
         x = x.contiguous()

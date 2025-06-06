@@ -1,6 +1,7 @@
 # Copyright (c) 2024, NVIDIA CORPORATION.  All rights reserved.
 import bisect
 import dataclasses
+import functools
 import json
 import re
 import sys
@@ -8,10 +9,11 @@ import traceback
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union
 
-from image_processing import ImageTransform, find_closest_aspect_ratio, find_closest_area_weighted_aspect_ratio
+from image_processing import ImageTransform, find_closest_aspect_ratio, find_closest_area_weighted_aspect_ratio, process_images
 from PIL import Image
 from torchvision.transforms import ToPILImage
 import numpy as np
+from einops import rearrange
 import torch
 
 from energon_util import OfflineTargetAspectRatioSample, SampleListSample
@@ -85,6 +87,9 @@ class ImageTaskBatchPacked(Batch):
     num_tiles: List[List[int]]  # Number of tiles per image (N, num_imgs)
     max_lengths: List[int]  # Maximum length across sub-samples (N,)
     cu_lengths: List[List[int]]  # Cumulative length of each sub-sample in each packed sample of the batch (N, P)
+    imgs_sizes: List[Tuple[int, int]]
+    vision_max_lengths: List[int]
+    vision_cu_lengths: List[List[int]]
 
 
 # Based on https://github.com/hiyouga/LLaMA-Factory/blob/641d0dab08d96a93c34657742213d8994d9ed476/src/llamafactory/data/processors/processor_utils.py#L19
@@ -163,16 +168,34 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
             assert self.packing_seq_length > 0, "packing sequence length must be set"
 
         self.num_image_embeddings_per_tile = get_num_image_embeddings(
-            self.args.img_h,
-            self.args.img_w,
-            self.args.patch_dim,
-            self.args.vision_model_type,
-            self.args.disable_vision_class_token,
-            1,
-            self.args.pixel_shuffle,
-            self.args.use_tile_tags,
-            self.args.max_num_tiles,
-            self.args.tokenizer_prompt_format,
+            img_h=self.args.img_h,
+            img_w=self.args.img_w,
+            patch_dim=self.args.patch_dim,
+            vision_model_type=self.args.vision_model_type,
+            disable_vision_class_token=self.args.disable_vision_class_token,
+            class_token_len=1,
+            pixel_shuffle=self.args.pixel_shuffle,
+            use_tile_tags=self.args.use_tile_tags,
+            max_num_tiles=self.args.max_num_tiles,
+            tokenizer_type=self.args.tokenizer_prompt_format,
+            use_image_break_token=self.args.image_break_token is not None,
+            conv_merging=self.args.conv_merging,
+        )
+
+        # Create a partial function with all the self.args parameters pre-filled
+        # Only img_h and img_w need to be specified when calling this function
+        self._get_num_image_embeddings = functools.partial(
+            get_num_image_embeddings,
+            patch_dim=self.args.patch_dim,
+            vision_model_type=self.args.vision_model_type,
+            disable_vision_class_token=self.args.disable_vision_class_token,
+            class_token_len=1,
+            pixel_shuffle=self.args.pixel_shuffle,
+            use_tile_tags=self.args.use_tile_tags,
+            max_num_tiles=self.args.max_num_tiles,
+            tokenizer_type=self.args.tokenizer_prompt_format,
+            use_image_break_token=self.args.image_break_token is not None,
+            conv_merging=self.args.conv_merging,
         )
 
         self.txt_to_token_dict = {}
@@ -187,20 +210,52 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
             find_closest_area_weighted_aspect_ratio if self.args.use_area_weighted_aspect_ratio
             else find_closest_aspect_ratio)
 
-        self.transform_img = ImageTransform(self.img_h, self.args.vision_model_type)
+        self.transform_img = ImageTransform(
+            self.img_h, 
+            self.args.vision_model_type,
+            dynamic_resolution=self.args.dynamic_resolution,
+            res_step=self.args.patch_dim,
+            min_num_patches=self.args.dynamic_resolution_min_patches,
+            max_num_patches=self.args.seq_length - (1 if not self.args.disable_vision_class_token else 0), #TODO: handle class toekn length correctly(not just use 1)
+            pixel_shuffle=self.args.pixel_shuffle,
+            min_side=self.args.dynamic_resolution_min_side,
+            conv_merging=self.args.conv_merging,
+        )
 
-    def _get_total_seq_length(self, input_ids, num_tiles):
+    def _get_total_seq_length(self, input_ids, num_tiles, imgs=None):
         """Calculate expected sequence length given text tokens length and number of tiles."""
-        total_num_images = len(num_tiles)
-        total_num_tiles = sum(num_tiles)
-        total_len = len(input_ids) + total_num_tiles * self.num_image_embeddings_per_tile - total_num_images
+        if self.args.dynamic_resolution:
+            assert imgs is not None
+
+            img_seq_len = 0
+            for img in imgs:
+                img_seq_len += self._get_num_image_embeddings(
+                    img_h=img.shape[1],
+                    img_w=img.shape[2],
+                )
+
+            total_len = len(input_ids) + img_seq_len - len(num_tiles)
+        else:
+            total_num_images = len(num_tiles)
+            total_num_tiles = sum(num_tiles)
+            total_len = len(input_ids) + total_num_tiles * self.num_image_embeddings_per_tile - total_num_images
         return total_len
 
-    def _truncate_for_packing(self, input_ids, target, num_tiles):
+    def _truncate_for_packing(self, input_ids, target, num_tiles, imgs):
         """Truncate tokens and labels if they exceed packing sequence length."""
         total_num_images = len(num_tiles)
         total_num_tiles = sum(num_tiles)
-        total_img_embeddings_len = total_num_tiles * self.num_image_embeddings_per_tile
+        if self.args.dynamic_resolution:
+            assert imgs is not None
+
+            total_img_embeddings_len = 0
+            for img in imgs:
+                total_img_embeddings_len += self._get_num_image_embeddings(
+                    img_h=img.shape[1],
+                    img_w=img.shape[2],
+                )
+        else:
+            total_img_embeddings_len = total_num_tiles * self.num_image_embeddings_per_tile
         max_text_tokens = self.packing_seq_length - total_img_embeddings_len + total_num_images
 
         input_ids = input_ids[:max_text_tokens]
@@ -222,6 +277,90 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
             yield self.encode_sample_list(sample)
         else:
             raise NotImplementedError("Sample format not supported", sample)
+
+
+    def encode_captioning(self, sample: CaptioningSample):
+        """Encode CaptioningSample."""
+        augment = sample.__subflavors__.get("augmentation")
+
+        imgs = self.transform_img(
+            sample.image, self.img_h, self.img_w, self.args.use_tiling, self.args.max_num_tiles, self.args.use_thumbnail, augment,
+            find_closest_aspect_ratio_fn=self.find_closest_aspect_ratio_fn
+        )
+        num_tiles = [len(imgs)]
+
+        prompt_list = self.manual_prompts["CaptioningPretraining"]["raw"]
+
+        prompt_idx = np.random.randint(len(prompt_list))
+        cur_prompt = prompt_list[prompt_idx]
+        cur_prompt = IMAGE_TOKEN + "\n" + cur_prompt + "\n"
+
+        caption = sample.caption.strip()
+
+        split_by_line_flag = sample.__subflavors__.get("SplitByLine")
+        if split_by_line_flag:
+            caption_list = caption.split('\n')
+            caption = np.random.choice(caption_list)
+
+        conv = [
+            # Note: no system message.
+            {"role": "user", "content": cur_prompt},
+            {"role": "assistant", "content": caption},
+        ]
+
+        input_ids, target = self.tokenizer.tokenize_conversation(conv, True, False)
+
+        if self.is_packing_enabled:
+            input_ids, target = self._truncate_for_packing(input_ids, target, num_tiles, imgs)
+
+        return ImageTaskSample(
+            __key__=sample.__key__,
+            __restore_key__=sample.__restore_key__,
+            __subflavor__=None,
+            __subflavors__=sample.__subflavors__,
+            imgs=imgs,
+            num_tiles=num_tiles,
+            tokens=torch.tensor(input_ids),
+            labels=torch.tensor(target),
+            total_len=self._get_total_seq_length(input_ids, num_tiles, imgs),
+        )
+
+    def encode_llava_pretrain(self, sample: VQASample):
+        """Encode pretrain sample in LLAVA style."""
+        augment = sample.__subflavors__.get("augmentation", False)
+
+        imgs = self.transform_img(
+            sample.image, self.img_h, self.img_w, self.args.use_tiling, self.args.max_num_tiles, self.args.use_thumbnail, augment,
+            find_closest_aspect_ratio_fn=self.find_closest_aspect_ratio_fn
+        )
+        num_tiles = [len(imgs)]
+
+        # LLAVA training: override text-prompt with just the image.
+        conv = [
+            # Note: no system message.
+            {"role": "user", "content": IMAGE_TOKEN + "\n"},
+            {"role": "assistant", "content": sample.answers},
+        ]
+
+        input_ids, target = self.tokenizer.tokenize_conversation(conv, True, False)
+
+        if self.is_packing_enabled:
+            input_ids, target = self._truncate_for_packing(input_ids, target, num_tiles, imgs)
+
+        assert self._get_total_seq_length(input_ids, num_tiles, imgs) < self.args.decoder_seq_length, f"total sequence length {self._get_total_seq_length(input_ids, num_tiles, imgs)} needs to be less than {self.args.decoder_seq_length}"
+
+
+        return ImageTaskSample(
+            __key__=sample.__key__,
+            __restore_key__=sample.__restore_key__,
+            __subflavor__=None,
+            __subflavors__=sample.__subflavors__,
+            imgs=imgs,
+            num_tiles=num_tiles,
+            tokens=torch.tensor(input_ids),
+            labels=torch.tensor(target),
+            total_len=self._get_total_seq_length(input_ids, num_tiles, imgs),
+        )
 
     def encode_sample_list(self, samples: SampleListSample):
         """We encode the list of samples using encode_llava_sft on each sample."""
@@ -351,7 +490,7 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
                         self.args.use_thumbnail, augment, find_closest_aspect_ratio_fn=local_find_closest_aspect_ratio_fn)
                     imgs += img_tiles
                     num_tiles += [len(img_tiles)]
-                if max_num_tiles == 1:
+                if max_num_tiles == 1 or self.args.dynamic_resolution:
                     break
                 if sum(num_tiles) * self.num_image_embeddings_per_tile > max_image_token_allowed:
                     if max_num_tiles in self.num_tiles_degradation_map:
@@ -386,7 +525,7 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
             imgs = num_tiles = []
 
         if self.is_packing_enabled or truncate_for_sample_list_packing:
-            input_ids, target = self._truncate_for_packing(input_ids, target, num_tiles)
+            input_ids, target = self._truncate_for_packing(input_ids, target, num_tiles, imgs)
 
         # Some final checks with respect to the number of image tokens and images on the tokenized
         # conversation. There can still be errors, for instance if a non-video sample happens to
@@ -401,7 +540,9 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
         assert np.sum(num_tiles) == len(imgs), error_msg
 
         # We need to ensure that there are at least some trainable tokens in the sample.
-        assert self.target_has_trainable_tokens(input_ids, num_tiles, target), "Sample has no trainable tokens."
+        assert self.target_has_trainable_tokens(input_ids, num_tiles, target, imgs), "Sample has no trainable tokens."
+
+        assert self._get_total_seq_length(input_ids, num_tiles, imgs) < self.args.decoder_seq_length, f"total sequence length {self._get_total_seq_length(input_ids, num_tiles, imgs)} needs to be less than {self.args.decoder_seq_length}"
 
         # Context parallel and FP8 require padding.
         total_len = self._get_total_seq_length(input_ids, num_tiles)
@@ -426,10 +567,10 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
             num_tiles=num_tiles,
             tokens=torch.tensor(input_ids),
             labels=torch.tensor(target),
-            total_len=self._get_total_seq_length(input_ids, num_tiles),
+            total_len=self._get_total_seq_length(input_ids, num_tiles, imgs),
         )
 
-    def target_has_trainable_tokens(self, input_ids, num_tiles, target):
+    def target_has_trainable_tokens(self, input_ids, num_tiles, target, imgs):
         # Compute the loss mask based on extending the image tags with the proper
         # number of image tokens, extracting the first self.args.decoder_seq_length tokens, and
         # ensuring that some of these tokens have a loss mask > 0.
@@ -438,9 +579,18 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
         # and targets to avoid this duplication.
         expanded_target = target.copy()
         expanded_target[input_ids==self.img_token_id] = self.img_token_id
+        if self.args.dynamic_resolution:
+            img_embeddings_len = []
+            for img in imgs:
+                img_embeddings_len.append(self._get_num_image_embeddings(
+                    img_h=img.shape[1],
+                    img_w=img.shape[2],
+                ))
+        else:
+            img_embeddings_len = np.array(num_tiles) * self.num_image_embeddings_per_tile
+
         expanded_target = self.replace_value_with_repetition(
-            expanded_target, self.img_token_id,
-            self.num_image_embeddings_per_tile * np.array(num_tiles), IGNORE_INDEX)
+            expanded_target, self.img_token_id, img_embeddings_len, IGNORE_INDEX)
         loss_mask = torch.ones(torch.tensor(expanded_target).size(), dtype=torch.float)
         loss_mask[expanded_target == self.tokenizer.pad] = 0.0 # mask paddings
         loss_mask[expanded_target == IGNORE_INDEX] = 0.0 # mask prompts
@@ -477,13 +627,233 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
 
         return np.array(result)
 
+
+    def encode_any_single_turn_vqa(self, sample):
+        """Encode MultiChoiceVQA or VQA sample."""
+        augment = sample.__subflavors__['augmentation'] if 'augmentation' in sample.__subflavors__ else False
+        has_video = sample.__subflavors__['has_video'] if 'has_video' in sample.__subflavors__ else False
+
+        if has_video:
+            # Grab the selected frames of the video as a tensor with shape
+            # fhwc: (num_frames, height, width, num_channels).
+            video_fhwc = sample.image.permute(0, 2, 3, 1)
+            selected_frames = torch.linspace(
+                0, video_fhwc.shape[0] - 1, self.args.num_frames).long()
+            video_frame_fhwc = video_fhwc[selected_frames]
+            imgs = []
+            for video_frame_hwc in video_frame_fhwc:
+                imgs += self.transform_img(
+                    video_frame_hwc, self.img_h, self.img_w,
+                    self.args.use_tiling, self.args.max_num_tiles,
+                    self.args.use_thumbnail, augment, find_closest_aspect_ratio_fn=self.find_closest_aspect_ratio_fn
+                )
+        else:
+            imgs = self.transform_img(
+                sample.image, self.img_h, self.img_w, self.args.use_tiling, self.args.max_num_tiles,
+                self.args.use_thumbnail, augment, find_closest_aspect_ratio_fn=self.find_closest_aspect_ratio_fn
+            )
+
+        num_tiles = [len(imgs)]
+
+        if isinstance(sample, MultiChoiceVQASample):
+            cur_prompt = format_multichoice_question(sample.context, sample.choices)
+            if IMAGE_TOKEN not in cur_prompt:
+                cur_prompt = IMAGE_TOKEN + "\n" + cur_prompt
+            cur_answer = format_multichoice_answer(sample.correct_choice_idx)
+        elif isinstance(sample, VQASample):
+            if 'docvqa' in sample.__key__:
+                prompt_list = self.manual_prompts["VQASFT"]["docvqa"]
+            elif sample.__subflavors__.get("VQASFT"):
+                prompt_list = self.manual_prompts["VQASFT"]["raw"]
+            else:
+                prompt_list = ["{}"]
+
+            prompt_idx = np.random.randint(len(prompt_list))
+            cur_prompt = prompt_list[prompt_idx]
+
+            cur_prompt = cur_prompt.format(sample.context)
+
+            if IMAGE_TOKEN not in cur_prompt:
+                cur_prompt = IMAGE_TOKEN + "\n" + cur_prompt
+
+            if isinstance(sample.answers, list):
+                answer_list = sample.answers
+                weight_list = np.array(sample.answer_weights).astype(np.float32)
+                weight_list = weight_list / np.sum(weight_list)
+                answer_idx = np.random.choice(weight_list.shape[0], 1, p=weight_list)[0]
+                cur_answer = answer_list[answer_idx]
+            else:
+                cur_answer = sample.answers
+        else:
+            raise NotImplementedError("Unsupported data type provided", sample)
+
+        conversation = [
+            {"role": "system", "content": "Answer the questions."},
+            {"role": "user", "content": cur_prompt},
+            {"role": "assistant", "content": str(cur_answer)},
+        ]
+
+        input_ids, target = self.tokenizer.tokenize_conversation(conversation, True, False)
+
+        if self.is_packing_enabled:
+            input_ids, target = self._truncate_for_packing(input_ids, target, num_tiles, imgs)
+
+        return ImageTaskSample(
+            __key__=sample.__key__,
+            __restore_key__=sample.__restore_key__,
+            __subflavor__=None,
+            __subflavors__=sample.__subflavors__,
+            imgs=imgs,
+            num_tiles=num_tiles,
+            tokens=torch.tensor(input_ids),
+            labels=torch.tensor(target),
+            total_len=self._get_total_seq_length(input_ids, num_tiles, imgs),
+        )
+
+    def combined_ocr_encoder(self, sample, task_type):
+        """Encode OCR samples."""
+        augment = sample.__subflavors__['augmentation'] if 'augmentation' in sample.__subflavors__ else False
+
+        if task_type == "encode_pdf":
+            sample, cur_prompt, cur_answer = self.encode_pdf_prompt(sample)
+        elif task_type == "encode_ocr_ref":
+            sample, cur_prompt, cur_answer = self.encode_ocr_ref_prompt(sample)
+        elif task_type == "_encode_ocr":
+            sample, cur_prompt, cur_answer = self.encode_ocr_prompt(sample)
+
+        imgs = self.transform_img(
+                sample.image, self.img_h, self.img_w, self.args.use_tiling, self.args.max_num_tiles,
+                self.args.use_thumbnail, augment, find_closest_aspect_ratio_fn=self.find_closest_aspect_ratio_fn
+            )
+        num_tiles = [len(imgs)]
+
+        conversation = [
+            {"role": "system", "content": "Answer the questions."},
+            {"role": "user", "content": cur_prompt},
+            {"role": "assistant", "content": str(cur_answer)},
+        ]
+
+        input_ids, target = self.tokenizer.tokenize_conversation(conversation, True, False)
+
+        if self.is_packing_enabled:
+            input_ids, target = self._truncate_for_packing(input_ids, target, num_tiles, imgs)
+
+        return ImageTaskSample(
+            __key__=sample.__key__,
+            __restore_key__=sample.__restore_key__,
+            __subflavor__=None,
+            __subflavors__=sample.__subflavors__,
+            imgs=imgs,
+            num_tiles=num_tiles,
+            tokens=torch.tensor(input_ids),
+            labels=torch.tensor(target),
+            total_len=self._get_total_seq_length(input_ids, num_tiles, imgs),
+        )
+
+    def encode_pdf_prompt(self, sample: OCRSample) -> ImageTaskSample:
+        """Encode OCR sample."""
+        prompt_list = self.manual_prompts["DocPretraining"]["raw"]
+        prompt_idx = np.random.randint(len(prompt_list))
+        cur_prompt = prompt_list[prompt_idx]
+        if IMAGE_TOKEN not in cur_prompt:
+            cur_prompt = IMAGE_TOKEN + "\n" + cur_prompt
+
+        # Make sure there is no extra IMAGE_TOKEN tag.
+        sample.text = sample.text.replace(IMAGE_TOKEN, "")
+
+        caption = sample.text.strip()
+
+        split_by_line_flag = sample.__subflavors__.get("SplitByLine")
+        if split_by_line_flag:
+            caption_list = caption.split('\n')
+            caption = np.random.choice(caption_list)
+        cur_answer = caption
+
+        return sample, cur_prompt, cur_answer
+
+    def encode_ocr_ref_prompt(self, sample: OCRSample) -> ImageTaskSample:
+        """Encode OCR sample."""
+        ref = sample.text
+        region = sample.words_boxes
+
+        # Make sure there is no extra IMAGE_TOKEN tag
+        ref = ref.replace(IMAGE_TOKEN, "")
+
+        if len(region) == 4:
+            region = f"<box>({region[0]},{region[1]}),({region[2]},{region[3]})</box>"
+        else:
+            region = f"<quad>({region[0]},{region[1]}),({region[2]},{region[3]}),({region[4]},{region[5]}),({region[6]},{region[7]})</quad>"
+
+        # Randomly choose between two tasks
+        task_idx = np.random.randint(2)
+        if task_idx == 0:
+            # Referring Grounding
+            prompt_list = self.manual_prompts["DocPretraining"]["referring_grounding"]
+            prompt_content = ref
+            answer = region
+        else:
+            # Grounded OCR
+            prompt_list = self.manual_prompts["DocPretraining"]["grounded_ocr"]
+            prompt_content = region
+            answer = ref
+
+        prompt_idx = np.random.randint(len(prompt_list))
+        cur_prompt = prompt_list[prompt_idx]
+        cur_prompt = cur_prompt.format(prompt_content)
+        if IMAGE_TOKEN not in cur_prompt:
+            cur_prompt = IMAGE_TOKEN + "\n" + cur_prompt
+
+        return sample, cur_prompt, answer
+
+    def bbox_coord_to_label(self, text, bbox):
+        """Format bbox coordinates as text."""
+        assert len(bbox) == 4 or len(bbox) == 8
+
+        # Make sure there is no extra IMAGE_TOKEN tag
+        text = text.replace(IMAGE_TOKEN, "")
+
+        if len(bbox) == 4:
+            label_str = f"<ref>{text}</ref><box>({bbox[0]},{bbox[1]}),({bbox[2]},{bbox[3]})</box>"
+        else:
+            label_str = f"<ref>{text}</ref><quad>({bbox[0]},{bbox[1]}),({bbox[2]},{bbox[3]}),({bbox[4]},{bbox[5]}),({bbox[6]},{bbox[7]})</quad>"
+
+        return label_str
+
+    def encode_ocr_prompt(self, sample: OCRSample) -> ImageTaskSample:
+        """Encode OCR sample."""
+        if isinstance(sample.words_boxes[0], int):
+            answer = self.bbox_coord_to_label(sample.text, sample.words_boxes)
+        elif isinstance(sample.words_boxes[0], list):
+            answer = ""
+            for i, bbox in enumerate(sample.words_boxes):
+                answer += self.bbox_coord_to_label(sample.words_text[i], bbox)
+
+        prompt_list = self.manual_prompts["DocPretraining"]["ocr_multi"]
+        prompt_idx = np.random.randint(len(prompt_list))
+        cur_prompt = prompt_list[prompt_idx]
+
+        if IMAGE_TOKEN not in cur_prompt:
+            cur_prompt = IMAGE_TOKEN + "\n" + cur_prompt
+        cur_answer = answer
+
+        return sample, cur_prompt, cur_answer
+
     def batch(self, samples: List[Union[ImageTaskSample, ImageTaskSamplePacked]]) -> ImageTaskBatchPacked:
         # Stack images to [num_tiles, c, h, w]. If there are no images (text-only), then use a dummy image.
         imgs = [img for s in samples for img in s.imgs]
-        if len(imgs) > 0:
-            imgs = torch.stack(imgs)
-        else:
-            imgs = torch.tensor([[0]], dtype=torch.float32)
+
+        if len(imgs) > 0 and self.args.dynamic_resolution:
+            assert self.args.vision_model_type in ("radio", "radio-g"), "Dynamic resolution only works with radio right now"
+        
+        imgs, imgs_sizes, vision_cu_lengths, vision_max_lengths = process_images(
+            imgs, self.args.patch_dim, self.args.dynamic_resolution, batch_mode=True
+        )
+        
+        # Set default values if no vision metadata was returned (static resolution case)
+        if vision_cu_lengths is None:
+            vision_cu_lengths = torch.tensor([[0]], dtype=torch.int32)
+        if vision_max_lengths is None:
+            vision_max_lengths = torch.tensor([[0]], dtype=torch.int32)
 
         # If the user hasn't defined a target dataloader sequence length, then use the max along the sample lengths.
         max_seq_len = self.dataloader_seq_length
@@ -525,6 +895,9 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
             num_tiles=num_tiles,
             cu_lengths=cu_lengths,
             max_lengths=max_lengths,
+            imgs_sizes=imgs_sizes,
+            vision_cu_lengths=vision_cu_lengths,
+            vision_max_lengths=vision_max_lengths,
         )
 
     def encode_batch(self, batch: ImageTaskBatchPacked) -> dict:

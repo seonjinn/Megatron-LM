@@ -23,6 +23,7 @@ from megatron.core import parallel_state
 from megatron.core.enums import ModelType
 from megatron.core.models.multimodal.llava_model import IMAGE_TOKEN
 from megatron.core.models.vision.clip_vit_model import get_num_image_embeddings
+from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.inference.text_generation.api import generate_and_post_process
 from megatron.inference.text_generation.forward_step import ForwardStep
 from megatron.core.inference.contexts import StaticInferenceContext
@@ -119,6 +120,13 @@ def get_evaluation_dataloader(
     num_frames,
     num_workers,
     vision_model_type,
+    dynamic_resolution,
+    patch_dim,
+    min_num_patches,
+    seq_length,
+    pixel_shuffle,
+    min_side,
+    conv_merging,
     split="validation"
 ):
     """Build evaluation dataset."""
@@ -136,6 +144,13 @@ def get_evaluation_dataloader(
         partition_id,
         num_frames,
         vision_model_type,
+        dynamic_resolution,
+        patch_dim,
+        min_num_patches,
+        seq_length,
+        pixel_shuffle,
+        min_side,
+        conv_merging,
         split=split
     )
 
@@ -172,20 +187,29 @@ def generate_samples(model, config: EvaluationConfig, print_output):
         args.num_frames,
         args.num_workers,
         args.vision_model_type,
+        args.dynamic_resolution,
+        args.patch_dim,
+        args.dynamic_resolution_min_patches,
+        args.seq_length,
+        args.pixel_shuffle,
+        args.dynamic_resolution_min_side,
+        args.conv_merging,
         config.split
     )
 
     num_img_embeddings_per_tile = get_num_image_embeddings(
-        args.img_h,
-        args.img_w,
-        args.patch_dim,
-        args.vision_model_type,
-        args.disable_vision_class_token,
-        1,
-        args.pixel_shuffle,
-        args.use_tile_tags,
-        args.max_num_tiles,
-        args.tokenizer_prompt_format,
+        img_h=args.img_h,
+        img_w=args.img_w,
+        patch_dim=args.patch_dim,
+        vision_model_type=args.vision_model_type,
+        disable_vision_class_token=args.disable_vision_class_token,
+        class_token_len=1,
+        pixel_shuffle=args.pixel_shuffle,
+        use_tile_tags=args.use_tile_tags,
+        max_num_tiles=args.max_num_tiles,
+        tokenizer_type=args.tokenizer_prompt_format,
+        use_image_break_token=args.image_break_token is not None,
+        conv_merging=args.conv_merging,
     )
 
     if args.use_mcore_inference:
@@ -211,28 +235,66 @@ def generate_samples(model, config: EvaluationConfig, print_output):
             num_tokens_to_generate=config.out_seq_length,
         )
 
-    for idx, (imgs, num_tiles, sample_id, question, answers, metadata) in enumerate(dataloader):
+    for idx, (imgs, num_tiles, sample_id, question, answers, metadata, imgs_sizes, vision_cu_lengths, vision_max_lengths) in enumerate(dataloader):
+
         imgs = imgs.to("cuda")
         num_tiles = num_tiles.to("cuda")
+        if vision_cu_lengths is not None:
+            vision_cu_lengths = vision_cu_lengths.to("cuda")
+        if vision_max_lengths is not None:
+            vision_max_lengths = vision_max_lengths.to("cuda")
+
+        # Create vision_packed_seq_params if vision_cu_lengths is provided
+        vision_packed_seq_params = None
+        if vision_cu_lengths is not None:
+            vision_packed_seq_params = PackedSeqParams(
+                qkv_format="thd",
+                cu_seqlens_q=vision_cu_lengths,
+                cu_seqlens_kv=vision_cu_lengths,
+                max_seqlen_q=vision_max_lengths,
+                max_seqlen_kv=vision_max_lengths,
+            )
+
+        if args.dynamic_resolution:
+            num_img_embeddings = 0
+            for img_size in imgs_sizes:
+                num_img_embeddings += get_num_image_embeddings(
+                    img_h=img_size[0], 
+                    img_w=img_size[1], 
+                    patch_dim=args.patch_dim, 
+                    vision_model_type=args.vision_model_type,
+                    disable_vision_class_token=args.disable_vision_class_token, 
+                    class_token_len=1,
+                    pixel_shuffle=args.pixel_shuffle, 
+                    use_tile_tags=args.use_tiling,
+                    use_image_break_token=args.image_break_token is not None,
+                    conv_merging=args.conv_merging,
+                )
+        else:
+            total_num_tiles = torch.sum(num_tiles).item()
+            num_img_embeddings = num_img_embeddings_per_tile * total_num_tiles
+
 
         conv = get_conversation(config.task, question, metadata)
 
         if not args.use_mcore_inference:
-            forward_step = partial(VLMForwardStep, num_img_embeddings_per_tile, imgs, num_tiles, args.decoder_seq_length)
+            forward_step = partial(VLMForwardStep, num_img_embeddings, imgs, num_tiles, args.decoder_seq_length, imgs_sizes, vision_cu_lengths, vision_max_lengths)
 
         inference_context = StaticInferenceContext(max_batch_size=1, max_sequence_length=args.inference_max_seq_length)
         if is_first_rank():
 
             if args.use_mcore_inference:
                 inference_request = VLMInferenceRequest(
-                   request_id=inference_engine.get_new_request_id(),
-                   prompt=conv,
-                   prompt_tokens=controller.tokenize_prompt(conv),
-                   sampling_params=sampling_params,
-                   num_img_embeddings_per_tile=num_img_embeddings_per_tile,
-                   imgs=imgs,
-                   num_tiles=num_tiles,
-                   decoder_seq_length=args.decoder_seq_length,
+                    request_id=inference_engine.get_new_request_id(),
+                    prompt=conv,
+                    prompt_tokens=controller.tokenize_prompt(conv),
+                    sampling_params=sampling_params,
+                    num_img_embeddings=num_img_embeddings,
+                    imgs=imgs,
+                    num_tiles=num_tiles,
+                    imgs_sizes=imgs_sizes,
+                    vision_packed_seq_params=vision_packed_seq_params,
+                    decoder_seq_length=args.decoder_seq_length,
                 )
                 results: List[InferenceRequest] = inference_engine.generate(
                     inference_requests=[inference_request]
@@ -346,9 +408,11 @@ def generate_samples(model, config: EvaluationConfig, print_output):
                    prompt=conv,
                    prompt_tokens=controller.tokenize_prompt(conv),
                    sampling_params=sampling_params,
-                   num_img_embeddings_per_tile=num_img_embeddings_per_tile,
+                   num_img_embeddings=num_img_embeddings,
                    imgs=imgs,
                    num_tiles=num_tiles,
+                   imgs_sizes=imgs_sizes,
+                   vision_packed_seq_params=vision_packed_seq_params,
                    decoder_seq_length=args.decoder_seq_length,
                 )
                 inference_engine.generate(
@@ -459,22 +523,37 @@ class VLMForwardStep(ForwardStep):
 
     def __init__(
         self,
-        num_img_embeddings_per_tile,
+        num_img_embeddings,
         images,
         num_tiles,
         decoder_seq_length,
+        imgs_sizes,
+        vision_cu_lengths,
+        vision_max_lengths,
         model,
         inference_context,
     ):
         """Create multimodal forward step."""
         total_num_tiles = torch.sum(num_tiles).item()
-        num_img_embeddings = num_img_embeddings_per_tile * total_num_tiles
 
+        #TODO: should i add amount of image embeddings to max seq length of infernece context? see commits before as example
         super().__init__(model, inference_context)
         self._images = images
         self._num_tiles = num_tiles
         self._num_img_embeddings = num_img_embeddings
         self.decoder_seq_length = decoder_seq_length
+        self._imgs_sizes = imgs_sizes
+        
+        # Create vision_packed_seq_params if vision_cu_lengths is provided
+        self._vision_packed_seq_params = None
+        if vision_cu_lengths is not None:
+            self._vision_packed_seq_params = PackedSeqParams(
+                qkv_format="thd",
+                cu_seqlens_q=vision_cu_lengths,
+                cu_seqlens_kv=vision_cu_lengths,
+                max_seqlen_q=vision_max_lengths,
+                max_seqlen_kv=vision_max_lengths,
+            )
 
         self._recv_only_vision_embeds = False
         pp_rank = parallel_state.get_pipeline_model_parallel_rank()
@@ -495,6 +574,8 @@ class VLMForwardStep(ForwardStep):
             inference_context=self.inference_context,
             num_image_tiles=self._num_tiles,
             runtime_gather_output=True,
+            imgs_sizes=self._imgs_sizes,
+            vision_packed_seq_params=self._vision_packed_seq_params,
         )
 
     def __call__(self, tokens, position_ids, attention_mask):

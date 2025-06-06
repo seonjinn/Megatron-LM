@@ -43,6 +43,9 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
     position_ids = None
     num_tiles = None
     packed_seq_params = None
+    imgs_sizes = None
+    vision_cu_lengths = None
+    vision_max_lengths = None
 
     args = get_args()
 
@@ -50,7 +53,7 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
     pp_size = get_pipeline_model_parallel_world_size()
     if not is_first_or_last_stage(pp_size, args.encoder_pipeline_model_parallel_size):
         # Note these are all set to None above.
-        return tokens, labels, loss_mask, attention_mask, position_ids, imgs, num_tiles, packed_seq_params
+        return tokens, labels, loss_mask, attention_mask, position_ids, imgs, num_tiles, packed_seq_params, imgs_sizes, vision_cu_lengths, vision_max_lengths
 
     # Broadcast data.
     torch.cuda.nvtx.range_push("get_data")
@@ -67,6 +70,11 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
 
     cu_lengths = tensor_parallel.broadcast_data(["cu_lengths"], data, torch.int32)["cu_lengths"]
     max_lengths = tensor_parallel.broadcast_data(["max_lengths"], data, torch.int32)["max_lengths"]
+
+    imgs_sizes = tensor_parallel.broadcast_data(["imgs_sizes"], data, torch.int32)["imgs_sizes"]
+
+    vision_cu_lengths = tensor_parallel.broadcast_data(["vision_cu_lengths"], data, torch.int32)["vision_cu_lengths"]
+    vision_max_lengths = tensor_parallel.broadcast_data(["vision_max_lengths"], data, torch.int32)["vision_max_lengths"]
 
     # No image input (text-only sample) if the dataloader returned a size 1 image.
     if imgs.shape == torch.Size([1, 1]):
@@ -101,6 +109,16 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
             max_seqlen_q=max_lengths,
             max_seqlen_kv=max_lengths,
         )
+
+    # Dummy vision cu lengths.
+    if vision_cu_lengths.shape == torch.Size([1, 1]):  # Must always have at least two elements.
+        vision_cu_lengths, vision_max_lengths = None, None
+    else:
+        assert (
+            vision_cu_lengths.shape[0] == vision_max_lengths.shape[0] == 1
+        ), "micro-batch-size must be 1 for packing"
+        vision_cu_lengths = vision_cu_lengths[0]
+        vision_max_lengths = vision_max_lengths[0]
 
     torch.cuda.nvtx.range_pop()
 
@@ -146,6 +164,9 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
         imgs,
         num_tiles,
         packed_seq_params,
+        imgs_sizes,
+        vision_cu_lengths,
+        vision_max_lengths,
     )
 
 
@@ -275,8 +296,22 @@ def forward_step(data_iterator, model: LLaVAModel):
         images,
         num_image_tiles,
         packed_seq_params,
+        imgs_sizes,
+        vision_cu_lengths,
+        vision_max_length,
     ) = get_batch(data_iterator, model.module.module.image_token_index, model.module.module.img_seq_len)
     timers('batch-generator').stop()
+
+    # Create vision_packed_seq_params if vision_cu_lengths is provided
+    vision_packed_seq_params = None
+    if vision_cu_lengths is not None:
+        vision_packed_seq_params = PackedSeqParams(
+            qkv_format="thd",
+            cu_seqlens_q=vision_cu_lengths,
+            cu_seqlens_kv=vision_cu_lengths,
+            max_seqlen_q=vision_max_length,
+            max_seqlen_kv=vision_max_length,
+        )
 
     output_tensor, loss_mask = model(
         images,
@@ -287,6 +322,8 @@ def forward_step(data_iterator, model: LLaVAModel):
         loss_mask,
         num_image_tiles=num_image_tiles,
         packed_seq_params=packed_seq_params,
+        imgs_sizes=imgs_sizes,
+        vision_packed_seq_params=vision_packed_seq_params,
     )
     args = get_args()
     if args.use_loss_scaling:

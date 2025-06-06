@@ -1,8 +1,9 @@
 # Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
 import logging
 from collections import namedtuple
+from copy import deepcopy
 from functools import partial
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import torch
 
@@ -12,6 +13,7 @@ from megatron.core.inference.contexts import BaseInferenceContext
 from megatron.core.models.gpt import GPTModel
 from megatron.core.models.mamba import MambaModel
 from megatron.core.models.vision.clip_vit_model import CLIPViTModel, get_num_image_embeddings
+from megatron.core.models.vision.conv_merging import ConvTokenMerge
 from megatron.core.models.vision.multimodal_projector import MultimodalProjector
 from megatron.core.models.vision.radio import RADIOViTModel
 from megatron.core.packed_seq_params import PackedSeqParams
@@ -79,10 +81,20 @@ class LLaVAModel(MegatronModule):
         language_rotary_base (int): RoPE base.
         language_rope_scaling (bool): Toggle RoPE scaling.
         language_rope_scaling_factor (float): RoPE scaling factor. Defaults to 8.
+        hybrid_attention_ratio (float): Ratio of attention heads in hybrid attention.
+        hybrid_mlp_ratio (float): Ratio of MLP heads in hybrid attention.
+        hybrid_override_pattern (str): Pattern for hybrid attention override.
+        fp16_lm_cross_entropy (bool): Use FP16 for language model cross-entropy loss.
         image_token_index (int): Token ID for image token such as <image>.
         pixel_shuffle (bool): Enable pixel shuffle.
         tile_tags (list): Optional tile tags.
         cp_group (torch.distributed.ProcessGroup): Process group for context parallelism.
+        max_num_tiles (int): Maximum number of tiles per image.
+        tokenizer_type (str): Tokenizer type.
+        dynamic_resolution (bool): Enable dynamic resolution.
+        image_break_token (str): Token for image break.
+        conv_merging (bool): Enable conv merging.
+        allow_missing_conv_merge_checkpoint (bool): Allow missing conv merge checkpoint.
     """
 
     def __init__(
@@ -123,6 +135,10 @@ class LLaVAModel(MegatronModule):
         max_num_tiles: int = 0,
         tokenizer_type: str = "",
         use_vision_backbone_fp8_arch: bool = False,
+        dynamic_resolution: bool = False,
+        image_break_token: Optional[str] = None,
+        conv_merging: bool = False,
+        allow_missing_conv_merge_checkpoint: bool = False,
     ) -> None:
         super().__init__(config=language_transformer_config)
 
@@ -228,6 +244,7 @@ class LLaVAModel(MegatronModule):
 
         class_token_len = 1
         if self.add_encoder:
+            vision_projection_input_size = vision_transformer_config.hidden_size
             self._drop_vision_class_token = drop_vision_class_token
             add_class_token = True
             if vision_transformer_config.vision_model_type.startswith(
@@ -299,6 +316,7 @@ class LLaVAModel(MegatronModule):
                     patch_dim=patch_dim,
                     add_class_token=add_class_token,
                     embedder_bias=embedder_bias,
+                    dynamic_resolution=dynamic_resolution,
                     use_mask_token=use_mask_token,
                 )
             elif vision_transformer_config.vision_model_type.startswith("hf://"):
@@ -345,23 +363,47 @@ class LLaVAModel(MegatronModule):
                 _load_state_dict_hook_ignore_extra_state
             )
 
+            if conv_merging:
+                # TODO: use different config (ie not vision_projection config), and maybe allow replacing the vision projection itself??
+                conv_merge_config = deepcopy(vision_projection_config)
+                conv_merge_config.hidden_size = vision_transformer_config.hidden_size
+                self.conv_merge = ConvTokenMerge(conv_merge_config)
+
+                if allow_missing_conv_merge_checkpoint:
+                    conv_merge_param_names = [
+                        f"conv_merge.{name}" for name in self.conv_merge.state_dict().keys()
+                    ]
+                    self.conv_merge.register_load_state_dict_post_hook(
+                        partial(_load_state_dict_hook_ignore_param_names, conv_merge_param_names)
+                    )
+
+                self.conv_merge.register_load_state_dict_post_hook(
+                    _load_state_dict_hook_ignore_extra_state
+                )
+            else:
+                self.conv_merge = None
+
         self.img_seq_len = get_num_image_embeddings(
-            img_h,
-            img_w,
-            patch_dim,
-            vision_transformer_config.vision_model_type,
-            drop_vision_class_token,
-            class_token_len,
-            pixel_shuffle,
-            tile_tags is not None,  # Tile tags enabled/disabled.
-            max_num_tiles,
-            tokenizer_type,
+            img_h=img_h,
+            img_w=img_w,
+            patch_dim=patch_dim,
+            vision_model_type=vision_transformer_config.vision_model_type,
+            disable_vision_class_token=drop_vision_class_token,
+            class_token_len=class_token_len,
+            pixel_shuffle=pixel_shuffle,
+            use_tile_tags=tile_tags is not None,  # Tile tags enabled/disabled.
+            max_num_tiles=max_num_tiles,
+            tokenizer_type=tokenizer_type,
+            use_image_break_token=image_break_token is not None,
+            conv_merging=conv_merging,
         )
 
         self.image_token_index = image_token_index
+        self.image_break_token = image_break_token
         self._pixel_shuffle = pixel_shuffle
         self._tile_tags = tile_tags
         self._max_num_tiles = max_num_tiles
+        self._dynamic_resolution = dynamic_resolution
 
     def shared_embedding_or_output_weight(self):
         """This is a convenience method to surface the language model's word embeddings, which is
@@ -422,8 +464,10 @@ class LLaVAModel(MegatronModule):
         inference_context,
         image_token_index,
         num_image_tiles,
+        imgs_sizes,
         *,
         inference_params: Optional[BaseInferenceContext] = None,
+        insertion_nums=None,
     ):
         """Preprocess input data before input to language model.
 
@@ -475,6 +519,26 @@ class LLaVAModel(MegatronModule):
             return language_embeddings, loss_mask, labels
 
         img_seq_len = self.img_seq_len
+        if self._dynamic_resolution:
+            img_seq_len = torch.prod(
+                imgs_sizes // self.vision_model.patch_dim, dim=-1, dtype=torch.int32
+            ) + (0 if self._drop_vision_class_token else self.vision_model.class_token_len)
+            if self._pixel_shuffle:
+                img_seq_len = (img_seq_len * (0.5**2)).int()
+            if self.conv_merge is not None:
+                img_seq_len = (img_seq_len * (0.5**2)).int()
+            if self.image_break_token is not None and insertion_nums is not None:
+                img_seq_len = img_seq_len + insertion_nums.to(device=img_seq_len.device)
+            # Logic for when multiple images per image (eg thumbnail image test)
+            out_img_seq_len = torch.zeros_like(num_image_tiles)
+            start = 0
+            for i, c in enumerate(num_image_tiles):
+                out_img_seq_len[i] = torch.sum(img_seq_len[start : start + c])
+                start += c
+            img_seq_len = out_img_seq_len
+
+            img_seq_len = img_seq_len.to("cuda")
+
         batch_size, text_seq_len = input_ids.shape
 
         has_labels = labels is not None
@@ -497,7 +561,17 @@ class LLaVAModel(MegatronModule):
             # Sequence length for each sample is the image sequence length multiplied by
             # the number of tiles for that image, minus image token indices,
             # plus text sequence length.
-            seq_lens = num_image_tiles_batch * img_seq_len - num_images_per_sample + text_seq_len
+            if self._dynamic_resolution:
+                # Currently makes assumption that mbz is length 1
+                assert (
+                    num_images_per_sample.shape[0] == 1
+                ), "Dynamic resolution only works for mbz=1"
+                packed_length_per_batch = torch.sum(img_seq_len, dim=-1)
+                seq_lens = packed_length_per_batch - num_images_per_sample + text_seq_len
+            else:
+                seq_lens = (
+                    num_image_tiles_batch * img_seq_len - num_images_per_sample + text_seq_len
+                )
             max_seq_len = seq_lens.max()
             # Pipeline parallel expects fixed input size. Check if we need to pad.
             if (
@@ -514,7 +588,10 @@ class LLaVAModel(MegatronModule):
             # new_position_ids = [576, 577, 578, 579]. text_position_ids are then [577, 578, 579].
             image_token_mask_lens = image_token_mask.int().clone()
             # -1 is for the removed image token index.
-            image_token_mask_lens[image_token_mask] = num_image_tiles * img_seq_len - 1
+            if self._dynamic_resolution:
+                image_token_mask_lens[image_token_mask] = img_seq_len - 1
+            else:
+                image_token_mask_lens[image_token_mask] = num_image_tiles * img_seq_len - 1
             # +1 is needed here for the cumulative sum. -1 is adjusting for zero-based indexing.
             new_position_ids = torch.cumsum((image_token_mask_lens + 1), dim=-1) - 1
             text_position_ids = new_position_ids[batch_indices, non_image_indices]
@@ -784,6 +861,8 @@ class LLaVAModel(MegatronModule):
         image_token_index: Optional[int] = None,
         runtime_gather_output: Optional[bool] = None,
         packed_seq_params: Optional[PackedSeqParams] = None,
+        imgs_sizes: Optional[Tuple[int, int]] = None,
+        vision_packed_seq_params: Optional[PackedSeqParams] = None,
         *,
         inference_params: Optional[BaseInferenceContext] = None,
     ) -> torch.Tensor:
@@ -809,6 +888,8 @@ class LLaVAModel(MegatronModule):
             packed_seq_params (PackedSeqParams): 1) If using sequence packing, must contain
                 subsample length information. 2) If using SP/CP with padding mask type,
                 must contain padded token information.
+            vision_packed_seq_params (PackedSeqParams): Vision packed sequence parameters containing
+                cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, and max_seqlen_kv for vision model.
 
         Returns:
             output (torch.Tensor): Loss of shape [b, s] if labels are provided,
@@ -824,6 +905,8 @@ class LLaVAModel(MegatronModule):
         )
         has_images = images is not None and images.shape[0] > 0
 
+        insertion_nums = None
+
         # If running inference, we can skip image token computation
         # if they were computed already earlier for this sample.
         if use_inference_kv_cache:
@@ -834,14 +917,55 @@ class LLaVAModel(MegatronModule):
                 0, 0, 0
             )
         elif self.add_encoder and has_images:
-            image_embeddings = self.vision_model(images)  # [num_tiles, img_seq_len, h_vision]
+            if self._dynamic_resolution:
+                image_embeddings = self.vision_model(
+                    images, imgs_sizes=imgs_sizes, packed_seq_params=vision_packed_seq_params
+                )  # [num_tiles, img_seq_len, h_vision]
+            else:
+                image_embeddings = self.vision_model(images)  # [num_tiles, img_seq_len, h_vision]
+
             if self._drop_vision_class_token:
-                image_embeddings = image_embeddings[:, self.vision_model.class_token_len :, :]
+                if self._dynamic_resolution:
+                    remove_class_token_mask = torch.full(
+                        (image_embeddings.shape[-2],), True, dtype=torch.bool
+                    )
+                    seq_lens = torch.prod(imgs_sizes // self.vision_model.patch_dim, dim=-1)
+                    # TODO: efficiency, torch.cumsum?, broadcast a mask instead of full_like?
+                    current_length = 0
+                    for seq_len in seq_lens:
+                        remove_class_token_mask[
+                            current_length : current_length + self.vision_model.class_token_len
+                        ] = False
+                        current_length += seq_len + self.vision_model.class_token_len
+                    image_embeddings = image_embeddings[:, remove_class_token_mask, :]
+                else:
+                    image_embeddings = image_embeddings[:, self.vision_model.class_token_len :, :]
 
             if self._pixel_shuffle:
-                image_embeddings = pixel_shuffle(
-                    image_embeddings
-                )  # [num_tiles, img_seq_len_shuffled, h_vision_shuffled]
+                if self._dynamic_resolution:
+                    image_embeddings = pixel_shuffle_dynamic_res(
+                        image_embeddings, imgs_sizes, self.vision_model.patch_dim
+                    )  # [num_tiles, img_seq_len_shuffled, h_vision_shuffled]
+                else:
+                    image_embeddings = pixel_shuffle(
+                        image_embeddings
+                    )  # [num_tiles, img_seq_len_shuffled, h_vision_shuffled]
+
+            if self.conv_merge is not None:
+                if self._dynamic_resolution:
+                    image_embeddings = self.conv_merge(
+                        image_embeddings, imgs_sizes // self.vision_model.patch_dim
+                    )
+                else:
+                    image_embeddings = self.conv_merge(
+                        image_embeddings,
+                        [
+                            (
+                                self._img_h // self.vision_model.patch_dim,
+                                self._img_w // self.vision_model.patch_dim,
+                            )
+                        ],
+                    )
 
             # contiguous() required as `permute` can sparsify the tensor and this breaks pipelining
             image_embeddings = image_embeddings.permute(
@@ -852,6 +976,22 @@ class LLaVAModel(MegatronModule):
             image_embeddings = self.vision_projection(
                 image_embeddings
             )  # [img_seq_len, num_tiles, h_language]
+
+            if self.image_break_token is not None:
+                patch_sizes = imgs_sizes // self.vision_model.patch_dim
+                if self._pixel_shuffle:
+                    patch_sizes = patch_sizes // 2
+                if self.conv_merge is not None:
+                    patch_sizes = patch_sizes // 2
+                image_break_token = self.language_model.embedding(
+                    input_ids=torch.tensor(
+                        [self.image_break_token], device=image_embeddings.device
+                    ),
+                    position_ids=None,
+                ).transpose(1, 0)
+                image_embeddings, insertion_nums = insert_image_break_tokens(
+                    image_embeddings, patch_sizes, image_break_token
+                )
 
             # Apply tile tagging if enabled and an image token is present.
             if self._tile_tags is not None and torch.any(input_ids == self.image_token_index):
@@ -899,6 +1039,8 @@ class LLaVAModel(MegatronModule):
             inference_context,
             image_token_index if image_token_index is not None else self.image_token_index,
             num_image_tiles,
+            imgs_sizes,
+            insertion_nums=insertion_nums,
         )  # [combined_seq_len, b, h_language], [b, combined_seq_len], [b, combined_seq_len]
 
         if self.context_parallel_lm > 1 or self.sequence_parallel_lm:
@@ -1011,3 +1153,68 @@ def pixel_shuffle(x, scale_factor=0.5, version=2):
     x = x.reshape(x.shape[0], -1, x.shape[-1])
 
     return x
+
+
+def pixel_shuffle_dynamic_res(x, imgs_sizes, patch_dim, scale_factor=0.5, version=2):
+    """From InternVL.
+
+    Args:
+        x (torch.Tensor): Vision model outputs [num_tiles, img_seq_len, h_vision]
+        imgs_sizes (torch.Tensor): Size of images in packed sequence for dynamic resolution
+        version (int): Implementation version.
+
+    Returns:
+        x (torch.Tensor): Shuffled vision model outputs
+            [num_tiles, (sq ** 2) * (scale ** 2), h_vision / (scale ** 2)]
+    """
+    seq_lens = torch.prod(imgs_sizes // patch_dim, dim=-1)
+    splits = torch.split(x, seq_lens.tolist(), dim=-2)
+
+    out = []
+    for i, sv in enumerate(splits):
+        h = imgs_sizes[i][0] // patch_dim
+        w = imgs_sizes[i][1] // patch_dim
+        sv = sv.reshape(sv.shape[0], h, w, -1)
+
+        n, h, w, c = sv.size()
+
+        sv = sv.view(n, h, int(w * scale_factor), int(c / scale_factor))
+        sv = sv.permute(0, 2, 1, 3).contiguous()
+        sv = sv.view(
+            n, int(w * scale_factor), int(h * scale_factor), int(c / (scale_factor * scale_factor))
+        )
+
+        if version == 2:
+            sv = sv.permute(0, 2, 1, 3).contiguous()
+
+        sv = sv.reshape(sv.shape[0], -1, sv.shape[-1])
+        out.append(sv)
+
+    x = torch.cat(out, dim=-2)
+
+    return x
+
+
+def insert_image_break_tokens(x, patch_sizes, image_break_token):
+    num_insertions = [h - 1 for h, _ in patch_sizes]
+    new_shape = list(x.shape)
+    new_shape[-3] += sum(num_insertions)
+    new_image_embeddings = torch.zeros(new_shape, dtype=x.dtype, device=x.device)
+
+    start = 0
+    start_new = 0
+    for how_many, interval in patch_sizes:
+        for i in range(how_many - 1):
+            new_image_embeddings[start_new : start_new + interval, :, :] = x[
+                start : start + interval, :, :
+            ]
+            new_image_embeddings[start_new + interval, :, :] = image_break_token
+            start += interval
+            start_new += interval + 1
+        new_image_embeddings[start_new : start_new + interval, :, :] = x[
+            start : start + interval, :, :
+        ]
+        start += interval
+        start_new += interval
+
+    return new_image_embeddings, torch.tensor(num_insertions, device=new_image_embeddings.device)

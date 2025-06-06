@@ -1,4 +1,8 @@
 # Copyright (c) 2024, NVIDIA CORPORATION.  All rights reserved. Except portions as noted which are Copyright (c) 2023 OpenGVLab and licensed under the MIT license found in LICENSE.
+import math
+
+import torch
+from einops import rearrange
 from torchvision import transforms as T
 from torchvision.transforms import Compose
 from torchvision.transforms.functional import InterpolationMode
@@ -62,12 +66,102 @@ def find_closest_area_weighted_aspect_ratio(aspect_ratio, target_ratios, width, 
     return best_ratio
 
 
+def process_images(sample_imgs, patch_dim, dynamic_resolution, batch_mode=False):
+    """Process a batch of images for multimodal training or evaluation.
+    
+    This function handles image preprocessing with support for both static and dynamic 
+    resolution processing. For dynamic resolution, it rearranges images into patches 
+    and computes cumulative sequence lengths for efficient batching.
+    
+    Args:
+        sample_imgs (List[torch.Tensor]): List of image tensors with shape (C, H, W).
+        patch_dim (int): Dimension of each patch (e.g., 14 for 14x14 patches).
+        dynamic_resolution (bool): Whether to use dynamic resolution processing.
+            If True, images are rearranged into patches with variable sequence lengths.
+            If False, images are simply stacked into a batch tensor.
+        batch_mode (bool, optional): Whether this is being called from training batch processing.
+            If True, wraps tensors in additional list dimension for consistency with batch format.
+            If False, returns tensors directly as used in evaluation. Defaults to False.
+    
+    Returns:
+        tuple: A 4-tuple containing:
+            - images (torch.Tensor): Processed image tensor.
+                For dynamic resolution: shape (1, total_patches, patch_features) if batch_mode=False,
+                                       or shape (1, total_patches, patch_features) if batch_mode=True
+                For static resolution: shape (batch_size, C, H, W)
+            - imgs_sizes (torch.Tensor): Image sizes tensor with shape (N, 2)
+                containing [width, height] for each image, or [[0,0]] if no images.
+            - vision_cu_lengths (torch.Tensor or None): Cumulative sequence lengths
+                for dynamic resolution. Shape (batch_size + 1,) for evaluation mode,
+                or shape (1, batch_size + 1) for batch mode. None for static resolution.
+            - vision_max_lengths (torch.Tensor or None): Maximum sequence length
+                among all images for dynamic resolution. Scalar tensor for evaluation mode,
+                or shape (1,) for batch mode. None for static resolution.
+    
+    Note:
+        This function is designed for processing one microbatch at a time for dynamic resolution.
+    """
+    vision_cu_lengths = None
+    vision_max_lengths = None
+    
+    if len(sample_imgs) > 0:
+        imgs_sizes = torch.tensor([[img.shape[1], img.shape[2]] for img in sample_imgs], dtype=torch.int32)
+        if dynamic_resolution:
+            def rearrange_img(x):
+                py = x.shape[-2] // patch_dim
+                px = x.shape[-1] // patch_dim
+                x = rearrange(x, 'c (py yy) (px xx) -> (py px) (c yy xx)',
+                                    py=py, yy=patch_dim,
+                                    px=px, xx=patch_dim,
+                )
+                return x
+            imgs = [rearrange_img(img) for img in sample_imgs]
+
+            current_length = 0
+            max_length = 0
+            vision_cu_lengths = [0]
+            for img in imgs:
+                if max_length < img.shape[0]:
+                    max_length = img.shape[0] 
+                current_length += img.shape[0]
+                vision_cu_lengths.append(current_length)
+            
+            vision_cu_lengths = torch.tensor(vision_cu_lengths, dtype=torch.int32)
+            vision_max_lengths = torch.tensor(max_length, dtype=torch.int32)
+            
+            # For batch mode, wrap in additional dimension for consistency
+            if batch_mode:
+                vision_cu_lengths = vision_cu_lengths.unsqueeze(0)  # Shape: (1, batch_size + 1)
+                vision_max_lengths = vision_max_lengths.unsqueeze(0)  # Shape: (1,)
+            
+            imgs = torch.cat(imgs, dim=0)
+            images = imgs.unsqueeze(0)
+        else:
+            images = torch.stack(sample_imgs)
+    else:
+        imgs_sizes = torch.tensor([[0,0]], dtype=torch.int32)
+        if len(sample_imgs) == 0 and batch_mode:
+            # For batch mode when no images, use appropriate dummy tensor
+            images = torch.tensor([[0]], dtype=torch.float32)
+        else:
+            images = torch.stack(sample_imgs)
+
+    return images, imgs_sizes, vision_cu_lengths, vision_max_lengths
+
+
 class ImageTransform:
     """Image transformation."""
 
-    def __init__(self, input_size, vision_model_type):
+    def __init__(self, input_size, vision_model_type, *, dynamic_resolution=False, res_step=16, min_num_patches=1, max_num_patches=128,  pixel_shuffle=False, min_side=None, conv_merging=False):
         self._transform = _build_transform(input_size, vision_model_type)
         self._vision_model_type = vision_model_type
+        self._dynamic_resolution = dynamic_resolution
+        self._res_step = res_step
+        self._min_num_patches = min_num_patches
+        self._max_num_patches = max_num_patches
+        self._pixel_shuffle = pixel_shuffle
+        self._min_side = min_side
+        self._conv_merging = conv_merging
 
     def __call__(self, img, img_h, img_w, use_tiling=False, max_num_tiles=1, use_thumbnail=False, augment=False, find_closest_aspect_ratio_fn=find_closest_aspect_ratio):
         assert not augment, "Image augmentation not implemented."
@@ -77,6 +171,15 @@ class ImageTransform:
                 img, min_num=1, max_num=max_num_tiles, image_size=img_h, use_thumbnail=use_thumbnail,
                 find_closest_aspect_ratio_fn=find_closest_aspect_ratio_fn)
             imgs = [self._transform(img) for img in imgs]
+        elif self._dynamic_resolution:
+            pixel_mean, pixel_std = pixel_statistics[self._vision_model_type]
+            transform = T.Compose([
+                T.Lambda(lambda img: img.convert('RGB') if img.mode != 'RGB' else img),
+                T.ToTensor(),
+                T.Normalize(mean=pixel_mean, std=pixel_std),
+            ])
+            img = dynamic_res_preprocess(img, min_patches=self._min_num_patches, max_patches=self._max_num_patches, res_step=self._res_step, pixel_shuffle=self._pixel_shuffle, min_side=self._min_side, conv_merging=self._conv_merging)
+            imgs = [transform(img)]
         else:
             imgs = [self._transform(img)]
 
@@ -124,6 +227,120 @@ def dynamic_preprocess(
         thumbnail_img = image.resize((image_size, image_size))
         processed_images.append(thumbnail_img)
     return processed_images
+
+
+def dynamic_res_preprocess(image, min_patches=1, max_patches=128, res_step=16, factor_max=1., pixel_shuffle=False, min_side=None, conv_merging=False):
+    """Preprocess an image with dynamic resolution for vision transformers.
+    
+    This function resizes an image to optimize the number of patches while respecting
+    constraints on minimum/maximum patches, minimum side length, and compatibility
+    with pixel shuffle or convolution merging operations.
+    
+    The algorithm works by:
+    1. Computing the initial patch grid size based on the image dimensions and res_step
+    2. Scaling the patch grid to fit within the max_patches constraint
+    3. Ensuring the result has at least min_patches
+    4. Optionally enforcing a minimum side length constraint
+    5. Rounding patch dimensions to even numbers for pixel_shuffle/conv_merging compatibility
+    6. Resizing the image to the computed target dimensions
+    
+    Args:
+        image (PIL.Image): Input image to preprocess.
+        min_patches (int, optional): Minimum number of patches required. Defaults to 1.
+        max_patches (int, optional): Maximum number of patches allowed. Defaults to 128.
+        res_step (int, optional): Resolution step size (patch dimension). Defaults to 16.
+        factor_max (float, optional): Maximum scaling factor to apply. Defaults to 1.0.
+        pixel_shuffle (bool, optional): Whether to ensure compatibility with pixel shuffle
+            operations by rounding to even patch dimensions. Defaults to False.
+        min_side (int, optional): Minimum side length in pixels. If specified, ensures
+            at least one side meets this constraint. Defaults to None.
+        conv_merging (bool, optional): Whether to ensure compatibility with convolution
+            merging by rounding to even patch dimensions. Defaults to False.
+    
+    Returns:
+        PIL.Image: Resized image with dimensions optimized for patch-based processing.
+            The output dimensions will be (target_patch_width * res_step, target_patch_height * res_step).
+    
+    Note:
+        The function preserves aspect ratio as much as possible while satisfying all constraints.
+        When constraints conflict (e.g., min_side vs max_patches), the function prioritizes
+        staying within max_patches while maximizing the image size.
+    
+    Example:
+        >>> from PIL import Image
+        >>> img = Image.open("example.jpg")  # 800x600 image
+        >>> resized_img = dynamic_res_preprocess(img, min_patches=4, max_patches=64, res_step=14)
+        >>> # Returns image resized to maintain aspect ratio with 4-64 patches of size 14x14
+    """
+    orig_width, orig_height = image.size
+
+    closest_patch_height = round(orig_height / res_step + 0.5)
+    closest_patch_width = round(orig_width / res_step + 0.5)
+    patches = closest_patch_height * closest_patch_width
+
+    factor = min(math.sqrt(max_patches / patches), factor_max)
+    target_patch_height = math.floor(factor * closest_patch_height)
+    target_patch_width = math.floor(factor * closest_patch_width)
+
+    if target_patch_height * target_patch_width < min_patches:
+        up_factor = math.sqrt(min_patches / (target_patch_height * target_patch_width))
+        target_patch_height = math.ceil(up_factor * target_patch_height)
+        target_patch_width = math.ceil(up_factor * target_patch_width)
+
+    if min_side is not None and min(target_patch_width, target_patch_height) * res_step < min_side:
+        if target_patch_width <= target_patch_height:
+            up_factor = min_side / (target_patch_width * res_step)
+            new_patch_height = math.ceil(up_factor * target_patch_height)
+            new_patch_width = math.ceil(up_factor * target_patch_width)
+
+            if new_patch_height * new_patch_width > max_patches:
+                # If only one side can be min_side, make as big as possible at native aspect ratio while staying below max_patches
+                if max(max_patches // new_patch_width, 1) * res_step < min_side:
+                    up_factor = math.sqrt(max_patches / (target_patch_height * target_patch_width))
+                    target_patch_height = math.floor(up_factor * target_patch_height)
+                    target_patch_width = math.floor(up_factor * target_patch_width)
+                target_patch_width = new_patch_width
+                target_patch_height = max(max_patches // new_patch_width, 1)
+            else:
+                target_patch_height = new_patch_height
+                target_patch_width = new_patch_width
+        else:
+            up_factor = min_side / (target_patch_height * res_step)
+            new_patch_height = math.ceil(up_factor * target_patch_height)
+            new_patch_width = math.ceil(up_factor * target_patch_width)
+
+            if new_patch_height * new_patch_width > max_patches:
+                # If only one side can be min_side, make as big as possible at native aspect ratio while staying below max_patches
+                if max(max_patches // new_patch_height, 1) * res_step < min_side:
+                    up_factor = math.sqrt(max_patches / (target_patch_height * target_patch_width))
+                    target_patch_height = math.floor(up_factor * target_patch_height)
+                    target_patch_width = math.floor(up_factor * target_patch_width)
+                else:
+                    target_patch_height = new_patch_height
+                    target_patch_width = max(max_patches // new_patch_height, 1)
+            else:
+                target_patch_height = new_patch_height
+                target_patch_width = new_patch_width
+
+    # Rounds to nearest even number for pixel shuffle compatibility, 
+    if pixel_shuffle or conv_merging:
+        if target_patch_height % 2 != 0:
+            if (target_patch_height + 1) * target_patch_width <= max_patches:
+                target_patch_height += 1
+            else:
+                target_patch_height -= 1
+        if target_patch_width % 2 != 0:
+            if target_patch_height * (target_patch_width + 1) <= max_patches:
+                target_patch_width += 1
+            else:
+                target_patch_width -= 1
+    assert target_patch_height * target_patch_width <= max_patches
+
+    # resize the image
+    resized_img = image.resize((target_patch_width * res_step, target_patch_height * res_step))
+
+    return resized_img
+
 
 
 # Based on https://github.com/openai/CLIP/blob/dcba3cb2e2827b402d2701e7e1c7d9fed8a20ef1/clip/clip.py#L79
