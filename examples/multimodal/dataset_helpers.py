@@ -19,13 +19,10 @@ from megatron.core.models.multimodal.llava_model import IGNORE_INDEX, IMAGE_TOKE
 from megatron.core.models.vision.clip_vit_model import get_num_image_embeddings
 from megatron.energon import (
     Batch,
-    CaptioningSample,
     DefaultTaskEncoder,
     OCRSample,
     Sample,
     SimilarityInterleavedSample,
-    VQASample,
-    MultiChoiceVQASample
 )
 from megatron.energon.task_encoder.base import stateless
 from megatron.training import get_args, get_tokenizer
@@ -215,113 +212,15 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
         return input_ids, target
 
     @stateless(restore_seeds=True)
-    def encode_sample(self, sample: Union[CaptioningSample, OCRSample, VQASample, SimilarityInterleavedSample]):
-        if isinstance(sample, OCRSample):
-            if "pdfa" in sample.__key__:
-                yield self.combined_ocr_encoder(sample, task_type='encode_pdf')
-            elif "multi" in sample.__key__:
-                yield self.combined_ocr_encoder(sample, task_type='_encode_ocr')
-            else:
-                yield self.combined_ocr_encoder(sample, task_type='encode_ocr_ref')
-        elif isinstance(sample, CaptioningSample):
-            yield self.encode_captioning(sample)
-        elif isinstance(sample, VQASample):
-            is_llava_training = sample.__subflavors__["is_llava_training"] if "is_llava_training" in sample.__subflavors__ else False
-
-            if "llava" in sample.__key__ or is_llava_training:
-                yield self.encode_llava_pretrain(sample)
-            else:
-                yield self.encode_any_single_turn_vqa(sample)
-        elif isinstance(sample, SimilarityInterleavedSample):
+    def encode_sample(self, sample: Union[SimilarityInterleavedSample]):
+        if isinstance(sample, SimilarityInterleavedSample):
             yield self.encode_llava_sft(sample)
-        elif isinstance(sample, MultiChoiceVQASample):
-            yield self.encode_any_single_turn_vqa(sample)
         # Because the SampleListSample is defined in the Megatron module but loaded by the Energon
         # library, we need to resort to the more brittle check:
         elif type(sample).__name__ == "SampleListSample":
             yield self.encode_sample_list(sample)
         else:
             raise NotImplementedError("Sample format not supported", sample)
-
-    def encode_captioning(self, sample: CaptioningSample):
-        """Encode CaptioningSample."""
-        augment = sample.__subflavors__.get("augmentation")
-
-        imgs = self.transform_img(
-            sample.image, self.img_h, self.img_w, self.args.use_tiling, self.args.max_num_tiles, self.args.use_thumbnail, augment,
-            find_closest_aspect_ratio_fn=self.find_closest_aspect_ratio_fn
-        )
-        num_tiles = [len(imgs)]
-
-        prompt_list = self.manual_prompts["CaptioningPretraining"]["raw"]
-
-        prompt_idx = np.random.randint(len(prompt_list))
-        cur_prompt = prompt_list[prompt_idx]
-        cur_prompt = IMAGE_TOKEN + "\n" + cur_prompt + "\n"
-
-        caption = sample.caption.strip()
-
-        split_by_line_flag = sample.__subflavors__.get("SplitByLine")
-        if split_by_line_flag:
-            caption_list = caption.split('\n')
-            caption = np.random.choice(caption_list)
-
-        conv = [
-            # Note: no system message.
-            {"role": "user", "content": cur_prompt},
-            {"role": "assistant", "content": caption},
-        ]
-
-        input_ids, target = self.tokenizer.tokenize_conversation(conv, True, False)
-
-        if self.is_packing_enabled:
-            input_ids, target = self._truncate_for_packing(input_ids, target, num_tiles)
-
-        return ImageTaskSample(
-            __key__=sample.__key__,
-            __restore_key__=sample.__restore_key__,
-            __subflavor__=None,
-            __subflavors__=sample.__subflavors__,
-            imgs=imgs,
-            num_tiles=num_tiles,
-            tokens=torch.tensor(input_ids),
-            labels=torch.tensor(target),
-            total_len=self._get_total_seq_length(input_ids, num_tiles),
-        )
-
-    def encode_llava_pretrain(self, sample: VQASample):
-        """Encode pretrain sample in LLAVA style."""
-        augment = sample.__subflavors__.get("augmentation", False)
-
-        imgs = self.transform_img(
-            sample.image, self.img_h, self.img_w, self.args.use_tiling, self.args.max_num_tiles, self.args.use_thumbnail, augment,
-            find_closest_aspect_ratio_fn=self.find_closest_aspect_ratio_fn
-        )
-        num_tiles = [len(imgs)]
-
-        # LLAVA training: override text-prompt with just the image.
-        conv = [
-            # Note: no system message.
-            {"role": "user", "content": IMAGE_TOKEN + "\n"},
-            {"role": "assistant", "content": sample.answers},
-        ]
-
-        input_ids, target = self.tokenizer.tokenize_conversation(conv, True, False)
-
-        if self.is_packing_enabled:
-            input_ids, target = self._truncate_for_packing(input_ids, target, num_tiles)
-
-        return ImageTaskSample(
-            __key__=sample.__key__,
-            __restore_key__=sample.__restore_key__,
-            __subflavor__=None,
-            __subflavors__=sample.__subflavors__,
-            imgs=imgs,
-            num_tiles=num_tiles,
-            tokens=torch.tensor(input_ids),
-            labels=torch.tensor(target),
-            total_len=self._get_total_seq_length(input_ids, num_tiles),
-        )
 
     def encode_sample_list(self, samples: SampleListSample):
         """We encode the list of samples using encode_llava_sft on each sample."""
@@ -404,7 +303,7 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
             for turn in conversation:
                 if turn["role"] == "user":
                     turn["content"] = turn["content"].replace(IMAGE_TOKEN, "")
-            number_image_tags = 0   
+            number_image_tags = 0
 
         # We currently only support one video per sample.
         number_of_images = 1 if has_video else len(sample.images)
@@ -563,216 +462,6 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
 
         return np.array(result)
 
-    def encode_any_single_turn_vqa(self, sample):
-        """Encode MultiChoiceVQA or VQA sample."""
-        augment = sample.__subflavors__['augmentation'] if 'augmentation' in sample.__subflavors__ else False
-        has_video = sample.__subflavors__['has_video'] if 'has_video' in sample.__subflavors__ else False
-
-        if has_video:
-            # Grab the selected frames of the video as a tensor with shape
-            # fhwc: (num_frames, height, width, num_channels).
-            video_fhwc = sample.image.permute(0, 2, 3, 1)
-            selected_frames = torch.linspace(
-                0, video_fhwc.shape[0] - 1, self.args.num_frames).long()
-            video_frame_fhwc = video_fhwc[selected_frames]
-            imgs = []
-            for video_frame_hwc in video_frame_fhwc:
-                imgs += self.transform_img(
-                    video_frame_hwc, self.img_h, self.img_w,
-                    self.args.use_tiling, self.args.max_num_tiles,
-                    self.args.use_thumbnail, augment, find_closest_aspect_ratio_fn=self.find_closest_aspect_ratio_fn
-                )
-        else:
-            imgs = self.transform_img(
-                sample.image, self.img_h, self.img_w, self.args.use_tiling, self.args.max_num_tiles,
-                self.args.use_thumbnail, augment, find_closest_aspect_ratio_fn=self.find_closest_aspect_ratio_fn
-            )
-
-        num_tiles = [len(imgs)]
-
-        if isinstance(sample, MultiChoiceVQASample):
-            cur_prompt = format_multichoice_question(sample.context, sample.choices)
-            if IMAGE_TOKEN not in cur_prompt:
-                cur_prompt = IMAGE_TOKEN + "\n" + cur_prompt
-            cur_answer = format_multichoice_answer(sample.correct_choice_idx)
-        elif isinstance(sample, VQASample):
-            if 'docvqa' in sample.__key__:
-                prompt_list = self.manual_prompts["VQASFT"]["docvqa"]
-            elif sample.__subflavors__.get("VQASFT"):
-                prompt_list = self.manual_prompts["VQASFT"]["raw"]
-            else:
-                prompt_list = ["{}"]
-
-            prompt_idx = np.random.randint(len(prompt_list))
-            cur_prompt = prompt_list[prompt_idx]
-
-            cur_prompt = cur_prompt.format(sample.context)
-
-            if IMAGE_TOKEN not in cur_prompt:
-                cur_prompt = IMAGE_TOKEN + "\n" + cur_prompt
-
-            if isinstance(sample.answers, list):
-                answer_list = sample.answers
-                weight_list = np.array(sample.answer_weights).astype(np.float32)
-                weight_list = weight_list / np.sum(weight_list)
-                answer_idx = np.random.choice(weight_list.shape[0], 1, p=weight_list)[0]
-                cur_answer = answer_list[answer_idx]
-            else:
-                cur_answer = sample.answers
-        else:
-            raise NotImplementedError("Unsupported data type provided", sample)
-
-        conversation = [
-            {"role": "system", "content": "Answer the questions."},
-            {"role": "user", "content": cur_prompt},
-            {"role": "assistant", "content": str(cur_answer)},
-        ]
-
-        input_ids, target = self.tokenizer.tokenize_conversation(conversation, True, False)
-
-        if self.is_packing_enabled:
-            input_ids, target = self._truncate_for_packing(input_ids, target, num_tiles)
-
-        return ImageTaskSample(
-            __key__=sample.__key__,
-            __restore_key__=sample.__restore_key__,
-            __subflavor__=None,
-            __subflavors__=sample.__subflavors__,
-            imgs=imgs,
-            num_tiles=num_tiles,
-            tokens=torch.tensor(input_ids),
-            labels=torch.tensor(target),
-            total_len=self._get_total_seq_length(input_ids, num_tiles),
-        )
-
-    def combined_ocr_encoder(self, sample, task_type):
-        """Encode OCR samples."""
-        augment = sample.__subflavors__['augmentation'] if 'augmentation' in sample.__subflavors__ else False
-
-        if task_type == "encode_pdf":
-            sample, cur_prompt, cur_answer = self.encode_pdf_prompt(sample)
-        elif task_type == "encode_ocr_ref":
-            sample, cur_prompt, cur_answer = self.encode_ocr_ref_prompt(sample)
-        elif task_type == "_encode_ocr":
-            sample, cur_prompt, cur_answer = self.encode_ocr_prompt(sample)
-
-        imgs = self.transform_img(
-                sample.image, self.img_h, self.img_w, self.args.use_tiling, self.args.max_num_tiles,
-                self.args.use_thumbnail, augment, find_closest_aspect_ratio_fn=self.find_closest_aspect_ratio_fn
-            )
-        num_tiles = [len(imgs)]
-
-        conversation = [
-            {"role": "system", "content": "Answer the questions."},
-            {"role": "user", "content": cur_prompt},
-            {"role": "assistant", "content": str(cur_answer)},
-        ]
-
-        input_ids, target = self.tokenizer.tokenize_conversation(conversation, True, False)
-
-        if self.is_packing_enabled:
-            input_ids, target = self._truncate_for_packing(input_ids, target, num_tiles)
-
-        return ImageTaskSample(
-            __key__=sample.__key__,
-            __restore_key__=sample.__restore_key__,
-            __subflavor__=None,
-            __subflavors__=sample.__subflavors__,
-            imgs=imgs,
-            num_tiles=num_tiles,
-            tokens=torch.tensor(input_ids),
-            labels=torch.tensor(target),
-            total_len=self._get_total_seq_length(input_ids, num_tiles),
-        )
-
-    def encode_pdf_prompt(self, sample: OCRSample) -> ImageTaskSample:
-        """Encode OCR sample."""
-        prompt_list = self.manual_prompts["DocPretraining"]["raw"]
-        prompt_idx = np.random.randint(len(prompt_list))
-        cur_prompt = prompt_list[prompt_idx]
-        if IMAGE_TOKEN not in cur_prompt:
-            cur_prompt = IMAGE_TOKEN + "\n" + cur_prompt
-
-        # Make sure there is no extra IMAGE_TOKEN tag.
-        sample.text = sample.text.replace(IMAGE_TOKEN, "")
-
-        caption = sample.text.strip()
-
-        split_by_line_flag = sample.__subflavors__.get("SplitByLine")
-        if split_by_line_flag:
-            caption_list = caption.split('\n')
-            caption = np.random.choice(caption_list)
-        cur_answer = caption
-
-        return sample, cur_prompt, cur_answer
-
-    def encode_ocr_ref_prompt(self, sample: OCRSample) -> ImageTaskSample:
-        """Encode OCR sample."""
-        ref = sample.text
-        region = sample.words_boxes
-
-        # Make sure there is no extra IMAGE_TOKEN tag
-        ref = ref.replace(IMAGE_TOKEN, "")
-
-        if len(region) == 4:
-            region = f"<box>({region[0]},{region[1]}),({region[2]},{region[3]})</box>"
-        else:
-            region = f"<quad>({region[0]},{region[1]}),({region[2]},{region[3]}),({region[4]},{region[5]}),({region[6]},{region[7]})</quad>"
-
-        # Randomly choose between two tasks
-        task_idx = np.random.randint(2)
-        if task_idx == 0:
-            # Referring Grounding
-            prompt_list = self.manual_prompts["DocPretraining"]["referring_grounding"]
-            prompt_content = ref
-            answer = region
-        else:
-            # Grounded OCR
-            prompt_list = self.manual_prompts["DocPretraining"]["grounded_ocr"]
-            prompt_content = region
-            answer = ref
-
-        prompt_idx = np.random.randint(len(prompt_list))
-        cur_prompt = prompt_list[prompt_idx]
-        cur_prompt = cur_prompt.format(prompt_content)
-        if IMAGE_TOKEN not in cur_prompt:
-            cur_prompt = IMAGE_TOKEN + "\n" + cur_prompt
-
-        return sample, cur_prompt, answer
-
-    def bbox_coord_to_label(self, text, bbox):
-        """Format bbox coordinates as text."""
-        assert len(bbox) == 4 or len(bbox) == 8
-
-        # Make sure there is no extra IMAGE_TOKEN tag
-        text = text.replace(IMAGE_TOKEN, "")
-
-        if len(bbox) == 4:
-            label_str = f"<ref>{text}</ref><box>({bbox[0]},{bbox[1]}),({bbox[2]},{bbox[3]})</box>"
-        else:
-            label_str = f"<ref>{text}</ref><quad>({bbox[0]},{bbox[1]}),({bbox[2]},{bbox[3]}),({bbox[4]},{bbox[5]}),({bbox[6]},{bbox[7]})</quad>"
-
-        return label_str
-
-    def encode_ocr_prompt(self, sample: OCRSample) -> ImageTaskSample:
-        """Encode OCR sample."""
-        if isinstance(sample.words_boxes[0], int):
-            answer = self.bbox_coord_to_label(sample.text, sample.words_boxes)
-        elif isinstance(sample.words_boxes[0], list):
-            answer = ""
-            for i, bbox in enumerate(sample.words_boxes):
-                answer += self.bbox_coord_to_label(sample.words_text[i], bbox)
-
-        prompt_list = self.manual_prompts["DocPretraining"]["ocr_multi"]
-        prompt_idx = np.random.randint(len(prompt_list))
-        cur_prompt = prompt_list[prompt_idx]
-
-        if IMAGE_TOKEN not in cur_prompt:
-            cur_prompt = IMAGE_TOKEN + "\n" + cur_prompt
-        cur_answer = answer
-
-        return sample, cur_prompt, cur_answer
-
     def batch(self, samples: List[Union[ImageTaskSample, ImageTaskSamplePacked]]) -> ImageTaskBatchPacked:
         # Stack images to [num_tiles, c, h, w]. If there are no images (text-only), then use a dummy image.
         imgs = [img for s in samples for img in s.imgs]
@@ -910,19 +599,3 @@ def print_error_handler(exc: Exception, key: Optional[str]):
         file=sys.stderr,
     )
     traceback.print_exc()
-
-
-def format_multichoice_question(question, multichoice_options):
-    """Format multi-choice question."""
-    options_text = ["{}. {}\n".format(chr(ord('A') + i), option) for i, option in
-                    zip(range(len(multichoice_options)), multichoice_options)]
-    options_text = "".join(options_text)
-
-    options_text = f"{options_text}Answer with the option's letter from the given choices directly."
-
-    return "{}\n{}".format(question, options_text)
-
-
-def format_multichoice_answer(idx):
-    """Format multi-choice answer."""
-    return chr(ord('A') + idx)
