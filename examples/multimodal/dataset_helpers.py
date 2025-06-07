@@ -15,6 +15,7 @@ import numpy as np
 import torch
 
 from energon_util import OfflineTargetAspectRatioSample, SampleListSample
+from megatron.core.models.multimodal.context_parallel import get_padding
 from megatron.core.models.multimodal.llava_model import IGNORE_INDEX, IMAGE_TOKEN, VIDEO_TOKEN
 from megatron.core.models.vision.clip_vit_model import get_num_image_embeddings
 from megatron.energon import (
@@ -401,6 +402,20 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
 
         # We need to ensure that there are at least some trainable tokens in the sample.
         assert self.target_has_trainable_tokens(input_ids, num_tiles, target), "Sample has no trainable tokens."
+
+        # Context parallel and FP8 require padding.
+        total_len = self._get_total_seq_length(input_ids, num_tiles)
+
+        has_cp = self.args.context_parallel_size > 1
+        has_fp8 = self.args.fp8 is not None
+
+        if has_cp or has_fp8:
+            padding_needed = get_padding(total_len, self.args.context_parallel_size, self.args.tensor_model_parallel_size, self.args.sequence_parallel, fp8_enabled=has_fp8)
+            padding_input = np.ones(padding_needed) * self.tokenizer.pad
+            padding_labels = np.ones(padding_needed) * IGNORE_INDEX
+            input_ids = np.concatenate([input_ids, padding_input])
+            target = np.concatenate([target, padding_labels])
+            total_len = total_len + padding_needed
 
         return ImageTaskSample(
             __key__=sample.__key__,
