@@ -45,6 +45,7 @@ class ImageTaskSample(Sample):
     num_tiles: List[int]
     tokens: torch.Tensor
     total_len: int  # Total token count in the sample, including text and image tokens
+    total_len_padded: int  # Total padded token count in the sample.
     labels: torch.Tensor = None
 
 
@@ -67,6 +68,7 @@ class ImageTaskSamplePacked(Sample):
     num_tiles: List[int]  # Number of tiles for each image of each sample (num_imgs)
     max_length: int    # Maximum length across sub-samples.
     cu_lengths: List[int]  # Cumulative length of each sub-sample in this packed sample incl. text and image tokens (P,)
+    cu_lengths_padded: List[int]  # Cumulative padded length of each sub-sample in this packed sample incl. text and image tokens (P,)
 
 
 # Typing for the resulting batch data after encode_batch()
@@ -90,6 +92,7 @@ class ImageTaskBatchPacked(Batch):
     num_tiles: List[List[int]]  # Number of tiles per image (N, num_imgs)
     max_lengths: List[int]  # Maximum length across sub-samples (N,)
     cu_lengths: List[List[int]]  # Cumulative length of each sub-sample in each packed sample of the batch (N, P)
+    cu_lengths_padded: List[List[int]]  # Cumulative padded length of each sub-sample in each packed sample of the batch (N, P)
     imgs_sizes: List[Tuple[int, int]]
     vision_max_lengths: List[int]
     vision_cu_lengths: List[List[int]]
@@ -215,7 +218,7 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
             else find_closest_aspect_ratio)
 
         self.transform_img = ImageTransform(
-            self.img_h, 
+            self.img_h,
             self.args.vision_model_type,
             dynamic_resolution=self.args.dynamic_resolution,
             res_step=self.args.patch_dim,
@@ -549,6 +552,8 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
         assert self._get_total_seq_length(input_ids, num_tiles, imgs) < self.args.decoder_seq_length, f"total sequence length {self._get_total_seq_length(input_ids, num_tiles, imgs)} needs to be less than {self.args.decoder_seq_length}"
 
         # Context parallel and FP8 require padding.
+        # TODO: Total sample len and padded len are kept the same here.
+        # H100 and newer cuDNN versions can handle different values for them.
         total_len = self._get_total_seq_length(input_ids, num_tiles, imgs)
 
         has_cp = self.args.context_parallel_size > 1
@@ -571,7 +576,8 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
             num_tiles=num_tiles,
             tokens=torch.tensor(input_ids),
             labels=torch.tensor(target),
-            total_len=self._get_total_seq_length(input_ids, num_tiles, imgs),
+            total_len=total_len,
+            total_len_padded=total_len,
         )
 
     def target_has_trainable_tokens(self, input_ids, num_tiles, target, imgs):
@@ -864,11 +870,11 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
                 pad_img = torch.zeros([1, padding_needed])
                 imgs.append(pad_img)
                 has_pad_img = torch.tensor(True)
-        
+
         imgs, imgs_sizes, vision_cu_lengths, vision_max_lengths = process_images(
             imgs, self.args.patch_dim, self.args.dynamic_resolution, batch_mode=True
         )
-        
+
         # Set default values if no vision metadata was returned (static resolution case)
         if vision_cu_lengths is None:
             vision_cu_lengths = torch.tensor([[0]], dtype=torch.int32)
@@ -898,10 +904,12 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
 
         # Cumulative sample lengths are needed for packing, otherwise use dummy values.
         cu_lengths = torch.tensor([[0]], dtype=torch.int32)
+        cu_lengths_padded = torch.tensor([[0]], dtype=torch.int32)
         max_lengths = torch.tensor([[0]], dtype=torch.int32)
 
         if isinstance(samples[0], ImageTaskSamplePacked):
             cu_lengths = torch.stack([s.cu_lengths for s in samples])
+            cu_lengths_padded = torch.stack([s.cu_lengths_padded for s in samples])
             max_lengths = torch.tensor([s.max_length for s in samples], dtype=torch.int32)
 
         return ImageTaskBatchPacked(
@@ -914,6 +922,7 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
             imgs=imgs,
             num_tiles=num_tiles,
             cu_lengths=cu_lengths,
+            cu_lengths_padded=cu_lengths_padded,
             max_lengths=max_lengths,
             imgs_sizes=imgs_sizes,
             vision_cu_lengths=vision_cu_lengths,
@@ -961,6 +970,7 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
         current_length = 0
         max_length = 0
         cu_lengths = [0]
+        cu_lengths_padded = [0]
 
         # Process each sample and build lists that we will concatenate to create the packed sample.
         for _, sample in enumerate(samples):
@@ -983,6 +993,7 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
 
             current_length += sample_len
             cu_lengths.append(current_length)
+            cu_lengths_padded.append(current_length)
 
         # Concatenate packed tokens and labels.
         packed_tokens = torch.cat(packed_tokens, dim=0)
@@ -997,6 +1008,7 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
             labels=packed_labels,
             imgs=packed_imgs,
             cu_lengths=torch.tensor(cu_lengths, dtype=torch.int32),
+            cu_lengths_padded=torch.tensor(cu_lengths_padded, dtype=torch.int32),
             max_length=max_length,
             num_tiles=[n for s in samples for n in s.num_tiles],
         )

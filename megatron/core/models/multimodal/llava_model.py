@@ -12,6 +12,10 @@ from megatron.core.config_logger import has_config_logger_enabled, log_config_to
 from megatron.core.inference.contexts import BaseInferenceContext
 from megatron.core.models.gpt import GPTModel
 from megatron.core.models.mamba import MambaModel
+from megatron.core.models.multimodal.context_parallel import (
+    gather_from_context_parallel_ranks,
+    split_to_context_parallel_ranks,
+)
 from megatron.core.models.vision.clip_vit_model import CLIPViTModel, get_num_image_embeddings
 from megatron.core.models.vision.conv_merging import ConvTokenMerge
 from megatron.core.models.vision.multimodal_projector import MultimodalProjector
@@ -752,7 +756,7 @@ class LLaVAModel(MegatronModule):
         shard_factor = seq_dim = None
         if self.pre_process:
             if self.context_parallel_lm > 1 and self.sequence_parallel_lm:
-                shard_factor = self.tensor_model_parallel_size_lm * self.context_parallel_lm * 2
+                shard_factor = max(self.tensor_model_parallel_size_lm * self.context_parallel_lm, self.context_parallel_lm * 2)
                 seq_dim = 1
             elif self.context_parallel_lm > 1:
                 shard_factor = self.context_parallel_lm * 2
@@ -918,11 +922,17 @@ class LLaVAModel(MegatronModule):
                 0, 0, 0
             )
         elif self.add_encoder and has_images:
+            pad = None
             if self._dynamic_resolution:
+                assert self.context_parallel_lm == 1, "dynamic resolution is not supported with context parallel yet"
+
                 image_embeddings = self.vision_model(
                     images, imgs_sizes=imgs_sizes, packed_seq_params=vision_packed_seq_params
                 )  # [num_tiles, img_seq_len, h_vision]
             else:
+                if self.context_parallel_lm > 1:
+                    images, pad = split_to_context_parallel_ranks(images)
+
                 image_embeddings = self.vision_model(images)  # [num_tiles, img_seq_len, h_vision]
 
             if self._drop_vision_class_token:
@@ -1002,6 +1012,11 @@ class LLaVAModel(MegatronModule):
             # Apply tile tagging if enabled and an image token is present.
             if self._tile_tags is not None and torch.any(input_ids == self.image_token_index):
                 image_embeddings = self._apply_tile_tagging(image_embeddings, num_image_tiles)
+
+            torch.cuda.nvtx.range_push("gather_from_context_parallel_ranks")
+            if self.context_parallel_lm > 1:
+                image_embeddings = gather_from_context_parallel_ranks(image_embeddings, pad)
+            torch.cuda.nvtx.range_pop()
 
             # TODO: Support batched inference.
             # In inference, the language model KV cache will be updated for image token positions.

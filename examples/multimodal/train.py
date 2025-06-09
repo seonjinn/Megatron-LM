@@ -70,6 +70,7 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
     num_tiles = tensor_parallel.broadcast_data(["num_tiles"], data, torch.int32)["num_tiles"]
 
     cu_lengths = tensor_parallel.broadcast_data(["cu_lengths"], data, torch.int32)["cu_lengths"]
+    cu_lengths_padded = tensor_parallel.broadcast_data(["cu_lengths_padded"], data, torch.int32)["cu_lengths_padded"]
     max_lengths = tensor_parallel.broadcast_data(["max_lengths"], data, torch.int32)["max_lengths"]
 
     imgs_sizes = tensor_parallel.broadcast_data(["imgs_sizes"], data, torch.int32)["imgs_sizes"]
@@ -102,12 +103,15 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
             cu_lengths.shape[0] == max_lengths.shape[0] == 1
         ), "micro-batch-size must be 1 for packing"
         cu_lengths = cu_lengths[0]
+        cu_lengths_padded = cu_lengths_padded[0]
         max_lengths = max_lengths[0]
 
         packed_seq_params = PackedSeqParams(
             qkv_format="thd",
             cu_seqlens_q=cu_lengths,
             cu_seqlens_kv=cu_lengths,
+            cu_seqlens_q_padded=cu_lengths_padded,
+            cu_seqlens_kv_padded=cu_lengths_padded,
             max_seqlen_q=max_lengths,
             max_seqlen_kv=max_lengths,
         )
@@ -138,24 +142,6 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
     torch.cuda.nvtx.range_push("get_ltor_masks_and_position_ids")
     loss_mask, position_ids = get_ltor_masks_and_position_ids(tokens, labels, tokenizer.pad)
     torch.cuda.nvtx.range_pop()
-
-    # If context parallel is enabled, must shard inputs to CP ranks.
-    if args.context_parallel_size > 1 or args.sequence_parallel:
-        assert tokens.shape[0], "micro-batch-size > 1 not supported yet with CP"
-
-        num_image_tokens = torch.sum(tokens == image_token_index).item()
-        num_image_embeddings = img_seq_len * imgs.shape[0] - num_image_tokens
-        seq_len = text_length + num_image_embeddings
-
-        # CP expects sequence length is divisible by CP size so apply padding.
-        mp_padding_needed = context_parallel.get_padding(
-            seq_len, args.context_parallel_size,
-            args.tensor_model_parallel_size, args.sequence_parallel,
-        )
-        tokens, position_ids, labels, loss_mask = [torch.nn.functional.pad(item, (0, mp_padding_needed)) for item in (tokens, position_ids, labels, loss_mask)]
-
-        # Get PackedSeqParams that indicate the amount of padding for TransformerEngine.
-        packed_seq_params = context_parallel.get_packed_seq_params(tokens, num_image_embeddings, mp_padding_needed, args.context_parallel_size, True)
 
     return (
         tokens,
@@ -225,6 +211,7 @@ def scaled_loss_func(loss_mask, output_tensor):
     Where we use the loss mask to infer the start / end of the conversation turns.
     """
     args = get_args()
+    assert args.context_parallel_size == 1, "this loss func is incorrect for context parallel"
     losses = output_tensor.float()
 
     loss_list = []
@@ -393,7 +380,7 @@ def run_online_eval(model):
     # We must write to a storage space that all ranks see.
     output_dir = os.path.join(args.save, "online_eval")
     os.makedirs(output_dir, exist_ok=True)
-    
+
     # Use the common evaluation loop
     scores = run_evaluation_loop(model[0].module, configs, output_dir_override=output_dir, print_output=False)
 

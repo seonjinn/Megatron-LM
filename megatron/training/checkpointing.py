@@ -660,7 +660,7 @@ def maybe_save_dataloader_state(train_iterator, iteration, dataloader_save_path)
         raise RuntimeError(f"Could not find a save_state for the train_iterator of type {type(train_iterator)}")
 
     # Save dataloader state for each data parallel rank only once.
-    first_rank = mpu.is_pipeline_first_stage(ignore_virtual=True) and mpu.get_tensor_model_parallel_rank() == 0
+    first_rank = mpu.is_pipeline_first_stage(ignore_virtual=True) and mpu.get_tensor_model_parallel_rank() == 0 and mpu.get_context_parallel_rank() == 0
     if not first_rank:
         return
 
@@ -1216,7 +1216,7 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load', 
             strict=strict,
             load_arg=load_arg
         )
-        
+
         # Since load_modelopt_checkpoint doesn't return iteration count, we need to get it
         if torch.distributed.is_initialized():
             tracker_filename = get_checkpoint_tracker_filename(load_dir)
@@ -1228,7 +1228,7 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load', 
                 iteration = 0
         else:
             iteration = 0
-        
+
         # We don't have a reliable way to get num_floating_point_operations_so_far from ModelOpt format
         return iteration, 0
 

@@ -68,6 +68,8 @@ if [[ $DEBUG -eq 1 ]]; then
     NONDETERMINISTIC_ATTN=1
 
     NUM_GPU=8
+    #NUM_GPU=4
+    #export CUDA_VISIBLE_DEVICES=0,1,2,3
 else
     MBZ=1
     BZ=128
@@ -87,11 +89,13 @@ if [[ $USE_TILING -eq 1 ]]; then
 fi
 
 USE_FP8=1
-
 if [[ $USE_FP8 -eq 1 ]]; then
+    # Recipe 1: More accurate but not the fastest.
     EXTRA_ARGS+=" --fp8-recipe blockwise --fp8-format e4m3 --first-last-layers-bf16 --num-layers-at-start-in-bf16 1 --num-layers-at-end-in-bf16 1"
+    # Recipes 2 and 3: Faster but metrics can become a bit noisier. Still the difference to bf16 should be small < 1%.
     #EXTRA_ARGS+=" --fp8-recipe blockwise --fp8-format e4m3 "
     #EXTRA_ARGS+=" --fp8-recipe blocwise --fp8-format e4m3 --fp8-param-gather "
+    EXTRA_ARGS+=" --use-vision-backbone-fp8-arch "
 fi
 
 if [[ $USE_PACKING -eq 1 ]]; then
@@ -99,13 +103,19 @@ if [[ $USE_PACKING -eq 1 ]]; then
 fi
 
 USE_PRECISION_AWARE_OPTIMIZER=1
-
 if [[ $USE_PRECISION_AWARE_OPTIMIZER -eq 1 ]]; then
     EXTRA_ARGS+=" --use-precision-aware-optimizer --main-grads-dtype bf16 --main-params-dtype fp16 --exp-avg-dtype fp16 --exp-avg-sq-dtype fp16 "
 fi
 
-EXTRA_ARGS+=" --recompute-granularity full --recompute-method block --recompute-num-layers 16 --recompute-vision"
+USE_CP=0
+if [[ $USE_CP -eq 1 ]]; then
+    # TODO: Loss scaling is not enabled for context parallel yet. Implementation exists but not committed yet.
+    EXTRA_ARGS+=" --context-parallel-size 2 --sequence-parallel "
+else
+    EXTRA_ARGS+=" --use-loss-scaling "
+fi
 
+EXTRA_ARGS+=" --recompute-granularity full --recompute-method block --recompute-num-layers 16 --recompute-vision"
 
 OPTIONS=" \
     --use-checkpoint-args \
@@ -175,14 +185,12 @@ OPTIONS=" \
     --distributed-timeout-minutes 60 \
     --vision-model-type radio \
     --tokenizer-prompt-format llama3p1 \
-    --use-loss-scaling \
     ${SPECIAL_TOKENS} \
     --ckpt-format torch \
     --image-tag-type internvl \
     --disable-vision-class-token \
     --online-evaluation-config ${SOURCE}/examples/multimodal/eagle/eval_config/sft_time_eval.yaml \
     --inference-max-seq-length ${DECODER_SEQ_LEN} \
-    --use-vision-backbone-fp8-arch \
 "
 
 

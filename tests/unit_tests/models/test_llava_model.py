@@ -804,3 +804,61 @@ def test_get_packed_seq_params(tokens, img_seq_len, padding_needed, cp_size, exp
             torch.tensor([0, padded_seq_len], dtype=torch.int32),
         )
         assert packed_seq_params.max_seqlen_q == padded_seq_len
+
+
+@pytest.mark.internal
+@pytest.mark.parametrize(
+    "batch_size, cp_size, expected_samples_per_rank, expected_global_pad",
+    [
+        (8, 2, 4, 0),  # Perfect division
+        (7, 2, 4, 1),  # Needs padding
+        (1, 4, 1, 3),  # Single sample
+    ],
+)
+def test_split_to_context_parallel_ranks(
+    batch_size, cp_size, expected_samples_per_rank, expected_global_pad
+):
+    """Test splitting tensors across context parallel ranks."""
+    tp_size = 8 // cp_size
+    assert 8 % cp_size == 0, "Expected to run this using 8 GPUs."
+    Utils.initialize_model_parallel(
+        tensor_model_parallel_size=tp_size, context_parallel_size=cp_size
+    )
+    model_parallel_cuda_manual_seed(123)
+
+    # Create a dummy tensor with shape [batch_size, 2, 3].
+    global_t = (
+        torch.arange(batch_size * 2 * 3, dtype=torch.bfloat16).reshape(batch_size, 2, 3).cuda()
+    )
+
+    # Split the global tensor to CP ranks.
+    local_t, global_pad = context_parallel.split_to_context_parallel_ranks(global_t)
+
+    # Check shapes
+    assert local_t.shape[0] == expected_samples_per_rank
+    assert local_t.shape[1:] == (2, 3)
+    assert global_pad == expected_global_pad
+
+    # Check values for non-padded elements
+    cp_rank = ps.get_context_parallel_rank()
+    start_idx = cp_rank * expected_samples_per_rank
+    end_idx = min(start_idx + expected_samples_per_rank, batch_size)
+    assert torch.allclose(local_t[: end_idx - start_idx], global_t[start_idx:end_idx])
+
+    # Check padding is zeros
+    end_idx2 = start_idx + expected_samples_per_rank
+    if end_idx < end_idx2:
+        assert torch.all(local_t[end_idx - start_idx :] == 0)
+
+    # Permute similar to the llava model.
+    local_t = local_t.permute(1, 0, 2).contiguous()
+
+    # Gather the tensor from all context parallel ranks.
+    global_t_gathered = context_parallel.gather_from_context_parallel_ranks(local_t, global_pad)
+
+    # Check the gathered tensor is the same as the original tensor.
+    expected_global_t = global_t.permute(1, 0, 2).contiguous()
+
+    assert torch.allclose(global_t_gathered, expected_global_t)
+
+    Utils.destroy_model_parallel()
