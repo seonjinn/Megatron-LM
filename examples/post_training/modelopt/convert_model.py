@@ -97,7 +97,7 @@ if __name__ == "__main__":
         if args.extra_model_path is not None:
             eagle_module = getattr(unwrapped_model, "eagle_module", None)
             if eagle_module is not None:
-                mcore_eagle_state_dict = torch.load(args.extra_model_path)
+                mcore_eagle_state_dict = torch.load(args.extra_model_path, weights_only=False)
                 eagle_module.load_state_dict(mcore_eagle_state_dict, strict=False)
 
     if args.export_num_medusa_heads > 0:
