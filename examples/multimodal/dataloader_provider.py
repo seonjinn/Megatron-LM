@@ -32,8 +32,7 @@ def datasets_provider(task_encoder,worker_config=None):
     train_dataset = get_train_dataset(
         dname,
         batch_size=args.micro_batch_size,
-        task_encoder=task_encoder,
-        virtual_epoch_length=1000,
+        task_encoder=TaskEncoder(),
         max_samples_per_sequence=100,
         shuffle_buffer_size=100,
         worker_config=worker_config,
@@ -41,7 +40,6 @@ def datasets_provider(task_encoder,worker_config=None):
         handler=print_error_handler,
         image_decode="pil",
     )
-
     val_datasets = get_val_datasets(
         dname,
         batch_size=args.micro_batch_size,
@@ -101,7 +99,7 @@ def is_dataloader_rank(encoder_pipeline_model_parallel_size):
 def train_valid_test_dataloaders_provider(train_val_test_num_samples, task_encoder=None):
     """Build multimodal train, validation and test dataloaders."""
     args = get_args()
-    
+
     if task_encoder is None:
         task_encoder = TaskEncoder()
 
