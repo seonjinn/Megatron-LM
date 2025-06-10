@@ -6,14 +6,16 @@
 #SBATCH --mem=0
 #SBATCH --ntasks-per-node=8
 #SBATCH --dependency=singleton
-#SBATCH --nodes=16
+#SBATCH --nodes=32
 #SBATCH --overcommit
 #SBATCH --exclusive
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=sft_llama_3p1_8b_radio_v13_full_dataset_fp8_0602
+#SBATCH --job-name=sft_llama_3p1_8b_radio_vlm_rc3_v13p16_fp8_0610
 
-#export NCCL_IB_SL=1
 export CUDA_DEVICE_MAX_CONNECTIONS=1
+
+# Optional MSC config.
+export MSC_CONFIG=""
 
 USER=$SLURM_JOB_USER
 
@@ -32,7 +34,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="sft_llama_3p1_8b_radio_v13_full_dataset_fp8_0602"
+    MODEL_NAME="sft_llama_3p1_8b_radio_vlm_rc3_v13p16_fp8_0610"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -47,9 +49,9 @@ TENSORBOARD_DIR="${OUTPUT}/tensorboard"
 
 TP=4
 
-CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/pretrain_llama_3p1_8b_radio_v11_0204/checkpoints"
+CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/amalasanjayd/checkpoints/pretrain_llama_3p1_8b_cradio_rc3_commercial_0416"
 
-DATA_TRAIN="${SOURCE}/examples/multimodal/v2/data_config/sft_dataset_commercial_v11_update.yaml"
+DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe/eagle_sft_v13.16_sft1/wds/out.yaml"
 
 SEQ_LEN=1024
 DECODER_SEQ_LEN=16384
@@ -63,16 +65,9 @@ if [[ $DEBUG -eq 1 ]]; then
     LI=1
     EVAL_INTERVAL=9999
 
-    # EXTRA_ARGS="--deterministic-mode --use-cpu-initialization"
-
     NONDETERMINISTIC_ATTN=1
 
     NUM_GPU=8
-    #NUM_GPU=4
-    #export CUDA_VISIBLE_DEVICES=0,1,2,3
-
-    #export NCCL_ALGO=Tree
-    #export CUBLAS_WORKSPACE_CONFIG=:4096:8
 else
     MBZ=1
     BZ=128
@@ -101,8 +96,6 @@ fi
 
 if [[ $USE_PACKING -eq 1 ]]; then
     EXTRA_ARGS+=" --packing-seq-length ${DECODER_SEQ_LEN} "
-else
-    EXTRA_ARGS+=" --unpack-packed "
 fi
 
 USE_PRECISION_AWARE_OPTIMIZER=1
@@ -146,7 +139,7 @@ OPTIONS=" \
     --seq-length ${SEQ_LEN} \
     --decoder-seq-length ${DECODER_SEQ_LEN} \
     --max-position-embeddings 131072 \
-    --train-samples 1000 \
+    --train-full-dataset \
     --lr-warmup-fraction 0.03 \
     --micro-batch-size ${MBZ} \
     --global-batch-size ${BZ} \
@@ -158,7 +151,7 @@ OPTIONS=" \
     --eval-interval ${EVAL_INTERVAL} \
     --data-path ${DATA_TRAIN} \
     --prompt-path ${SOURCE}/examples/multimodal/manual_prompts.json \
-    --save-interval 20 \
+    --save-interval 2000 \
     --save ${FINETUNE_DIR} \
     --load ${FINETUNE_DIR} \
     --pretrained-checkpoint ${CHECKPOINT_DIR} \
@@ -174,6 +167,7 @@ OPTIONS=" \
     --patch-dim 16 \
     --img-h 512 \
     --img-w 512 \
+    --use-area-weighted-aspect-ratio \
     --dataloader-type external \
     --tensorboard-dir ${TENSORBOARD_DIR} \
     --language-model-type=llama3.1_8b \
@@ -187,7 +181,9 @@ OPTIONS=" \
     --image-tag-type internvl \
     --disable-vision-class-token \
     --online-evaluation-config ${SOURCE}/examples/multimodal/eagle/eval_config/sft_time_eval.yaml \
+    --inference-max-seq-length ${DECODER_SEQ_LEN} \
 "
+
 
 export NVTE_APPLY_QK_LAYER_SCALING=0
 export NVTE_ALLOW_NONDETERMINISTIC_ALGO=${NONDETERMINISTIC_ATTN}
