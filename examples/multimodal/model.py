@@ -255,6 +255,7 @@ def model_provider(
         tile_tags=tile_tags,
         max_num_tiles=args.max_num_tiles,
         tokenizer_type=args.tokenizer_prompt_format,
+        use_vision_backbone_fp8_arch=args.use_vision_backbone_fp8_arch,
     )
 
     model.freeze(

@@ -122,6 +122,7 @@ class LLaVAModel(MegatronModule):
         cp_group: Optional[torch.distributed.ProcessGroup] = None,
         max_num_tiles: int = 0,
         tokenizer_type: str = "",
+        use_vision_backbone_fp8_arch: bool = False,
     ) -> None:
         super().__init__(config=language_transformer_config)
 
@@ -283,7 +284,7 @@ class LLaVAModel(MegatronModule):
                     ln_post_impl = None
                     use_mask_token = False
 
-                if vision_transformer_config.fp8:
+                if vision_transformer_config.fp8 or use_vision_backbone_fp8_arch:
                     class_token_len = 16    # FP8 requires final sequence length to be a multiple of 16.
 
                 self.vision_model = RADIOViTModel(

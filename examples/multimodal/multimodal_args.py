@@ -89,5 +89,5 @@ def add_multimodal_extra_args(parser):
             "image aspect ratio and the area covered by the tiles.")
     )
     group.add_argument("--use-mcore-inference", action="store_true", default=False, help="Use the MCore inference API")
-
+    group.add_argument("--use-vision-backbone-fp8-arch", action="store_true", default=False, help="Use the FP8 arch in the vision backbone. This is used to load the FP8 checkpoint when running inference.")
     return parser
