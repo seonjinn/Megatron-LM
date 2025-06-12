@@ -22,10 +22,13 @@ from megatron.core.models.multimodal.llava_model import IGNORE_INDEX, IMAGE_TOKE
 from megatron.core.models.vision.clip_vit_model import get_num_image_embeddings
 from megatron.energon import (
     Batch,
+    CaptioningSample,
     DefaultTaskEncoder,
     OCRSample,
     Sample,
     SimilarityInterleavedSample,
+    VQASample,
+    MultiChoiceVQASample
 )
 from megatron.energon.task_encoder.base import stateless
 from megatron.training import get_args, get_tokenizer
@@ -90,6 +93,7 @@ class ImageTaskBatchPacked(Batch):
     imgs_sizes: List[Tuple[int, int]]
     vision_max_lengths: List[int]
     vision_cu_lengths: List[List[int]]
+    has_pad_img: bool
 
 
 # Based on https://github.com/hiyouga/LLaMA-Factory/blob/641d0dab08d96a93c34657742213d8994d9ed476/src/llamafactory/data/processors/processor_utils.py#L19
@@ -545,7 +549,7 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
         assert self._get_total_seq_length(input_ids, num_tiles, imgs) < self.args.decoder_seq_length, f"total sequence length {self._get_total_seq_length(input_ids, num_tiles, imgs)} needs to be less than {self.args.decoder_seq_length}"
 
         # Context parallel and FP8 require padding.
-        total_len = self._get_total_seq_length(input_ids, num_tiles)
+        total_len = self._get_total_seq_length(input_ids, num_tiles, imgs)
 
         has_cp = self.args.context_parallel_size > 1
         has_fp8 = self.args.fp8 is not None
@@ -843,7 +847,23 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
         imgs = [img for s in samples for img in s.imgs]
 
         if len(imgs) > 0 and self.args.dynamic_resolution:
-            assert self.args.vision_model_type in ("radio", "radio-g"), "Dynamic resolution only works with radio right now"
+            assert self.args.vision_model_type in ("radio", "radio-g", "cradio-g"), "Dynamic resolution only works with radio right now"
+
+        # Pad image packed seq length to be % 16 if using fp8 and dynamic resolution
+        has_fp8 = self.args.fp8 is not None
+        has_pad_img = torch.tensor(False)
+        if has_fp8 and self.args.dynamic_resolution:
+            img_seq_len = 0
+            for img in imgs:
+                img_seq_len += self._get_num_image_embeddings(
+                    img_h=img.shape[1],
+                    img_w=img.shape[2],
+                )
+            padding_needed = get_padding(img_seq_len, self.args.context_parallel_size, self.args.tensor_model_parallel_size, self.args.sequence_parallel, fp8_enabled=has_fp8)
+            if padding_needed > 0:
+                pad_img = torch.zeros([1, padding_needed])
+                imgs.append(pad_img)
+                has_pad_img = torch.tensor(True)
         
         imgs, imgs_sizes, vision_cu_lengths, vision_max_lengths = process_images(
             imgs, self.args.patch_dim, self.args.dynamic_resolution, batch_mode=True
@@ -898,6 +918,7 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
             imgs_sizes=imgs_sizes,
             vision_cu_lengths=vision_cu_lengths,
             vision_max_lengths=vision_max_lengths,
+            has_pad_img=has_pad_img,
         )
 
     def encode_batch(self, batch: ImageTaskBatchPacked) -> dict:

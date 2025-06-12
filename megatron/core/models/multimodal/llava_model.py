@@ -863,6 +863,7 @@ class LLaVAModel(MegatronModule):
         packed_seq_params: Optional[PackedSeqParams] = None,
         imgs_sizes: Optional[Tuple[int, int]] = None,
         vision_packed_seq_params: Optional[PackedSeqParams] = None,
+        has_pad_img: bool = False,
         *,
         inference_params: Optional[BaseInferenceContext] = None,
     ) -> torch.Tensor:
@@ -940,6 +941,11 @@ class LLaVAModel(MegatronModule):
                     image_embeddings = image_embeddings[:, remove_class_token_mask, :]
                 else:
                     image_embeddings = image_embeddings[:, self.vision_model.class_token_len :, :]
+
+            if has_pad_img and self._dynamic_resolution:
+                pad_len = imgs_sizes[-1][0] * imgs_sizes[-1][1]
+                image_embeddings = image_embeddings[:, -pad_len, :]
+                imgs_sizes = imgs_sizes[:-1]
 
             if self._pixel_shuffle:
                 if self._dynamic_resolution:

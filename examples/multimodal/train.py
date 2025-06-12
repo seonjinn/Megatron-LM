@@ -46,6 +46,7 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
     imgs_sizes = None
     vision_cu_lengths = None
     vision_max_lengths = None
+    has_pad_img = None
 
     args = get_args()
 
@@ -53,7 +54,7 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
     pp_size = get_pipeline_model_parallel_world_size()
     if not is_first_or_last_stage(pp_size, args.encoder_pipeline_model_parallel_size):
         # Note these are all set to None above.
-        return tokens, labels, loss_mask, attention_mask, position_ids, imgs, num_tiles, packed_seq_params, imgs_sizes, vision_cu_lengths, vision_max_lengths
+        return tokens, labels, loss_mask, attention_mask, position_ids, imgs, num_tiles, packed_seq_params, imgs_sizes, vision_cu_lengths, vision_max_lengths, has_pad_img
 
     # Broadcast data.
     torch.cuda.nvtx.range_push("get_data")
@@ -75,6 +76,7 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
 
     vision_cu_lengths = tensor_parallel.broadcast_data(["vision_cu_lengths"], data, torch.int32)["vision_cu_lengths"]
     vision_max_lengths = tensor_parallel.broadcast_data(["vision_max_lengths"], data, torch.int32)["vision_max_lengths"]
+    has_pad_img = tensor_parallel.broadcast_data(["has_pad_img"], data, torch.bool)["has_pad_img"]
 
     # No image input (text-only sample) if the dataloader returned a size 1 image.
     if imgs.shape == torch.Size([1, 1]):
@@ -167,6 +169,7 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
         imgs_sizes,
         vision_cu_lengths,
         vision_max_lengths,
+        has_pad_img,
     )
 
 
@@ -299,6 +302,7 @@ def forward_step(data_iterator, model: LLaVAModel):
         imgs_sizes,
         vision_cu_lengths,
         vision_max_length,
+        has_pad_img,
     ) = get_batch(data_iterator, model.module.module.image_token_index, model.module.module.img_seq_len)
     timers('batch-generator').stop()
 
@@ -324,6 +328,7 @@ def forward_step(data_iterator, model: LLaVAModel):
         packed_seq_params=packed_seq_params,
         imgs_sizes=imgs_sizes,
         vision_packed_seq_params=vision_packed_seq_params,
+        has_pad_img=has_pad_img,
     )
     args = get_args()
     if args.use_loss_scaling:
