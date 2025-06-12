@@ -49,7 +49,7 @@ TENSORBOARD_DIR="${OUTPUT}/tensorboard"
 
 TP=4
 
-CHECKPOINT_DIR="/lustre/fs1/portfolios/llmservice/projects/llmservice_nlp_fm/mcore_mmodal_models/llama_3p1_8b_c-radio-vlm_v1_rc3"
+CHECKPOINT_DIR="/lustre/fs1/portfolios/llmservice/projects/llmservice_nlp_fm/mcore_mmodal_models/llama_3p1_8b_c-radio-vlm_v1_rc3-no-extra-state"
 
 DATA_TRAIN="${SOURCE}/examples/multimodal/v2/data_config/pretrain_dataset_commercial.yaml"
 
@@ -69,9 +69,6 @@ if [[ $DEBUG -eq 1 ]]; then
 
     NUM_GPU=4
     export CUDA_VISIBLE_DEVICES=0,1,2,3
-
-    export NCCL_ALGO=Tree
-    export CUBLAS_WORKSPACE_CONFIG=:4096:8
 else
     MBZ=1
     BZ=1024
