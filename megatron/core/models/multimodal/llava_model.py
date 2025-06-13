@@ -952,9 +952,11 @@ class LLaVAModel(MegatronModule):
                 else:
                     image_embeddings = image_embeddings[:, self.vision_model.class_token_len :, :]
 
+            # If we used a fake image to pad for fp8 with dynamic resolution, remove if from the
+            # image embeddings and imgs_sizes.
             if has_pad_img and self._dynamic_resolution:
-                pad_len = imgs_sizes[-1][0] * imgs_sizes[-1][1]
-                image_embeddings = image_embeddings[:, -pad_len, :]
+                pad_len = imgs_sizes[-1][0] // self.vision_model.patch_dim * imgs_sizes[-1][1] // self.vision_model.patch_dim
+                image_embeddings = image_embeddings[:, :-pad_len, :]
                 imgs_sizes = imgs_sizes[:-1]
 
             if self._pixel_shuffle:
@@ -989,9 +991,15 @@ class LLaVAModel(MegatronModule):
             ).contiguous()  # [img_seq_len, num_tiles, h_vision]
 
             # map vision model output size to language model input size.
+            fp8_padding = 0
+            if image_embeddings.shape[0] % 16 != 0:
+                fp8_padding = 16 - (image_embeddings.shape[0] % 16)
+                image_embeddings = torch.cat([image_embeddings, torch.zeros([fp8_padding, image_embeddings.shape[1], image_embeddings.shape[2]]).to(image_embeddings.device).to(image_embeddings.dtype)], dim=0)
             image_embeddings = self.vision_projection(
                 image_embeddings
             )  # [img_seq_len, num_tiles, h_language]
+            if fp8_padding > 0:
+                image_embeddings = image_embeddings[:-fp8_padding, :, :]
 
             if self.image_break_token is not None:
                 patch_sizes = imgs_sizes // self.vision_model.patch_dim
