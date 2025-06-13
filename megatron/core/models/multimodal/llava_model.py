@@ -15,6 +15,7 @@ from megatron.core.models.mamba import MambaModel
 from megatron.core.models.multimodal.context_parallel import (
     gather_from_context_parallel_ranks,
     split_to_context_parallel_ranks,
+    get_padding,
 )
 from megatron.core.models.vision.clip_vit_model import CLIPViTModel, get_num_image_embeddings
 from megatron.core.models.vision.conv_merging import ConvTokenMerge
@@ -248,6 +249,7 @@ class LLaVAModel(MegatronModule):
 
         class_token_len = 1
         if self.add_encoder:
+            self._vision_fp8 = vision_transformer_config.fp8 or use_vision_backbone_fp8_arch
             vision_projection_input_size = vision_transformer_config.hidden_size
             self._drop_vision_class_token = drop_vision_class_token
             add_class_token = True
@@ -990,16 +992,20 @@ class LLaVAModel(MegatronModule):
                 1, 0, 2
             ).contiguous()  # [img_seq_len, num_tiles, h_vision]
 
+            vision_projection_padding_needed = 0
+            if self._vision_fp8:
+                vision_projection_padding_needed = get_padding(image_embeddings.shape[0], self.context_parallel_lm, self.tensor_model_parallel_size_lm, self.sequence_parallel_lm, fp8_enabled=self._vision_fp8)
+                if vision_projection_padding_needed > 0:
+                    padding_image_embeddings = torch.zeros([vision_projection_padding_needed, image_embeddings.shape[1], image_embeddings.shape[2]]).to(image_embeddings.device).to(image_embeddings.dtype)
+                    image_embeddings = torch.cat([image_embeddings, padding_image_embeddings], dim=0)
+
             # map vision model output size to language model input size.
-            fp8_padding = 0
-            if image_embeddings.shape[0] % 16 != 0:
-                fp8_padding = 16 - (image_embeddings.shape[0] % 16)
-                image_embeddings = torch.cat([image_embeddings, torch.zeros([fp8_padding, image_embeddings.shape[1], image_embeddings.shape[2]]).to(image_embeddings.device).to(image_embeddings.dtype)], dim=0)
             image_embeddings = self.vision_projection(
                 image_embeddings
             )  # [img_seq_len, num_tiles, h_language]
-            if fp8_padding > 0:
-                image_embeddings = image_embeddings[:-fp8_padding, :, :]
+
+            if vision_projection_padding_needed > 0:
+                image_embeddings = image_embeddings[:-vision_projection_padding_needed, :, :]
 
             if self.image_break_token is not None:
                 patch_sizes = imgs_sizes // self.vision_model.patch_dim

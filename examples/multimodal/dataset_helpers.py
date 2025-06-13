@@ -861,10 +861,10 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
         if has_fp8 and self.args.dynamic_resolution:
             img_seq_len = 0
             for img in imgs:
-                img_seq_len = img.shape[1] // self.args.patch_dim * img.shape[2] // self.args.patch_dim
+                img_seq_len += (img.shape[1] // self.args.patch_dim) * (img.shape[2] // self.args.patch_dim)
             padding_needed = get_padding(img_seq_len, self.args.context_parallel_size, self.args.tensor_model_parallel_size, self.args.sequence_parallel, fp8_enabled=has_fp8)
             if padding_needed > 0:
-                pad_img = torch.zeros([3, self.args.patch_dim, self.args.patch_dim * padding_needed])
+                pad_img = torch.zeros([3, self.args.patch_dim, padding_needed * self.args.patch_dim])
                 imgs.append(pad_img)
                 has_pad_img = torch.tensor(True)
 
