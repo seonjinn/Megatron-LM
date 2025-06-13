@@ -6,13 +6,12 @@
 #SBATCH --mem=0
 #SBATCH --ntasks-per-node=8
 #SBATCH --dependency=singleton
-#SBATCH --nodes=8
+#SBATCH --nodes=32
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=pretrain_llama_3p1_8b_cradio_rc3_dynamic_res_commercial_0610
+#SBATCH --job-name=pretrain_llama_3p1_8b_cradio_rc3_dynamic_res_commercial_0613
 
-export NCCL_IB_SL=1
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 
 USER=$SLURM_JOB_USER
@@ -34,7 +33,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="pretrain_llama_3p1_8b_cradio_rc3_dynamic_res_commercial_0610"
+    MODEL_NAME="pretrain_llama_3p1_8b_cradio_rc3_dynamic_res_commercial_0613"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -147,7 +146,7 @@ OPTIONS=" \
     --decoder-seq-length ${DECODER_SEQ_LEN} \
     --max-position-embeddings 131072 \
     --train-full-dataset \
-    --lr-warmup-fraction 0.0687 \
+    --lr-warmup-samples 102400 \
     --micro-batch-size ${MBZ} \
     --global-batch-size ${BZ} \
     --lr 2e-4 \
@@ -155,7 +154,7 @@ OPTIONS=" \
     --lr-decay-style cosine \
     --log-interval ${LI} \
     --eval-iters 10 \
-    --eval-interval 500 \
+    --eval-interval 999999999 \
     --data-path ${DATA_TRAIN} \
     --prompt-path ${SOURCE}/examples/multimodal/manual_prompts.json \
     --save-interval 5000 \
@@ -192,6 +191,9 @@ OPTIONS=" \
     --image-tag-type internvl \
     --force-system-message \
     --disable-vision-class-token \
+    --inference-max-seq-length ${DECODER_SEQ_LEN} \
+    --use-area-weighted-aspect-ratio \
+    --use-vision-backbone-fp8-arch \
 "
 
 export NVTE_APPLY_QK_LAYER_SCALING=0
@@ -206,7 +208,7 @@ else
     DATETIME=`date +'date_%y-%m-%d_time_%H-%M-%S'`
 
     srun -l --verbose \
-    --container-image /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/mcore_mmodal_containers/megatron-dev-img-01232025.sqsh \
+    --container-image /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/containers/megatron-dev-img-05142025-pytorch-dev-te-cd37379-energon-develop-08471f7-mamba-vlmeval.sqsh \
     --container-mounts "/lustre" \
     --output=${LOGS_DIR}/%x_%j_$DATETIME.log \
     sh -c "echo ${run_cmd}; ${run_cmd}"
