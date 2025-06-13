@@ -1,3 +1,5 @@
+from contextlib import nullcontext
+
 import torch
 
 from megatron.core.tensor_parallel.layers import ColumnParallelLinear, RowParallelLinear
