@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH -A llmservice_fm_vision
-#SBATCH -p batch_block1
+#SBATCH -p batch_block1,backfill,batch_large,batch_long
 #SBATCH -t 04:00:00
 #SBATCH --mem=0
 #SBATCH --ntasks-per-node=8
@@ -13,9 +13,7 @@
 #SBATCH --job-name=sft_llama_3p1_8b_radio_vlm_rc3_v13p16_fp8_0611
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
-
-# Optional MSC config.
-export MSC_CONFIG=""
+export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
 
 USER=$SLURM_JOB_USER
 

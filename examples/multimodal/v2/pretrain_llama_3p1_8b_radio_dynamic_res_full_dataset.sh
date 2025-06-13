@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH -A llmservice_fm_vision
-#SBATCH -p batch_block1,batch_block3,batch_block4,backfill_block1,backfill_block2,backfill_block3,backfill_block4
+#SBATCH -p batch_block1,backfill,batch_large,batch_long
 #SBATCH -t 04:00:00
 #SBATCH --mem=0
 #SBATCH --ntasks-per-node=8
@@ -13,6 +13,7 @@
 #SBATCH --job-name=pretrain_llama_3p1_8b_cradio_rc3_dynamic_res_commercial_0613
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
+export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
 
 USER=$SLURM_JOB_USER
 
