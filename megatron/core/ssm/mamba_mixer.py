@@ -20,6 +20,7 @@ from megatron.core.dist_checkpointing.mapping import ReplicaId, ShardedTensorFac
 from megatron.core.inference.contexts import BaseInferenceContext
 from megatron.core.process_groups_config import ModelCommProcessGroups
 from megatron.core.packed_seq_params import PackedSeqParams
+from megatron.core.process_groups_config import ModelCommProcessGroups
 from megatron.core.tensor_parallel import get_cuda_rng_tracker
 from megatron.core.transformer import TransformerConfig
 from megatron.core.transformer.module import MegatronModule
@@ -63,6 +64,9 @@ try:
     HAVE_EINOPS = True
 except ImportError:
     HAVE_EINOPS = False
+
+
+logger = logging.getLogger(__name__)
 
 
 logger = logging.getLogger(__name__)
