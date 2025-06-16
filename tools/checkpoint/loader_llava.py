@@ -83,6 +83,11 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
         margs.recompute_vision = getattr(checkpoint_args, "recompute_vision", False)
         margs.vocab_size = getattr(checkpoint_args, "vocab_size", None)
         margs.padded_vocab_size = checkpoint_args.padded_vocab_size
+        margs.use_vision_backbone_fp8_arch = getattr(checkpoint_args, "use_vision_backbone_fp8_arch", False)
+        margs.dynamic_resolution = getattr(checkpoint_args, "dynamic_resolution", False)
+        margs.image_break_token = getattr(checkpoint_args, "image_break_token", None)
+        margs.conv_merging = getattr(checkpoint_args, "conv_merging", False)
+        margs.allow_missing_conv_merge_checkpoint = getattr(checkpoint_args, "allow_missing_conv_merge_checkpoint", False)
         
         return margs
 
@@ -150,6 +155,7 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
         md.vision_linear_bias = vision_config.add_bias_linear
         md.vision_qkv_bias = vision_config.add_qkv_bias
         md.padded_vocab_size = self.margs.padded_vocab_size
+        md.conv_merging = self.margs.conv_merging
         if hasattr(vision_config, 'normalization'):
             md.vision_norm_has_bias = vision_config.normalization == "LayerNorm"
         else:
@@ -305,6 +311,14 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
         if self.md.vision_projection_linear_bias:
             message["vision projection l0 bias"] = torch.cat([self.all_models[0][0][tp_rank].vision_projection.encoder.linear_fc1.bias.data for tp_rank in range(encoder_tp_size)], dim=0)
             message["vision projection l1 bias"] = self.all_models[0][0][0].vision_projection.encoder.linear_fc2.bias.data
+
+        if self.md.conv_merging:
+            message["conv merge l0 weight"] = torch.cat([self.all_models[0][0][tp_rank].conv_merge.mlp.linear_fc1.weight.data for tp_rank in range(encoder_tp_size)], dim=0)
+            message["conv merge l1 weight"] = torch.cat([self.all_models[0][0][tp_rank].conv_merge.mlp.linear_fc2.weight.data for tp_rank in range(encoder_tp_size)], dim=1)
+
+            if self.md.vision_projection_linear_bias:
+                message["conv merge l0 bias"] = torch.cat([self.all_models[0][0][tp_rank].conv_merge.mlp.linear_fc1.bias.data for tp_rank in range(encoder_tp_size)], dim=0)
+                message["conv merge l1 bias"] = self.all_models[0][0][0].conv_merge.mlp.linear_fc2.bias.data
         
         self.queue_put("vision projection", message)
         

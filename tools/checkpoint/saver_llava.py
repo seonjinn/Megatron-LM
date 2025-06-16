@@ -159,6 +159,11 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
         margs.num_frames = getattr(self.md.checkpoint_args, "num_frames", 8)
         margs.recompute_vision = getattr(self.md.checkpoint_args, "recompute_vision", False)
         margs.padded_vocab_size = self.md.padded_vocab_size
+        margs.use_vision_backbone_fp8_arch = getattr(self.md.checkpoint_args, "use_vision_backbone_fp8_arch", False)
+        margs.dynamic_resolution = getattr(self.md.checkpoint_args, "dynamic_resolution", False)
+        margs.image_break_token = getattr(self.md.checkpoint_args, "image_break_token", None)
+        margs.conv_merging = getattr(self.md.checkpoint_args, "conv_merging", False)
+        margs.allow_missing_conv_merge_checkpoint = getattr(self.md.checkpoint_args, "allow_missing_conv_merge_checkpoint", False)
 
         return margs
 
@@ -339,6 +344,18 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
             vision_projection_l0_bias = chunk_bias(
             vision_projection_msg.pop("vision projection l0 bias"), "column", self.args.target_tensor_parallel_size)
             vision_projection_l1_bias = vision_projection_msg.pop("vision projection l1 bias")
+
+        if self.md.conv_merging:
+            conv_merge_l0_weight = chunk_weight(
+                vision_projection_msg.pop("conv merge l0 weight"), "column", self.args.target_tensor_parallel_size)
+            conv_merge_l1_weight = chunk_weight(
+                vision_projection_msg.pop("conv merge l1 weight"), "row", self.args.target_tensor_parallel_size)
+
+            if self.md.vision_projection_linear_bias:
+                conv_merge_l0_bias = chunk_bias(
+                vision_projection_msg.pop("conv merge l0 bias"), "column", self.args.target_tensor_parallel_size)
+                conv_merge_l1_bias = vision_projection_msg.pop("conv merge l1 bias")
+
         for tp_rank in range(self.args.target_tensor_parallel_size):
             # The vision projection is on the PP / EP 0 
             model = self.get_local_model(0, 0, tp_rank)
@@ -356,6 +373,17 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
                 model.vision_projection.encoder.linear_fc1.bias.data.copy_(
                     vision_projection_l0_bias[tp_rank])
                 model.vision_projection.encoder.linear_fc2.bias.data.copy_(vision_projection_l1_bias)
+
+            if self.md.conv_merging:
+                model.conv_merge.mlp.linear_fc1.weight.data.copy_(
+                    conv_merge_l0_weight[tp_rank])
+                model.conv_merge.mlp.linear_fc2.weight.data.copy_(
+                    conv_merge_l1_weight[tp_rank])
+
+                if self.md.vision_projection_linear_bias:
+                    model.conv_merge.mlp.linear_fc1.bias.data.copy_(
+                        conv_merge_l0_bias[tp_rank])
+                    model.conv_merge.mlp.linear_fc2.bias.data.copy_(conv_merge_l1_bias)
 
     def receive_model(self):
         extra_layer_schema = {}
