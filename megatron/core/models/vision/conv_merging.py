@@ -2,6 +2,8 @@ from contextlib import nullcontext
 
 import torch
 
+from contextlib import nullcontext
+
 from megatron.core.tensor_parallel.layers import ColumnParallelLinear, RowParallelLinear
 from megatron.core.transformer.mlp import MLP, MLPSubmodules
 from megatron.core.transformer.module import MegatronModule
