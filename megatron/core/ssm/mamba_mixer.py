@@ -19,6 +19,7 @@ from megatron.core.dist_checkpointing import ShardedTensor
 from megatron.core.dist_checkpointing.mapping import ReplicaId, ShardedTensorFactory
 from megatron.core.inference.contexts import BaseInferenceContext
 from megatron.core.process_groups_config import ModelCommProcessGroups
+from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.tensor_parallel import get_cuda_rng_tracker
 from megatron.core.transformer import TransformerConfig
 from megatron.core.transformer.module import MegatronModule
@@ -378,10 +379,27 @@ class MambaMixer(MegatronModule):
             D_has_hdim=self.D_has_hdim,
         )
 
+    def get_packed_seq_idx(self, packed_seq_params: PackedSeqParams, max_seqlen: int):
+        """
+        this method takes packed_seq_params.cu_seqlens_q which is of the form [   0, 6445, 8060, 8176]
+        and returns a tensor which has [0, 0, 0, 0 (repeats 6445 times), 1, 1, 1, 1 (repeats 8060 - 6445 times), 2, 2, 2, 2 (repeats 8176 - 8060 times), 3, 3, 3, 3 (repeats 8192 - 8176 times)]
+        """
+        # Extract the cumulative sequence lengths tensor.
+        max_seqlen_tensor = torch.tensor([max_seqlen]).type_as(packed_seq_params.cu_seqlens_q)
+        cu_seqlens = torch.cat([packed_seq_params.cu_seqlens_q, max_seqlen_tensor]).type_as(packed_seq_params.cu_seqlens_q)
+        # Compute the differences between consecutive entries to determine each sequence length.
+        seq_lengths = cu_seqlens[1:] - cu_seqlens[:-1]
+        # Create indices for each sequence (0, 1, 2, ...) and repeat each according to its sequence length.
+        seq_idx = torch.repeat_interleave(torch.arange(seq_lengths.numel(), device=cu_seqlens.device), seq_lengths)
+        # make seq_idx be of type torch int32
+        seq_idx = seq_idx.to(torch.int32).unsqueeze(0)
+        return seq_idx
+
     def forward(
         self,
         hidden_states,
         inference_context=None,
+        packed_seq_params: Optional[PackedSeqParams] = None,
         *,
         inference_params: Optional[BaseInferenceContext] = None,
     ):
@@ -423,6 +441,10 @@ class MambaMixer(MegatronModule):
             if self.conv1d.bias is not None:
                 self.conv1d.bias.data_ptr()
 
+            seq_idx = None
+            if packed_seq_params is not None:
+                seq_idx = self.get_packed_seq_idx(packed_seq_params, hidden_states.shape[0])
+
             y = mamba_split_conv1d_scan_combined(
                 zxBCdt,
                 rearrange(self.cp.get_conv1d_weight(), "d 1 w -> d w"),
@@ -439,6 +461,7 @@ class MambaMixer(MegatronModule):
                 headdim=None if self.D_has_hdim else self.headdim,
                 ngroups=self.cp.ngroups_local_tpcp,
                 norm_before_gate=self.norm_before_gate,
+                seq_idx=seq_idx,
             )
 
             y = rearrange(y, "b l d -> l b d").contiguous()
