@@ -47,9 +47,7 @@ TENSORBOARD_DIR="${OUTPUT}/tensorboard"
 
 TP=4
 
-#TODO: NEED CHECKPOINT WITH VISION PROJECTION FOR CONV MERGE
-# CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/amalasanjayd/checkpoints/pretrain_llama_3p1_8b_cradio_rc3_commercial_0416"
-CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/tpoon/workspace/output/interactive_pretrain_llama_3p1_8b_radio_v1_dynamic_res_25-06-13-08-49-41/checkpoints"
+CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/pretrain_llama_3p1_8b_cradio_rc3_dynamic_res_commercial_0618/checkpoints"
 
 DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe/eagle_sft_v13.16_sft1/wds/out.yaml"
 
@@ -206,7 +204,6 @@ OPTIONS=" \
     --online-evaluation-config ${SOURCE}/examples/multimodal/eagle/eval_config/sft_time_eval.yaml \
     --inference-max-seq-length ${DECODER_SEQ_LEN} \
 "
-
 
 export NVTE_APPLY_QK_LAYER_SCALING=0
 export NVTE_ALLOW_NONDETERMINISTIC_ALGO=${NONDETERMINISTIC_ATTN}

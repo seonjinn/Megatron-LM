@@ -211,3 +211,89 @@ def gather_from_context_parallel_ranks(local_t, global_pad):
         global_t = global_t[:, :-global_pad]
 
     return global_t
+
+def gather_from_context_parallel_ranks_dynamic_res(local_t):
+    """Gather the tensor local_t from context parallel ranks.
+
+    A twist here is that the tensors have different sequence lengths.
+    So we gather the shapes first, then all-to-all the tensors (all-gather requires same shape).
+
+    """
+    cp_size = get_context_parallel_world_size()
+    shape = torch.as_tensor(local_t.shape, device=local_t.device)
+    shapes = [torch.empty_like(shape) for _ in range(cp_size)]
+
+    torch.distributed.all_gather(shapes, shape, group=get_context_parallel_group())
+
+    inputs = [local_t] * cp_size
+    outputs = [
+        torch.empty(*s, dtype=local_t.dtype, device=local_t.device)
+        for s in shapes
+    ]
+    torch.distributed.nn.functional.all_to_all(outputs, inputs, group=get_context_parallel_group())
+
+    global_t = torch.cat(outputs, dim=0)
+
+    return global_t
+
+
+def split_to_context_parallel_ranks_dynamic_res(global_t, global_imgs_sizes, global_packed_seq_params, fp8_enabled=False):
+    """Split the tensors global_t and global_imgs_sizes into context parallel world size parts.
+
+    global_packed_seq_params will be used to compute the local PackedSeqParams corresponding to the split.
+    fp8_enabled is used to compute possible padding.
+    """
+    cp_size = get_context_parallel_world_size()
+    cp_rank = get_context_parallel_rank()
+
+    cu_seqlens = global_packed_seq_params.cu_seqlens_q
+    # How many sequences per CP rank?
+    # TODO: this has imbalance per ranks. Add a better algorithm to balance the load.
+    seq_per_rank = len(global_imgs_sizes) // cp_size
+
+    seqlens = cu_seqlens[1:] - cu_seqlens[:-1]
+
+    lb = cp_rank * seq_per_rank
+    # Last rank gets the remaining sequences. TODO: this has imbalance per ranks.
+    ub = (cp_rank + 1) * seq_per_rank if cp_rank < cp_size - 1 else len(cu_seqlens)
+
+    seqlens_local = torch.cat([torch.tensor([0], device=seqlens.device), seqlens[lb:ub]])
+    cu_seqlens_local = torch.cumsum(seqlens_local, dim=0).to(torch.int32)
+
+    final_seqlen = cu_seqlens_local[-1]
+
+    pad_img = None
+    if fp8_enabled:
+        padding_needed = get_padding(final_seqlen, 1, 1, False, fp8_enabled=True)
+        patch_dim = 16
+
+        if padding_needed > 0:
+            pad_img = torch.zeros([1, padding_needed, patch_dim * patch_dim * 3], device=global_t.device, dtype=global_t.dtype)
+            cu_seqlens_local = torch.cat([cu_seqlens_local, torch.tensor([final_seqlen + padding_needed], device=cu_seqlens_local.device, dtype=cu_seqlens_local.dtype)])
+
+    has_padding = pad_img is not None
+
+    local_packed_seq_params = PackedSeqParams(
+        qkv_format="thd",
+        cu_seqlens_q=cu_seqlens_local,
+        cu_seqlens_kv=cu_seqlens_local,
+        cu_seqlens_q_padded=None,
+        cu_seqlens_kv_padded=None,
+    )
+
+    max_seqlen_local = max(seqlens_local).to(torch.int32)
+    local_packed_seq_params.max_seqlen_q = max_seqlen_local
+    local_packed_seq_params.max_seqlen_kv = max_seqlen_local
+
+    local_imgs_sizes = global_imgs_sizes[lb:ub]
+    if has_padding:
+        local_imgs_sizes = torch.cat([local_imgs_sizes, torch.tensor([[patch_dim, patch_dim * padding_needed]], device=local_imgs_sizes.device, dtype=local_imgs_sizes.dtype)])
+
+    offset = torch.cumsum(seqlens[:lb], dim=0)[-1] if lb > 0 else 0
+
+    if not has_padding:
+        local_t = global_t[:, offset + cu_seqlens_local[0] : offset + cu_seqlens_local[-1]]
+    else:
+        local_t = torch.cat([global_t[:, offset + cu_seqlens_local[0] : offset + cu_seqlens_local[-2]], pad_img], dim=1)
+
+    return local_t, local_imgs_sizes, local_packed_seq_params, has_padding

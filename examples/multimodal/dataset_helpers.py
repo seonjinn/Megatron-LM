@@ -858,7 +858,9 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
         # Pad image packed seq length to be % 16 if using fp8 and dynamic resolution
         has_fp8 = self.args.fp8 is not None
         has_pad_img = torch.tensor(False)
-        if has_fp8 and self.args.dynamic_resolution:
+        # TODO: Context parallel currently requires padding per CP rank so we do it later if needed.
+        no_cp = self.args.context_parallel_size == 1
+        if has_fp8 and self.args.dynamic_resolution and no_cp:
             img_seq_len = 0
             for img in imgs:
                 img_seq_len += (img.shape[1] // self.args.patch_dim) * (img.shape[2] // self.args.patch_dim)

@@ -122,15 +122,21 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
             max_seqlen_kv=max_lengths,
         )
 
-    # Dummy vision cu lengths.
-    if vision_cu_lengths.shape == torch.Size([1, 1]):  # Must always have at least two elements.
-        vision_cu_lengths, vision_max_lengths = None, None
-    else:
+    # If cu_lengths and max_lengths are non-dummy, construct PackedSeqParams. Otherwise, leave it at None.
+    if vision_cu_lengths.shape != torch.Size([1, 1]):
         assert (
             vision_cu_lengths.shape[0] == vision_max_lengths.shape[0] == 1
         ), "micro-batch-size must be 1 for packing"
         vision_cu_lengths = vision_cu_lengths[0]
         vision_max_lengths = vision_max_lengths[0]
+
+        vision_packed_seq_params = PackedSeqParams(
+            qkv_format="thd",
+            cu_seqlens_q=vision_cu_lengths,
+            cu_seqlens_kv=vision_cu_lengths,
+            max_seqlen_q=vision_max_lengths,
+            max_seqlen_kv=vision_max_lengths,
+        )
 
     torch.cuda.nvtx.range_pop()
 
@@ -159,8 +165,7 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
         num_tiles,
         packed_seq_params,
         imgs_sizes,
-        vision_cu_lengths,
-        vision_max_lengths,
+        vision_packed_seq_params,
         has_pad_img,
         samples_seen,
     )
@@ -308,23 +313,12 @@ def forward_step(data_iterator, model: LLaVAModel):
         num_image_tiles,
         packed_seq_params,
         imgs_sizes,
-        vision_cu_lengths,
-        vision_max_length,
+        vision_packed_seq_params,
         has_pad_img,
         samples_seen,
     ) = get_batch(data_iterator, model.module.module.image_token_index, model.module.module.img_seq_len)
     timers('batch-generator').stop()
 
-    # Create vision_packed_seq_params if vision_cu_lengths is provided
-    vision_packed_seq_params = None
-    if vision_cu_lengths is not None:
-        vision_packed_seq_params = PackedSeqParams(
-            qkv_format="thd",
-            cu_seqlens_q=vision_cu_lengths,
-            cu_seqlens_kv=vision_cu_lengths,
-            max_seqlen_q=vision_max_length,
-            max_seqlen_kv=vision_max_length,
-        )
 
     output_tensor, loss_mask = model(
         images,

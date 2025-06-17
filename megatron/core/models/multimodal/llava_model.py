@@ -16,6 +16,8 @@ from megatron.core.models.multimodal.context_parallel import (
     gather_from_context_parallel_ranks,
     split_to_context_parallel_ranks,
     get_padding,
+    split_to_context_parallel_ranks_dynamic_res,
+    gather_from_context_parallel_ranks_dynamic_res,
 )
 from megatron.core.models.vision.clip_vit_model import CLIPViTModel, get_num_image_embeddings
 from megatron.core.models.vision.conv_merging import ConvTokenMerge
@@ -750,7 +752,6 @@ class LLaVAModel(MegatronModule):
             packed_seq_params (PackedSeqParams): Dict with padded token information.
 
         """
-
         # No pre or post processing needed with PP middle chunks.
         if not self.pre_process and not self.post_process:
             return combined_embeddings, new_labels, new_loss_mask, packed_seq_params
@@ -781,7 +782,7 @@ class LLaVAModel(MegatronModule):
             batch = dict()
             if self.pre_process:
                 batch["combined_embeddings"] = combined_embeddings
-            if self.post_process:
+            if self.post_process and new_labels is not None:
                 batch["new_labels"] = new_labels
                 batch["new_loss_mask"] = new_loss_mask
             # Distribute sequence across CP ranks
@@ -807,7 +808,7 @@ class LLaVAModel(MegatronModule):
                 combined_embeddings = combined_embeddings.transpose(
                     1, 0
                 ).contiguous()  # [B,S/CP,H] -> [S/CP,B,H]
-            if self.post_process:
+            if self.post_process and new_labels is not None:
                 new_labels = batch["new_labels"]
                 new_loss_mask = batch["new_loss_mask"]
 
@@ -906,6 +907,9 @@ class LLaVAModel(MegatronModule):
 
         inference_context = deprecate_inference_params(inference_context, inference_params)
 
+        # Keep a copy of the original imgs_sizes in case we split to context parallel ranks later.
+        global_imgs_sizes = imgs_sizes.clone()
+
         use_inference_kv_cache = (
             inference_context is not None
             and "image_tokens_count" in inference_context.key_value_memory_dict
@@ -926,7 +930,9 @@ class LLaVAModel(MegatronModule):
         elif self.add_encoder and has_images:
             pad = None
             if self._dynamic_resolution:
-                assert self.context_parallel_lm == 1, "dynamic resolution is not supported with context parallel yet"
+                if self.context_parallel_lm > 1:
+                    # This will split the images and imgs_sizes to context parallel ranks. Each rank will have a different imgs_sizes.
+                    images, imgs_sizes, vision_packed_seq_params, has_pad_img = split_to_context_parallel_ranks_dynamic_res(images, imgs_sizes, vision_packed_seq_params, self._vision_fp8)
 
                 image_embeddings = self.vision_model(
                     images, imgs_sizes=imgs_sizes, packed_seq_params=vision_packed_seq_params
@@ -1007,6 +1013,11 @@ class LLaVAModel(MegatronModule):
             if vision_projection_padding_needed > 0:
                 image_embeddings = image_embeddings[:-vision_projection_padding_needed, :, :]
 
+            if self.context_parallel_lm > 1 and self._dynamic_resolution:
+                image_embeddings = gather_from_context_parallel_ranks_dynamic_res(image_embeddings)
+                # Go back from local imgs_sizes to global imgs_sizes.
+                imgs_sizes = global_imgs_sizes
+
             if self.image_break_token is not None:
                 patch_sizes = imgs_sizes // self.vision_model.patch_dim
                 if self._pixel_shuffle:
@@ -1028,8 +1039,9 @@ class LLaVAModel(MegatronModule):
                 image_embeddings = self._apply_tile_tagging(image_embeddings, num_image_tiles)
 
             torch.cuda.nvtx.range_push("gather_from_context_parallel_ranks")
-            if self.context_parallel_lm > 1:
+            if self.context_parallel_lm > 1 and not self._dynamic_resolution:
                 image_embeddings = gather_from_context_parallel_ranks(image_embeddings, pad)
+
             torch.cuda.nvtx.range_pop()
 
             # TODO: Support batched inference.
