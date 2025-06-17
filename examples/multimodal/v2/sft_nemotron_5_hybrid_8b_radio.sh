@@ -6,10 +6,10 @@
 #SBATCH --mem=0
 #SBATCH --ntasks-per-node=8
 #SBATCH --dependency=singleton
-#SBATCH --nodes=16
+#SBATCH --nodes=32
 #SBATCH --exclusive
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=sft_nemotron_5_hybrid_8b_cradio_vlm_v1_rc3_0602
+#SBATCH --job-name=sft_nemotron_5_hybrid_8b_cradio_vlm_v1_rc3_0617
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 
@@ -28,7 +28,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="sft_nemotron_5_hybrid_8b_cradio_vlm_v1_rc3_0602"
+    MODEL_NAME="sft_nemotron_5_hybrid_8b_cradio_vlm_v1_rc3_0617"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -43,7 +43,7 @@ TENSORBOARD_DIR="${OUTPUT}/tensorboard"
 
 TP=8
 
-CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/output/pretrain_nemotron_5_hybrid_8b_cradio_dev/checkpoints"
+CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/pretrain_nemotron_5_hybrid_8b_cradio_vlm_v1_rc3_0616/checkpoints"
 
 DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe/eagle_sft_v13.16_sft1/wds/out.yaml"
 
@@ -54,7 +54,7 @@ DECODER_SEQ_LEN=24000
 
 if [[ $DEBUG -eq 1 ]]; then
     MBZ=1
-    BZ=8
+    BZ=1
     NW=2
     AD=0.0
     HD=0.0
@@ -187,6 +187,7 @@ OPTIONS=" \
     --image-tag-type internvl \
     --eos-id 11 \
     --disable-vision-class-token \
+    --use-vision-backbone-fp8-arch \
 "
 
 export NVTE_APPLY_QK_LAYER_SCALING=0
@@ -217,7 +218,7 @@ else
     DATETIME=`date +'date_%y-%m-%d_time_%H-%M-%S'`
 
     srun -l --verbose \
-    --container-image /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/containers/megatron-dev-img-05142025-pytorch-dev-te-cd37379-energon-develop-08471f7-mamba-vlmeval.sqsh \
+    --container-image /lustre/fsw/portfolios/llmservice/users/matthieul/docker/megatron-dev-img-05142025-pytorch-dev-te-cd37379-energon-develop-08471f7-mamba-fix-vlmeval.sqsh \
     --container-mounts "/lustre" \
     --output=${LOGS_DIR}/%x_%j_$DATETIME.log \
     sh -c "${run_cmd}"

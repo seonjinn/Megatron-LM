@@ -10,7 +10,7 @@
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=pretrain_nemotron_5_hybrid_8b_cradio_vlm_v1_rc3_0602
+#SBATCH --job-name=pretrain_nemotron_5_hybrid_8b_cradio_vlm_v1_rc3_0616
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 
@@ -26,11 +26,11 @@ DEBUG=0
 # Remember to update model and job name if running in batch mode!!
 if [[ $BATCH -eq 0 ]]; then
     DATETIME=`date +'%y-%m-%d-%H-%M-%S'`
-    MODEL_NAME="pretrain_nemotron_5_hybrid_8b_cradio_${DATETIME}"
+    MODEL_NAME="temp_interactive_pretrain_nemotron_5_hybrid_8b_cradio_${DATETIME}"
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="pretrain_nemotron_5_hybrid_8b_cradio_vlm_v1_rc3_0602"
+    MODEL_NAME="pretrain_nemotron_5_hybrid_8b_cradio_vlm_v1_rc3_0616"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -64,6 +64,8 @@ if [[ $DEBUG -eq 1 ]]; then
     NONDETERMINISTIC_ATTN=1
 
     NUM_GPU=8
+
+    SAVE_INTERVAL=10
 else
     MBZ=1
     BZ=1024
@@ -74,6 +76,8 @@ else
     EXTRA_ARGS=""
     NONDETERMINISTIC_ATTN=1
     NUM_GPU=8
+
+    SAVE_INTERVAL=5000
 fi
 
 SEQ_LEN=1024
@@ -155,7 +159,7 @@ OPTIONS=" \
     --eval-interval 100000 \
     --data-path ${DATA_TRAIN} \
     --prompt-path ${SOURCE}/examples/multimodal/manual_prompts.json \
-    --save-interval 5000 \
+    --save-interval ${SAVE_INTERVAL} \
     --save ${FINETUNE_DIR} \
     --load ${FINETUNE_DIR} \
     --dataloader-save ${FINETUNE_DIR}/dataloader \
@@ -188,6 +192,7 @@ OPTIONS=" \
     --disable-vision-class-token \
     --eos-id 11 \
     --attention-backend flash \
+    --use-vision-backbone-fp8-arch \
 "
 
 export NVTE_APPLY_QK_LAYER_SCALING=0
@@ -218,7 +223,7 @@ else
     DATETIME=`date +'date_%y-%m-%d_time_%H-%M-%S'`
 
     srun -l --verbose \
-    --container-image /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/containers/megatron-dev-img-05142025-pytorch-dev-te-cd37379-energon-develop-08471f7-mamba-vlmeval.sqsh \
+    --container-image /lustre/fsw/portfolios/llmservice/users/matthieul/docker/megatron-dev-img-05142025-pytorch-dev-te-cd37379-energon-develop-08471f7-mamba-fix-vlmeval.sqsh \
     --container-mounts "/lustre" \
     --output=${LOGS_DIR}/%x_%j_$DATETIME.log \
     sh -c "echo ${run_cmd}; ${run_cmd}"
