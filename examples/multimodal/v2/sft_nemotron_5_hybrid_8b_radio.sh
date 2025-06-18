@@ -12,6 +12,7 @@
 #SBATCH --job-name=sft_nemotron_5_hybrid_8b_cradio_vlm_v1_rc3_0617
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
+export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
 
 USER=$SLURM_JOB_USER
 
@@ -48,8 +49,7 @@ CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/outp
 DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe/eagle_sft_v13.16_sft1/wds/out.yaml"
 
 SEQ_LEN=1024
-# DECODER_SEQ_LEN=16384
-DECODER_SEQ_LEN=24000
+DECODER_SEQ_LEN=16384
 
 
 if [[ $DEBUG -eq 1 ]]; then

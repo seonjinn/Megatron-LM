@@ -10,9 +10,10 @@
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=pretrain_nemotron_5_hybrid_8b_cradio_vlm_v1_rc3_0616
+#SBATCH --job-name=pretrain_nemotron_5_hybrid_8b_cradio_vlm_v1_rc3_0618
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
+export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
 
 USER=$SLURM_JOB_USER
 
@@ -30,7 +31,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="pretrain_nemotron_5_hybrid_8b_cradio_vlm_v1_rc3_0616"
+    MODEL_NAME="pretrain_nemotron_5_hybrid_8b_cradio_vlm_v1_rc3_0618"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -81,7 +82,7 @@ else
 fi
 
 SEQ_LEN=1024
-DECODER_SEQ_LEN=4096
+DECODER_SEQ_LEN=16384
 
 USE_TILING=0
 if [[ $USE_TILING -eq 1 ]]; then
