@@ -66,8 +66,8 @@ class TransformerConfig(ModelParallelConfig):
     - list: e.g., [['embedding', 'decoder'], ['decoder', 'decoder', 'decoder', 'loss']].
     - PipelineParallelLayerLayout: a PipelineParallelLayerLayout object.
     If given either a string or a list, it will be transferred into a PipelineParallelLayerLayout
-    in post init. Let i = a * pp_size + b, then layout[i] gives a list of the layers 
-    in the a-th vpp stage and the b-th pp stage, i.e., vpp(0)pp(0), vpp(0)pp(1), ..., 
+    in post init. Let i = a * pp_size + b, then layout[i] gives a list of the layers
+    in the a-th vpp stage and the b-th pp stage, i.e., vpp(0)pp(0), vpp(0)pp(1), ...,
     vpp(i)pp(j), vpp(i)pp(j+1), ..., vpp(-1)pp(-2), vpp(-1)pp(-1).
     In the inner lists of layers, 'embedding' or 'E' denotes the embedding layer, 'loss' or 'L'
     denotes the loss function, and 'decoder' or 't' denotes the transformer decoder layer.
@@ -430,7 +430,7 @@ class TransformerConfig(ModelParallelConfig):
     """Number of selected groups for group-limited routing."""
 
     moe_router_pre_softmax: bool = False
-    """Enable pre-softmax(pre-sigmoid) routing for MoE, which means softmax is before the 
+    """Enable pre-softmax(pre-sigmoid) routing for MoE, which means softmax is before the
     top-k selection.
     By default, softmax is done after top-k."""
 
@@ -458,7 +458,7 @@ class TransformerConfig(ModelParallelConfig):
     The default value 1e-3 is same as that used in DeepSeekV3."""
 
     moe_router_force_load_balancing: bool = False
-    """[Experimental] Force load balancing with random logits for MoE router, supports naive topk 
+    """[Experimental] Force load balancing with random logits for MoE router, supports naive topk
     and group-limited topk. This is an experimental feature and only for benchmark."""
 
     moe_grouped_gemm: bool = False
@@ -609,7 +609,7 @@ class TransformerConfig(ModelParallelConfig):
     """The number of groups used in Mamba layers."""
 
     mamba_num_heads: Optional[int] = None
-    """The number of heads used in Mamba layers. 
+    """The number of heads used in Mamba layers.
     If None, the number of heads will be hidden_size * expand // mamba_head_dim."""
 
     use_mamba_mem_eff_path: bool = True
@@ -737,10 +737,11 @@ class TransformerConfig(ModelParallelConfig):
                     f"but got {self.moe_shared_expert_intermediate_size}"
                 )
             if self.moe_shared_expert_overlap and self.moe_token_dispatcher_type not in [
-                "alltoall"
+                "alltoall",
+                "flex",
             ]:
                 raise ValueError(
-                    f"moe_shared_expert_overlap only works with alltoall token dispatcher."
+                    f'moe_shared_expert_overlap only works with alltoall or flex token dispatcher.'
                 )
 
         if self.moe_expert_capacity_factor is not None:
