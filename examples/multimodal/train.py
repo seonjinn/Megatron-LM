@@ -47,6 +47,7 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
     vision_cu_lengths = None
     vision_max_lengths = None
     has_pad_img = None
+    samples_seen = None
 
     args = get_args()
 
@@ -54,7 +55,7 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
     pp_size = get_pipeline_model_parallel_world_size()
     if not is_first_or_last_stage(pp_size, args.encoder_pipeline_model_parallel_size):
         # Note these are all set to None above.
-        return tokens, labels, loss_mask, attention_mask, position_ids, imgs, num_tiles, packed_seq_params, imgs_sizes, vision_cu_lengths, vision_max_lengths, has_pad_img
+        return tokens, labels, loss_mask, attention_mask, position_ids, imgs, num_tiles, packed_seq_params, imgs_sizes, vision_cu_lengths, vision_max_lengths, has_pad_img, samples_seen
 
     # Broadcast data.
     torch.cuda.nvtx.range_push("get_data")
@@ -72,6 +73,11 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
     cu_lengths = tensor_parallel.broadcast_data(["cu_lengths"], data, torch.int32)["cu_lengths"]
     cu_lengths_padded = tensor_parallel.broadcast_data(["cu_lengths_padded"], data, torch.int32)["cu_lengths_padded"]
     max_lengths = tensor_parallel.broadcast_data(["max_lengths"], data, torch.int32)["max_lengths"]
+
+    if get_tensor_model_parallel_rank() == 0 and 'samples_seen' not in data:
+        data['samples_seen'] = torch.tensor(1, dtype=torch.int32, device=data_text.device)
+    
+    samples_seen = tensor_parallel.broadcast_data(["samples_seen"], data, torch.int32)["samples_seen"]
 
     imgs_sizes = tensor_parallel.broadcast_data(["imgs_sizes"], data, torch.int32)["imgs_sizes"]
 
@@ -156,6 +162,7 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
         vision_cu_lengths,
         vision_max_lengths,
         has_pad_img,
+        samples_seen,
     )
 
 
@@ -200,7 +207,7 @@ def get_mask_start_and_end_idx(arr):
     return sequences
 
 
-def scaled_loss_func(loss_mask, output_tensor):
+def scaled_loss_func(loss_mask, output_tensor, samples_seen):
     """
     Scaled loss function
 
@@ -246,10 +253,17 @@ def scaled_loss_func(loss_mask, output_tensor):
     num_tokens = total_tokens.clone().detach().to(torch.int)
     reporting_loss = torch.cat([total_loss.clone().detach().view(1), num_tokens.view(1)])
 
-    return (total_loss, num_tokens, {'lm loss': reporting_loss})
+    return (
+        total_loss,
+        num_tokens,
+        {
+            'lm loss': reporting_loss,
+            '_samples_seen': samples_seen.detach(),
+        }
+    )
 
 
-def loss_func(loss_mask, output_tensor):
+def loss_func(loss_mask, output_tensor, samples_seen):
     args = get_args()
 
     losses = output_tensor.view(-1).float()
@@ -259,7 +273,14 @@ def loss_func(loss_mask, output_tensor):
     num_tokens = loss_mask.sum().clone().detach().to(torch.int)
     reporting_loss = torch.cat([loss.clone().detach().view(1), num_tokens.view(1)])
 
-    return (loss, num_tokens, {'lm loss': reporting_loss})
+    return (
+        loss,
+        num_tokens,
+        {
+            'lm loss': reporting_loss,
+            '_samples_seen': samples_seen.detach(),
+        },
+    )
 
 
 def forward_step(data_iterator, model: LLaVAModel):
@@ -290,6 +311,7 @@ def forward_step(data_iterator, model: LLaVAModel):
         vision_cu_lengths,
         vision_max_length,
         has_pad_img,
+        samples_seen,
     ) = get_batch(data_iterator, model.module.module.image_token_index, model.module.module.img_seq_len)
     timers('batch-generator').stop()
 
@@ -319,9 +341,9 @@ def forward_step(data_iterator, model: LLaVAModel):
     )
     args = get_args()
     if args.use_loss_scaling:
-        loss_function = partial(scaled_loss_func, loss_mask)
+        loss_function = partial(scaled_loss_func, loss_mask, samples_seen=samples_seen)
     else:
-        loss_function = partial(loss_func, loss_mask)
+        loss_function = partial(loss_func, loss_mask, samples_seen=samples_seen)
 
     return output_tensor, loss_function
 

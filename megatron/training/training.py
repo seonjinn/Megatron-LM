@@ -876,7 +876,7 @@ def pretrain(
             print_rank_0("retro cyclic train iters : %d" % args.train_iters)
 
         iteration = 0
-        if args.do_train and args.train_iters > 0:
+        if args.do_train and (args.train_iters or args.train_samples):
             iteration, num_floating_point_operations_so_far = train(
                 forward_step_func,
                 model,
@@ -1421,7 +1421,7 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
         )
     should_checkpoint, should_exit, exit_code = rerun_state_machine.should_checkpoint_and_exit()
     if should_exit:
-        return {}, True, should_checkpoint, should_exit, exit_code, None, None
+        return {}, True, should_checkpoint, should_exit, exit_code, None, None, None
 
     # Empty unused memory.
     if args.empty_unused_memory_level >= 1:
@@ -1431,6 +1431,16 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
     if args.vision_pretraining and args.vision_pretraining_type == "dino":
         unwrapped_model = unwrap_model(model[0])
         unwrapped_model.cancel_gradients_last_layer(args.curr_iteration)
+
+    if any("_samples_seen" in l for l in losses_reduced):
+        # to support dynamic batch, we use the `forward_data_store`, we pop the info we need before handling losses
+        samples_seen = [l.pop("_samples_seen", 1) for l in losses_reduced]
+        assert (len(samples_seen) == get_num_microbatches()), f"{len(samples_seen)=} != {get_num_microbatches()=}"
+        samples_seen_in_iteration = sum(samples_seen)
+        if isinstance(samples_seen_in_iteration, torch.Tensor):
+            samples_seen_in_iteration = samples_seen_in_iteration.item()
+    else:
+        samples_seen_in_iteration = get_num_microbatches() * args.micro_batch_size * args.data_parallel_size
 
     # Update parameters.
 
@@ -1454,7 +1464,7 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
 
     # Update learning rate.
     if update_successful:
-        increment = get_num_microbatches() * args.micro_batch_size * args.data_parallel_size
+        increment = samples_seen_in_iteration
         opt_param_scheduler.step(increment=increment)
         skipped_iter = 0
     else:
@@ -1512,8 +1522,9 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
             exit_code,
             grad_norm,
             num_zeros_in_grad,
+            samples_seen_in_iteration,
         )
-    return {}, skipped_iter, should_checkpoint, should_exit, exit_code, grad_norm, num_zeros_in_grad
+    return {}, skipped_iter, should_checkpoint, should_exit, exit_code, grad_norm, num_zeros_in_grad, samples_seen_in_iteration
 
 
 def training_log(
@@ -1713,8 +1724,17 @@ def training_log(
             if wandb_writer:
                 wandb_writer.log({'iteration-time': elapsed_time_per_iteration}, iteration)
         log_string = f" [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]"
-        log_string += ' iteration {:8d}/{:8d} |'.format(iteration, args.train_iters)
-        log_string += ' consumed samples: {:12d} |'.format(args.consumed_train_samples)
+        if args.train_iters:
+            log_string += ' iteration {:8d}/{:8d} ({:.2f}%) |'.format(
+                iteration, args.train_iters, iteration / args.train_iters * 100)
+        else:
+            log_string += ' iteration {:8d} |'.format(iteration)
+        if args.train_samples:
+            log_string += ' consumed samples: {:12d}/{:12d} ({:.2f}%) |'.format(
+                args.consumed_train_samples, args.train_samples, args.consumed_train_samples / args.train_samples * 100)
+        else:
+            log_string += ' consumed samples: {:12d} |'.format(
+                args.consumed_train_samples)
         if args.skipped_train_samples > 0:
             log_string += ' skipped samples: {:12d} |'.format(args.skipped_train_samples)
         log_string += ' elapsed time per iteration (ms): {:.1f} |'.format(
@@ -2233,7 +2253,8 @@ def train(
         print_rank_0(f">>> Weight hashes match after {iteration} iterations...")
 
     # Run training iterations till done.
-    while iteration < args.train_iters:
+    while (not args.train_iters or iteration < args.train_iters) and \
+            (not args.train_samples or args.consumed_train_samples < args.train_samples):
         if args.profile and torch.distributed.get_rank() in args.profile_ranks:
             if args.use_pytorch_profiler:
                 prof.step()
@@ -2291,6 +2312,7 @@ def train(
             exit_code,
             grad_norm,
             num_zeros_in_grad,
+            samples_seen_in_iteration,
         ) = train_step(
             forward_step_func, train_data_iterator, model, optimizer, opt_param_scheduler, config
         )
@@ -2327,10 +2349,7 @@ def train(
                     pre_hook_enabled = True
 
         iteration += 1
-        batch_size = (
-            mpu.get_data_parallel_world_size() * args.micro_batch_size * get_num_microbatches()
-        )
-        args.consumed_train_samples += batch_size
+        args.consumed_train_samples += samples_seen_in_iteration
         num_skipped_samples_in_batch = (
             get_current_global_batch_size() - get_current_running_global_batch_size()
         )
@@ -2761,7 +2780,7 @@ def build_train_valid_test_data_loaders(build_train_valid_test_datasets_provider
         test_dataloader = build_pretraining_data_loader(test_ds, 0)
 
         # Flags to know if we need to do training/validation/testing.
-        do_train = train_dataloader is not None and args.train_iters > 0
+        do_train = train_dataloader is not None and (args.train_iters or args.train_samples)
         do_valid = valid_dataloader is not None and args.eval_iters > 0
         do_test = test_dataloader is not None and args.eval_iters > 0
         flags = torch.tensor(

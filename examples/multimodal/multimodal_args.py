@@ -73,6 +73,9 @@ def add_multimodal_extra_args(parser):
         "--packing-seq-length", type=int, default=0, help="Packing sequence length. Must be > 0 if using packing."
     )
     group.add_argument(
+        "--packing-knapsack-algorithm", type=str, default="greedy_knapsack", help="Knapsack algorithm to use for packing."
+    )
+    group.add_argument(
         "--recompute-vision", action="store_true", default=False, help="Enable activation checkpointing in the vision model"
     )
     group.add_argument(
@@ -105,6 +108,18 @@ def add_multimodal_extra_args(parser):
     group.add_argument("--conv-merging", action="store_true", default=False, help="Use convolution merging which uses a convolution to merge tokens after the vision encoder")
     group.add_argument(
         "--allow-missing-conv-merge-checkpoint", action="store_true", default=False
+    )
+    group.add_argument(
+        "--video-min-num-frames", type=int, default=1, help="Minimum number of frames to sample from the video as input to the model.",
+    )
+    group.add_argument(
+        "--video-max-num-frames", type=int, default=128, help="Maximum number of frames to sample from the video as input to the model.",
+    )
+    group.add_argument(
+        "--video-default-fps", type=int, default=2, help="Default frames per second to sample from the video as input to the model.",
+    )
+    group.add_argument(
+        "--video-frame-temporal-jitter", action="store_true", default=False, help="Enable temporal jittering of the frames to sample from the video as input to the model.",
     )
 
     return parser
