@@ -20,9 +20,9 @@ from megatron.energon import (
     Lazy,
     Sample,
     SampleDecoder,
-    edataclass,
     stateless,
 )
+from megatron.energon.edataclass import edataclass
 from megatron.energon.av import AVDecoder
 from megatron.training import get_args, get_tokenizer
 

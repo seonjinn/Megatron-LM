@@ -803,7 +803,7 @@ def pretrain(
 
     if args.train_full_dataset:
         # A hacky way to ensure we only apply this to multimodal datasets.
-        # train_valid_test_dataset_provider expects the size of the dataset as an argument, but 
+        # train_valid_test_dataset_provider expects the size of the dataset as an argument, but
         # here we want to create the dataset first and then get the size. I only checked that it
         # worked for the multimodal train_valid_test_dataset_provider.
         assert "examples/multimodal/dataloader_provider.py" in train_valid_test_dataset_provider.__code__.co_filename, "train_full_dataset is only supported for the multimodal case so far."
@@ -2358,7 +2358,7 @@ def train(
         else:
             assert num_skipped_samples_in_batch == 0
         args.skipped_train_samples += num_skipped_samples_in_batch
-        num_floating_point_operations_in_batch = num_floating_point_operations(args, batch_size)
+        num_floating_point_operations_in_batch = num_floating_point_operations(args, samples_seen_in_iteration)
         num_floating_point_operations_so_far += num_floating_point_operations_in_batch
         num_floating_point_operations_since_last_log_event += num_floating_point_operations_in_batch
 

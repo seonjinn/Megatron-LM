@@ -5,7 +5,8 @@ from typing import Literal, Optional, Union
 import torch
 from PIL import Image
 
-from megatron.energon import Lazy, Sample, edataclass
+from megatron.energon import Lazy, Sample
+from megatron.energon.edataclass import edataclass
 from megatron.energon.av import AVDecoder
 
 

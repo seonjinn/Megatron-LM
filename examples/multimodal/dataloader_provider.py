@@ -2,7 +2,7 @@
 import os
 
 import torch
-from dataset_helpers import print_error_handler
+from dataset_helpers import TaskEncoder, print_error_handler
 from data_loading.task_encoder import MultiModalTaskEncoder
 
 from megatron.core import parallel_state
@@ -30,11 +30,18 @@ def datasets_provider(task_encoder,worker_config=None):
     """Create multimodal train, validation and test datasets."""
     args = get_args()
 
+    if args.packing_buffer_size is None:
+        train_task_encoder = TaskEncoder()
+        val_task_encoder = TaskEncoder()
+    else:
+        train_task_encoder = MultiModalTaskEncoder()
+        val_task_encoder = MultiModalTaskEncoder(is_val=True)
+
     dname = args.data_path[0] if type(args.data_path) is list else args.data_path
     train_dataset = get_train_dataset(
         dname,
         batch_size=args.micro_batch_size,
-        task_encoder=MultiModalTaskEncoder(),
+        task_encoder=train_task_encoder,
         max_samples_per_sequence=100,
         shuffle_buffer_size=100,
         worker_config=worker_config,
@@ -46,7 +53,7 @@ def datasets_provider(task_encoder,worker_config=None):
         batch_size=args.micro_batch_size,
         # This is the total number over all workers
         # limit=args.eval_iters * get_num_microbatches(),
-        task_encoder=MultiModalTaskEncoder(is_val=True),
+        task_encoder=val_task_encoder,
         worker_config=worker_config,
         # TODO: Currently disabled for val, there is no non-packed val dataset yet.
         # packing_buffer_size=args.packing_buffer_size,
@@ -126,15 +133,19 @@ def train_valid_test_dataloaders_provider(train_val_test_num_samples, task_encod
     )
     train_ds, valid_ds1, test_ds = datasets_provider(task_encoder, worker_config)
 
-    train_dataloader = get_savable_loader(
-        train_ds,
-        cache_pool=FileStoreCachePool(
-            num_workers=8,
-            # max_cache_size_gbytes=8,
-            method="raw",
-        ),
-        watchdog_initial_timeout_seconds=180 + (args.packing_buffer_size or 0) * 0.0075,
-    )
+    if args.packing_buffer_size is None:
+        train_dataloader = get_savable_loader(train_ds, worker_config=worker_config)
+    else:
+        train_dataloader = get_savable_loader(
+            train_ds,
+            cache_pool=FileStoreCachePool(
+                num_workers=8,
+                # max_cache_size_gbytes=8,
+                method="raw",
+            ),
+            watchdog_initial_timeout_seconds=180 + (args.packing_buffer_size or 0) * 0.0075,
+        )
+
     if args.load is not None:
         if getattr(args, "dataloader_save", None):
             dp_rank = parallel_state.get_data_parallel_rank()
@@ -154,14 +165,21 @@ def train_valid_test_dataloaders_provider(train_val_test_num_samples, task_encod
             else:
                 print(f"dataset state {data_save_name} does not exist")
 
-    valid_dataloader = [
-        EnergonDataloader(get_loader(
-            valid_ds,
-            cache_pool=FileStoreCachePool(method="raw"),
-            watchdog_initial_timeout_seconds=180 + (args.packing_buffer_size or 0) * 0.0075,
-        ))
-        for valid_ds in valid_ds1
-    ]
+    if args.packing_buffer_size is None:
+        valid_dataloader = [
+            EnergonDataloader(get_loader(valid_ds, worker_config=worker_config))
+            for valid_ds in valid_ds1
+        ]
+    else:
+        valid_dataloader = [
+            EnergonDataloader(get_loader(
+                valid_ds,
+                cache_pool=FileStoreCachePool(method="raw"),
+                watchdog_initial_timeout_seconds=180 + (args.packing_buffer_size or 0) * 0.0075,
+            ))
+            for valid_ds in valid_ds1
+        ]
+
     test_dataloader = None
 
     return EnergonDataloader(train_dataloader), valid_dataloader, EnergonDataloader(test_dataloader)

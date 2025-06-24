@@ -24,6 +24,7 @@ BATCH=$((1-$?))
 DEBUG=0
 USE_TILING=0
 USE_PACKING=1
+USE_ONLINE_PACKING=0
 
 # Remember to update model and job name if running in batch mode!!
 if [[ $BATCH -eq 0 ]]; then
@@ -98,6 +99,10 @@ fi
 
 if [[ $USE_PACKING -eq 1 ]]; then
     EXTRA_ARGS+=" --packing-seq-length ${DECODER_SEQ_LEN} "
+fi
+
+if [[ $USE_ONLINE_PACKING -eq 1 ]]; then
+    EXTRA_ARGS+=" --packing-seq-length ${DECODER_SEQ_LEN} --packing-buffer-size 1000 "
 fi
 
 USE_PRECISION_AWARE_OPTIMIZER=1
