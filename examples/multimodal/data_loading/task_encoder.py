@@ -290,7 +290,7 @@ class MultiModalTaskEncoder(
             self.packing_knapsack_algorithm = balanced_greedy_knapsack
         else:
             raise ValueError(
-                f"Unknown knapsack algorithm: {self.args.packing_knapsack_algorithm}"
+                f"Unknown knapsack algorithm: {self.args.packing_knapsack_algorithm}")
 
     @staticmethod
     def get_seq_frames_v3(
