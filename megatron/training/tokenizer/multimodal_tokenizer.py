@@ -89,12 +89,12 @@ class MultimodalTokenizer(MegatronTokenizer):
             special_tokens (List[str]): Non-text tokens.
             image_tag_type (str): Image tag to apply, if any. For example <img><image></img>.
         """
-        self._vocab_size = len(tokenizer)
 
         num_added_tokens = tokenizer.add_tokens(special_tokens, special_tokens=True)
         assert num_added_tokens == len(
             special_tokens
         ), f"failed to add {len(special_tokens)} special tokens; only added {num_added_tokens}"
+        self._vocab_size = len(tokenizer)
 
         self._tokenizer = tokenizer
 
