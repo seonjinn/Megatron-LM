@@ -2,17 +2,21 @@ import torch
 import os
 import matplotlib.pyplot as plt
 
-orig_dir = "/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/nemotron5p5_hybrid_12b_tp_4/torch"
-new_dir = "/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/nemotron5p5_hybrid_12b_patch_vocab_tp_4"
+# orig_dir = "/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/nemotron5p5_hybrid_12b_tp_4/torch"
+# new_dir = "/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/nemotron5p5_hybrid_12b_patch_vocab_tp_4"
+
+orig_dir = "/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/nemotron5p5_hybrid_12b_tp_4_dq/torch"
+new_dir = "/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/nemotron5p5_hybrid_12b_tp_4_dq_patch_vocab"
 
 TP = 4
-iter_dir = "iter_1600000"
+iter_dir = "iter_2560000"
 
 # We're patching the embeddings weights from size 131072 to size 131584
 if TP == 8:
     num_pad = 132096 - 131072
 elif TP == 4:
-    num_pad = 131584 - 131072
+    # num_pad = 131584 - 131072
+    num_pad = 132096 - 131072
 
 # First, load all the embeddings and concatenate them.
 input_embeddings = []
