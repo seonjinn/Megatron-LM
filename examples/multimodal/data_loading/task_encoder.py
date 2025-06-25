@@ -235,17 +235,19 @@ class MultiModalTaskEncoder(
             )
         else:
             num_image_embeddings_per_tile = get_num_image_embeddings(
-                self.args.img_h,
-                self.args.img_w,
-                self.args.patch_dim,
-                self.args.vision_model_type,
-                self.args.disable_vision_class_token,
-                class_token_len=1,  # class_token_len
-                pixel_shuffle=self.args.pixel_shuffle,
-                pixel_shuffle_factor=self.args.pixel_shuffle_factor,
-                use_tile_tags=self.args.use_tile_tags,
-                token_merging_out_tokens=self.args.token_merging_out_tokens,
-            )
+                    img_h=self.args.img_h,
+                    img_w=self.args.img_w,
+                    patch_dim=self.args.patch_dim,
+                    vision_model_type=self.args.vision_model_type,
+                    disable_vision_class_token=self.args.disable_vision_class_token,
+                    class_token_len=1,
+                    pixel_shuffle=self.args.pixel_shuffle,
+                    use_tile_tags=self.args.use_tile_tags,
+                    max_num_tiles=self.args.max_num_tiles,
+                    tokenizer_type=self.args.tokenizer_prompt_format,
+                    use_image_break_token=self.args.image_break_token is not None,
+                    conv_merging=self.args.conv_merging,
+                ),
             if self.args.use_tiling:
                 image_tiling_strategy = ImageTilingStrategyV1(
                     vision_model_type=self.args.vision_model_type,
@@ -289,10 +291,6 @@ class MultiModalTaskEncoder(
         else:
             raise ValueError(
                 f"Unknown knapsack algorithm: {self.args.packing_knapsack_algorithm}"
-            )
-        print(
-            f"TaskEncoder params:\n  {self.packing_seq_length=}\n  {self.num_image_embeddings_per_tile=}\n  {self.transform_image=}\n  {self.transform_video_frame=}\n  {self.tile_degradation_map=}\n  {self.packing_knapsack_algorithm=}"
-        )
 
     @staticmethod
     def get_seq_frames_v3(
