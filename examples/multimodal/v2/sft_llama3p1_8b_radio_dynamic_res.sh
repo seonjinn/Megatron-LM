@@ -10,7 +10,7 @@
 #SBATCH --overcommit
 #SBATCH --exclusive
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=sft_llama_3p1_8b_radio_vlm_rc3_v13p16_fp8_0611
+#SBATCH --job-name=sft_llama_3p1_8b_radio_vlm_rc3_v13p16_fp8_0624
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
@@ -33,7 +33,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="sft_llama_3p1_8b_radio_vlm_rc3_v13p16_fp8_0611"
+    MODEL_NAME="sft_llama_3p1_8b_radio_vlm_rc3_v13p16_fp8_0624"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
