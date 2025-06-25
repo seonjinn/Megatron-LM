@@ -24,7 +24,7 @@ BATCH=$((1-$?))
 DEBUG=0
 USE_TILING=0
 USE_PACKING=1
-USE_ONLINE_PACKING=0
+USE_ONLINE_PACKING=1
 
 # Remember to update model and job name if running in batch mode!!
 if [[ $BATCH -eq 0 ]]; then

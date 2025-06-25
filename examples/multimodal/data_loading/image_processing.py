@@ -565,10 +565,10 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
             conv_merging: Whether to ensure compatibility with convolution merging by rounding to even patch dimensions.
                 Defaults to False.
         """
-
-        assert "radio" not in vision_model_type, (
+        assert "radio" in vision_model_type, (
             "Dynamic resolution is only supported for radio models"
         )
+        self._vision_model_type = vision_model_type
         self._min_num_patches = min_num_patches
         self._max_num_patches = max_num_patches
         self._patch_size = patch_size
