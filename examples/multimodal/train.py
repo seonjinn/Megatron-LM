@@ -123,6 +123,7 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
         )
 
     # If cu_lengths and max_lengths are non-dummy, construct PackedSeqParams. Otherwise, leave it at None.
+    vision_packed_seq_params = None
     if vision_cu_lengths.shape != torch.Size([1, 1]):
         assert (
             vision_cu_lengths.shape[0] == vision_max_lengths.shape[0] == 1
