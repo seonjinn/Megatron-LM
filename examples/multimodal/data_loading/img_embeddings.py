@@ -3,20 +3,20 @@ from megatron.core.models.vision.clip_vit_model import get_num_image_embeddings
 
 class ImageEmbeddings:
     def __init__(
-            self,
-            img_h: int,
-            img_w: int,
-            patch_dim: int,
-            vision_model_type: str,
-            disable_vision_class_token: bool,
-            class_token_len: int,
-            pixel_shuffle: bool,
-            use_tile_tags: bool,
-            max_num_tiles: int,
-            tokenizer_type: str,
-            use_image_break_token: bool,
-            conv_merging: bool,
-            dynamic: bool,
+        self,
+        img_h: int,
+        img_w: int,
+        patch_dim: int,
+        vision_model_type: str,
+        disable_vision_class_token: bool,
+        class_token_len: int,
+        pixel_shuffle: bool,
+        use_tile_tags: bool,
+        max_num_tiles: int,
+        tokenizer_type: str,
+        use_image_break_token: bool,
+        conv_merging: bool,
+        dynamic: bool,
     ):
         self.img_h = img_h
         self.img_w = img_w

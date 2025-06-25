@@ -3,9 +3,8 @@ import dataclasses
 import json
 import os
 import random
-import sys
 from collections import defaultdict
-from typing import Hashable, List, Literal, Optional, Tuple, TypedDict, Union
+from typing import List, Literal, TypedDict, Union
 
 import torch
 from PIL import Image
@@ -37,9 +36,11 @@ from .conversation_sample import (
 from .cookers.conversation import cook_conversation
 from .cookers.eagle import cook_eagle
 from .image_processing import (
-    ImageTilingStrategy,
-    NoopTileDegradationMap,
-    TileDegradationMap,
+    DynamicResolutionImageTilingStrategy,
+    ImageTilingParams,
+    ImageTilingStrategyV1,
+    NoTilingStrategy,
+    TileDegradationStrategy,
     find_closest_area_weighted_aspect_ratio,
     find_closest_aspect_ratio,
 )
@@ -66,18 +67,10 @@ class ConversationTaskSample(Sample):
 
 
 @edataclass
-class PreprocessedImageMedia:
-    media: ImageMedia | VideoFrameMedia
-    tiling: tuple[int, int]
-    size: tuple[int, int]
-
-
-@edataclass
 class PreEncodedTaskSample(Sample):
     tokens: torch.Tensor
     labels: torch.Tensor
-    images: list[PreprocessedImageMedia]
-    num_tiles: list[int]
+    images: list[ImageTilingParams]
     total_len: int
     total_len_padded: int
 
@@ -91,19 +84,26 @@ class PackedTaskSample(Sample):
     num_imgs = Number of images across all samples in the packed sample
     """
 
-    __key__: list[str]  # Sample name
-    tokens: torch.Tensor  # Input tokens packed into a single tensor (seq_len,)
-    labels: torch.Tensor  # Target tokens packed into a single tensor (seq_len,)
-    imgs: List[torch.Tensor]  # Input images
-    num_tiles: list[int]  # Number of tiles for each image of each sample (num_imgs)
-    max_length: int  # Maximum length across sub-samples.
-    cu_lengths: List[
-        int
-    ]  # Cumulative length of each sub-sample in this packed sample incl. text and image tokens (P,)
-    cu_lengths_padded: List[
-        int
-    ]  # Cumulative length of each sub-sample in this packed sample incl. text and image tokens (P,)
-    samples_seen: int  # Number of samples in the packed sample
+    # Sample name
+    __key__: list[str]
+    # Input tokens packed into a single tensor (seq_len,)
+    tokens: torch.Tensor
+    # Target tokens packed into a single tensor (seq_len,)
+    labels: torch.Tensor
+    # Maximum length across sub-samples.
+    max_length: int
+    # Cumulative length of each sub-sample in this packed sample incl. text and image tokens (P,)
+    cu_lengths: list[int]
+    # Cumulative length of each sub-sample in this packed sample incl. text and image tokens (P,)
+    cu_lengths_padded: list[int]
+
+    # Input images
+    imgs: list[torch.Tensor]
+    # Number of tiles for each image of each sample (num_imgs)
+    num_tiles: list[int]
+
+    # Number of samples in the packed sample
+    samples_seen: int
 
 
 # Typing for the resulting batch data after encode_batch()
@@ -117,20 +117,33 @@ class BatchedPackedTaskSample(Batch):
     num_imgs = Number of images across all samples in the packed sample
     """
 
-    tokens: torch.Tensor  # Input tokens packed and padded (N, seq_len)
-    labels: torch.Tensor  # Target tokens packed and padded (N, seq_len)
-    imgs: (
-        torch.Tensor
-    )  # All image tiles stacked into a single tensor (num_tiles, C, H, W)
-    num_tiles: List[List[int]]  # Number of tiles per image (N, num_imgs)
-    max_lengths: List[int]  # Maximum length across sub-samples (N,)
-    cu_lengths: List[
-        List[int]
-    ]  # Cumulative length of each sub-sample in each packed sample of the batch (N, P)
-    cu_lengths_padded: List[
-        List[int]
-    ]  # Cumulative length of each sub-sample in each packed sample of the batch (N, P)
-    samples_seen: int  # Number of samples in the packed batch
+    # Input tokens packed and padded (N, seq_len)
+    tokens: torch.Tensor
+    # Target tokens packed and padded (N, seq_len)
+    labels: torch.Tensor
+    # Maximum length across sub-samples (N,)
+    max_lengths: list[int]
+    # Cumulative length of each sub-sample in each packed sample of the batch (N, P)
+    cu_lengths: list[list[int]]
+    # Cumulative length of each sub-sample in each packed sample of the batch (N, P)
+    cu_lengths_padded: list[list[int]]
+
+    # All image tiles stacked into a single tensor (num_tiles, C, H, W)
+    imgs: torch.Tensor
+    # Number of tiles per image (N, num_imgs)
+    num_tiles: list[list[int]]
+    # Size of each image tile
+    imgs_sizes: list[tuple[int, int]]
+    # Maximum length across sub-samples. (N,)
+    vision_max_lengths: list[int]
+    # Cumulative length of each sub-sample in this packed sample incl. text and image tokens (N, num_imgs)
+    vision_cu_lengths: list[list[int]]
+
+    # Number of samples in the packed batch
+    samples_seen: int
+
+    # Whether the batch has a padded image
+    has_pad_img: bool
 
 
 class LegacyConversation(TypedDict):
@@ -184,22 +197,6 @@ class MultiModalTaskEncoder(
         if self.is_packing_enabled:
             assert self.packing_seq_length > 0, "packing sequence length must be set"
 
-        self.get_num_image_embeddings = ImageEmbeddings(
-            img_h=self.args.img_h,
-            img_w=self.args.img_w,
-            patch_dim=self.args.patch_dim,
-            vision_model_type=self.args.vision_model_type,
-            disable_vision_class_token=self.args.disable_vision_class_token,
-            class_token_len=1,
-            pixel_shuffle=self.args.pixel_shuffle,
-            use_tile_tags=self.args.use_tile_tags,
-            max_num_tiles=self.args.max_num_tiles,
-            tokenizer_type=self.args.tokenizer_prompt_format,
-            use_image_break_token=self.args.image_break_token is not None,
-            conv_merging=self.args.conv_merging,
-            dynamic=self.args.dynamic_resolution,
-        )
-
         self.txt_to_token_dict = {}
 
         self.img_h, self.img_w = self.args.img_h, self.args.img_w
@@ -209,36 +206,79 @@ class MultiModalTaskEncoder(
         self.num_tiles_degradation_map = {12: 8, 8: 6, 6: 4, 4: 2, 2: 1, 1: 1}
 
         assert self.args.img_h == self.args.img_w, "img_h and img_w must be the same"
-        self.transform_image = ImageTilingStrategy(
-            vision_model_type=self.args.vision_model_type,
-            use_tiling=self.args.use_tiling,
-            tile_size=self.args.img_h,
-            use_thumbnail=self.args.use_thumbnail,
-            augment=False,
-            min_num_tiles=1,
-            max_num_tiles=self.args.max_num_tiles,
-            find_closest_aspect_ratio_fn=(
-                find_closest_area_weighted_aspect_ratio
-                if self.args.use_area_weighted_aspect_ratio
-                else find_closest_aspect_ratio
-            ),
-        )
-        self.transform_video_frame = ImageTilingStrategy(
-            vision_model_type=self.args.vision_model_type,
-            use_tiling=False,
-            use_thumbnail=True,
-            tile_size=self.args.img_h,
-            augment=False,
-            min_num_tiles=1,
-            max_num_tiles=1,
-        )
-
         if self.args.dynamic_resolution:
-            self.tile_degradation_map = NoopTileDegradationMap(
-                max_num_tiles=self.args.max_num_tiles,
+            self.image_tiling_strategy = DynamicResolutionImageTilingStrategy(
+                vision_model_type=self.args.vision_model_type,
+                min_num_patches=self.args.dynamic_resolution_min_patches,
+                max_num_patches=self.args.seq_length
+                - (
+                    1 if not self.args.disable_vision_class_token else 0
+                ),  # TODO: handle class toekn length correctly(not just use 1)
+                patch_size=self.args.patch_dim,
+                get_num_embeddings=lambda width, height: get_num_image_embeddings(
+                    img_h=height,
+                    img_w=width,
+                    patch_dim=self.args.patch_dim,
+                    vision_model_type=self.args.vision_model_type,
+                    disable_vision_class_token=self.args.disable_vision_class_token,
+                    class_token_len=1,
+                    pixel_shuffle=self.args.pixel_shuffle,
+                    use_tile_tags=self.args.use_tile_tags,
+                    max_num_tiles=self.args.max_num_tiles,
+                    tokenizer_type=self.args.tokenizer_prompt_format,
+                    use_image_break_token=self.args.image_break_token is not None,
+                    conv_merging=self.args.conv_merging,
+                ),
+                pixel_shuffle=self.args.pixel_shuffle,
+                min_side=self.args.dynamic_resolution_min_side,
+                conv_merging=self.args.conv_merging,
             )
         else:
-            self.tile_degradation_map = TileDegradationMap(
+            num_image_embeddings_per_tile = get_num_image_embeddings(
+                self.args.img_h,
+                self.args.img_w,
+                self.args.patch_dim,
+                self.args.vision_model_type,
+                self.args.disable_vision_class_token,
+                class_token_len=1,  # class_token_len
+                pixel_shuffle=self.args.pixel_shuffle,
+                pixel_shuffle_factor=self.args.pixel_shuffle_factor,
+                use_tile_tags=self.args.use_tile_tags,
+                token_merging_out_tokens=self.args.token_merging_out_tokens,
+            )
+            if self.args.use_tiling:
+                image_tiling_strategy = ImageTilingStrategyV1(
+                    vision_model_type=self.args.vision_model_type,
+                    tile_size=self.args.img_h,
+                    use_thumbnail=self.args.use_thumbnail,
+                    augment=False,
+                    min_num_tiles=1,
+                    max_num_tiles=self.args.max_num_tiles,
+                    embeddings_per_tile=num_image_embeddings_per_tile,
+                    find_closest_aspect_ratio_fn=(
+                        find_closest_area_weighted_aspect_ratio
+                        if self.args.use_area_weighted_aspect_ratio
+                        else find_closest_aspect_ratio
+                    ),
+                )
+            else:
+                image_tiling_strategy = NoTilingStrategy(
+                    vision_model_type=self.args.vision_model_type,
+                    embeddings_per_image=num_image_embeddings_per_tile,
+                    target_width=self.args.img_w,
+                    target_height=self.args.img_h,
+                    augment=False,
+                )
+            self.image_tiling_strategy = TileDegradationStrategy(
+                image_strateg=image_tiling_strategy,
+                video_frame_strategy=NoTilingStrategy(
+                    vision_model_type=self.args.vision_model_type,
+                    embeddings_per_image=num_image_embeddings_per_tile,
+                    target_width=self.args.img_w,
+                    target_height=self.args.img_h,
+                    augment=False,
+                ),
+                embeddings_per_tile=num_image_embeddings_per_tile,
                 max_num_tiles=self.args.max_num_tiles,
             )
 
@@ -250,58 +290,9 @@ class MultiModalTaskEncoder(
             raise ValueError(
                 f"Unknown knapsack algorithm: {self.args.packing_knapsack_algorithm}"
             )
-        print(f"TaskEncoder params:\n  {self.packing_seq_length=}\n  {self.num_image_embeddings_per_tile=}\n  {self.transform_image=}\n  {self.transform_video_frame=}\n  {self.tile_degradation_map=}\n  {self.packing_knapsack_algorithm=}")
-
-    @staticmethod
-    def get_seq_frames_v2(
-        total_num_frames: int,
-        desired_num_frames: int = -1,
-        stride: int = -1,
-        temporal_jitter: bool = False,
-    ) -> list[int]:
-        """
-        Calculate the indices of frames to extract from a video.
-
-        Parameters:
-            total_num_frames: Total number of frames in the video.
-            desired_num_frames: Desired number of frames to extract.
-            stride: Stride of the frames to extract.
-            temporal_jitter: Whether to jitter the frames.
-
-        Returns:
-            List of indices of frames to extract.
-        """
-
-        assert (
-            desired_num_frames > 0
-            or stride > 0
-            and not (desired_num_frames > 0 and stride > 0)
+        print(
+            f"TaskEncoder params:\n  {self.packing_seq_length=}\n  {self.num_image_embeddings_per_tile=}\n  {self.transform_image=}\n  {self.transform_video_frame=}\n  {self.tile_degradation_map=}\n  {self.packing_knapsack_algorithm=}"
         )
-
-        if stride > 0:
-            desired_num_frames = len(list(range(0, total_num_frames, stride)))
-
-        # Calculate the size of each segment from which a frame will be extracted
-        seg_size = float(total_num_frames - 1) / desired_num_frames
-        # print(f"seg_size: {seg_size}")
-
-        # Calculate start and end indices for all segments at once
-        i = torch.arange(desired_num_frames)
-        starts = torch.round(seg_size * i).to(torch.int32)
-        ends = torch.round(seg_size * (i + 1)).to(torch.int32)
-
-        # Calculate middle indices for all segments
-        seq = ((starts + ends) // 2).tolist()
-
-        if temporal_jitter:
-            shift_base = int(seg_size / 2)
-            # Generate random shifts for all frames at once
-            random_shifts = torch.randint(-shift_base, shift_base + 1, (len(seq),))
-            seq = torch.tensor(seq) + random_shifts
-            # Clip values to valid range
-            seq = torch.clamp(seq, 0, total_num_frames - 1).tolist()
-
-        return seq
 
     @staticmethod
     def get_seq_frames_v3(
@@ -412,8 +403,6 @@ class MultiModalTaskEncoder(
         ]
 
         image_media = []
-        image_sizes = []
-        image_transforms = []
 
         # Format the conversation as a list of "user" / "assistant" turns.
         for message in sample.conversation:
@@ -428,20 +417,9 @@ class MultiModalTaskEncoder(
                 elif isinstance(fragment, ImageMedia):
                     content += IMAGE_TOKEN
                     image_media.append(fragment)
-                    image_sizes.append(
-                        (fragment.width, fragment.height)
-                    )
-                    image_transforms.append(self.transform_image)
                 elif isinstance(fragment, VideoFrameMedia):
                     content += IMAGE_TOKEN
                     image_media.append(fragment)
-                    image_sizes.append(
-                        (
-                            fragment.video_width,
-                            fragment.video_height,
-                        )
-                    )
-                    image_transforms.append(self.transform_video_frame)
                 elif isinstance(fragment, VideoMedia):
                     raise ValueError(
                         "VideoMedia should have been converted to VideoFrameMedia."
@@ -462,33 +440,28 @@ class MultiModalTaskEncoder(
         )
 
         max_image_token_allowed = self.args.decoder_seq_length - len(input_ids) - 4
-
-        params = self.tile_degradation_map.compute_tilings(
-            image_sizes, image_transforms, max_image_token_allowed
+        image_media_params = self.image_tiling_strategy.compute_params(
+            image_media, max_image_token_allowed
         )
 
-        preprocessed_image_media = [
-            PreprocessedImageMedia(media=media, params=params)
-            for media, params in zip(image_media, image_params)
-        ]
-
-        input_ids, target = self._truncate_to_decoder_seq_len(input_ids, target, num_tiles)
+        input_ids, target = self._truncate_to_decoder_seq_len(
+            input_ids, target, image_media_params
+        )
 
         # We need to ensure that there are at least some trainable tokens in the sample.
-        assert self._target_has_trainable_tokens(input_ids, num_tiles, target), (
-            f"Sample has no trainable tokens: {self.tokenizer.detokenize(input_ids)}"
-        )
+        assert self._target_has_trainable_tokens(
+            input_ids, target, image_media_params
+        ), f"Sample has no trainable tokens: {self.tokenizer.detokenize(input_ids)}"
 
         total_len, total_len_padded, input_ids, target = self._pad_for_context_parallel(
-            input_ids, target, num_tiles
+            input_ids, target, image_media_params
         )
 
         return PreEncodedTaskSample.derive_from(
             sample,
             tokens=input_ids,
             labels=target,
-            images=preprocessed_image_media,
-            num_tiles=num_tiles,
+            images=image_media_params,
             total_len=total_len,
             total_len_padded=total_len_padded,
         )
@@ -520,7 +493,7 @@ class MultiModalTaskEncoder(
             tokens=sample.tokens,
             labels=sample.labels,
             imgs=image_tiles,
-            num_tiles=sample.num_tiles,
+            num_tiles=[media.num_tiles for media in sample.images],
             max_length=sample.total_len_padded,
             cu_lengths=torch.tensor([0, sample.total_len], dtype=torch.int32),
             cu_lengths_padded=torch.tensor(
@@ -528,7 +501,6 @@ class MultiModalTaskEncoder(
             ),
             samples_seen=torch.tensor(1, dtype=torch.int32),
         )
-
 
     @stateless(restore_seeds=True)
     def select_samples_to_pack(
@@ -632,15 +604,13 @@ class MultiModalTaskEncoder(
             cu_lengths_padded=torch.tensor(cu_lengths_padded, dtype=torch.int32),
             max_length=max(sample.max_length for sample in samples),
             num_tiles=[n for s in samples for n in s.num_tiles],
+            tile_sizes=[s.tile_size for s in samples],
             samples_seen=sum(s.samples_seen for s in samples),
         )
 
     def batch(self, samples: List[PackedTaskSample]) -> BatchedPackedTaskSample:
         # Stack images to [num_tiles, c, h, w]. If there are no images (text-only), then use a dummy image.
         imgs = [img for s in samples for img in s.imgs]
-        if len(imgs) > 0:
-            assert self.args.vision_model_type in ("radio", "radio-g", "cradio-g"), "Dynamic resolution only works with radio right now"
-            imgs = torch.stack(imgs)
 
         # Pad image packed seq length to be % 16 if using fp8 and dynamic resolution
         has_fp8 = self.args.fp8 is not None
@@ -648,22 +618,39 @@ class MultiModalTaskEncoder(
         if has_fp8 and self.args.dynamic_resolution:
             img_seq_len = 0
             for img in imgs:
-                img_seq_len += (img.shape[1] // self.args.patch_dim) * (img.shape[2] // self.args.patch_dim)
-            padding_needed = get_padding(img_seq_len, self.args.context_parallel_size, self.args.tensor_model_parallel_size, self.args.sequence_parallel, fp8_enabled=has_fp8)
+                img_seq_len += (img.shape[1] // self.args.patch_dim) * (
+                    img.shape[2] // self.args.patch_dim
+                )
+            padding_needed = get_padding(
+                img_seq_len,
+                self.args.context_parallel_size,
+                self.args.tensor_model_parallel_size,
+                self.args.sequence_parallel,
+                fp8_enabled=has_fp8,
+            )
             if padding_needed > 0:
-                pad_img = torch.zeros([3, self.args.patch_dim, padding_needed * self.args.patch_dim])
+                pad_img = torch.zeros(
+                    [3, self.args.patch_dim, padding_needed * self.args.patch_dim]
+                )
                 imgs.append(pad_img)
                 has_pad_img = torch.tensor(True)
 
-        imgs, imgs_sizes, vision_cu_lengths, vision_max_lengths = process_images(
-            imgs, self.args.patch_dim, self.args.dynamic_resolution, batch_mode=True
+        imgs, imgs_sizes, vision_cu_lengths, vision_max_lengths = (
+            self.image_tiling_strategy.stack(imgs)
         )
 
+        # For batch mode, wrap in additional dimension for consistency
         # Set default values if no vision metadata was returned (static resolution case)
         if vision_cu_lengths is None:
             vision_cu_lengths = torch.tensor([[0]], dtype=torch.int32)
+        else:
+            # Shape: (1, batch_size + 1)
+            vision_cu_lengths = vision_cu_lengths.unsqueeze(0)
         if vision_max_lengths is None:
             vision_max_lengths = torch.tensor([[0]], dtype=torch.int32)
+        else:
+            # Shape: (1,)
+            vision_max_lengths = vision_max_lengths.unsqueeze(0)
 
         # If the user hasn't defined a target dataloader sequence length, then use the max along the sample lengths.
         max_seq_len = self.dataloader_seq_length
@@ -727,7 +714,7 @@ class MultiModalTaskEncoder(
         """Loads all lazy media in the sample."""
         if len(sample.images) > 1:
             medias: dict[
-                Lazy[AVDecoder] | Lazy[Image.Image], list[PreprocessedImageMedia]
+                Lazy[AVDecoder] | Lazy[Image.Image], list[ImageTilingParams]
             ] = defaultdict(list)
             # Group by video and frame index
             for media in sample.images:
@@ -766,8 +753,22 @@ class MultiModalTaskEncoder(
                 media.media.value = media.media.value.get()
 
     def _target_has_trainable_tokens(
-        self, input_ids: torch.Tensor, num_tiles: list[int], target: torch.Tensor
+        self,
+        input_ids: torch.Tensor,
+        target: torch.Tensor,
+        image_tiling_params: list[ImageTilingParams],
     ) -> bool:
+        """
+        Check if the target has trainable tokens.
+
+        Args:
+            input_ids: Input tokens.
+            target: Target tokens.
+            image_tiling_params: Image tiling parameters.
+
+        Returns:
+            True if the target has trainable tokens, False otherwise.
+        """
         # Compute the loss mask based on extending the image tags with the proper
         # number of image tokens, extracting the first self.args.decoder_seq_length tokens, and
         # ensuring that some of these tokens have a loss mask > 0.
@@ -779,7 +780,7 @@ class MultiModalTaskEncoder(
         expanded_target = self._replace_value_with_repetition(
             expanded_target,
             self.img_token_id,
-            self.num_image_embeddings_per_tile * torch.tensor(num_tiles),
+            torch.tensor([media.num_embeddings for media in image_tiling_params]),
             IGNORE_INDEX,
         )
         loss_mask = torch.ones(expanded_target.size(), dtype=torch.float)
@@ -800,38 +801,70 @@ class MultiModalTaskEncoder(
         Replace every occurrence of value V in the input array with R repetitions of W.
 
         Args:
-            arr (Array): Input array to be modified
-            token_to_replace: token to be replaced
-            new_token: new token
-            num_repetition (Array): number of repetition of new token.
+            arr: Input array to be modified
+            token_to_replace: Token to be replaced
+            num_repetition: Number of repetition of new token. Size must match the number of `token_to_replace` in the
+                input array.
+            new_token: New token to replace the `token_to_replace` with.
 
         Returns:
             Array: New array with token_to_replace replaced by num_repetition repetitions of
              new_token
         """
-        error_msg = (
+        assert torch.sum(arr == token_to_replace) == len(num_repetition), (
             "The number of image tokens must match the length of the tile tensor."
         )
-        assert torch.sum(arr == token_to_replace) == len(num_repetition), error_msg
-        result = []
-        idx = 0
-        for item in arr:
-            if item == token_to_replace:
-                # If the current item matches token_to_replace, add R copies of W
-                result.extend([new_token] * num_repetition[idx])
-                idx += 1
-            else:
-                # Otherwise, keep the original item
-                result.append(item)
 
-        return torch.tensor(result)
+        # Find positions of tokens to replace
+        replace_positions = torch.where(arr == token_to_replace)[0]
+
+        if len(replace_positions) == 0:
+            return arr
+
+        # Calculate final array size
+        total_replacements = torch.sum(num_repetition).item()
+        final_size = len(arr) - len(replace_positions) + total_replacements
+
+        # Pre-allocate result array
+        result = torch.empty(final_size, dtype=arr.dtype, device=arr.device)
+
+        # Copy data efficiently
+        src_idx = 0
+        dst_idx = 0
+
+        for i, pos in enumerate(replace_positions):
+            pos = pos.item()
+
+            # Copy segment before replacement
+            if pos > src_idx:
+                segment_len = pos - src_idx
+                result[dst_idx : dst_idx + segment_len] = arr[src_idx:pos]
+                dst_idx += segment_len
+
+            # Fill replacement tokens
+            reps = num_repetition[i].item()
+            if reps > 0:
+                result[dst_idx : dst_idx + reps] = new_token
+                dst_idx += reps
+
+            src_idx = pos + 1
+
+        # Copy final segment
+        if src_idx < len(arr):
+            remaining_len = len(arr) - src_idx
+            result[dst_idx : dst_idx + remaining_len] = arr[src_idx:]
+
+        return result
 
     def _pad_for_context_parallel(
-        self, input_ids: torch.Tensor, target: torch.Tensor, num_tiles: list[int]
+        self,
+        input_ids: torch.Tensor,
+        target: torch.Tensor,
+        image_tiling_params: list[ImageTilingParams],
     ) -> tuple[int, int, torch.Tensor, torch.Tensor]:
-        total_len = self._get_total_seq_length(input_ids, num_tiles)
+        total_len = self._get_total_seq_length(input_ids, image_tiling_params)
         total_len_padded = total_len
-        if getattr(self.args, 'context_parallel_size', 1) > 1:
+        if getattr(self.args, "context_parallel_size", 1) > 1:
             padding_needed = get_padding(
                 total_len,
                 self.args.context_parallel_size,
@@ -855,11 +888,12 @@ class MultiModalTaskEncoder(
                 total_len_padded = total_len + padding_needed
         return total_len, total_len_padded, input_ids, target
 
-    def _get_total_seq_length(self, input_ids: torch.Tensor, num_tiles):
+    def _get_total_seq_length(
+        self, input_ids: torch.Tensor, image_tiling_params: list[ImageTilingParams]
+    ):
         """Calculate expected sequence length given text tokens length and number of tiles."""
-        self.get_num_image_embeddings(num_tiles)
-        total_num_images = len(num_tiles)
-        total_num_tiles = sum(num_tiles)
+        total_num_images = len(image_tiling_params)
+        total_num_tiles = sum(media.num_tiles for media in image_tiling_params)
         total_len = (
             len(input_ids)
             + total_num_tiles * self.num_image_embeddings_per_tile
@@ -868,12 +902,16 @@ class MultiModalTaskEncoder(
         return total_len
 
     def _truncate_to_decoder_seq_len(
-        self, input_ids: torch.Tensor, target: torch.Tensor, num_tiles: list[int]
+        self,
+        input_ids: torch.Tensor,
+        target: torch.Tensor,
+        image_tiling_params: list[ImageTilingParams],
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Truncate tokens and labels if they exceed sequence length."""
-        total_num_images = len(num_tiles)
-        total_num_tiles = sum(num_tiles)
-        total_img_embeddings_len = total_num_tiles * self.num_image_embeddings_per_tile
+        total_img_embeddings_len = sum(
+            media.num_embeddings for media in image_tiling_params
+        )
+        total_num_images = len(image_tiling_params)
         max_text_tokens = (
             self.packing_seq_length - 12 - total_img_embeddings_len + total_num_images
         )
@@ -888,5 +926,6 @@ class MultiModalTaskEncoder(
             )
 
         return input_ids, target
+
 
 tensor_to_pil = ToPILImage()

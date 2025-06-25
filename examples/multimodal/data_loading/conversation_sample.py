@@ -28,7 +28,7 @@ class ImageMedia(Media):
     @property
     def width(self) -> int:
         return self.metadata["width"]
-    
+
     @property
     def height(self) -> int:
         return self.metadata["height"]
@@ -49,7 +49,7 @@ class VideoMedia(Media):
     @property
     def video_width(self) -> int:
         return self.metadata["video_width"]
-    
+
     @property
     def video_height(self) -> int:
         return self.metadata["video_height"]
@@ -69,7 +69,7 @@ class VideoFrameMedia(Media):
     @property
     def video_width(self) -> int:
         return self.metadata["video_width"]
-    
+
     @property
     def video_height(self) -> int:
         return self.metadata["video_height"]
@@ -122,12 +122,14 @@ class ConversationSample(Sample):
                     fragments=[
                         (
                             frag
-                            if isinstance(frag, str) else
-                            (
-                                # TODO: This is a hack to support legacy formatted text media in the conversation
+                            if isinstance(frag, str)
+                            # TODO: This is a hack to support legacy formatted text media in the conversation
+                            else (
                                 frag["value"]
-                                if frag["t"] == "text" else
-                                ConversationSample.__MEDIA_TYPES__[frag.pop("t")](**frag)
+                                if frag["t"] == "text"
+                                else ConversationSample.__MEDIA_TYPES__[frag.pop("t")](
+                                    **frag
+                                )
                             )
                         )
                         for frag in msg["fragments"]
@@ -145,8 +147,8 @@ class ConversationSample(Sample):
                     sender=msg.sender,
                     fragments=[
                         frag
-                        if isinstance(frag, str) else
-                        dict(
+                        if isinstance(frag, str)
+                        else dict(
                             t=ConversationSample.__MEDIA_TYPES_REVERSE__[type(frag)],
                             **dataclasses.asdict(frag),
                         )
