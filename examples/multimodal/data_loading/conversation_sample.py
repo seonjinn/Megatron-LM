@@ -25,6 +25,14 @@ class ImageMedia(Media):
 
     metadata: dict[str, Union[str, int, float, bool]] | None = None
 
+    @property
+    def width(self) -> int:
+        return self.metadata["width"]
+    
+    @property
+    def height(self) -> int:
+        return self.metadata["height"]
+
 
 @edataclass
 class VideoMedia(Media):
@@ -38,6 +46,14 @@ class VideoMedia(Media):
 
     metadata: dict[str, Union[str, int, float, bool]] | None = None
 
+    @property
+    def video_width(self) -> int:
+        return self.metadata["video_width"]
+    
+    @property
+    def video_height(self) -> int:
+        return self.metadata["video_height"]
+
 
 @edataclass
 class VideoFrameMedia(Media):
@@ -50,6 +66,14 @@ class VideoFrameMedia(Media):
 
     metadata: dict[str, Union[str, int, float, bool]] | None = None
 
+    @property
+    def video_width(self) -> int:
+        return self.metadata["video_width"]
+    
+    @property
+    def video_height(self) -> int:
+        return self.metadata["video_height"]
+
 
 @edataclass
 class AudioMedia(Media):
@@ -61,13 +85,6 @@ class AudioMedia(Media):
 
 
 @edataclass
-class TextMedia(Media):
-    """A text media object in a conversation."""
-
-    value: str
-
-
-@edataclass
 class Message:
     """A message in a conversation between a user and an assistant."""
 
@@ -75,7 +92,7 @@ class Message:
     sender: Literal["user", "assistant", "system"]
 
     #: The message content
-    fragments: list[Media]
+    fragments: list[Media | str]
 
 
 @edataclass
@@ -90,7 +107,6 @@ class ConversationSample(Sample):
         "video": VideoMedia,
         "video_frame": VideoFrameMedia,
         "audio": AudioMedia,
-        "text": TextMedia,
     }
     __MEDIA_TYPES_REVERSE__ = {v: k for k, v in __MEDIA_TYPES__.items()}
 
@@ -104,7 +120,16 @@ class ConversationSample(Sample):
                 Message(
                     sender=msg["sender"],
                     fragments=[
-                        ConversationSample.__MEDIA_TYPES__[frag.pop("t")](**frag)
+                        (
+                            frag
+                            if isinstance(frag, str) else
+                            (
+                                # TODO: This is a hack to support legacy formatted text media in the conversation
+                                frag["value"]
+                                if frag["t"] == "text" else
+                                ConversationSample.__MEDIA_TYPES__[frag.pop("t")](**frag)
+                            )
+                        )
                         for frag in msg["fragments"]
                     ],
                 )
@@ -119,6 +144,8 @@ class ConversationSample(Sample):
                 dict(
                     sender=msg.sender,
                     fragments=[
+                        frag
+                        if isinstance(frag, str) else
                         dict(
                             t=ConversationSample.__MEDIA_TYPES_REVERSE__[type(frag)],
                             **dataclasses.asdict(frag),

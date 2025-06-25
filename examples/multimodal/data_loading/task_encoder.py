@@ -31,14 +31,13 @@ from .conversation_sample import (
     ConversationSample,
     ImageMedia,
     Media,
-    TextMedia,
     VideoFrameMedia,
     VideoMedia,
 )
 from .cookers.conversation import cook_conversation
 from .cookers.eagle import cook_eagle
 from .image_processing import (
-    ImageTransform,
+    ImageTilingStrategy,
     NoopTileDegradationMap,
     TileDegradationMap,
     find_closest_area_weighted_aspect_ratio,
@@ -70,6 +69,7 @@ class ConversationTaskSample(Sample):
 class PreprocessedImageMedia:
     media: ImageMedia | VideoFrameMedia
     tiling: tuple[int, int]
+    size: tuple[int, int]
 
 
 @edataclass
@@ -209,7 +209,7 @@ class MultiModalTaskEncoder(
         self.num_tiles_degradation_map = {12: 8, 8: 6, 6: 4, 4: 2, 2: 1, 1: 1}
 
         assert self.args.img_h == self.args.img_w, "img_h and img_w must be the same"
-        self.transform_image = ImageTransform(
+        self.transform_image = ImageTilingStrategy(
             vision_model_type=self.args.vision_model_type,
             use_tiling=self.args.use_tiling,
             tile_size=self.args.img_h,
@@ -223,7 +223,7 @@ class MultiModalTaskEncoder(
                 else find_closest_aspect_ratio
             ),
         )
-        self.transform_video_frame = ImageTransform(
+        self.transform_video_frame = ImageTilingStrategy(
             vision_model_type=self.args.vision_model_type,
             use_tiling=False,
             use_thumbnail=True,
@@ -372,22 +372,22 @@ class MultiModalTaskEncoder(
         )
         frame_timestamps += start_time
 
-        return [TextMedia(value="This is a video:\n")] + [
+        return ["This is a video:\n"] + [
             media
             for i, timestamp in enumerate(frame_timestamps)
             for media in (
-                TextMedia(value=f"Frame {i + 1} sampled at {timestamp:.2f} seconds: "),
+                f"Frame {i + 1} sampled at {timestamp:.2f} seconds: ",
                 # TODO: Orginal eagle repro
                 # TextMedia(value=f"Frame {i + 1} sampled at {timestamp:.2f} seconds: <image-{i}>"),
                 VideoFrameMedia(
                     value=video.value,
                     timestamp=float(timestamp),
                     metadata={
-                        "video_width": video.metadata["video_width"],
-                        "video_height": video.metadata["video_height"],
+                        "video_width": video.video_width,
+                        "video_height": video.video_height,
                     },
                 ),
-                TextMedia(value="\n"),
+                "\n",
             )
         ]
 
@@ -423,13 +423,13 @@ class MultiModalTaskEncoder(
 
             content = ""
             for fragment in message.fragments:
-                if isinstance(fragment, TextMedia):
-                    content += fragment.value
+                if isinstance(fragment, str):
+                    content += fragment
                 elif isinstance(fragment, ImageMedia):
                     content += IMAGE_TOKEN
                     image_media.append(fragment)
                     image_sizes.append(
-                        (fragment.metadata["width"], fragment.metadata["height"])
+                        (fragment.width, fragment.height)
                     )
                     image_transforms.append(self.transform_image)
                 elif isinstance(fragment, VideoFrameMedia):
@@ -437,8 +437,8 @@ class MultiModalTaskEncoder(
                     image_media.append(fragment)
                     image_sizes.append(
                         (
-                            fragment.metadata["video_width"],
-                            fragment.metadata["video_height"],
+                            fragment.video_width,
+                            fragment.video_height,
                         )
                     )
                     image_transforms.append(self.transform_video_frame)
@@ -463,13 +463,13 @@ class MultiModalTaskEncoder(
 
         max_image_token_allowed = self.args.decoder_seq_length - len(input_ids) - 4
 
-        image_tilings, num_tiles = self.tile_degradation_map.compute_tilings(
+        params = self.tile_degradation_map.compute_tilings(
             image_sizes, image_transforms, max_image_token_allowed
         )
 
         preprocessed_image_media = [
-            PreprocessedImageMedia(media=media, tiling=tiling)
-            for media, tiling in zip(image_media, image_tilings)
+            PreprocessedImageMedia(media=media, params=params)
+            for media, params in zip(image_media, image_params)
         ]
 
         input_ids, target = self._truncate_to_decoder_seq_len(input_ids, target, num_tiles)
@@ -502,13 +502,13 @@ class MultiModalTaskEncoder(
         for media in sample.images:
             if isinstance(media.media, VideoFrameMedia):
                 image_tiles.extend(
-                    self.transform_video_frame.transform(
+                    self.transform_video_frame.apply_params(
                         media.media.value, media.tiling
                     )
                 )
             elif isinstance(media.media, ImageMedia):
                 image_tiles.extend(
-                    self.transform_image.transform(media.media.value, media.tiling)
+                    self.transform_image.apply_params(media.media.value, media.tiling)
                 )
             else:
                 raise ValueError(f"Unexpected media type: {type(media.media)}")

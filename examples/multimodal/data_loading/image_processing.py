@@ -1,10 +1,16 @@
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved. Except portions as noted which are Copyright (c) 2023 OpenGVLab and licensed under the MIT license found in LICENSE.
-from typing import Optional
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+import math
+from typing import Optional, Sequence
 
 from PIL import Image
+import torch
 from torchvision import transforms as T
 from torchvision.transforms import Compose
 from torchvision.transforms.functional import InterpolationMode
+
+from examples.multimodal.data_loading.conversation_sample import ImageMedia, VideoFrameMedia
 
 IMAGENET_PIXEL_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_PIXEL_STD = [0.229, 0.224, 0.225]
@@ -69,8 +75,99 @@ def find_closest_area_weighted_aspect_ratio(
     return best_ratio
 
 
-class ImageTransform:
-    """Image transformation."""
+@dataclass
+class ImageTilingParams:
+    media: ImageMedia | VideoFrameMedia
+    num_tiles: int
+    num_tokens: int
+
+
+class ImageTilingStrategy(ABC):
+    """
+    Base class for image transformations.
+
+    Subclasses must implement the `compute_params` and `apply_params` methods.
+
+    The `transform` method is a convenience method that computes the transformation parameters and applies the transformation to the media.
+    
+    """
+
+    def transform(self, media_list: list[ImageMedia | VideoFrameMedia], num_tokens_available: int | None = None) -> list[torch.Tensor]:
+        """
+        Transform the media and compute the transformation parameters.
+        """
+        transform_media_list = self.compute_params(media_list, num_tokens_available)
+        return [self.apply_params(transform_media) for transform_media in transform_media_list]
+
+    @abstractmethod
+    def compute_params(self, media_list: list[ImageMedia | VideoFrameMedia], num_tokens_available: int) -> list[ImageTilingParams]:
+        """
+        Compute the transformation parameters and the number of tokens to use for the media.
+
+        Args:
+            media_list: List of media to transform
+            num_tokens_available: Number of tokens available for all media
+
+        Returns:
+            list of transformation parameters with the media
+        """
+        ...
+
+    @abstractmethod
+    def apply_params(self, transform_media: ImageTilingParams) -> list[torch.Tensor]:
+        """
+        Apply the transformation parameters to the media.
+
+        Args:
+            transform_media: The media to apply the transformation to
+
+        Returns:
+            list of transformed media tensors
+        """
+        ...
+
+
+class NoTilingStrategy(ImageTilingStrategy):
+    """
+    A simple image transformation that resizes the image to the target width and height.
+    """
+
+    def __init__(
+        self,
+        vision_model_type: str,
+        target_width: int,
+        target_height: int,
+        num_tokens_per_image: int,
+        augment: bool = False,
+    ):
+        self._vision_model_type = vision_model_type
+        self._transform = _build_transform((target_width, target_height), vision_model_type)
+        self._num_tokens_per_image = num_tokens_per_image
+
+        assert not augment, "Image augmentation not implemented."
+
+    def apply_params(self, transform_media: ImageTilingParams) -> list[torch.Tensor]:
+        return [self._transform(transform_media.media.value)]
+
+    def compute_params(
+        self, media_list: list[ImageMedia | VideoFrameMedia], num_tokens_available: Optional[int] = None
+    ) -> list[ImageTilingParams]:
+        return [ImageTilingParams(media=media, num_tiles=1, num_tokens=self._num_tokens_per_image) for media in media_list]
+    
+    def __str__(self):
+        return f"SimpleImageTransform(vision_model_type={self._vision_model_type}, num_tokens_per_image={self._num_tokens_per_image})"
+
+
+@dataclass
+class ImageTilingParamsV1(ImageTilingParams):
+    tiling: tuple[int, int]
+
+
+class ImageTilingStrategyV1(ImageTilingStrategy):
+    """Tiling image transformation.
+    
+    This transformation splits the image into a grid of tiles and applies the transformation to each tile.
+    """
 
     # Based on https://github.com/openai/CLIP/blob/dcba3cb2e2827b402d2701e7e1c7d9fed8a20ef1/clip/clip.py#L79
     # and https://github.com/OpenGVLab/InternVL/blob/aa521e6eb1df4cf153aa4118fcf13e673c055d46/internvl_chat/internvl/train/dataset.py#L276
@@ -78,23 +175,22 @@ class ImageTransform:
     def __init__(
         self,
         vision_model_type: str,
-        use_tiling: bool = False,
-        tile_size: int = 224,
-        use_thumbnail: bool = False,
-        augment: bool = False,
-        min_num_tiles: int = 1,
-        max_num_tiles: int = 1,
+        tile_size: int,
+        use_thumbnail: bool,
+        augment: bool,
+        min_num_tiles: int,
+        max_num_tiles: int,
+        tokens_per_tile: int,
         find_closest_aspect_ratio_fn=find_closest_aspect_ratio,
     ):
         # print(f"Transformation params: {vision_model_type=}, {use_tiling=}, {tile_size=}, {use_thumbnail=}, {augment=}, {min_num_tiles=}, {max_num_tiles=}, {find_closest_aspect_ratio_fn=}")
         self._transform = _build_transform(tile_size, vision_model_type)
         self._vision_model_type = vision_model_type
-        self._use_tiling = use_tiling
         self._tile_size = tile_size
         self._use_thumbnail = use_thumbnail
-        self._augment = augment
         self._min_num_tiles = min_num_tiles
         self._max_num_tiles = max_num_tiles
+        self._tokens_per_tile = tokens_per_tile
         self._find_closest_aspect_ratio_fn = find_closest_aspect_ratio_fn
 
         # Calculate all possible aspect ratios for each max_num_tiles.
@@ -111,11 +207,13 @@ class ImageTransform:
 
         assert not augment, "Image augmentation not implemented."
 
-    def transform(self, image: Image.Image, tiling: tuple[int, int]):
+    def apply_params(self, transform_media: ImageTilingParams) -> list[torch.Tensor]:
+        assert isinstance(transform_media, ImageTilingParamsV1)
+        image = transform_media.media.value
         # calculate the target width and height
-        target_width = self._tile_size * tiling[0]
-        target_height = self._tile_size * tiling[1]
-        blocks = tiling[0] * tiling[1]
+        target_width = self._tile_size * transform_media.tiling[0]
+        target_height = self._tile_size * transform_media.tiling[1]
+        blocks = transform_media.tiling[0] * transform_media.tiling[1]
 
         # resize the image
         resized_img = image.resize((target_width, target_height))
@@ -137,21 +235,24 @@ class ImageTransform:
 
         return [self._transform(img) for img in processed_images]
 
-    def compute_tiling(
-        self, img_size: tuple[int, int], max_num_tiles: Optional[int] = None
-    ) -> tuple[tuple[int, int], int]:
-        if self._use_tiling:
-            if max_num_tiles is None:
-                max_num_tiles = self._max_num_tiles
+    def compute_params(
+        self, media_list: list[ImageMedia | VideoFrameMedia], num_tokens_available: Optional[int] = None
+    ) -> list[ImageTilingParamsV1]:
+        max_num_tiles = min(num_tokens_available // self._tokens_per_tile, self._max_num_tiles)
+
+        # calculate the existing image aspect ratio
+        target_ratios = self.target_ratios[max_num_tiles]
+
+        params = []
+        for media in media_list:
+            if isinstance(media, ImageMedia):
+                img_size = (media.width, media.height)
+            elif isinstance(media, VideoFrameMedia):
+                img_size = (media.video_width, media.video_height)
             else:
-                assert self._min_num_tiles <= max_num_tiles <= self._max_num_tiles, (
-                    f"max_num_tiles={max_num_tiles} must be between {self._min_num_tiles} and {self._max_num_tiles}"
-                )
+                raise ValueError(f"Unsupported media type: {type(media)}")
 
             aspect_ratio = img_size[0] / img_size[1]
-
-            # calculate the existing image aspect ratio
-            target_ratios = self.target_ratios[max_num_tiles]
 
             # find the closest aspect ratio to the target
             tiling = self._find_closest_aspect_ratio_fn(
@@ -161,83 +262,249 @@ class ImageTransform:
             if self._use_thumbnail and num_tiles != 1:
                 num_tiles += 1
 
-            return tiling, num_tiles
-        else:
-            return (1, 1), 1
+            params.append(ImageTilingParamsV1(
+                media=media,
+                num_tiles=num_tiles,
+                num_tokens=num_tiles * self._tokens_per_tile,
+                tiling=tiling,
+            ))
+
+        return params
     
     def __str__(self):
-        return f"ImageTransform(vision_model_type={self._vision_model_type}, use_tiling={self._use_tiling}, tile_size={self._tile_size}, use_thumbnail={self._use_thumbnail}, augment={self._augment}, min_num_tiles={self._min_num_tiles}, max_num_tiles={self._max_num_tiles}, find_closest_aspect_ratio_fn={self._find_closest_aspect_ratio_fn})"
+        return f"TilingImageTransform(vision_model_type={self._vision_model_type}, tile_size={self._tile_size}, use_thumbnail={self._use_thumbnail}, augment={self._augment}, min_num_tiles={self._min_num_tiles}, max_num_tiles={self._max_num_tiles}, tokens_per_tile={self._tokens_per_tile}, find_closest_aspect_ratio_fn={self._find_closest_aspect_ratio_fn})"
 
 
-class TileDegradationMap:
+class TileDegradationStrategy(ImageTilingStrategy):
+    """Image transformation."""
+
+    # Based on https://github.com/openai/CLIP/blob/dcba3cb2e2827b402d2701e7e1c7d9fed8a20ef1/clip/clip.py#L79
+    # and https://github.com/OpenGVLab/InternVL/blob/aa521e6eb1df4cf153aa4118fcf13e673c055d46/internvl_chat/internvl/train/dataset.py#L276
+
     def __init__(
         self,
-        tile_degradation_map: dict[int, int] = {12: 8, 8: 6, 6: 4, 4: 2, 2: 1, 1: 1},
-        max_num_tiles: int = 12,
+        image_transform: ImageTilingStrategy,
+        video_frame_transform: ImageTilingStrategy,
+        tokens_per_tile: int,
+        max_num_tiles: int,
+        tile_degradation_map: dict[int, int] = {12: 8, 8: 6, 6: 4, 4: 2, 2: 1},
     ):
-        self._tile_degradation_map = tile_degradation_map
+        self._image_transform = image_transform
+        self._video_frame_transform = video_frame_transform
+        self._tokens_per_tile = tokens_per_tile
         self._max_num_tiles = max_num_tiles
+        self._tile_degradation_map = tile_degradation_map
 
-    def compute_tilings(
+    def apply_params(self, transform_media: ImageTilingParams) -> list[torch.Tensor]:
+        if isinstance(transform_media.media, ImageMedia):
+            return [self._image_transform.apply_params(transform_media)]
+        elif isinstance(transform_media.media, VideoFrameMedia):
+            return [self._video_frame_transform.apply_params(transform_media)]
+        else:
+            raise ValueError(f"Unsupported media type: {type(transform_media.media)}")
+
+    def compute_params(
         self,
-        img_sizes: list[tuple[int, int]],
-        img_transforms: "list[ImageTransform]",
-        tiles_available: int,
-    ) -> tuple[list[tuple[int, int]], list[int]]:
+        media_list: list[ImageMedia | VideoFrameMedia],
+        num_tokens_available: int | None = None,
+    ) -> list[ImageTilingParams]:
         max_num_tiles = self._max_num_tiles
         while True:
-            tilings = []
+            params = []
             img_num_tiles = []
-            for img_size, img_transform in zip(img_sizes, img_transforms):
-                tiling, num_tiles = img_transform.compute_tiling(
-                    img_size, max_num_tiles
-                )
-                img_num_tiles.append(num_tiles)
-                tilings.append(tiling)
-            if max_num_tiles == 1:
+            for media in media_list:
+                if isinstance(media, ImageMedia):
+                    media_params = self._image_transform.compute_params(
+                        [media], max_num_tiles * self._tokens_per_tile
+                    )[0]
+                elif isinstance(media, VideoFrameMedia):
+                    media_params = self._video_frame_transform.compute_params(
+                        [media], max_num_tiles * self._tokens_per_tile
+                    )[0]
+                img_num_tiles.append(media_params.num_tiles)
+                params.append(media_params)
+            if max_num_tiles == 1 or num_tokens_available is None:
                 break
-            if sum(img_num_tiles) > tiles_available:
+            if sum(img_num_tiles) > max_num_tiles:
                 if max_num_tiles in self._tile_degradation_map:
                     max_num_tiles = self._tile_degradation_map[max_num_tiles]
                 else:
-                    raise RuntimeError(
-                        (
-                            f"Tried to decrease the number of tiles {max_num_tiles} but it's not ",
-                            f"defined in the degradation map {self._tile_degradation_map}",
-                        )
-                    )
+                    # End of degradation
+                    break
             else:
                 break
-        return tilings, img_num_tiles
+        return params
     
     def __str__(self):
-        return f"TileDegradationMap(tile_degradation_map={self._tile_degradation_map}, max_num_tiles={self._max_num_tiles})"
+        return f"TileDegradationImageTransform(max_num_tiles={self._max_num_tiles}, video_frame_transform={self._video_frame_transform}, image_transform={self._image_transform})"
 
-class NoopTileDegradationMap:
-    def __init__(self, max_num_tiles: int = 12):
-        self._max_num_tiles = max_num_tiles
 
-    def compute_tilings(
-            self,
-            img_sizes: list[tuple[int, int]],
-            img_transforms: list[ImageTransform],
-            tiles_available: int,
-    ) -> tuple[list[tuple[int, int]], list[int]]:
-        max_num_tiles = self._max_num_tiles
-        tilings = []
-        img_num_tiles = []
-        for img_size, img_transform in zip(img_sizes, img_transforms):
-            tiling, num_tiles = img_transform.compute_tiling(
-                img_size, max_num_tiles
+class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
+    """Preprocess an image with dynamic resolution for vision transformers.
+    
+    This function resizes an image to optimize the number of patches while respecting
+    constraints on minimum/maximum patches, minimum side length, and compatibility
+    with pixel shuffle or convolution merging operations.
+    
+    The algorithm works by:
+    1. Computing the initial patch grid size based on the image dimensions and res_step
+    2. Scaling the patch grid to fit within the max_patches constraint
+    3. Ensuring the result has at least min_patches
+    4. Optionally enforcing a minimum side length constraint
+    5. Rounding patch dimensions to even numbers for pixel_shuffle/conv_merging compatibility
+    6. Resizing the image to the computed target dimensions
+    
+    Args:
+        image (PIL.Image): Input image to preprocess.
+        min_patches (int, optional): Minimum number of patches required. Defaults to 1.
+        max_patches (int, optional): Maximum number of patches allowed. Defaults to 128.
+        res_step (int, optional): Resolution step size (patch dimension). Defaults to 16.
+        factor_max (float, optional): Maximum scaling factor to apply. Defaults to 1.0.
+        pixel_shuffle (bool, optional): Whether to ensure compatibility with pixel shuffle
+            operations by rounding to even patch dimensions. Defaults to False.
+        min_side (int, optional): Minimum side length in pixels. If specified, ensures
+            at least one side meets this constraint. Defaults to None.
+        conv_merging (bool, optional): Whether to ensure compatibility with convolution
+            merging by rounding to even patch dimensions. Defaults to False.
+    
+    Returns:
+        PIL.Image: Resized image with dimensions optimized for patch-based processing.
+            The output dimensions will be (target_patch_width * res_step, target_patch_height * res_step).
+    
+    Note:
+        The function preserves aspect ratio as much as possible while satisfying all constraints.
+        When constraints conflict (e.g., min_side vs max_patches), the function prioritizes
+        staying within max_patches while maximizing the image size.
+    
+    Example:
+        >>> from PIL import Image
+        >>> img = Image.open("example.jpg")  # 800x600 image
+        >>> resized_img = dynamic_res_preprocess(img, min_patches=4, max_patches=64, res_step=14)
+        >>> # Returns image resized to maintain aspect ratio with 4-64 patches of size 14x14
+    """
+    
+    def __init__(
+        self,
+        vision_model_type: str,
+        tile_size: int,
+        tokens_per_tile: int,
+        min_num_patches: int,
+        max_num_patches: int,
+        res_step: int,
+        factor_max: float = 1.0,
+        pixel_shuffle: bool = False,
+        min_side: int | None = None,
+        conv_merging: bool = False,
+    ):
+        self._tile_size = tile_size
+        self._tokens_per_tile = tokens_per_tile
+        self._min_num_patches = min_num_patches
+        self._max_num_patches = max_num_patches
+        self._res_step = res_step
+        self._factor_max = factor_max
+        self._pixel_shuffle = pixel_shuffle
+        self._min_side = min_side
+        self._conv_merging = conv_merging
+
+        pixel_mean, pixel_std = pixel_statistics[self._vision_model_type]
+        self._transform = T.Compose([
+            T.Lambda(lambda img: img.convert('RGB') if img.mode != 'RGB' else img),
+            T.ToTensor(),
+            T.Normalize(mean=pixel_mean, std=pixel_std),
+        ])
+    
+    def apply_params(self, image: Image.Image, params: None) -> list[torch.Tensor]:
+        return [self._transform(image)]
+    
+    def compute_params(
+        self,
+        media_list: list[ImageMedia | VideoFrameMedia],
+        num_tokens_available: int | None = None,
+    ) -> list[ImageTilingParams]:
+        for media in media_list:
+            if isinstance(media, ImageMedia):
+                orig_width, orig_height = media.width, media.height
+            elif isinstance(media, VideoFrameMedia):
+                orig_width, orig_height = media.video_width, media.video_height
+            else:
+                raise ValueError(f"Unsupported media type: {type(media)}")
+
+            closest_patch_height = round(orig_height / self._res_step + 0.5)
+            closest_patch_width = round(orig_width / self._res_step + 0.5)
+            patches = closest_patch_height * closest_patch_width
+
+            factor = min(math.sqrt(self._max_num_patches / patches), self._factor_max)
+            target_patch_height = math.floor(factor * closest_patch_height)
+            target_patch_width = math.floor(factor * closest_patch_width)
+
+            if target_patch_height * target_patch_width < self._min_num_patches:
+                up_factor = math.sqrt(self._min_num_patches / (target_patch_height * target_patch_width))
+                target_patch_height = math.ceil(up_factor * target_patch_height)
+                target_patch_width = math.ceil(up_factor * target_patch_width)
+
+            if self._min_side is not None and min(target_patch_width, target_patch_height) * self._res_step < self._min_side:
+                if target_patch_width <= target_patch_height:
+                    up_factor = self._min_side / (target_patch_width * self._res_step)
+                    new_patch_height = math.ceil(up_factor * target_patch_height)
+                    new_patch_width = math.ceil(up_factor * target_patch_width)
+
+                    if new_patch_height * new_patch_width > self._max_num_patches:
+                        # If only one side can be min_side, make as big as possible at native aspect ratio while staying below max_patches
+                        if max(self._max_num_patches // new_patch_width, 1) * self._res_step < self._min_side:
+                            up_factor = math.sqrt(self._max_num_patches / (target_patch_height * target_patch_width))
+                            target_patch_height = math.floor(up_factor * target_patch_height)
+                            target_patch_width = math.floor(up_factor * target_patch_width)
+                        target_patch_width = new_patch_width
+                        target_patch_height = max(self._max_num_patches // new_patch_width, 1)
+                    else:
+                        target_patch_height = new_patch_height
+                        target_patch_width = new_patch_width
+                else:
+                    up_factor = self._min_side / (target_patch_height * self._res_step)
+                    new_patch_height = math.ceil(up_factor * target_patch_height)
+                    new_patch_width = math.ceil(up_factor * target_patch_width)
+
+                    if new_patch_height * new_patch_width > self._max_num_patches:
+                        # If only one side can be min_side, make as big as possible at native aspect ratio while staying below max_patches
+                        if max(self._max_num_patches // new_patch_height, 1) * self._res_step < self._min_side:
+                            up_factor = math.sqrt(self._max_num_patches / (target_patch_height * target_patch_width))
+                            target_patch_height = math.floor(up_factor * target_patch_height)
+                            target_patch_width = math.floor(up_factor * target_patch_width)
+                        else:
+                            target_patch_height = new_patch_height
+                            target_patch_width = max(self._max_num_patches // new_patch_height, 1)
+                    else:
+                        target_patch_height = new_patch_height
+                        target_patch_width = new_patch_width
+
+            # Rounds to nearest even number for pixel shuffle compatibility, 
+            if self._pixel_shuffle or self._conv_merging:
+                if target_patch_height % 2 != 0:
+                    if (target_patch_height + 1) * target_patch_width <= self._max_num_patches:
+                        target_patch_height += 1
+                    else:
+                        target_patch_height -= 1
+                if target_patch_width % 2 != 0:
+                    if target_patch_height * (target_patch_width + 1) <= self._max_num_patches:
+                        target_patch_width += 1
+                    else:
+                        target_patch_width -= 1
+            assert target_patch_height * target_patch_width <= self._max_num_patches
+
+            # resize the image
+            params.append(
+                DynamicResolutionTransformMedia(
+                    media=media,
+                    target_width=target_patch_width * self._res_step,
+                    target_height=target_patch_height * self._res_step,
+                )
             )
-            img_num_tiles.append(num_tiles)
-            tilings.append(tiling)
-        return tilings, img_num_tiles
+
 
 
 # Based on https://github.com/openai/CLIP/blob/dcba3cb2e2827b402d2701e7e1c7d9fed8a20ef1/clip/clip.py#L79
 # and https://github.com/OpenGVLab/InternVL/blob/aa521e6eb1df4cf153aa4118fcf13e673c055d46/internvl_chat/internvl/train/dataset.py#L276
-def _build_transform(input_size: int, vision_model_type: str):
+def _build_transform(target_size: tuple[int, int], vision_model_type: str):
     if vision_model_type in ("siglip", "internvit", "radio", "radio-g"):
         pixel_mean, pixel_std = pixel_statistics[vision_model_type]
 
@@ -245,7 +512,7 @@ def _build_transform(input_size: int, vision_model_type: str):
             [
                 T.Lambda(lambda img: img.convert("RGB") if img.mode != "RGB" else img),
                 T.Resize(
-                    (input_size, input_size), interpolation=InterpolationMode.BICUBIC
+                    (target_size[1], target_size[0]), interpolation=InterpolationMode.BICUBIC
                 ),
                 T.ToTensor(),
                 T.Normalize(mean=pixel_mean, std=pixel_std),
@@ -258,7 +525,7 @@ def _build_transform(input_size: int, vision_model_type: str):
         transform = Compose(
             [
                 T.Resize(
-                    (input_size, input_size), interpolation=InterpolationMode.BICUBIC
+                    (target_size[1], target_size[0]), interpolation=InterpolationMode.BICUBIC
                 ),
                 T.Lambda(lambda img: img.convert("RGB") if img.mode != "RGB" else img),
                 T.ToTensor(),
@@ -275,7 +542,7 @@ def _build_transform(input_size: int, vision_model_type: str):
             )
 
             processor = SiglipImageProcessor(
-                size={"height": input_size, "width": input_size}
+                size={"height": target_size[1], "width": target_size[0]}
             )
 
             def transform(x):
