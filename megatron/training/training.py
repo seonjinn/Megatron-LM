@@ -1439,6 +1439,8 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
         samples_seen_in_iteration = sum(samples_seen)
         if isinstance(samples_seen_in_iteration, torch.Tensor):
             samples_seen_in_iteration = samples_seen_in_iteration.item()
+        samples_seen_in_iteration = reduce_sum_across_data_parallel_group(samples_seen_in_iteration)
+        samples_seen_in_iteration = int(samples_seen_in_iteration)
     else:
         samples_seen_in_iteration = get_num_microbatches() * args.micro_batch_size * args.data_parallel_size
 
