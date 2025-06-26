@@ -125,17 +125,18 @@ def experimental_fn(introduced_with_version: str):
             PkgVersion(introduced_with_version).minor + max_lifetime
             < PkgVersion(mcore_version).minor
         ):
-            logger.warning(
-                "%s has reached end of life. Please migrate to a non-experimental function.",
-                func.__name__,
-            )
+            pass
+            #logger.warning(
+            #    "%s has reached end of life. Please migrate to a non-experimental function.",
+            #    func.__name__,
+            #)
 
         @wraps(func)
         def wrapped_func(*args, **kwargs):
             if config.is_experimental_enabled() is not True:
                 raise ExperimentalNotEnabledError(f"Flag config.ENABLE_EXPERIMENTAL not enabled.")
 
-            logger.info("Setting ENABLE_EXPERIMENTAL=True will run experimental code.")
+            #logger.info("Setting ENABLE_EXPERIMENTAL=True will run experimental code.")
 
             return func(*args, **kwargs)
 
@@ -185,10 +186,11 @@ def experimental_cls(introduced_with_version: str):
             PkgVersion(introduced_with_version).minor + max_lifetime
             < PkgVersion(mcore_version).minor
         ):
-            logger.warning(
-                "%s has reached end of life. Please migrate to a non-experimental function.",
-                cls.__name__,
-            )
+            pass
+            #logger.warning(
+            #    "%s has reached end of life. Please migrate to a non-experimental function.",
+            #    cls.__name__,
+            #)
 
         def wrapped_func(cls):
             def guard(super: super, attr: str):
@@ -212,7 +214,7 @@ def experimental_cls(introduced_with_version: str):
                         f"Flag config.ENABLE_EXPERIMENTAL not enabled."
                     )
 
-                logger.info("Setting ENABLE_EXPERIMENTAL=True will run experimental code.")
+                #logger.info("Setting ENABLE_EXPERIMENTAL=True will run experimental code.")
                 return super.__getattribute__(attr)
 
             class ClassInterceptor(type):
