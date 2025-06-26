@@ -130,6 +130,7 @@ def train_valid_test_dataloaders_provider(train_val_test_num_samples, task_encod
         data_parallel_group=data_parallel_group,
         worker_debug_path=worker_debug_path,
         worker_log_level=worker_log_level,
+        seed_offset=args.dataloader_seed,
     )
     train_ds, valid_ds1, test_ds = datasets_provider(task_encoder, worker_config)
 

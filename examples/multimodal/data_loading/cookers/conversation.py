@@ -5,7 +5,6 @@ from ..conversation_sample import (
     AudioMedia,
     ConversationSample,
     ImageMedia,
-    TextMedia,
     VideoFrameMedia,
     VideoMedia,
 )
@@ -25,7 +24,7 @@ def cook_conversation(
         for frag in msg.fragments:
             if isinstance(frag, (ImageMedia, VideoMedia, AudioMedia, VideoFrameMedia)):
                 frag.value = cache.get_lazy(media_source, frag.value)
-            elif isinstance(frag, TextMedia):
+            elif isinstance(frag, str):
                 # No source
                 pass
             else:

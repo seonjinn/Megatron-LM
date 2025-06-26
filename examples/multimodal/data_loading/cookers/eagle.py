@@ -3,10 +3,9 @@ import re
 
 from PIL import Image
 
-from examples.multimodal.data_loading.conversation_sample import (
+from data_loading.conversation_sample import (
     ConversationSample,
     Message,
-    TextMedia,
 )
 from megatron.core.models.multimodal.llava_model import IMAGE_TOKEN
 from megatron.energon import (
@@ -59,7 +58,7 @@ def cook_eagle(
 
     # Note: Some tokenizers may ignore the system prompt.
     conversation = [
-        Message(sender="system", fragments=[TextMedia(value="Answer the questions.")])
+        Message(sender="system", fragments=["Answer the questions."])
     ]
 
     # Format the conversation as a list of "user" / "assistant" turns.
@@ -71,7 +70,7 @@ def cook_eagle(
         conversation.append(
             Message(
                 sender="user" if turn["from"] == "human" else "assistant",
-                fragments=[TextMedia(value=turn["value"])],
+                fragments=[turn["value"]],
             )
         )
 

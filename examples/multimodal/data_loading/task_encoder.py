@@ -235,19 +235,19 @@ class MultiModalTaskEncoder(
             )
         else:
             num_image_embeddings_per_tile = get_num_image_embeddings(
-                    img_h=self.args.img_h,
-                    img_w=self.args.img_w,
-                    patch_dim=self.args.patch_dim,
-                    vision_model_type=self.args.vision_model_type,
-                    disable_vision_class_token=self.args.disable_vision_class_token,
-                    class_token_len=1,
-                    pixel_shuffle=self.args.pixel_shuffle,
-                    use_tile_tags=self.args.use_tile_tags,
-                    max_num_tiles=self.args.max_num_tiles,
-                    tokenizer_type=self.args.tokenizer_prompt_format,
-                    use_image_break_token=self.args.image_break_token is not None,
-                    conv_merging=self.args.conv_merging,
-                ),
+                img_h=self.args.img_h,
+                img_w=self.args.img_w,
+                patch_dim=self.args.patch_dim,
+                vision_model_type=self.args.vision_model_type,
+                disable_vision_class_token=self.args.disable_vision_class_token,
+                class_token_len=1,
+                pixel_shuffle=self.args.pixel_shuffle,
+                use_tile_tags=self.args.use_tile_tags,
+                max_num_tiles=self.args.max_num_tiles,
+                tokenizer_type=self.args.tokenizer_prompt_format,
+                use_image_break_token=self.args.image_break_token is not None,
+                conv_merging=self.args.conv_merging,
+            )
             if self.args.use_tiling:
                 image_tiling_strategy = ImageTilingStrategyV1(
                     vision_model_type=self.args.vision_model_type,
@@ -272,7 +272,7 @@ class MultiModalTaskEncoder(
                     augment=False,
                 )
             self.image_tiling_strategy = TileDegradationStrategy(
-                image_strateg=image_tiling_strategy,
+                image_strategy=image_tiling_strategy,
                 video_frame_strategy=NoTilingStrategy(
                     vision_model_type=self.args.vision_model_type,
                     embeddings_per_image=num_image_embeddings_per_tile,
@@ -367,7 +367,7 @@ class MultiModalTaskEncoder(
             for media in (
                 f"Frame {i + 1} sampled at {timestamp:.2f} seconds: ",
                 # TODO: Orginal eagle repro
-                # TextMedia(value=f"Frame {i + 1} sampled at {timestamp:.2f} seconds: <image-{i}>"),
+                # f"Frame {i + 1} sampled at {timestamp:.2f} seconds: <image-{i}>",
                 VideoFrameMedia(
                     value=video.value,
                     timestamp=float(timestamp),
@@ -400,7 +400,7 @@ class MultiModalTaskEncoder(
             # {"role": "system", "content": "You are an AI assistant whose name is Eagle-Next."},
         ]
 
-        image_media = []
+        image_media: list[ImageMedia | VideoFrameMedia] = []
 
         # Format the conversation as a list of "user" / "assistant" turns.
         for message in sample.conversation:
@@ -412,6 +412,7 @@ class MultiModalTaskEncoder(
             for fragment in message.fragments:
                 if isinstance(fragment, str):
                     content += fragment
+                    assert IMAGE_TOKEN not in fragment, f"{IMAGE_TOKEN!r} in {fragment!r}. This breaks further processing."
                 elif isinstance(fragment, ImageMedia):
                     content += IMAGE_TOKEN
                     image_media.append(fragment)
@@ -471,18 +472,7 @@ class MultiModalTaskEncoder(
         # Transform the images
         image_tiles = []
         for media in sample.images:
-            if isinstance(media.media, VideoFrameMedia):
-                image_tiles.extend(
-                    self.transform_video_frame.apply_params(
-                        media.media.value, media.tiling
-                    )
-                )
-            elif isinstance(media.media, ImageMedia):
-                image_tiles.extend(
-                    self.transform_image.apply_params(media.media.value, media.tiling)
-                )
-            else:
-                raise ValueError(f"Unexpected media type: {type(media.media)}")
+            image_tiles.extend(self.image_tiling_strategy.apply_params(media))
 
         # Make this a packed sample (if used without packing, it will be the same next code)
         return PackedTaskSample.derive_from(
@@ -556,7 +546,7 @@ class MultiModalTaskEncoder(
     @stateless
     def pack_selected_samples(
         self, samples: List[PackedTaskSample]
-    ) -> List[PackedTaskSample]:
+    ) -> PackedTaskSample:
         """
         Function to pack a list of ImageTaskSamplePacked into a single ImageTaskSamplePacked.
 
@@ -587,7 +577,7 @@ class MultiModalTaskEncoder(
         )
         assert all(
             isinstance(img, torch.Tensor) for sample in samples for img in sample.imgs
-        ), "All images must be tensors"
+        ), f"All images must be tensors: {[type(img) for sample in samples for img in sample.imgs]}"
 
         return PackedTaskSample(
             __key__=[k for s in samples for k in s.__key__],
@@ -602,7 +592,6 @@ class MultiModalTaskEncoder(
             cu_lengths_padded=torch.tensor(cu_lengths_padded, dtype=torch.int32),
             max_length=max(sample.max_length for sample in samples),
             num_tiles=[n for s in samples for n in s.num_tiles],
-            tile_sizes=[s.tile_size for s in samples],
             samples_seen=sum(s.samples_seen for s in samples),
         )
 
@@ -891,10 +880,10 @@ class MultiModalTaskEncoder(
     ):
         """Calculate expected sequence length given text tokens length and number of tiles."""
         total_num_images = len(image_tiling_params)
-        total_num_tiles = sum(media.num_tiles for media in image_tiling_params)
+        total_num_embeddings = sum(media.num_embeddings for media in image_tiling_params)
         total_len = (
             len(input_ids)
-            + total_num_tiles * self.num_image_embeddings_per_tile
+            + total_num_embeddings
             - total_num_images
         )
         return total_len

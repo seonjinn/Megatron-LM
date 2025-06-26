@@ -2,7 +2,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 import math
-from typing import Callable, Optional, Sequence
+from typing import Callable, Optional
 
 import einops
 import torch
@@ -10,7 +10,7 @@ from torchvision import transforms as T
 from torchvision.transforms import Compose
 from torchvision.transforms.functional import InterpolationMode
 
-from examples.multimodal.data_loading.conversation_sample import (
+from data_loading.conversation_sample import (
     ImageMedia,
     VideoFrameMedia,
 )
@@ -186,6 +186,7 @@ class _FixedSizeStrategy(ImageTilingStrategy):
 
     # Based on https://github.com/openai/CLIP/blob/dcba3cb2e2827b402d2701e7e1c7d9fed8a20ef1/clip/clip.py#L79
     # and https://github.com/OpenGVLab/InternVL/blob/aa521e6eb1df4cf153aa4118fcf13e673c055d46/internvl_chat/internvl/train/dataset.py#L276
+    @staticmethod
     def _build_transform(target_size: tuple[int, int], vision_model_type: str):
         """
         Build a transform for a given vision model type and target size.
@@ -310,7 +311,7 @@ class ImageTilingParamsV1(ImageTilingParams):
     tiling: tuple[int, int]
 
 
-class ImageTilingStrategyV1(ImageTilingStrategy):
+class ImageTilingStrategyV1(_FixedSizeStrategy):
     """Tiling image transformation.
 
     This transformation splits the image into a grid of tiles and applies the transformation to each tile.
@@ -395,7 +396,7 @@ class ImageTilingStrategyV1(ImageTilingStrategy):
         num_tokens_available: Optional[int] = None,
     ) -> list[ImageTilingParamsV1]:
         max_num_tiles = min(
-            num_tokens_available // self._embeddings_per_tile, self._max_num_tiles
+            num_tokens_available // self._embeddings_per_image, self._max_num_tiles
         )
 
         # calculate the existing image aspect ratio
@@ -424,7 +425,7 @@ class ImageTilingStrategyV1(ImageTilingStrategy):
                 ImageTilingParamsV1(
                     media=media,
                     num_tiles=num_tiles,
-                    num_embeddings=num_tiles * self._embeddings_per_tile,
+                    num_embeddings=num_tiles * self._embeddings_per_image,
                     tiling=tiling,
                 )
             )
@@ -432,34 +433,36 @@ class ImageTilingStrategyV1(ImageTilingStrategy):
         return params
 
     def __str__(self):
-        return f"TilingImageTransform(vision_model_type={self._vision_model_type}, tile_size={self._tile_size}, use_thumbnail={self._use_thumbnail}, augment={self._augment}, min_num_tiles={self._min_num_tiles}, max_num_tiles={self._max_num_tiles}, tokens_per_tile={self._embeddings_per_tile}, find_closest_aspect_ratio_fn={self._find_closest_aspect_ratio_fn})"
+        return f"TilingImageTransform(vision_model_type={self._vision_model_type}, tile_size={self._tile_size}, use_thumbnail={self._use_thumbnail}, min_num_tiles={self._min_num_tiles}, max_num_tiles={self._max_num_tiles}, embeddings_per_tile={self._embeddings_per_image}, find_closest_aspect_ratio_fn={self._find_closest_aspect_ratio_fn})"
 
 
 class TileDegradationStrategy(ImageTilingStrategy):
-    """Image transformation."""
+    """Strategy for tiling images and video frames, each with their own tiling strategy, while trying to match the
+    number of tokens left in the sample by reducing the number of tiles if needed.
+    """
 
     # Based on https://github.com/openai/CLIP/blob/dcba3cb2e2827b402d2701e7e1c7d9fed8a20ef1/clip/clip.py#L79
     # and https://github.com/OpenGVLab/InternVL/blob/aa521e6eb1df4cf153aa4118fcf13e673c055d46/internvl_chat/internvl/train/dataset.py#L276
 
     def __init__(
         self,
-        image_transform: ImageTilingStrategy,
-        video_frame_transform: ImageTilingStrategy,
+        image_strategy: ImageTilingStrategy,
+        video_frame_strategy: ImageTilingStrategy,
         embeddings_per_tile: int,
         max_num_tiles: int,
         tile_degradation_map: dict[int, int] = {12: 8, 8: 6, 6: 4, 4: 2, 2: 1},
     ):
-        self._image_transform = image_transform
-        self._video_frame_transform = video_frame_transform
+        self._image_strategy = image_strategy
+        self._video_frame_strategy = video_frame_strategy
         self._embeddings_per_tile = embeddings_per_tile
         self._max_num_tiles = max_num_tiles
         self._tile_degradation_map = tile_degradation_map
 
     def apply_params(self, transform_media: ImageTilingParams) -> list[torch.Tensor]:
         if isinstance(transform_media.media, ImageMedia):
-            return [self._image_transform.apply_params(transform_media)]
+            return self._image_strategy.apply_params(transform_media)
         elif isinstance(transform_media.media, VideoFrameMedia):
-            return [self._video_frame_transform.apply_params(transform_media)]
+            return self._video_frame_strategy.apply_params(transform_media)
         else:
             raise ValueError(f"Unsupported media type: {type(transform_media.media)}")
 
@@ -474,13 +477,15 @@ class TileDegradationStrategy(ImageTilingStrategy):
             img_num_tiles = []
             for media in media_list:
                 if isinstance(media, ImageMedia):
-                    media_params = self._image_transform.compute_params(
+                    media_params = self._image_strategy.compute_params(
                         [media], max_num_tiles * self._embeddings_per_tile
                     )[0]
                 elif isinstance(media, VideoFrameMedia):
-                    media_params = self._video_frame_transform.compute_params(
+                    media_params = self._video_frame_strategy.compute_params(
                         [media], max_num_tiles * self._embeddings_per_tile
                     )[0]
+                else:
+                    raise ValueError(f"Unsupported media type: {type(media)}")
                 img_num_tiles.append(media_params.num_tiles)
                 params.append(media_params)
             if max_num_tiles == 1 or num_tokens_available is None:
@@ -498,10 +503,10 @@ class TileDegradationStrategy(ImageTilingStrategy):
     def stack(
         self, images: list[torch.Tensor]
     ) -> tuple[torch.Tensor, list[tuple[int, int]], list[int] | None, list[int] | None]:
-        return self._image_transform.stack(images)
+        return self._image_strategy.stack(images)
 
     def __str__(self):
-        return f"TileDegradationImageTransform(max_num_tiles={self._max_num_tiles}, video_frame_transform={self._video_frame_transform}, image_transform={self._image_transform})"
+        return f"TileDegradationImageTransform(max_num_tiles={self._max_num_tiles}, image_transform={self._image_strategy}, video_frame_transform={self._video_frame_strategy})"
 
 
 @dataclass
@@ -765,3 +770,6 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
             vision_cu_lengths,
             vision_max_lengths,
         )
+
+    def __str__(self):
+        return f"DynamicResolutionImageTransform(vision_model_type={self._vision_model_type}, min_num_patches={self._min_num_patches}, max_num_patches={self._max_num_patches}, patch_size={self._patch_size}, pixel_shuffle={self._pixel_shuffle}, conv_merging={self._conv_merging})"

@@ -32,6 +32,12 @@ def add_multimodal_extra_args(parser):
         help="Make dataloader to produce sequences of specific length.",
     )
     group.add_argument(
+        "--dataloader-seed",
+        type=int,
+        default=0,
+        help="The seed for the dataloader to use for training.",
+    )
+    group.add_argument(
         "--num-frames",
         type=int,
         default=1,

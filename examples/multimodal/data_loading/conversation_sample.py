@@ -85,15 +85,6 @@ class AudioMedia(Media):
 
 
 @edataclass
-class TextMedia(Media):
-    """A text media object in a conversation."""
-
-    value: str
-
-    metadata: dict[str, Union[str, int, float, bool]] | None = None
-
-
-@edataclass
 class Message:
     """A message in a conversation between a user and an assistant."""
 
