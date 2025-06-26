@@ -799,46 +799,20 @@ class MultiModalTaskEncoder(
             "The number of image tokens must match the length of the tile tensor."
         )
 
-        # Find positions of tokens to replace
-        replace_positions = torch.where(arr == token_to_replace)[0]
-
-        if len(replace_positions) == 0:
-            return arr
-
-        # Calculate final array size
-        total_replacements = torch.sum(num_repetition).item()
-        final_size = len(arr) - len(replace_positions) + total_replacements
-
-        # Pre-allocate result array
-        result = torch.empty(final_size, dtype=arr.dtype, device=arr.device)
-
-        # Copy data efficiently
-        src_idx = 0
-        dst_idx = 0
-
-        for i, pos in enumerate(replace_positions):
-            pos = pos.item()
-
-            # Copy segment before replacement
-            if pos > src_idx:
-                segment_len = pos - src_idx
-                result[dst_idx : dst_idx + segment_len] = arr[src_idx:pos]
-                dst_idx += segment_len
-
-            # Fill replacement tokens
-            reps = num_repetition[i].item()
-            if reps > 0:
-                result[dst_idx : dst_idx + reps] = new_token
-                dst_idx += reps
-
-            src_idx = pos + 1
-
-        # Copy final segment
-        if src_idx < len(arr):
-            remaining_len = len(arr) - src_idx
-            result[dst_idx : dst_idx + remaining_len] = arr[src_idx:]
-
-        return result
+        # Convert to list for easier manipulation
+        arr_list = arr.tolist()
+        result = []
+        idx = 0
+        for item in arr_list:
+            if item == token_to_replace:
+                # If the current item matches token_to_replace, add R copies of new_token
+                result.extend([new_token] * num_repetition[idx].item())
+                idx += 1
+            else:
+                # Otherwise, keep the original item
+                result.append(item)
+        
+        return torch.tensor(result, dtype=arr.dtype, device=arr.device)
 
     def _pad_for_context_parallel_and_fp8(
         self,
