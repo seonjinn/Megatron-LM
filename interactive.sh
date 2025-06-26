@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # H100
-CONTAINER_IMAGE="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/containers/megatron-dev-img-05142025-pytorch-dev-te-cd37379-energon-develop-08471f7-mamba-vlmeval.sqsh"
+CONTAINER_IMAGE="/lustre/fsw/portfolios/llmservice/users/matthieul/docker/megatron-dev-img-05142025-pytorch-dev-te-cd37379-energon-710-mamba-fix-vlmeval.sqsh"
 
 # Set partitions based on hostname
 if [[ $(hostname) == *"oci-iad"* ]]; then
@@ -16,7 +16,7 @@ fi
 
 srun -p ${PARTITIONS} -A llmservice_fm_vision -N 1 --pty \
     --container-image ${CONTAINER_IMAGE} \
-    --container-mounts "/lustre" \
+    --container-mounts "/lustre,/home" \
     --gpus 8 \
     --exclusive \
     --job-name "llmservice_fm_vision-megatron-dev:interactive" \

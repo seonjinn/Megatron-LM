@@ -50,7 +50,11 @@ TP=4
 
 CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/pretrain_llama_3p1_8b_cradio_rc3_dynamic_res_commercial_0618/checkpoints"
 
-DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe/eagle_sft_v13.16_sft1/wds/out.yaml"
+if [[ $USE_ONLINE_PACKING -eq 1 ]]; then
+    DATA_TRAIN="${SOURCE}/examples/multimodal/v2/data_config/sft_dataset_commercial_v13.16_online_packing.yaml"
+else
+    DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe/eagle_sft_v13.16_sft1/wds/out.yaml"
+fi
 
 SEQ_LEN=1024
 DECODER_SEQ_LEN=16384
@@ -102,7 +106,7 @@ if [[ $USE_PACKING -eq 1 ]]; then
 fi
 
 if [[ $USE_ONLINE_PACKING -eq 1 ]]; then
-    EXTRA_ARGS+=" --packing-seq-length ${DECODER_SEQ_LEN} --packing-buffer-size 1000 "
+    EXTRA_ARGS+=" --packing-buffer-size 3247 --packing-seq-length ${DECODER_SEQ_LEN} --packing-knapsack-algorithm balanced_greedy_knapsack "
 fi
 
 USE_PRECISION_AWARE_OPTIMIZER=1
@@ -222,8 +226,8 @@ else
     DATETIME=`date +'date_%y-%m-%d_time_%H-%M-%S'`
 
     srun -l --verbose \
-    --container-image /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/containers/megatron-dev-img-05142025-pytorch-dev-te-cd37379-energon-develop-08471f7-mamba-vlmeval.sqsh \
-    --container-mounts "/lustre" \
+    --container-image /lustre/fsw/portfolios/llmservice/users/matthieul/docker/megatron-dev-img-05142025-pytorch-dev-te-cd37379-energon-710-mamba-fix-vlmeval.sqsh \
+    --container-mounts "/lustre,/home" \
     --output=${LOGS_DIR}/%x_%j_$DATETIME.log \
     sh -c "${run_cmd}"
 
