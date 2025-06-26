@@ -765,7 +765,7 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
         vision_max_lengths = torch.tensor(max_length, dtype=torch.int32)
 
         return (
-            torch.stack(imgs),
+            torch.cat(imgs, dim=0).unsqueeze(0),
             imgs_sizes,
             vision_cu_lengths,
             vision_max_lengths,
