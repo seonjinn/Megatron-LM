@@ -210,10 +210,6 @@ class MultiModalTaskEncoder(
             self.image_tiling_strategy = DynamicResolutionImageTilingStrategy(
                 vision_model_type=self.args.vision_model_type,
                 min_num_patches=self.args.dynamic_resolution_min_patches,
-                max_num_patches=self.args.seq_length
-                - (
-                    1 if not self.args.disable_vision_class_token else 0
-                ),  # TODO: handle class toekn length correctly(not just use 1)
                 patch_size=self.args.patch_dim,
                 get_num_embeddings=lambda width, height: get_num_image_embeddings(
                     img_h=height,
@@ -438,7 +434,8 @@ class MultiModalTaskEncoder(
             + "".join([f"{m.sender}: {m.fragments}\n" for m in sample.conversation])
         )
 
-        max_image_token_allowed = self.args.decoder_seq_length - len(input_ids) - 4
+        max_image_token_allowed = max(
+            int((self.args.decoder_seq_length - len(input_ids) - 4) / max(len(image_media), 1)), 1)
         image_media_params = self.image_tiling_strategy.compute_params(
             image_media, max_image_token_allowed
         )
