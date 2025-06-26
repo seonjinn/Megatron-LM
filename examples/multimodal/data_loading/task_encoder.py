@@ -452,7 +452,7 @@ class MultiModalTaskEncoder(
             input_ids, target, image_media_params
         ), f"Sample has no trainable tokens: {self.tokenizer.detokenize(input_ids)}"
 
-        total_len, total_len_padded, input_ids, target = self._pad_for_context_parallel(
+        total_len, total_len_padded, input_ids, target = self._pad_for_context_parallel_and_fp8(
             input_ids, target, image_media_params
         )
 
@@ -843,7 +843,7 @@ class MultiModalTaskEncoder(
 
         return result
 
-    def _pad_for_context_parallel(
+    def _pad_for_context_parallel_and_fp8(
         self,
         input_ids: torch.Tensor,
         target: torch.Tensor,
@@ -851,12 +851,14 @@ class MultiModalTaskEncoder(
     ) -> tuple[int, int, torch.Tensor, torch.Tensor]:
         total_len = self._get_total_seq_length(input_ids, image_tiling_params)
         total_len_padded = total_len
-        if getattr(self.args, "context_parallel_size", 1) > 1:
+        has_fp8 = self.args.fp8 is not None
+        if getattr(self.args, "context_parallel_size", 1) > 1 or has_fp8:
             padding_needed = get_padding(
                 total_len,
                 self.args.context_parallel_size,
                 self.args.tensor_model_parallel_size,
                 self.args.sequence_parallel,
+                fp8_enabled=has_fp8,
             )
             padding1 = torch.ones(padding_needed) * self.tokenizer.pad
             padding2 = torch.ones(padding_needed) * IGNORE_INDEX
@@ -903,16 +905,23 @@ class MultiModalTaskEncoder(
             self.packing_seq_length - 12 - total_img_embeddings_len + total_num_images
         )
 
-        input_ids = input_ids[:max_text_tokens]
-        target = target[:max_text_tokens]
+        truncated_input_ids = input_ids[:max_text_tokens]
+        truncated_target = target[:max_text_tokens]
 
         # If truncate causes all labels to be ignored, then skip the sample
-        if len(target) == 0 or (target == IGNORE_INDEX).all():
+        if len(truncated_target) == 0 or (truncated_target == IGNORE_INDEX).all():
             raise ValueError(
-                f"all targets will be ignored after truncation: {input_ids} {target}"
+                "All targets will be ignored after truncation: \n"
+                f"original input: {input_ids} \n"
+                f"original target: {target} \n"
+                f"truncated input:  {truncated_input_ids} \n"
+                f"truncated target: {truncated_target} \n"
+                f"max_text_tokens: {max_text_tokens} \n"
+                f"total_img_embeddings_len: {total_img_embeddings_len} \n"
+                f"total_num_images: {total_num_images} \n"
             )
 
-        return input_ids, target
+        return truncated_input_ids, truncated_target
 
 
 tensor_to_pil = ToPILImage()
