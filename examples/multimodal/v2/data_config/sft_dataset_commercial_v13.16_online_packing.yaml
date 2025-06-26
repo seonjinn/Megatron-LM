@@ -2,7 +2,7 @@ __module__: megatron.energon
 __class__: MetadatasetV2
 splits:
   train:
-    path: /home/lvoegtle/src/megatron-lm/tmpdata/eagle_sft_v13.16_sft1/metadataset.yaml
+    path: /lustre/fsw/portfolios/llmservice/users/lvoegtle/src/megatron-lm/tmpdata/eagle_sft_v13.16_sft1/metadataset.yaml
     subflavors:
       augmentation: False
   val:
