@@ -1,8 +1,8 @@
 import torch
 import os
 
-original_ckpt = "/lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/mcore_mmodal_models/nemotron5p5_hybrid_12b_dq_patch_vocab_cradio_vlm_v1_rc3_tp4"
-new_ckpt =      "/lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/mcore_mmodal_models/nemotron5p5_hybrid_12b_dq_patch_vocab_cradio_vlm_v1_rc3_tp4_no_extra_state"
+original_ckpt = "/lustre/fs1/portfolios/llmservice/projects/llmservice_nlp_fm/mcore_mmodal_models/llama_3p1_8b_c-radio-g-v3-no-extra-state"
+new_ckpt =      "/lustre/fs1/portfolios/llmservice/projects/llmservice_nlp_fm/mcore_mmodal_models/llama_3p1_8b_c-radio-g-v3-no-extra-state"
 TP = 4
 
 for i in range(TP):
