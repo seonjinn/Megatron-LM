@@ -474,10 +474,24 @@ class MultiModalTaskEncoder(
         for media in sample.images:
             image_tiles.extend(self.image_tiling_strategy.apply_params(media))
 
-        # Make this a packed sample (if used without packing, it will be the same next code)
-        return PackedTaskSample.derive_from(
-            sample,
+        # # Make this a packed sample (if used without packing, it will be the same next code)
+        # return PackedTaskSample.derive_from(
+        #     sample,
+        #     __key__=[sample.__key__],
+        #     tokens=sample.tokens,
+        #     labels=sample.labels,
+        #     imgs=image_tiles,
+        #     num_tiles=[media.num_tiles for media in sample.images],
+        #     max_length=sample.total_len_padded,
+        #     cu_lengths=torch.tensor([0, sample.total_len], dtype=torch.int32),
+        #     cu_lengths_padded=torch.tensor(
+        #         [0, sample.total_len_padded], dtype=torch.int32
+        #     ),
+        #     samples_seen=torch.tensor(1, dtype=torch.int32),
+        # )
+        return PackedTaskSample(
             __key__=[sample.__key__],
+            __restore_key__=(),
             tokens=sample.tokens,
             labels=sample.labels,
             imgs=image_tiles,
