@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH -A llmservice_fm_vision
-#SBATCH -p batch_block1,batch_large,batch_long
+#SBATCH -p batch_block1,backfill,batch_large,batch_long
 #SBATCH -t 04:00:00
 #SBATCH --mem=0
 #SBATCH --ntasks-per-node=8
@@ -10,7 +10,7 @@
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=pretrain_nemotron_5_hybrid_8b_cradio_vlm_v1_rc3_0618
+#SBATCH --job-name=pretrain_llama_3p1_8b_cradio_g_v3_0625
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
@@ -22,16 +22,19 @@ which srun
 BATCH=$((1-$?))
 
 DEBUG=0
-
+USE_TILING=0
+USE_DYNAMIC_RES=1
+USE_PP=0
+USE_FP8=1
 
 # Remember to update model and job name if running in batch mode!!
 if [[ $BATCH -eq 0 ]]; then
     DATETIME=`date +'%y-%m-%d-%H-%M-%S'`
-    MODEL_NAME="temp_interactive_pretrain_nemotron_5_hybrid_8b_cradio_${DATETIME}"
+    MODEL_NAME="interactive_pretrain_llama_3p1_8b_cradio_g_v3_${DATETIME}"
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="pretrain_nemotron_5_hybrid_8b_cradio_vlm_v1_rc3_0618"
+    MODEL_NAME="pretrain_llama_3p1_8b_cradio_g_v3_0625"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -44,16 +47,16 @@ FINETUNE_DIR=${OUTPUT}/checkpoints
 LOGS_DIR="${OUTPUT}/logs"
 TENSORBOARD_DIR="${OUTPUT}/tensorboard"
 
-TP=8
+TP=4
 
-CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/mcore_mmodal_models/N5p5_phase3_blend2_torch_cradio_vlm_v1_rc3_tp8_reinit_patched-no-extra-state"
+CHECKPOINT_DIR="/lustre/fs1/portfolios/llmservice/projects/llmservice_nlp_fm/mcore_mmodal_models/llama_3p1_8b_c-radio-g-v3-no-extra-state"
 
 DATA_TRAIN="${SOURCE}/examples/multimodal/v2/data_config/pretrain_dataset_commercial.yaml"
 
 if [[ $DEBUG -eq 1 ]]; then
     MBZ=1
-    BZ=8
-    NW=2
+    BZ=4
+    NW=0
     AD=0.0
     HD=0.0
     LI=1
@@ -65,8 +68,7 @@ if [[ $DEBUG -eq 1 ]]; then
     NONDETERMINISTIC_ATTN=1
 
     NUM_GPU=8
-
-    SAVE_INTERVAL=10
+    export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 else
     MBZ=1
     BZ=1024
@@ -77,30 +79,27 @@ else
     EXTRA_ARGS=""
     NONDETERMINISTIC_ATTN=1
     NUM_GPU=8
-
-    SAVE_INTERVAL=5000
 fi
 
 SEQ_LEN=1024
 DECODER_SEQ_LEN=16384
 
-USE_TILING=0
 if [[ $USE_TILING -eq 1 ]]; then
     EXTRA_ARGS+=" --pixel-shuffle --use-tiling --max-num-tiles 12 --use-thumbnail"
     SEQ_LEN=256
 fi
 
-USE_FP8=1
-if [[ $USE_FP8 -eq 1 ]]; then
-    # Recipe 1: More accurate but not the fastest.
-    EXTRA_ARGS+=" --fp8-recipe blockwise --fp8-format e4m3 --first-last-layers-bf16 --num-layers-at-start-in-bf16 1 --num-layers-at-end-in-bf16 1"
-    # Recipes 2 and 3: Faster but metrics can become a bit noisier. Still the difference to bf16 should be small < 1%.
-    #EXTRA_ARGS+=" --fp8-recipe blockwise --fp8-format e4m3 "
-    #EXTRA_ARGS+=" --fp8-recipe blocwise --fp8-format e4m3 --fp8-param-gather "
-    EXTRA_ARGS+=" --use-vision-backbone-fp8-arch "
+if [[ $USE_PP -eq 1 ]]; then
+    EXTRA_ARGS+=" --pipeline-model-parallel-size 1 --encoder-pipeline-model-parallel-size 1"
+    NUM_GPU=8
 fi
 
-USE_DYNAMIC_RES=1
+if [[ $USE_FP8 -eq 1 ]]; then
+    EXTRA_ARGS+=" --fp8-recipe blockwise --fp8-format e4m3 --first-last-layers-bf16 --num-layers-at-start-in-bf16 1 --num-layers-at-end-in-bf16 1"
+    #EXTRA_ARGS+=" --fp8-recipe blockwise --fp8-format e4m3 "
+    #EXTRA_ARGS+=" --fp8-recipe blocwise --fp8-format e4m3 --fp8-param-gather "
+fi
+
 if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
     SEQ_LEN=12288
 
@@ -114,12 +113,12 @@ if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
     EXTRA_ARGS+=" ${IMAGE_BREAK_TOKEN} --dynamic-resolution --dynamic-resolution-min-patches 1024 --conv-merging --allow-missing-conv-merge-checkpoint"
 fi
 
+
 OPTIONS=" \
     --use-checkpoint-args \
     --disable-bias-linear \
     --tokenizer-type MultimodalTokenizer \
-    --tokenizer-model /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/mcore_mmodal_models/Mistral-Nemo-Instruct-2407/ \
-    --make-vocab-size-divisible-by 16512 \
+    --tokenizer-model /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/mcore_mmodal_models/models--meta-llama--Meta-Llama-3.1-8B-Instruct/snapshots/5206a32e0bd3067aef1ce90f5528ade7d866253f/ \
     --transformer-impl transformer_engine \
     --normalization RMSNorm \
     --group-query-attention \
@@ -129,17 +128,16 @@ OPTIONS=" \
     --attention-dropout ${AD} \
     --hidden-dropout ${HD} \
     --untie-embeddings-and-output-weights \
-    --position-embedding-type none \
-    --hybrid-override-pattern M-M-M-M*-M-M-M-M-M*-M-M-M-M-M*-M-M-M-M-M*-M-M-M-M-M- \
-    --spec megatron.core.models.mamba.mamba_layer_specs mamba_stack_spec \
-    --squared-relu \
-    --norm-epsilon 1e-05 \
-    --tensor-model-parallel-size ${TP} \
-    --pipeline-model-parallel-size 1 \
-    --num-layers 52 \
+    --position-embedding-type rope \
+    --rotary-percent 1.0 \
+    --rotary-base 500000 \
+    --use-rope-scaling \
+    --swiglu \
+    --tensor-model-parallel-size ${TP}  \
+    --pipeline-model-parallel-size 1  \
+    --num-layers 32 \
     --hidden-size 4096 \
-    --ffn-hidden-size 21504 \
-    --kv-channels 128 \
+    --ffn-hidden-size 14336 \
     --num-attention-heads 32 \
     --use-distributed-optimizer \
     --use-te \
@@ -157,10 +155,10 @@ OPTIONS=" \
     --lr-decay-style cosine \
     --log-interval ${LI} \
     --eval-iters 10 \
-    --eval-interval 100000 \
+    --eval-interval 999999999 \
     --data-path ${DATA_TRAIN} \
     --prompt-path ${SOURCE}/examples/multimodal/manual_prompts.json \
-    --save-interval ${SAVE_INTERVAL} \
+    --save-interval 5000 \
     --save ${FINETUNE_DIR} \
     --load ${FINETUNE_DIR} \
     --dataloader-save ${FINETUNE_DIR}/dataloader \
@@ -171,6 +169,8 @@ OPTIONS=" \
     --adam-beta1 0.9 \
     --adam-beta2 0.999 \
     --init-method-std 0.02 \
+    --log-params-norm \
+    --log-num-zeros-in-grad \
     --bf16 \
     --eod-mask-loss \
     --freeze-ViT \
@@ -180,40 +180,25 @@ OPTIONS=" \
     --img-w 512 \
     --dataloader-type external \
     --tensorboard-dir ${TENSORBOARD_DIR} \
-    --language-model-type nemotron5-hybrid-8b \
+    --language-model-type=llama3.1_8b \
     ${EXTRA_ARGS} \
     --distributed-timeout-minutes 60 \
     --allow-missing-vision-projection-checkpoint \
-    --vision-model-type radio \
-    --tokenizer-prompt-format nemotron5 \
+    --vision-model-type cradio-g \
+    --tokenizer-prompt-format llama3p1 \
     --use-loss-scaling \
     ${SPECIAL_TOKENS} \
     --ckpt-format torch \
     --image-tag-type internvl \
+    --force-system-message \
     --disable-vision-class-token \
-    --eos-id 15 \
-    --attention-backend flash \
+    --inference-max-seq-length ${DECODER_SEQ_LEN} \
+    --use-area-weighted-aspect-ratio \
     --use-vision-backbone-fp8-arch \
 "
 
 export NVTE_APPLY_QK_LAYER_SCALING=0
 export NVTE_ALLOW_NONDETERMINISTIC_ALGO=${NONDETERMINISTIC_ATTN}
-
-# TODO: Why are these needed?
-#export NCCL_IB_TIMEOUT=19
-#export UB_TIMEOUT=720
-#export NVTE_FWD_LAYERNORM_SM_MARGIN=16
-#export NVTE_BWD_LAYERNORM_SM_MARGIN=16
-#export NVTE_FUSED_ATTN=0  # Disable cuDNN fused attention.
-#export NCCL_P2P_NET_CHUNKSIZE=2097152
-#export NCCL_DEBUG=WARN
-#export NCCL_SHM_DISABLE=1
-#export NCCL_PROTO=simple
-#export NCCL_NVLS_ENABLE=0
-
-# for online eval
-#export NCCL_P2P_LEVEL=NVL
-#export NCCL_P2P_DISABLE=0
 
 # Interactive or batch mode
 if [[ $BATCH -eq 0 ]]; then
@@ -224,10 +209,11 @@ else
     DATETIME=`date +'date_%y-%m-%d_time_%H-%M-%S'`
 
     srun -l --verbose \
-    --container-image /lustre/fsw/portfolios/llmservice/users/matthieul/docker/megatron-dev-img-05142025-pytorch-dev-te-cd37379-energon-develop-08471f7-mamba-fix-vlmeval.sqsh \
+    --container-image /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/containers/megatron-dev-img-05142025-pytorch-dev-te-cd37379-energon-develop-08471f7-mamba-vlmeval.sqsh \
     --container-mounts "/lustre" \
     --output=${LOGS_DIR}/%x_%j_$DATETIME.log \
     sh -c "echo ${run_cmd}; ${run_cmd}"
 
     set +x
 fi
+

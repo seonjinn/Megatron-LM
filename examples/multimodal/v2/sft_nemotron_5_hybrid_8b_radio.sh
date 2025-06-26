@@ -185,7 +185,7 @@ OPTIONS=" \
     ${SPECIAL_TOKENS} \
     --ckpt-format torch \
     --image-tag-type internvl \
-    --eos-id 11 \
+    --eos-id 15 \
     --disable-vision-class-token \
     --use-vision-backbone-fp8-arch \
 "
