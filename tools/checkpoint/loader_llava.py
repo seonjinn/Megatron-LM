@@ -90,7 +90,8 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
         margs.image_break_token = getattr(checkpoint_args, "image_break_token", None)
         margs.conv_merging = getattr(checkpoint_args, "conv_merging", False)
         margs.allow_missing_conv_merge_checkpoint = getattr(checkpoint_args, "allow_missing_conv_merge_checkpoint", False)
-        
+        margs.enable_fusions = getattr(checkpoint_args, "enable_fusions", False)
+
         return margs
 
     def _maybe_ensure_additional_required_arguments(self):
@@ -131,7 +132,7 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
         language_config = get_language_model_config(deepcopy(base_config))
 
         vision_config = deepcopy(base_config)
-        vision_config = get_vision_model_config(base_config, apply_query_key_layer_scaling=self.checkpoint_args.apply_query_key_layer_scaling)
+        vision_config = get_vision_model_config(base_config)
 
         vision_projection_config = deepcopy(base_config)
         vision_projection_config = get_vision_projection_config(
@@ -165,7 +166,7 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
         else:
             # older models only supported LayerNorm
             md.vision_norm_has_bias = True
-        
+
         return md
 
     def send_vision_backbone_over_queue(self, schema):
@@ -294,7 +295,7 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
                 self.queue_put(f"vit transformer layer {total_layer_num}", message)
 
                 total_layer_num = total_layer_num + 1
-    
+
     def send_vision_projection_over_queue(self):
         encoder_tp_size = self.md.previous_encoder_tensor_parallel_size
         message = {
@@ -323,9 +324,9 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
             if self.md.vision_projection_linear_bias:
                 message["conv merge l0 bias"] = torch.cat([self.all_models[0][0][tp_rank].conv_merge.mlp.linear_fc1.bias.data for tp_rank in range(encoder_tp_size)], dim=0)
                 message["conv merge l1 bias"] = self.all_models[0][0][0].conv_merge.mlp.linear_fc2.bias.data
-        
+
         self.queue_put("vision projection", message)
-        
+
     def send_model_over_queue(self):
         self.send_metadata_over_queue()
 

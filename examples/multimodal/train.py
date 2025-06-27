@@ -76,7 +76,7 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
 
     if get_tensor_model_parallel_rank() == 0 and 'samples_seen' not in data:
         data['samples_seen'] = torch.tensor(1, dtype=torch.int32, device=data_text.device)
-    
+
     samples_seen = tensor_parallel.broadcast_data(["samples_seen"], data, torch.int32)["samples_seen"]
 
     imgs_sizes = tensor_parallel.broadcast_data(["imgs_sizes"], data, torch.int32)["imgs_sizes"]
@@ -319,7 +319,6 @@ def forward_step(data_iterator, model: LLaVAModel):
         samples_seen,
     ) = get_batch(data_iterator, model.module.module.image_token_index, model.module.module.img_seq_len)
     timers('batch-generator').stop()
-
 
     output_tensor, loss_mask = model(
         images,

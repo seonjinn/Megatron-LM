@@ -668,9 +668,9 @@ class MultiModalTaskEncoder(
         max_lengths = torch.tensor([s.max_length for s in samples], dtype=torch.int32)
 
         if self.dataloader_seq_length is not None:
-            cu_lengths[:][-1] = self.dataloader_seq_length
-            cu_lengths_padded[:][-1] = self.dataloader_seq_length
-            new_max_length = cu_lengths_padded[:][-1] - cu_lengths[:][-2]
+            cu_lengths[0][-1] = self.dataloader_seq_length
+            cu_lengths_padded[0][-1] = self.dataloader_seq_length
+            new_max_length = cu_lengths_padded[0][-1] - cu_lengths[0][-2]
             max_lengths = torch.max(max_lengths, new_max_length)
 
         return BatchedPackedTaskSample(
@@ -811,7 +811,7 @@ class MultiModalTaskEncoder(
             else:
                 # Otherwise, keep the original item
                 result.append(item)
-        
+
         return torch.tensor(result, dtype=arr.dtype, device=arr.device)
 
     def _pad_for_context_parallel_and_fp8(
@@ -823,7 +823,7 @@ class MultiModalTaskEncoder(
         total_len = self._get_total_seq_length(input_ids, image_tiling_params)
         total_len_padded = total_len
         has_fp8 = self.args.fp8 is not None
-        if getattr(self.args, "context_parallel_size", 1) > 1 or has_fp8:
+        if getattr(self.args, "context_parallel_size", 1) > 1 or self.args.sequence_parallel or has_fp8:
             padding_needed = get_padding(
                 total_len,
                 self.args.context_parallel_size,

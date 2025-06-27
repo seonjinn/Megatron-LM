@@ -29,6 +29,7 @@ USE_DYNAMIC_RES=1
 USE_FP8=1
 USE_PRECISION_AWARE_OPTIMIZER=1
 USE_CP=0
+USE_FUSIONS=0
 
 # Remember to update model and job name if running in batch mode!!
 if [[ $BATCH -eq 0 ]]; then
@@ -69,8 +70,8 @@ DECODER_SEQ_LEN=16384
 
 if [[ $DEBUG -eq 1 ]]; then
     MBZ=1
-    BZ=1
-    NW=1
+    BZ=16
+    NW=2
     AD=0.0
     HD=0.0
     LI=1
@@ -101,10 +102,11 @@ fi
 
 if [[ $USE_FP8 -eq 1 ]]; then
     # Recipe 1: More accurate but not the fastest.
-    EXTRA_ARGS+=" --fp8-recipe blockwise --fp8-format e4m3 --first-last-layers-bf16 --num-layers-at-start-in-bf16 1 --num-layers-at-end-in-bf16 1"
+    EXTRA_ARGS+=" --fp8-recipe blockwise --fp8-format e4m3 --first-last-layers-bf16 --num-layers-at-start-in-bf16 1 --num-layers-at-end-in-bf16 1 "
     # Recipes 2 and 3: Faster but metrics can become a bit noisier. Still the difference to bf16 should be small < 1%.
     #EXTRA_ARGS+=" --fp8-recipe blockwise --fp8-format e4m3 "
-    #EXTRA_ARGS+=" --fp8-recipe blocwise --fp8-format e4m3 --fp8-param-gather "
+    #EXTRA_ARGS+=" --fp8-recipe blockwise --fp8-format e4m3 --fp8-param-gather "
+
     EXTRA_ARGS+=" --use-vision-backbone-fp8-arch "
 fi
 
@@ -140,7 +142,13 @@ if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
     EXTRA_ARGS+=" ${IMAGE_BREAK_TOKEN} --dynamic-resolution --dynamic-resolution-min-patches 1024 --conv-merging"
 fi
 
-EXTRA_ARGS+=" --recompute-granularity full --recompute-method block --recompute-num-layers 16 --recompute-vision"
+EXTRA_ARGS+=" --recompute-granularity full --recompute-method block --recompute-num-layers 16 --recompute-vision "
+
+if [[ $USE_FUSIONS -eq 1 ]]; then
+    EXTRA_ARGS+=" --enable-fusions "
+    # This requires a new TE version due to a bug fix. But it gives another speed boost.
+    # --cross-entropy-loss-fusion --cross-entropy-loss-fusion-impl te
+fi
 
 OPTIONS=" \
     --use-checkpoint-args \

@@ -110,7 +110,7 @@ def model_provider(
     base_config.calculate_per_token_loss = True
 
     language_config = deepcopy(base_config)
-    language_config = get_language_model_config(language_config)
+    language_config = get_language_model_config(language_config, args.enable_fusions)
 
     if language_model_type.startswith("hf://"):
         assert args.tensor_model_parallel_size == 1, "Huggingface models do not support --tensor-model-parallel-size > 1"
@@ -136,7 +136,7 @@ def model_provider(
 
     vision_config = deepcopy(base_config)
     vision_config = get_vision_model_config(
-        vision_config, apply_query_key_layer_scaling=args.apply_query_key_layer_scaling
+        vision_config, enable_fusions=args.enable_fusions
     )
     if vision_model_type.startswith("hf://"):
         assert args.encoder_tensor_model_parallel_size < 2, "Huggingface vision encoders do not support --encoder-tensor-model-parallel-size > 1"
@@ -176,7 +176,7 @@ def model_provider(
     vision_projection_config = deepcopy(base_config)
 
     vision_projection_config = get_vision_projection_config(
-        vision_projection_config, language_config.hidden_size
+        vision_projection_config, language_config.hidden_size, enable_fusions=args.enable_fusions
     )
 
     # --encoder-pipeline-model-parallel-size 1 will enable a separate pipeline stage for the vision model.

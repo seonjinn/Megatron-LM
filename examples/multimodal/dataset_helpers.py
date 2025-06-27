@@ -559,7 +559,7 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
         has_cp = self.args.context_parallel_size > 1
         has_fp8 = self.args.fp8 is not None
 
-        if has_cp or has_fp8:
+        if has_cp or has_fp8 or self.args.sequence_parallel:
             padding_needed = get_padding(total_len, self.args.context_parallel_size, self.args.tensor_model_parallel_size, self.args.sequence_parallel, fp8_enabled=has_fp8)
             padding_input = np.ones(padding_needed) * self.tokenizer.pad
             padding_labels = np.ones(padding_needed) * IGNORE_INDEX
