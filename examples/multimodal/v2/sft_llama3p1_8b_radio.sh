@@ -155,7 +155,7 @@ OPTIONS=" \
     --min-lr 0.0 \
     --lr-decay-style cosine \
     --log-interval ${LI} \
-    --eval-iters 10 \
+    --eval-iters 0 \
     --eval-interval ${EVAL_INTERVAL} \
     --data-path ${DATA_TRAIN} \
     --prompt-path ${SOURCE}/examples/multimodal/manual_prompts.json \

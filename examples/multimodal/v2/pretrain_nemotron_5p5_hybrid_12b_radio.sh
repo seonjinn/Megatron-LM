@@ -153,7 +153,7 @@ OPTIONS=" \
     --min-lr 0.0 \
     --lr-decay-style cosine \
     --log-interval ${LI} \
-    --eval-iters 10 \
+    --eval-iters 0 \
     --eval-interval 100000 \
     --data-path ${DATA_TRAIN} \
     --prompt-path ${SOURCE}/examples/multimodal/manual_prompts.json \
@@ -188,7 +188,7 @@ OPTIONS=" \
     --ckpt-format torch \
     --image-tag-type internvl \
     --disable-vision-class-token \
-    --eos-id 11 \
+    --eos-id 15 \
     --attention-backend flash \
     --use-vision-backbone-fp8-arch \
     --is-hybrid-model \
