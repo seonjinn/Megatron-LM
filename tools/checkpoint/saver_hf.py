@@ -134,6 +134,81 @@ class HFCheckpointSaver:
 
         return qb, kb, vb
 
+    def _receive_mamba_layer(self, message):
+        """Handle MAMBA layer processing."""
+        params_dict = {}
+        params_dict["norm_weight"] = message["in proj norm weight"]
+        params_dict["mixer_norm_weight"] = message["norm weight"]
+        params_dict["mixer_D"] = message["D"]
+        params_dict["mixer_dt_bias"] = message["dt bias"]
+        params_dict["mixer_A_log"] = message["A log"]
+        params_dict["mixer_in_proj_weight"] = message["in proj weight"]
+        params_dict["mixer_conv1d_weight"] = message["conv1d weight"]
+        params_dict["mixer_conv1d_bias"] = message["conv1d bias"]
+        params_dict["mixer_out_proj_weight"] = message["out proj weight"]
+        return params_dict
+
+    def _receive_attention_layer(self, message, norm_weight_key="norm_weight", norm_bias_key="norm bias"):
+        """Handle ATTENTION layer processing."""
+        params_dict = {}
+        params_dict[norm_weight_key] = message["input norm weight"]
+        if self.md.norm_has_bias:
+            params_dict[norm_bias_key] = message["input norm bias"]
+
+        qkv_weight = message["qkv weight"]
+        if self.md.qkv_bias:
+            qkv_bias = message["qkv bias"]
+
+        q, k, v = self.recover_lm_qkv_weight(qkv_weight)
+        q = q.clone().detach().contiguous()
+        params_dict["q_proj_weight"] = q
+        k = k.clone().detach().contiguous()
+        params_dict["k_proj_weight"] = k
+        v = v.clone().detach().contiguous()
+        params_dict["v_proj_weight"] = v
+
+        if self.md.qkv_bias:
+            qb, kb, vb = self.recover_lm_qkv_bias(qkv_bias)
+            qb = qb.clone().detach().contiguous()
+            params_dict["q_proj_bias"] = qb
+            kb = kb.clone().detach().contiguous()
+            params_dict["k_proj_bias"] = kb
+            vb = vb.clone().detach().contiguous()
+            params_dict["v_proj_bias"] = vb
+
+        params_dict["dense_weight"] = message["dense weight"]
+        if self.md.linear_bias:
+            params_dict["dense_bias"] = message["dense bias"]
+        return params_dict
+
+    def _receive_mlp_layer(self, message, norm_weight_key="norm_weight", norm_bias_key="norm bias", use_swiglu=None):
+        """Handle MLP layer processing."""
+        params_dict = {}
+        params_dict[norm_weight_key] = message["post norm weight"]
+        if self.md.norm_has_bias:
+            params_dict[norm_bias_key] = message["post norm bias"]
+
+        # Use the provided use_swiglu parameter, or fall back to self.md.swiglu
+        swiglu_enabled = use_swiglu if use_swiglu is not None else getattr(self.md, 'swiglu', False)
+        
+        if swiglu_enabled:
+            params_dict["mlp_l0_weight_W"] = message["mlp l0 weight W"]
+            params_dict["mlp_l0_weight_V"] = message["mlp l0 weight V"]
+        else:
+            params_dict["mlp_l0_weight"] = message["mlp l0 weight"]
+        
+        if self.md.linear_bias:
+            if swiglu_enabled:
+                params_dict["mlp_l0_bias_W"] = message["mlp l0 bias W"]
+                params_dict["mlp_l0_bias_V"] = message["mlp l0 bias V"]
+            else:
+                params_dict["mlp_l0_bias"] = message["mlp l0 bias"] 
+
+        params_dict["mlp_l1_weight"] = message["mlp l1 weight"]
+        if self.md.linear_bias:
+            params_dict["mlp_l1_bias"] = message["mlp l1 bias"]
+        return params_dict
+
     def receive_lm(self, schema):
         embeddings_msg = self.queue_get("embeddings")
         params_dict = {}
@@ -160,61 +235,14 @@ class HFCheckpointSaver:
 
             for i in range(self.md.num_layers):
                 message = self.queue_get(f"transformer layer {i}")
-                params_dict = {}
-
+                
                 layer_type = layer_type_list[i]
                 if layer_type == LayerSymbols.MAMBA:
-                    # looks weird but this might be it
-                    params_dict["norm_weight"] = message["in proj norm weight"]
-                    params_dict["mixer_norm_weight"] = message["norm weight"]
-                    params_dict["mixer_D"] = message["D"]
-                    params_dict["mixer_dt_bias"] = message["dt bias"]
-                    params_dict["mixer_A_log"] = message["A log"]
-                    params_dict["mixer_in_proj_weight"] = message["in proj weight"]
-                    params_dict["mixer_conv1d_weight"] = message["conv1d weight"]
-                    params_dict["mixer_conv1d_bias"] = message["conv1d bias"]
-                    params_dict["mixer_out_proj_weight"] = message["out proj weight"]
+                    params_dict = self._receive_mamba_layer(message)
                 elif layer_type == LayerSymbols.ATTENTION:
-                    params_dict["norm_weight"] = message["input norm weight"]
-                    if self.md.norm_has_bias:
-                        params_dict["norm bias"] = message["input norm bias"]
-
-                    qkv_weight = message["qkv weight"]
-                    if self.md.qkv_bias:
-                        qkv_bias = message["qkv bias"]
-
-                    q, k, v = self.recover_lm_qkv_weight(qkv_weight)
-                    q = q.clone().detach().contiguous()
-                    params_dict["q_proj_weight"] = q
-                    k = k.clone().detach().contiguous()
-                    params_dict["k_proj_weight"] = k
-                    v = v.clone().detach().contiguous()
-                    params_dict["v_proj_weight"] = v
-
-                    if self.md.qkv_bias:
-                        qb, kb, vb = self.recover_lm_qkv_bias(qkv_bias)
-                        qb = qb.clone().detach().contiguous()
-                        params_dict["q_proj_bias"] = qb
-                        kb = kb.clone().detach().contiguous()
-                        params_dict["k_proj_bias"] = kb
-                        vb = vb.clone().detach().contiguous()
-                        params_dict["v_proj_bias"] = vb
-
-                    params_dict["dense_weight"] = message["dense weight"]
-                    if self.md.linear_bias:
-                        params_dict["dense_bias"] = message["dense bias"]
+                    params_dict = self._receive_attention_layer(message)
                 elif layer_type == LayerSymbols.MLP:
-                    params_dict["norm_weight"] = message["post norm weight"]
-                    if self.md.norm_has_bias:
-                        params_dict["norm bias"] = message["post norm bias"]
-
-                    params_dict["mlp_l0_weight"] = message["mlp l0 weight"]
-                    if self.md.linear_bias:
-                        params_dict["mlp_l0_bias"] = message["mlp l0 bias"] 
-
-                    params_dict["mlp_l1_weight"] = message["mlp l1 weight"]
-                    if self.md.linear_bias:
-                        params_dict["mlp_l1_bias"] = message["mlp l1 bias"]
+                    params_dict = self._receive_mlp_layer(message)
                 else:
                     raise ValueError(f"hybrid layer {i} is not one of MAMBA, ATTENTION, or MLP")
 
@@ -222,53 +250,25 @@ class HFCheckpointSaver:
         else:
             for i in range(self.md.num_layers):
                 message = self.queue_get(f"transformer layer {i}")
-                params_dict = {}
-
-                params_dict["input_norm_weight"] = message["input norm weight"]
-                params_dict["post_norm_weight"] = message["post norm weight"]
-                if self.md.norm_has_bias:
-                    params_dict["input_norm_bias"] = message["input norm bias"]
-                    params_dict["post_norm_bias"] = message["post norm bias"]
-
-                if self.md.swiglu:
-                    params_dict["mlp_l0_weight_W"] = message["mlp l0 weight W"]
-                    params_dict["mlp_l0_weight_V"] = message["mlp l0 weight V"]
-                else:
-                    params_dict["mlp_l0_weight"] = message["mlp l0 weight"]
-                if self.md.linear_bias:
-                    if self.md.swiglu:
-                        params_dict["mlp_l0_bias_W"] = message["mlp l0 bias W"]
-                        params_dict["mlp_l0_bias_V"] = message["mlp l0 bias V"]
-                    else:
-                        params_dict["mlp_l0_bias"] = message["mlp l0 bias"] 
-
-                qkv_weight = message["qkv weight"]
-                if self.md.qkv_bias:
-                    qkv_bias = message["qkv bias"]
-
-                q, k, v = self.recover_lm_qkv_weight(qkv_weight)
-                q = q.clone().detach().contiguous()
-                params_dict["q_proj_weight"] = q
-                k = k.clone().detach().contiguous()
-                params_dict["k_proj_weight"] = k
-                v = v.clone().detach().contiguous()
-                params_dict["v_proj_weight"] = v
-
-                if self.md.qkv_bias:
-                    qb, kb, vb = self.recover_lm_qkv_bias(qkv_bias)
-                    qb = qb.clone().detach().contiguous()
-                    params_dict["q_proj_bias"] = qb
-                    kb = kb.clone().detach().contiguous()
-                    params_dict["k_proj_bias"] = kb
-                    vb = vb.clone().detach().contiguous()
-                    params_dict["v_proj_bias"] = vb
-
-                params_dict["mlp_l1_weight"] = message["mlp l1 weight"]
-                params_dict["dense_weight"] = message["dense weight"]
-                if self.md.linear_bias:
-                    params_dict["mlp_l1_bias"] = message["mlp l1 bias"]
-                    params_dict["dense_bias"] = message["dense bias"]
-
+                
+                # Get attention parameters with proper key mapping for regular transformers
+                attention_params = self._receive_attention_layer(
+                    message, 
+                    norm_weight_key="input_norm_weight", 
+                    norm_bias_key="input_norm_bias"
+                )
+                
+                # Get MLP parameters with proper key mapping for regular transformers
+                mlp_params = self._receive_mlp_layer(
+                    message,
+                    norm_weight_key="post_norm_weight",
+                    norm_bias_key="post_norm_bias", 
+                    use_swiglu=self.md.swiglu
+                )
+                
+                # Merge the parameter dictionaries
+                params_dict = {**attention_params, **mlp_params}
+                
                 schema.set_layer(self.state_dict, i, params_dict)
 
         params_dict = {

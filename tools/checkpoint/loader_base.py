@@ -347,6 +347,55 @@ class MegatronCheckpointLoaderBase:
 
         return message
 
+    def _send_mamba_layer(self, models, layer_idx, schema):
+        """
+        Extract Mamba layer parameters and return message dictionary.
+        """
+        tp_size = self.margs.tensor_model_parallel_size
+        layer = schema.get_layer(models[0], layer_idx)
+        message = {}
+        
+        # Non-parallel params
+        message["in proj norm weight"] = layer["mixer_in_proj_layer_norm_weight"]
+
+        # Collect parallel parameters
+        dt_bias = []
+        D = []
+        A_log = []
+        in_proj_weight = []
+        conv_1d_weight, conv_1d_bias = [], []
+        norm_weight = []
+        out_proj_weight = []
+        
+        for model_tp in models:
+            layer_p = schema.get_layer(model_tp, layer_idx)
+            dt_bias.append(layer_p["mixer_dt_bias"])
+            D.append(layer_p["mixer_D"])
+            A_log.append(layer_p["mixer_A_log"])
+            in_proj_weight.append(layer_p["mixer_in_proj_weight"])
+            conv_1d_weight.append(layer_p["mixer_conv1d_weight"])
+            conv_1d_bias.append(layer_p["mixer_conv1d_bias"])
+            norm_weight.append(layer_p["mixer_norm_weight"])
+            out_proj_weight.append(layer_p["mixer_out_proj_weight"])
+
+        # Concatenate parallel parameters
+        message["dt bias"] = torch.cat(dt_bias, dim=0)
+        message["D"] = torch.cat(D, dim=0)
+        message["A log"] = torch.cat(A_log, dim=0)
+
+        # Combine specialized parameters
+        d_inner = self.md.hidden_size * 2  # TODO: can I know expansion factor?
+        ngroups = self.margs.mamba_num_groups
+        d_state = self.md.mamba_state_dim
+        nheads = self.margs.mamba_num_heads if self.margs.mamba_num_heads is not None else d_inner // self.margs.mamba_head_dim
+        message["in proj weight"] = combine_in_proj(in_proj_weight, d_inner, ngroups, d_state, nheads, tp_size=tp_size)
+        message["conv1d weight"] = combine_conv1d(conv_1d_weight, "weight", d_inner, ngroups, d_state, tp_size=tp_size)
+        message["conv1d bias"] = combine_conv1d(conv_1d_bias, "bias", d_inner, ngroups, d_state, tp_size=tp_size)
+        message["norm weight"] = torch.cat(norm_weight, dim=0)
+        message["out proj weight"] = torch.cat(out_proj_weight, dim=1)
+
+        return message
+
     def send_llm_over_queue(self, schema):
         """
         Using self.all_models, extract model parameters and send them over the queue.
@@ -392,41 +441,7 @@ class MegatronCheckpointLoaderBase:
                         layer_type = layer_type_list[layer_idx]
                         
                         if layer_type == LayerSymbols.MAMBA:
-                            layer = schema.get_layer(models[0], layer_idx)
-                            message = {}
-                            message["in proj norm weight"] = layer["mixer_in_proj_layer_norm_weight"]
-
-                            dt_bias = []
-                            D = []
-                            A_log = []
-                            in_proj_weight = []
-                            conv_1d_weight, conv_1d_bias = [], []
-                            norm_weight = []
-                            out_proj_weight = []
-                            for model_tp in models:
-                                layer_p = schema.get_layer(model_tp, layer_idx)
-                                dt_bias.append(layer_p["mixer_dt_bias"])
-                                D.append(layer_p["mixer_D"])
-                                A_log.append(layer_p["mixer_A_log"])
-                                in_proj_weight.append(layer_p["mixer_in_proj_weight"])
-                                conv_1d_weight.append(layer_p["mixer_conv1d_weight"])
-                                conv_1d_bias.append(layer_p["mixer_conv1d_bias"])
-                                norm_weight.append(layer_p["mixer_norm_weight"])
-                                out_proj_weight.append(layer_p["mixer_out_proj_weight"])
-
-                            message["dt bias"] = torch.cat(dt_bias, dim=0)
-                            message["D"] = torch.cat(D, dim=0)
-                            message["A log"] = torch.cat(A_log, dim=0)
-
-                            d_inner = self.md.hidden_size * 2 #TODO: can I know expansion factor?
-                            ngroups = self.margs.mamba_num_groups
-                            d_state = self.md.mamba_state_dim
-                            nheads = self.margs.mamba_num_heads if self.margs.mamba_num_heads is not None else d_inner // self.margs.mamba_head_dim
-                            message["in proj weight"] = combine_in_proj(in_proj_weight, d_inner, ngroups, d_state, nheads, tp_size=tp_size)
-                            message["conv1d weight"] = combine_conv1d(conv_1d_weight, "weight", d_inner, ngroups, d_state, tp_size=tp_size)
-                            message["conv1d bias"] = combine_conv1d(conv_1d_bias, "bias", d_inner, ngroups, d_state, tp_size=tp_size)
-                            message["norm weight"] = torch.cat(norm_weight, dim=0)
-                            message["out proj weight"] = torch.cat(out_proj_weight, dim=1)
+                            message = self._send_mamba_layer(models, layer_idx, schema)
                         elif layer_type == LayerSymbols.ATTENTION:
                             message = self._send_attention_layer(models, layer_idx, schema)
                         elif layer_type == LayerSymbols.MLP:

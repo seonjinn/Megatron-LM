@@ -257,7 +257,7 @@ class MegatronCheckpointSaverBase:
                     '--no-one-logger',
                     ]
 
-        if self.args.make_vocab_size_divisible_by is not None:
+        if getattr(self.args, "make_vocab_size_divisible_by", None) is not None:
             my_argv.extend(['--make-vocab-size-divisible-by', str(self.args.make_vocab_size_divisible_by)])
         elif self.md.make_vocab_size_divisible_by is not None:
             my_argv.extend(['--make-vocab-size-divisible-by', str(self.md.make_vocab_size_divisible_by)])
@@ -373,6 +373,157 @@ class MegatronCheckpointSaverBase:
                     # release the uselese model parts
                     self.models[pp_rank][ep_rank][tp_rank] = None
 
+    def _receive_mamba_layer(self, msg, schema, pp_rank, layer_id):
+        """
+        Receive and process MAMBA layer parameters from the queue message.
+        """
+        in_proj_norm_weight = msg.pop("in proj norm weight")
+
+        dt_bias = chunk_bias(msg.pop("dt bias"), "column", self.args.target_tensor_parallel_size)
+        D = chunk_bias(msg.pop("D"), "column", self.args.target_tensor_parallel_size)
+        A_log = chunk_bias(msg.pop("A log"), "column", self.args.target_tensor_parallel_size)
+
+        d_inner = self.md.hidden_size * 2 #TODO: can I know expansion factor?
+        ngroups = self.margs.mamba_num_groups
+        d_state = self.md.mamba_state_dim
+        nheads = self.margs.mamba_num_heads if self.margs.mamba_num_heads is not None else d_inner // self.margs.mamba_head_dim
+        in_proj_weight = split_in_proj(msg.pop("in proj weight"), d_inner, ngroups, d_state, nheads, self.args.target_tensor_parallel_size)
+        conv_1d_weight = split_conv1d(msg.pop("conv1d weight"), "weight", d_inner, ngroups, d_state, self.args.target_tensor_parallel_size)
+        conv_1d_bias = split_conv1d(msg.pop("conv1d bias"), "bias", d_inner, ngroups, d_state, self.args.target_tensor_parallel_size)
+
+        norm_weight = chunk_bias(msg.pop("norm weight"), "column", self.args.target_tensor_parallel_size)
+        out_proj_weight = chunk_weight(msg.pop("out proj weight"), "row", self.args.target_tensor_parallel_size)
+
+        # Save them to the model
+        for ep_rank in range(self.args.target_expert_parallel_size):
+            for tp_rank in range(self.args.target_tensor_parallel_size):
+                params_dict = {
+                    "mixer_in_proj_layer_norm_weight": in_proj_norm_weight,
+                    "mixer_dt_bias": dt_bias[tp_rank],
+                    "mixer_D": D[tp_rank],
+                    "mixer_A_log": A_log[tp_rank],
+                    "mixer_in_proj_weight": in_proj_weight[tp_rank],
+                    "mixer_conv1d_weight": conv_1d_weight[tp_rank],
+                    "mixer_conv1d_bias": conv_1d_bias[tp_rank],
+                    "mixer_norm_weight": norm_weight[tp_rank],
+                    "mixer_out_proj_weight": out_proj_weight[tp_rank],
+                }
+
+                model = self.get_local_model(pp_rank, ep_rank, tp_rank)
+                schema.set_layer(model, layer_id, params_dict)
+
+    def _receive_attention_layer(self, msg, schema, pp_rank, layer_id):
+        """
+        Receive and process attention layer parameters from the queue message.
+        """
+        input_norm_weight = msg.pop("input norm weight")
+        if self.md.norm_has_bias:
+            input_norm_bias = msg.pop("input norm bias")
+
+        qkv_weight = chunk_weight(msg.pop("qkv weight"), "column", self.args.target_tensor_parallel_size)
+        dense_weight = chunk_weight(msg.pop("dense weight"), "row", self.args.target_tensor_parallel_size)
+
+        if self.md.qkv_bias:
+            qkv_bias = chunk_bias(msg.pop("qkv bias"), 'column', self.args.target_tensor_parallel_size)
+        if self.md.linear_bias:
+            dense_bias = msg.pop("dense bias")
+
+        # Save them to the model
+        for ep_rank in range(self.args.target_expert_parallel_size):
+            for tp_rank in range(self.args.target_tensor_parallel_size):
+                params_dict = {
+                    "self_attn_norm_weight" : input_norm_weight,
+                    "self_attn_qkv_weight" : qkv_weight[tp_rank],
+                    "self_attn_proj_weight" : dense_weight[tp_rank],
+                }
+
+                params_dict.update({
+                    "self_attn_norm_bias" : input_norm_bias if self.md.norm_has_bias else None,
+                })
+
+                if self.md.qkv_bias:
+                    params_dict.update({
+                        "self_attn_qkv_bias" : qkv_bias[tp_rank]
+                    })
+                if self.md.linear_bias:
+                    params_dict.update({
+                        "self_attn_proj_bias" : dense_bias
+                    })
+
+                model = self.get_local_model(pp_rank, ep_rank, tp_rank)
+                schema.set_layer(model, layer_id, params_dict)
+
+    def _receive_mlp_layer(self, msg, schema, pp_rank, layer_id):
+        """
+        Receive and process MLP layer parameters from the queue message.
+        """
+        post_norm_weight = msg.pop("post norm weight")
+        if self.md.norm_has_bias:
+            post_norm_bias = msg.pop("post norm bias")
+
+        mlp_l1_weight = chunk_weight(msg.pop("mlp l1 weight"), "row", self.args.target_tensor_parallel_size, self.args.target_expert_parallel_size)
+
+        if self.margs.num_experts:
+            router = msg.pop("router weight")
+
+        # Special handling for swiglu
+        if self.md.swiglu:
+            mlp_l0_weight_W = chunk_weight(msg.pop("mlp l0 weight W"), "column", self.args.target_tensor_parallel_size, self.args.target_expert_parallel_size)
+            mlp_l0_weight_V = chunk_weight(msg.pop("mlp l0 weight V"), "column", self.args.target_tensor_parallel_size, self.args.target_expert_parallel_size)
+            mlp_l0_weight = torch.cat((mlp_l0_weight_W, mlp_l0_weight_V), dim=-2)
+        else:
+            mlp_l0_weight = chunk_weight(msg.pop("mlp l0 weight"), "column", self.args.target_tensor_parallel_size, self.args.target_expert_parallel_size)
+
+        if self.md.linear_bias:
+            mlp_l1_bias = chunk_bias(msg.pop("mlp l1 bias"), 'row', self.args.target_tensor_parallel_size, self.args.target_expert_parallel_size)
+            if self.md.swiglu:
+                mlp_l0_bias_W = chunk_bias(msg.pop("mlp l0 bias W"), 'column', self.args.target_tensor_parallel_size, self.args.target_expert_parallel_size)
+                mlp_l0_bias_V = chunk_bias(msg.pop("mlp l0 bias V"), 'column', self.args.target_tensor_parallel_size, self.args.target_expert_parallel_size)
+                mlp_l0_bias = torch.cat((mlp_l0_bias_W, mlp_l0_bias_V), dim=-1)
+            else:
+                mlp_l0_bias = chunk_bias(msg.pop("mlp l0 bias"), 'column', self.args.target_tensor_parallel_size, self.args.target_expert_parallel_size)
+
+        # Save them to the model
+        for ep_rank in range(self.args.target_expert_parallel_size):
+            for tp_rank in range(self.args.target_tensor_parallel_size):
+                params_dict = {
+                    "mlp_norm_weight" : post_norm_weight
+                }
+
+                if self.margs.num_experts:
+                    params_dict.update({
+                        "mlp_fc1_weight" : mlp_l0_weight[ep_rank][tp_rank],
+                        "mlp_fc2_weight" : mlp_l1_weight[ep_rank][tp_rank]
+                    })
+                else:
+                    params_dict.update({
+                        "mlp_fc1_weight" : mlp_l0_weight[tp_rank],
+                        "mlp_fc2_weight" : mlp_l1_weight[tp_rank]
+                    })
+
+                params_dict.update({
+                    "mlp_norm_bias" : post_norm_bias if self.md.norm_has_bias else None,
+                })
+                if self.md.linear_bias:
+                    if self.margs.num_experts:
+                        params_dict.update({
+                            "mlp_fc1_bias" : mlp_l0_bias[ep_rank][tp_rank],
+                            "mlp_fc2_bias" : mlp_l1_bias[ep_rank]
+                        })
+                    else :
+                        params_dict.update({
+                            "mlp_fc1_bias" : mlp_l0_bias[tp_rank],
+                            "mlp_fc2_bias" : mlp_l1_bias
+                        })
+                
+                if self.margs.num_experts:
+                    params_dict.update({
+                        "router_weight": router
+                    })
+
+                model = self.get_local_model(pp_rank, ep_rank, tp_rank)
+                schema.set_layer(model, layer_id, params_dict)
+
     def receive_lm(self, schema, prefix=None):
         """
         Receive LM model parameters over queue and save them in self.models
@@ -446,7 +597,6 @@ class MegatronCheckpointSaverBase:
             from megatron.core.ssm.mamba_hybrid_layer_allocation import Symbols as LayerSymbols
             from megatron.core.ssm.mamba_hybrid_layer_allocation import allocate_layers
 
-            #TODO: maybe refactor these layer things into separate functions
             layer_type_list = allocate_layers(
                 self.md.num_layers,
                 self.margs.hybrid_attention_ratio,
@@ -463,136 +613,11 @@ class MegatronCheckpointSaverBase:
 
                     layer_type = layer_type_list[total_layer_num]
                     if layer_type == LayerSymbols.MAMBA:
-                        in_proj_norm_weight = msg.pop("in proj norm weight")
-
-                        dt_bias = chunk_bias(msg.pop("dt bias"), "column", self.args.target_tensor_parallel_size)
-                        D = chunk_bias(msg.pop("D"), "column", self.args.target_tensor_parallel_size)
-                        A_log = chunk_bias(msg.pop("A log"), "column", self.args.target_tensor_parallel_size)
-
-                        d_inner = self.md.hidden_size * 2 #TODO: can I know expansion factor?
-                        ngroups = self.margs.mamba_num_groups
-                        d_state = self.md.mamba_state_dim
-                        nheads = self.margs.mamba_num_heads if self.margs.mamba_num_heads is not None else d_inner // self.margs.mamba_head_dim
-                        in_proj_weight = split_in_proj(msg.pop("in proj weight"), d_inner, ngroups, d_state, nheads, self.args.target_tensor_parallel_size)
-                        conv_1d_weight = split_conv1d(msg.pop("conv1d weight"), "weight", d_inner, ngroups, d_state, self.args.target_tensor_parallel_size)
-                        conv_1d_bias = split_conv1d(msg.pop("conv1d bias"), "bias", d_inner, ngroups, d_state, self.args.target_tensor_parallel_size)
-
-                        norm_weight = chunk_bias(msg.pop("norm weight"), "column", self.args.target_tensor_parallel_size)
-                        out_proj_weight = chunk_weight(msg.pop("out proj weight"), "row", self.args.target_tensor_parallel_size)
-
-                        # Save them to the model
-                        for ep_rank in range(self.args.target_expert_parallel_size):
-                            for tp_rank in range(self.args.target_tensor_parallel_size):
-                                params_dict = {
-                                    "mixer_in_proj_layer_norm_weight": in_proj_norm_weight,
-                                    "mixer_dt_bias": dt_bias[tp_rank],
-                                    "mixer_D": D[tp_rank],
-                                    "mixer_A_log": A_log[tp_rank],
-                                    "mixer_in_proj_weight": in_proj_weight[tp_rank],
-                                    "mixer_conv1d_weight": conv_1d_weight[tp_rank],
-                                    "mixer_conv1d_bias": conv_1d_bias[tp_rank],
-                                    "mixer_norm_weight": norm_weight[tp_rank],
-                                    "mixer_out_proj_weight": out_proj_weight[tp_rank],
-                                }
-
-                                model = self.get_local_model(pp_rank, ep_rank, tp_rank)
-                                schema.set_layer(model, layer_id, params_dict)
+                        self._receive_mamba_layer(msg, schema, pp_rank, layer_id)
                     elif layer_type == LayerSymbols.ATTENTION:
-                        input_norm_weight = msg.pop("input norm weight")
-                        if self.md.norm_has_bias:
-                            input_norm_bias = msg.pop("input norm bias")
-
-                        qkv_weight = chunk_weight(msg.pop("qkv weight"), "column", self.args.target_tensor_parallel_size)
-                        dense_weight = chunk_weight(msg.pop("dense weight"), "row", self.args.target_tensor_parallel_size)
-
-                        if self.md.qkv_bias:
-                            qkv_bias = chunk_bias(msg.pop("qkv bias"), 'column', self.args.target_tensor_parallel_size)
-                        if self.md.linear_bias:
-                            dense_bias = msg.pop("dense bias")
-
-                        # Save them to the model
-                        for ep_rank in range(self.args.target_expert_parallel_size):
-                            for tp_rank in range(self.args.target_tensor_parallel_size):
-                                params_dict = {
-                                    "self_attn_norm_weight" : input_norm_weight,
-                                    "self_attn_qkv_weight" : qkv_weight[tp_rank],
-                                    "self_attn_proj_weight" : dense_weight[tp_rank],
-                                }
-
-                                params_dict.update({
-                                    "self_attn_norm_bias" : input_norm_bias if self.md.norm_has_bias else None,
-                                })
-
-                                if self.md.qkv_bias:
-                                    params_dict.update({
-                                        "self_attn_qkv_bias" : qkv_bias[tp_rank]
-                                    })
-                                if self.md.linear_bias:
-                                    params_dict.update({
-                                        "self_attn_proj_bias" : dense_bias
-                                    })
-
-                                model = self.get_local_model(pp_rank, ep_rank, tp_rank)
-                                schema.set_layer(model, layer_id, params_dict)
+                        self._receive_attention_layer(msg, schema, pp_rank, layer_id)
                     elif layer_type == LayerSymbols.MLP:
-                        post_norm_weight = msg.pop("post norm weight")
-                        if self.md.norm_has_bias:
-                            post_norm_bias = msg.pop("post norm bias")
-
-                        mlp_l1_weight = chunk_weight(msg.pop("mlp l1 weight"), "row", self.args.target_tensor_parallel_size, self.args.target_expert_parallel_size)
-
-                        # Special handling for swiglu
-                        if self.md.swiglu:
-                            mlp_l0_weight_W = chunk_weight(msg.pop("mlp l0 weight W"), "column", self.args.target_tensor_parallel_size, self.args.target_expert_parallel_size)
-                            mlp_l0_weight_V = chunk_weight(msg.pop("mlp l0 weight V"), "column", self.args.target_tensor_parallel_size, self.args.target_expert_parallel_size)
-                            mlp_l0_weight = torch.cat((mlp_l0_weight_W, mlp_l0_weight_V), dim=-2)
-                        else:
-                            mlp_l0_weight = chunk_weight(msg.pop("mlp l0 weight"), "column", self.args.target_tensor_parallel_size, self.args.target_expert_parallel_size)
-
-                        if self.md.linear_bias:
-                            mlp_l1_bias = chunk_bias(msg.pop("mlp l1 bias"), 'row', self.args.target_tensor_parallel_size, self.args.target_expert_parallel_size)
-                            if self.md.swiglu:
-                                mlp_l0_bias_W = chunk_bias(msg.pop("mlp l0 bias W"), 'column', self.args.target_tensor_parallel_size, self.args.target_expert_parallel_size)
-                                mlp_l0_bias_V = chunk_bias(msg.pop("mlp l0 bias V"), 'column', self.args.target_tensor_parallel_size, self.args.target_expert_parallel_size)
-                                mlp_l0_bias = torch.cat((mlp_l0_bias_W, mlp_l0_bias_V), dim=-1)
-                            else:
-                                mlp_l0_bias = chunk_bias(msg.pop("mlp l0 bias"), 'column', self.args.target_tensor_parallel_size, self.args.target_expert_parallel_size)
-
-                        # Save them to the model
-                        for ep_rank in range(self.args.target_expert_parallel_size):
-                            for tp_rank in range(self.args.target_tensor_parallel_size):
-                                params_dict = {
-                                    "mlp_norm_weight" : post_norm_weight
-                                }
-
-                                if self.margs.num_experts:
-                                    params_dict.update({
-                                        "mlp_fc1_weight" : mlp_l0_weight[ep_rank][tp_rank],
-                                        "mlp_fc2_weight" : mlp_l1_weight[ep_rank][tp_rank]
-                                    })
-                                else:
-                                    params_dict.update({
-                                        "mlp_fc1_weight" : mlp_l0_weight[tp_rank],
-                                        "mlp_fc2_weight" : mlp_l1_weight[tp_rank]
-                                    })
-
-                                params_dict.update({
-                                    "mlp_norm_bias" : post_norm_bias if self.md.norm_has_bias else None,
-                                })
-                                if self.md.linear_bias:
-                                    if self.margs.num_experts:
-                                        params_dict.update({
-                                            "mlp_fc1_bias" : mlp_l0_bias[ep_rank][tp_rank],
-                                            "mlp_fc2_bias" : mlp_l1_bias[ep_rank]
-                                        })
-                                    else :
-                                        params_dict.update({
-                                            "mlp_fc1_bias" : mlp_l0_bias[tp_rank],
-                                            "mlp_fc2_bias" : mlp_l1_bias
-                                        })
-
-                                model = self.get_local_model(pp_rank, ep_rank, tp_rank)
-                                schema.set_layer(model, layer_id, params_dict)
+                        self._receive_mlp_layer(msg, schema, pp_rank, layer_id)
 
                     total_layer_num = total_layer_num + 1
                     self.check_message(msg)
@@ -699,92 +724,12 @@ class MegatronCheckpointSaverBase:
                 for layer_id in range(schema.get_num_layers(self.models[pp_rank][0][0])):
                     msg = self.queue_get(f"transformer layer {total_layer_num}")
 
-                    # duplicated tensors
-                    input_norm_weight = msg.pop("input norm weight")
-                    post_norm_weight = msg.pop("post norm weight")
-                    if self.md.norm_has_bias:
-                        input_norm_bias = msg.pop("input norm bias")
-                        post_norm_bias = msg.pop("post norm bias")
-
-                    # Split up the parallel tensors
-                    qkv_weight = chunk_weight(msg.pop("qkv weight"), "column", self.args.target_tensor_parallel_size)
-                    dense_weight = chunk_weight(msg.pop("dense weight"), "row", self.args.target_tensor_parallel_size)
-                    mlp_l1_weight = chunk_weight(msg.pop("mlp l1 weight"), "row", self.args.target_tensor_parallel_size, self.args.target_expert_parallel_size)
-
-                    if self.margs.num_experts:
-                        router = msg.pop("router weight")
-
-                    # Special handling for swiglu
-                    if self.md.swiglu:
-                        mlp_l0_weight_W = chunk_weight(msg.pop("mlp l0 weight W"), "column", self.args.target_tensor_parallel_size, self.args.target_expert_parallel_size)
-                        mlp_l0_weight_V = chunk_weight(msg.pop("mlp l0 weight V"), "column", self.args.target_tensor_parallel_size, self.args.target_expert_parallel_size)
-                        mlp_l0_weight = torch.cat((mlp_l0_weight_W, mlp_l0_weight_V), dim=-2)
-                    else:
-                        mlp_l0_weight = chunk_weight(msg.pop("mlp l0 weight"), "column", self.args.target_tensor_parallel_size, self.args.target_expert_parallel_size)
-
-                    if self.md.qkv_bias:
-                        qkv_bias = chunk_bias(msg.pop("qkv bias"), 'column', self.args.target_tensor_parallel_size)
-                    if self.md.linear_bias:
-                        dense_bias = msg.pop("dense bias")
-                        mlp_l1_bias = chunk_bias(msg.pop("mlp l1 bias"), 'row', self.args.target_tensor_parallel_size, self.args.target_expert_parallel_size)
-                        if self.md.swiglu:
-                            mlp_l0_bias_W = chunk_bias(msg.pop("mlp l0 bias W"), 'column', self.args.target_tensor_parallel_size, self.args.target_expert_parallel_size)
-                            mlp_l0_bias_V = chunk_bias(msg.pop("mlp l0 bias V"), 'column', self.args.target_tensor_parallel_size, self.args.target_expert_parallel_size)
-                            mlp_l0_bias = torch.cat((mlp_l0_bias_W, mlp_l0_bias_V), dim=-1)
-                        else:
-                            mlp_l0_bias = chunk_bias(msg.pop("mlp l0 bias"), 'column', self.args.target_tensor_parallel_size, self.args.target_expert_parallel_size)
-
-                    # Save them to the model
-                    for ep_rank in range(self.args.target_expert_parallel_size):
-                        for tp_rank in range(self.args.target_tensor_parallel_size):
-                            params_dict = {
-                                "self_attn_norm_weight" : input_norm_weight,
-                                "self_attn_qkv_weight" : qkv_weight[tp_rank],
-                                "self_attn_proj_weight" : dense_weight[tp_rank],
-                                "mlp_norm_weight" : post_norm_weight
-                            }
-                            if self.margs.num_experts:
-                                params_dict.update({
-                                    "mlp_fc1_weight" : mlp_l0_weight[ep_rank][tp_rank],
-                                    "mlp_fc2_weight" : mlp_l1_weight[ep_rank][tp_rank]
-                                })
-                            else:
-                                params_dict.update({
-                                    "mlp_fc1_weight" : mlp_l0_weight[tp_rank],
-                                    "mlp_fc2_weight" : mlp_l1_weight[tp_rank]
-                                })
-                            params_dict.update({
-                                "self_attn_norm_bias" : input_norm_bias if self.md.norm_has_bias else None,
-                                "mlp_norm_bias" : post_norm_bias if self.md.norm_has_bias else None,
-                            })
-                            if self.md.qkv_bias:
-                                params_dict.update({
-                                    "self_attn_qkv_bias" : qkv_bias[tp_rank]
-                                })
-                            if self.md.linear_bias:
-                                params_dict.update({
-                                    "self_attn_proj_bias" : dense_bias
-                                })
-                                if self.margs.num_experts:
-                                    params_dict.update({
-                                        "mlp_fc1_bias" : mlp_l0_bias[ep_rank][tp_rank],
-                                        "mlp_fc2_bias" : mlp_l1_bias[ep_rank]
-                                    })
-                                else :
-                                    params_dict.update({
-                                        "mlp_fc1_bias" : mlp_l0_bias[tp_rank],
-                                        "mlp_fc2_bias" : mlp_l1_bias
-                                    })
-                            if self.margs.num_experts:
-                                params_dict.update({
-                                    "router_weight":  router
-                                })
-                            model = self.get_local_model(pp_rank, ep_rank, tp_rank)
-                            schema.set_layer(model, layer_id, params_dict)
+                    # Process attention and MLP layers using refactored functions
+                    self._receive_attention_layer(msg, schema, pp_rank, layer_id)
+                    self._receive_mlp_layer(msg, schema, pp_rank, layer_id)
 
                     total_layer_num = total_layer_num + 1
                     self.check_message(msg)
-
 
                 if pp_rank == self.args.target_pipeline_parallel_size - 1:
                     msg = self.queue_get("final norm")

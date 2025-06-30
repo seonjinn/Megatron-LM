@@ -181,7 +181,7 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
             print(f"Unable to import required Megatron modules: {e}")
             sys.exit(1)
 
-        if self.md.model_type == 'GPT':
+        if self.md.model_type == 'GPT' or self.md.model_type == 'hybrid':
             sys.path.insert(0, './examples/multimodal')
             from examples.multimodal.model import model_provider
             from examples.multimodal.config import get_vision_model_config, get_vision_projection_config
@@ -191,12 +191,6 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
             from pretrain_bert import model_provider
             self.margs.model_type = ModelType.encoder_or_decoder
             self.model_provider = model_provider
-        elif self.args.model_type == 'hybrid':
-            sys.path.insert(0, './examples/multimodal')
-            from examples.multimodal.model import model_provider
-            from examples.multimodal.config import get_vision_model_config, get_vision_projection_config
-            self.model_provider = model_provider
-            self.margs.model_type = ModelType.encoder_or_decoder
         else:
             raise Exception(f'unrecognized model type: {self.args.model_type}')
 
