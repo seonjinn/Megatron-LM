@@ -116,10 +116,10 @@ def add_multimodal_extra_args(parser):
         "--allow-missing-conv-merge-checkpoint", action="store_true", default=False
     )
     group.add_argument(
-        "--video-min-num-frames", type=int, default=1, help="Minimum number of frames to sample from the video as input to the model.",
+        "--video-min-num-frames", type=int, default=8, help="Minimum number of frames to sample from the video as input to the model.",
     )
     group.add_argument(
-        "--video-max-num-frames", type=int, default=128, help="Maximum number of frames to sample from the video as input to the model.",
+        "--video-max-num-frames", type=int, default=32, help="Maximum number of frames to sample from the video as input to the model.",
     )
     group.add_argument(
         "--video-default-fps", type=int, default=2, help="Default frames per second to sample from the video as input to the model.",
@@ -131,7 +131,10 @@ def add_multimodal_extra_args(parser):
         "--enable-fusions", action="store_true", default=False, help="Enable fusions in the model."
     )
     group.add_argument(
-        "--optimize-broadcast", action="store_true", default=False, help="Optimize the broadcast of data."
+        "--optimize-broadcast", action="store_true", default=False, help="Optimize the broadcast of data.",
+    )
+    group.add_argument(
+        "--recompute-vision-num-layers", type=int, default=0, help="Number of layers to recompute in the vision model."
     )
 
     return parser

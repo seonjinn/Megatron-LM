@@ -63,8 +63,11 @@ else
     CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/output/pretrain_nemotron_5_hybrid_reasoning_8b_cradio_vlm_v1_rc3_0702_DEV_DONOTUSE/checkpoints"
 fi
 
-#DATA_TRAIN="${SOURCE}/examples/multimodal/v2/data_config/sft_dataset_commercial_v11_update.yaml"
-DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/eagle_sft_v13.28/eagle_sft_v13.28/wds/recipe.yaml"
+if [[ $USE_ONLINE_PACKING -eq 1 ]]; then
+    DATA_TRAIN="${SOURCE}/examples/multimodal/v2/data_config/sft_dataset_v13.29_online_packing.yaml"
+else
+    DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/eagle_sft_v13.28/eagle_sft_v13.28/wds/recipe.yaml"
+fi
 
 SEQ_LEN=1024
 DECODER_SEQ_LEN=16384
@@ -80,6 +83,8 @@ if [[ $DEBUG -eq 1 ]]; then
     NONDETERMINISTIC_ATTN=1
 
     NUM_GPU=8
+    #NUM_GPU=4
+    #export CUDA_VISIBLE_DEVICES=0,1,2,3
 else
     MBZ=1
     BZ=128

@@ -445,9 +445,11 @@ class MultiModalTaskEncoder(
         )
 
         # We need to ensure that there are at least some trainable tokens in the sample.
-        assert self._target_has_trainable_tokens(
+        has_trainable_tokens = self._target_has_trainable_tokens(
             input_ids, target, image_media_params
-        ), f"Sample has no trainable tokens: {self.tokenizer.detokenize(input_ids)}"
+        )
+
+        assert has_trainable_tokens, f"Sample has no trainable tokens: {self.tokenizer.detokenize(input_ids)}"
 
         total_len, total_len_padded, input_ids, target = self._pad_for_context_parallel_and_fp8(
             input_ids, target, image_media_params
@@ -673,6 +675,24 @@ class MultiModalTaskEncoder(
             new_max_length = cu_lengths_padded[0][-1] - cu_lengths[0][-2]
             max_lengths = torch.max(max_lengths, new_max_length)
 
+        # Pad entire sequence to be a multiple of 16 if using fp8.
+        if has_fp8:
+            total_seq_len = cu_lengths_padded[0][-1]
+            padding_needed = get_padding(
+                total_seq_len,
+                self.args.context_parallel_size,
+                self.args.tensor_model_parallel_size,
+                self.args.sequence_parallel,
+                fp8_enabled=has_fp8,
+            )
+            if padding_needed > 0:
+                tokens = torch.cat([tokens, torch.full((tokens.shape[0], padding_needed), self.tokenizer.pad, dtype=torch.int64)], dim=1)
+                labels = torch.cat([labels, torch.full((labels.shape[0], padding_needed), IGNORE_INDEX, dtype=torch.int64)], dim=1)
+                cu_lengths[0][-1] += padding_needed
+                cu_lengths_padded[0][-1] += padding_needed
+                new_max_length = cu_lengths_padded[0][-1] - cu_lengths[0][-2]
+                max_lengths = torch.max(max_lengths, new_max_length)
+
         return BatchedPackedTaskSample(
             __key__=[s.__key__ for s in samples],
             __restore_key__=[s.__restore_key__ for s in samples],
@@ -822,14 +842,15 @@ class MultiModalTaskEncoder(
     ) -> tuple[int, int, torch.Tensor, torch.Tensor]:
         total_len = self._get_total_seq_length(input_ids, image_tiling_params)
         total_len_padded = total_len
-        has_fp8 = self.args.fp8 is not None
-        if getattr(self.args, "context_parallel_size", 1) > 1 or self.args.sequence_parallel or has_fp8:
+        # With context parallel or sequence parallel, we need to pad individual sequences.
+        # However, with FP8, we need to only pad the entire sequence to be a multiple of 16.
+        if getattr(self.args, "context_parallel_size", 1) > 1 or self.args.sequence_parallel:
             padding_needed = get_padding(
                 total_len,
                 self.args.context_parallel_size,
                 self.args.tensor_model_parallel_size,
                 self.args.sequence_parallel,
-                fp8_enabled=has_fp8,
+                fp8_enabled=False,
             )
             padding1 = torch.ones(padding_needed) * self.tokenizer.pad
             padding2 = torch.ones(padding_needed) * IGNORE_INDEX

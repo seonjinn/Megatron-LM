@@ -32,6 +32,11 @@ USE_CP=0
 USE_FUSIONS=0
 USE_OPTIMIZE_BROADCAST=0
 
+if [[ $USE_TILING == $USE_DYNAMIC_RES ]]; then
+    echo "USE_TILING and USE_DYNAMIC_RES cannot be enabled at the same time"
+    exit 1
+fi
+
 # Remember to update model and job name if running in batch mode!!
 if [[ $BATCH -eq 0 ]]; then
     DATETIME=`date +'%y-%m-%d-%H-%M-%S'`

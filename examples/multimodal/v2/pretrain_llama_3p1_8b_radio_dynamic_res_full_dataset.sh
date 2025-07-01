@@ -27,6 +27,11 @@ USE_DYNAMIC_RES=1
 USE_PP=0
 USE_FP8=1
 
+if [[ $USE_TILING == $USE_DYNAMIC_RES ]]; then
+    echo "USE_TILING and USE_DYNAMIC_RES cannot be enabled at the same time"
+    exit 1
+fi
+
 # Remember to update model and job name if running in batch mode!!
 if [[ $BATCH -eq 0 ]]; then
     DATETIME=`date +'%y-%m-%d-%H-%M-%S'`

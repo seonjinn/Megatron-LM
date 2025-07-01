@@ -556,11 +556,11 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
         # H100 and newer cuDNN versions can handle different values for them.
         total_len = self._get_total_seq_length(input_ids, num_tiles, imgs)
 
+        # Individual samples need to be padded if using context parallel or sequence parallel.
+        # Here we don't pad for FP8 because only the final sequence needs to be padded. That is done in batch().
         has_cp = self.args.context_parallel_size > 1
-        has_fp8 = self.args.fp8 is not None
-
-        if has_cp or has_fp8 or self.args.sequence_parallel:
-            padding_needed = get_padding(total_len, self.args.context_parallel_size, self.args.tensor_model_parallel_size, self.args.sequence_parallel, fp8_enabled=has_fp8)
+        if has_cp or self.args.sequence_parallel:
+            padding_needed = get_padding(total_len, self.args.context_parallel_size, self.args.tensor_model_parallel_size, self.args.sequence_parallel, fp8_enabled=False)
             padding_input = np.ones(padding_needed) * self.tokenizer.pad
             padding_labels = np.ones(padding_needed) * IGNORE_INDEX
             input_ids = np.concatenate([input_ids, padding_input])
@@ -855,11 +855,36 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
         if len(imgs) > 0 and self.args.dynamic_resolution:
             assert self.args.vision_model_type in ("radio", "radio-g", "cradio-g"), "Dynamic resolution only works with radio right now"
 
+        # If the user hasn't defined a target dataloader sequence length, then use the max along the sample lengths.
+        max_seq_len = self.dataloader_seq_length
+        if not max_seq_len:
+           max_seq_len = max(len(s.tokens) for s in samples)
+
+        tokens = torch.full((len(samples), max_seq_len), self.tokenizer.pad, dtype=torch.int64)
+        # +1 to accommodate shift to left by one later.
+        labels = torch.full((len(samples), max_seq_len + 1), self.tokenizer.pad, dtype=torch.int64)
+
+        for i, s in enumerate(samples):
+            # If the sample/target length exceeds the target sequence length, then truncate.
+            text_len = min(max_seq_len, len(s.tokens))
+            target_len = min(max_seq_len+1, len(s.labels))
+
+            tokens[i, :text_len] = s.tokens[:text_len]
+            labels[i, :target_len] = s.labels[:target_len]
+
+        num_tiles = torch.tensor([n for s in samples for n in s.num_tiles], dtype=torch.int32)
+
+        total_seq_len = self._get_total_seq_length(tokens[0], num_tiles, imgs)
+
+        if len(num_tiles) == 0:
+            num_tiles = torch.tensor([[0]], dtype=torch.int32)
+
         # Pad image packed seq length to be % 16 if using fp8 and dynamic resolution
         has_fp8 = self.args.fp8 is not None
         has_pad_img = torch.tensor(False)
         # TODO: Context parallel currently requires padding per CP rank so we do it later if needed.
         no_cp = self.args.context_parallel_size == 1
+
         if has_fp8 and self.args.dynamic_resolution and no_cp:
             img_seq_len = 0
             for img in imgs:
@@ -880,33 +905,13 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
         if vision_max_lengths is None:
             vision_max_lengths = torch.tensor([[0]], dtype=torch.int32)
 
-        # If the user hasn't defined a target dataloader sequence length, then use the max along the sample lengths.
-        max_seq_len = self.dataloader_seq_length
-        if not max_seq_len:
-           max_seq_len = max(len(s.tokens) for s in samples)
-
-        tokens = np.full((len(samples), max_seq_len), self.tokenizer.pad, dtype=np.int64)
-        # +1 to accommodate shift to left by one later.
-        labels = np.full((len(samples), max_seq_len + 1), self.tokenizer.pad, dtype=np.int64)
-
-        for i, s in enumerate(samples):
-            # If the sample/target length exceeds the target sequence length, then truncate.
-            text_len = min(max_seq_len, len(s.tokens))
-            target_len = min(max_seq_len+1, len(s.labels))
-
-            tokens[i, :text_len] = s.tokens[:text_len]
-            labels[i, :target_len] = s.labels[:target_len]
-
-        num_tiles = torch.tensor([n for s in samples for n in s.num_tiles], dtype=torch.int32)
-        if len(num_tiles) == 0:
-            num_tiles = torch.tensor([[0]], dtype=torch.int32)
-
         # Cumulative sample lengths are needed for packing, otherwise use dummy values.
         cu_lengths = torch.tensor([[0]], dtype=torch.int32)
         cu_lengths_padded = torch.tensor([[0]], dtype=torch.int32)
         max_lengths = torch.tensor([[0]], dtype=torch.int32)
 
-        if isinstance(samples[0], ImageTaskSamplePacked):
+        is_packed = isinstance(samples[0], ImageTaskSamplePacked)
+        if is_packed:
             cu_lengths = torch.stack([s.cu_lengths for s in samples])
             cu_lengths_padded = torch.stack([s.cu_lengths_padded for s in samples])
             max_lengths = torch.tensor([s.max_length for s in samples], dtype=torch.int32)
@@ -917,6 +922,24 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
                     cu_lengths_padded[i][-1] = self.dataloader_seq_length
                     new_max_length = cu_lengths_padded[i][-1] - cu_lengths[i][-2]
                     max_lengths[i] = torch.max(max_lengths[i], new_max_length)
+
+        # Pad entire sequence to be a multiple of 16 if using fp8
+        if has_fp8:
+            padding_needed = get_padding(
+                total_seq_len,
+                self.args.context_parallel_size,
+                self.args.tensor_model_parallel_size,
+                self.args.sequence_parallel,
+                fp8_enabled=has_fp8,
+            )
+            if padding_needed > 0:
+                tokens = torch.cat([tokens, torch.full((tokens.shape[0], padding_needed), self.tokenizer.pad, dtype=torch.int64)], dim=1)
+                labels = torch.cat([labels, torch.full((labels.shape[0], padding_needed), IGNORE_INDEX, dtype=torch.int64)], dim=1)
+                if is_packed:
+                    cu_lengths[0][-1] += padding_needed
+                    cu_lengths_padded[0][-1] += padding_needed
+                    new_max_length = cu_lengths_padded[0][-1] - cu_lengths[0][-2]
+                    max_lengths = torch.max(max_lengths, new_max_length)
 
         return ImageTaskBatchPacked(
             __key__=[s.__key__ for s in samples],

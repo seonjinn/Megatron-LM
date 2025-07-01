@@ -232,7 +232,8 @@ def model_provider(
     # Toggle --recompute* for the vision and language model separately.
     if args.recompute_vision:
         if vision_config.recompute_method is not None and vision_config.recompute_granularity is not None:
-            vision_config.recompute_num_layers = vision_config.num_layers
+            recompute_vision_num_layers = args.recompute_vision_num_layers if args.recompute_vision_num_layers > 0 else vision_config.num_layers
+            vision_config.recompute_num_layers = recompute_vision_num_layers
     else:
         vision_config.recompute_granularity = None
         vision_config.recompute_method = None

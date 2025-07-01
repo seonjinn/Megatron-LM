@@ -10,7 +10,7 @@
 #SBATCH --overcommit
 #SBATCH --exclusive
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=sft_llama_3p1_8b_radio_vlm_rc3_v13p16_0630
+#SBATCH --job-name=sft_llama_3p1_8b_radio_vlm_rc3_v13p16_0709
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
@@ -24,6 +24,13 @@ BATCH=$((1-$?))
 DEBUG=0
 USE_TILING=1
 USE_PACKING=1
+USE_ONLINE_PACKING=1
+USE_DYNAMIC_RES=0
+USE_FP8=1
+USE_PRECISION_AWARE_OPTIMIZER=1
+USE_CP=0
+USE_FUSIONS=0
+USE_OPTIMIZE_BROADCAST=0
 
 # Remember to update model and job name if running in batch mode!!
 if [[ $BATCH -eq 0 ]]; then
@@ -32,7 +39,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="sft_llama_3p1_8b_radio_vlm_rc3_v13p16_0630"
+    MODEL_NAME="sft_llama_3p1_8b_radio_vlm_rc3_v13p16_0709"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -49,7 +56,11 @@ TP=4
 
 CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/amalasanjayd/checkpoints/pretrain_llama_3p1_8b_cradio_rc3_commercial_0416"
 
-DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe/eagle_sft_v13.16_sft1/wds/out.yaml"
+if [[ $USE_ONLINE_PACKING -eq 1 ]]; then
+    DATA_TRAIN="${SOURCE}/examples/multimodal/v2/data_config/sft_dataset_commercial_v13.16_online_packing.yaml"
+else
+    DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe/eagle_sft_v13.16_sft1/wds/out.yaml"
+fi
 
 SEQ_LEN=1024
 DECODER_SEQ_LEN=16384
@@ -86,7 +97,6 @@ if [[ $USE_TILING -eq 1 ]]; then
     SEQ_LEN=256
 fi
 
-USE_FP8=1
 if [[ $USE_FP8 -eq 1 ]]; then
     # Recipe 1: More accurate but not the fastest.
     EXTRA_ARGS+=" --fp8-recipe blockwise --fp8-format e4m3 --first-last-layers-bf16 --num-layers-at-start-in-bf16 1 --num-layers-at-end-in-bf16 1"
@@ -100,12 +110,14 @@ if [[ $USE_PACKING -eq 1 ]]; then
     EXTRA_ARGS+=" --packing-seq-length ${DECODER_SEQ_LEN} "
 fi
 
-USE_PRECISION_AWARE_OPTIMIZER=1
+if [[ $USE_ONLINE_PACKING -eq 1 ]]; then
+    EXTRA_ARGS+=" --packing-buffer-size 3247 --packing-seq-length ${DECODER_SEQ_LEN} --packing-knapsack-algorithm balanced_greedy_knapsack "
+fi
+
 if [[ $USE_PRECISION_AWARE_OPTIMIZER -eq 1 ]]; then
     EXTRA_ARGS+=" --use-precision-aware-optimizer --main-grads-dtype bf16 --main-params-dtype fp16 --exp-avg-dtype fp16 --exp-avg-sq-dtype fp16 "
 fi
 
-USE_CP=0
 if [[ $USE_CP -eq 1 ]]; then
     # TODO: Loss scaling is not enabled for context parallel yet. Implementation exists but not committed yet.
     EXTRA_ARGS+=" --context-parallel-size 2 --sequence-parallel "

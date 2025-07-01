@@ -1008,7 +1008,7 @@ class LLaVAModel(MegatronModule):
             ).contiguous()  # [img_seq_len, num_tiles, h_vision]
 
             vision_projection_padding_needed = 0
-            if self._vision_fp8:
+            if self._vision_fp8 and self._dynamic_resolution:
                 vision_projection_padding_needed = get_padding(image_embeddings.shape[0], self.context_parallel_lm, self.tensor_model_parallel_size_lm, self.sequence_parallel_lm, fp8_enabled=self._vision_fp8)
                 if vision_projection_padding_needed > 0:
                     padding_image_embeddings = torch.zeros([vision_projection_padding_needed, image_embeddings.shape[1], image_embeddings.shape[2]]).to(image_embeddings.device).to(image_embeddings.dtype)
