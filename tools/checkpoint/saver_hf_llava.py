@@ -152,6 +152,14 @@ class HFCheckpointSaverLLaVA(HFCheckpointSaver):
             self.state_dict["mlp1.1.bias"] = projection_msg["vision projection l0 bias"]
             self.state_dict["mlp1.3.bias"] = projection_msg["vision projection l1 bias"]
 
+        # Handle conv merge weights if conv_merging is enabled
+        if self.md.conv_merging:
+            self.state_dict["conv_merge.mlp.0.weight"] = projection_msg["conv merge l0 weight"]
+            self.state_dict["conv_merge.mlp.2.weight"] = projection_msg["conv merge l1 weight"]
+            if self.md.vision_projection_linear_bias:
+                self.state_dict["conv_merge.mlp.0.bias"] = projection_msg["conv merge l0 bias"]
+                self.state_dict["conv_merge.mlp.2.bias"] = projection_msg["conv merge l1 bias"]
+
     def receive_model(self):
         """Override to handle both vision and language models for LLaVA"""
         vision_model_prefix = "vision_model.vision_model."
