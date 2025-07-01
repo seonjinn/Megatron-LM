@@ -130,5 +130,8 @@ def add_multimodal_extra_args(parser):
     group.add_argument(
         "--enable-fusions", action="store_true", default=False, help="Enable fusions in the model."
     )
+    group.add_argument(
+        "--optimize-broadcast", action="store_true", default=False, help="Optimize the broadcast of data."
+    )
 
     return parser

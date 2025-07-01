@@ -64,26 +64,26 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
     else:
         data = None
 
-    data_text = tensor_parallel.broadcast_data(["tokens"], data, torch.int64)["tokens"]
-    labels = tensor_parallel.broadcast_data(["labels"], data, torch.int64)["labels"]
+    data_text = tensor_parallel.broadcast_data(["tokens"], data, torch.int64, optimize=args.optimize_broadcast)["tokens"]
+    labels = tensor_parallel.broadcast_data(["labels"], data, torch.int64, optimize=args.optimize_broadcast)["labels"]
 
-    imgs = tensor_parallel.broadcast_data(["imgs"], data, torch.float32)["imgs"]
-    num_tiles = tensor_parallel.broadcast_data(["num_tiles"], data, torch.int32)["num_tiles"]
+    imgs = tensor_parallel.broadcast_data(["imgs"], data, torch.float32, optimize=args.optimize_broadcast)["imgs"]
+    num_tiles = tensor_parallel.broadcast_data(["num_tiles"], data, torch.int32, optimize=args.optimize_broadcast)["num_tiles"]
 
-    cu_lengths = tensor_parallel.broadcast_data(["cu_lengths"], data, torch.int32)["cu_lengths"]
-    cu_lengths_padded = tensor_parallel.broadcast_data(["cu_lengths_padded"], data, torch.int32)["cu_lengths_padded"]
-    max_lengths = tensor_parallel.broadcast_data(["max_lengths"], data, torch.int32)["max_lengths"]
+    cu_lengths = tensor_parallel.broadcast_data(["cu_lengths"], data, torch.int32, optimize=args.optimize_broadcast)["cu_lengths"]
+    cu_lengths_padded = tensor_parallel.broadcast_data(["cu_lengths_padded"], data, torch.int32, optimize=args.optimize_broadcast)["cu_lengths_padded"]
+    max_lengths = tensor_parallel.broadcast_data(["max_lengths"], data, torch.int32, optimize=args.optimize_broadcast)["max_lengths"]
 
     if get_tensor_model_parallel_rank() == 0 and 'samples_seen' not in data:
         data['samples_seen'] = torch.tensor(1, dtype=torch.int32, device=data_text.device)
 
-    samples_seen = tensor_parallel.broadcast_data(["samples_seen"], data, torch.int32)["samples_seen"]
+    samples_seen = tensor_parallel.broadcast_data(["samples_seen"], data, torch.int32, optimize=args.optimize_broadcast)["samples_seen"]
 
-    imgs_sizes = tensor_parallel.broadcast_data(["imgs_sizes"], data, torch.int32)["imgs_sizes"]
+    imgs_sizes = tensor_parallel.broadcast_data(["imgs_sizes"], data, torch.int32, optimize=args.optimize_broadcast)["imgs_sizes"]
 
-    vision_cu_lengths = tensor_parallel.broadcast_data(["vision_cu_lengths"], data, torch.int32)["vision_cu_lengths"]
-    vision_max_lengths = tensor_parallel.broadcast_data(["vision_max_lengths"], data, torch.int32)["vision_max_lengths"]
-    has_pad_img = tensor_parallel.broadcast_data(["has_pad_img"], data, torch.bool)["has_pad_img"]
+    vision_cu_lengths = tensor_parallel.broadcast_data(["vision_cu_lengths"], data, torch.int32, optimize=args.optimize_broadcast)["vision_cu_lengths"]
+    vision_max_lengths = tensor_parallel.broadcast_data(["vision_max_lengths"], data, torch.int32, optimize=args.optimize_broadcast)["vision_max_lengths"]
+    has_pad_img = tensor_parallel.broadcast_data(["has_pad_img"], data, torch.bool, optimize=args.optimize_broadcast)["has_pad_img"]
 
     # No image input (text-only sample) if the dataloader returned a size 1 image.
     if imgs.shape == torch.Size([1, 1]):
