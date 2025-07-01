@@ -524,6 +524,142 @@ class MegatronCheckpointSaverBase:
                 model = self.get_local_model(pp_rank, ep_rank, tp_rank)
                 schema.set_layer(model, layer_id, params_dict)
 
+    def _pad_weight(self, orig_word_embed, true_vocab_size):
+        """
+        Helper method to pad weight tensors for vocabulary size alignment.
+        """
+        try:
+            from megatron.training.tokenizer.tokenizer import _vocab_size_with_padding
+        except ModuleNotFoundError as e:
+            print(f"Unable to import required Megatron modules: {e}")
+            sys.exit(1)
+            
+        if true_vocab_size is not None:
+            # figure out what our padded vocab size is
+            orig_vocab_size = orig_word_embed.shape[0]
+            self.margs.padded_vocab_size = _vocab_size_with_padding(true_vocab_size, self.margs)
+
+            # Cut out extra padding we don't need
+            if orig_vocab_size > self.margs.padded_vocab_size:
+                full_word_embed = orig_word_embed[0:self.margs.padded_vocab_size,:]
+
+            # Expanding embedding to larger size by replicating final entry
+            elif orig_vocab_size < self.margs.padded_vocab_size:
+                padding_size = self.margs.padded_vocab_size - orig_vocab_size
+
+                full_word_embed = torch.cat((
+                    orig_word_embed,
+                    orig_word_embed[-1].unsqueeze(0).expand(padding_size, -1)))
+
+            # Same size!
+            else:
+                full_word_embed = orig_word_embed
+        else:
+            print("Original vocab size not specified, leaving embedding table as-is. "
+                "If you've changed the tensor parallel size this could cause problems.")
+            self.margs.padded_vocab_size = orig_word_embed.shape[0]
+            full_word_embed = orig_word_embed
+        return full_word_embed
+
+    def _receive_final_layer_outputs(self, schema, pp_rank, out_word_embed, prefix=None):
+        """
+        Receive and process final layer outputs (final norm, output layer, pooler, lm head, binary head).
+        This handles the common logic for both hybrid and regular transformer models.
+        """
+        msg = self.queue_get("final norm")
+        final_norm_weight = msg.pop("weight")
+        if self.md.norm_has_bias:
+            final_norm_bias = msg.pop("bias")
+        pp_local_models = [self.get_local_model(pp_rank, ep_rank, tp_rank) for ep_rank in range(self.args.target_expert_parallel_size)
+            for tp_rank in range(self.args.target_tensor_parallel_size)]
+        for eptp_rank, model in enumerate(pp_local_models):
+            tp_rank = eptp_rank % self.args.target_tensor_parallel_size
+            schema.set("final_norm", model, {
+                "weight" : final_norm_weight,
+                "bias" : final_norm_bias if self.md.norm_has_bias else None,
+            })
+            if pp_rank != 0 and not self.md.output_layer:
+                # Copy word embeddings to final pipeline rank
+                schema.set("output_layer", model, {
+                    "weight" : out_word_embed[tp_rank],
+                })
+        del final_norm_weight
+        if self.md.norm_has_bias:
+            del final_norm_bias
+        self.check_message(msg)
+
+        if self.md.output_layer:
+            msg = self.queue_get("output layer")
+            if not hasattr(pp_local_models[0] if prefix is None else getattr(pp_local_models[0], prefix), 'output_layer'):
+                print("ERROR: got an output layer, but model does not have one")
+                exit(1)
+            
+            output_layer_weight = self._pad_weight(msg.pop("weight"), self.md.true_vocab_size)
+            output_layer_weight = torch.chunk(output_layer_weight, self.args.target_tensor_parallel_size, dim=0)
+            for eptp_rank, model in enumerate(pp_local_models):
+                tp_rank = eptp_rank % self.args.target_tensor_parallel_size
+                schema.set("output_layer", model, {
+                    "weight" : output_layer_weight[tp_rank],
+                })
+            self.check_message(msg)
+
+        msg = self.queue_get()
+        if msg != "done" and msg["name"] == "pooler":
+            if not hasattr(self.models[pp_rank][0][0] if prefix is None else getattr(self.models[pp_rank][0][0], prefix), 'pooler'):
+                print("ERROR: got a pooler, but model does not have one")
+                exit(1)
+            print("received pooler")
+            pooler_weight = msg.pop("weight")
+            pooler_bias = msg.pop("bias")
+            for model in pp_local_models:
+                schema.set("pooler", model, {
+                    "weight" : pooler_weight,
+                    "bias" : pooler_bias,
+                })
+            del pooler_weight
+            del pooler_bias
+            self.check_message(msg)
+            msg = self.queue_get()
+
+        if msg != "done" and msg["name"] == "lm head":
+            if not hasattr(self.models[pp_rank][0][0] if prefix is None else getattr(self.models[pp_rank][0][0], prefix), 'lm_head'):
+                print("ERROR: got an lm head, but model does not have one")
+                exit(1)
+            print("received lm head")
+            lm_head_dense_weight = msg.pop("dense weight")
+            lm_head_dense_bias = msg.pop("dense bias")
+            lm_head_norm_weight = msg.pop("norm weight")
+            if self.md.norm_has_bias:
+                lm_head_norm_bias = msg.pop("norm bias")
+            for model in pp_local_models:
+                schema.set("lm_head", model, {
+                    "dense_weight" : lm_head_dense_weight,
+                    "dense_bias" : lm_head_dense_bias,
+                    "norm_weight" : lm_head_norm_weight,
+                    "norm_bias" : lm_head_norm_bias if self.md.norm_has_bias else None,
+                })
+            self.check_message(msg)
+            msg = self.queue_get()
+
+        if msg != "done" and msg["name"] == "binary head":
+            if not hasattr(self.models[pp_rank][0][0] if prefix is None else getattr(self.models[pp_rank][0][0], prefix), 'binary_head'):
+                print("ERROR: got a binary head, but model does not have one")
+                exit(1)
+            print("received binary head")
+            binary_head_weight = msg.pop("weight")
+            binary_head_bias = msg.pop("bias")
+            for model in pp_local_models:
+                schema.set("binary_head", model, {
+                    "weight" : binary_head_weight,
+                    "bias" : binary_head_bias,
+                })
+            self.check_message(msg)
+            msg = self.queue_get()
+
+        # TODO: delete weight when not used
+        if msg != "done":
+            print("ERROR: got some more data but was expecting to be done")
+
     def receive_lm(self, schema, prefix=None):
         """
         Receive LM model parameters over queue and save them in self.models
@@ -545,35 +681,7 @@ class MegatronCheckpointSaverBase:
         self.check_message(embeddings_msg)
 
         # Deal with padding
-        def pad_weight(orig_word_embed, true_vocab_size):
-            if true_vocab_size is not None:
-                # figure out what our padded vocab size is
-                orig_vocab_size = orig_word_embed.shape[0]
-                self.margs.padded_vocab_size = _vocab_size_with_padding(true_vocab_size, self.margs)
-
-                # Cut out extra padding we don't need
-                if orig_vocab_size > self.margs.padded_vocab_size:
-                    full_word_embed = orig_word_embed[0:self.margs.padded_vocab_size,:]
-
-                # Expanding embedding to larger size by replicating final entry
-                elif orig_vocab_size < self.margs.padded_vocab_size:
-                    padding_size = self.margs.padded_vocab_size - orig_vocab_size
-
-                    full_word_embed = torch.cat((
-                        orig_word_embed,
-                        orig_word_embed[-1].unsqueeze(0).expand(padding_size, -1)))
-
-                # Same size!
-                else:
-                    full_word_embed = orig_word_embed
-            else:
-                print("Original vocab size not specified, leaving embedding table as-is. "
-                    "If you've changed the tensor parallel size this could cause problems.")
-                self.margs.padded_vocab_size = orig_word_embed.shape[0]
-                full_word_embed = orig_word_embed
-            return full_word_embed
-
-        full_word_embed = pad_weight(orig_word_embed, self.md.true_vocab_size)
+        full_word_embed = self._pad_weight(orig_word_embed, self.md.true_vocab_size)
 
         # Split into new tensor model parallel sizes
         out_word_embed = torch.chunk(full_word_embed, self.args.target_tensor_parallel_size, dim=0)
@@ -623,98 +731,7 @@ class MegatronCheckpointSaverBase:
                     self.check_message(msg)
 
                 if pp_rank == self.args.target_pipeline_parallel_size - 1:
-                    msg = self.queue_get("final norm")
-                    final_norm_weight = msg.pop("weight")
-                    if self.md.norm_has_bias:
-                        final_norm_bias = msg.pop("bias")
-                    pp_local_models = [self.get_local_model(pp_rank, ep_rank, tp_rank) for ep_rank in range(self.args.target_expert_parallel_size)
-                        for tp_rank in range(self.args.target_tensor_parallel_size)]
-                    for eptp_rank, model in enumerate(pp_local_models):
-                        tp_rank = eptp_rank % self.args.target_tensor_parallel_size
-                        schema.set("final_norm", model, {
-                            "weight" : final_norm_weight,
-                            "bias" : final_norm_bias if self.md.norm_has_bias else None,
-                        })
-                        if pp_rank != 0 and not self.md.output_layer:
-                            # Copy word embeddings to final pipeline rank
-                            schema.set("output_layer", model, {
-                                "weight" : out_word_embed[tp_rank],
-                            })
-                    del final_norm_weight
-                    if self.md.norm_has_bias:
-                        del final_norm_bias
-                    self.check_message(msg)
-
-                    if self.md.output_layer:
-                        msg = self.queue_get("output layer")
-                        if not hasattr(pp_local_models[0] if prefix is None else getattr(pp_local_models[0], prefix), 'output_layer'):
-                            print("ERROR: got an output layer, but model does not have one")
-                            exit(1)
-                        output_layer_weight = pad_weight(msg.pop("weight"), self.md.true_vocab_size)
-                        output_layer_weight = torch.chunk(output_layer_weight, self.args.target_tensor_parallel_size, dim=0)
-                        for eptp_rank, model in enumerate(pp_local_models):
-                            tp_rank = eptp_rank % self.args.target_tensor_parallel_size
-                            schema.set("output_layer", model, {
-                                "weight" : output_layer_weight[tp_rank],
-                            })
-                        self.check_message(msg)
-
-                    msg = self.queue_get()
-                    if msg != "done" and msg["name"] == "pooler":
-                        if not hasattr(self.models[pp_rank][0][0] if prefix is None else getattr(self.models[pp_rank][0][0], prefix), 'pooler'):
-                            print("ERROR: got a pooler, but model does not have one")
-                            exit(1)
-                        print("received pooler")
-                        pooler_weight = msg.pop("weight")
-                        pooler_bias = msg.pop("bias")
-                        for model in pp_local_models:
-                            schema.set("pooler", model, {
-                                "weight" : pooler_weight,
-                                "bias" : pooler_bias,
-                            })
-                        del pooler_weight
-                        del pooler_bias
-                        self.check_message(msg)
-                        msg = self.queue_get()
-
-                    if msg != "done" and msg["name"] == "lm head":
-                        if not hasattr(self.models[pp_rank][0][0] if prefix is None else getattr(self.models[pp_rank][0][0], prefix), 'lm_head'):
-                            print("ERROR: got an lm head, but model does not have one")
-                            exit(1)
-                        print("received lm head")
-                        lm_head_dense_weight = msg.pop("dense weight")
-                        lm_head_dense_bias = msg.pop("dense bias")
-                        lm_head_norm_weight = msg.pop("norm weight")
-                        if self.md.norm_has_bias:
-                            lm_head_norm_bias = msg.pop("norm bias")
-                        for model in pp_local_models:
-                            schema.set("lm_head", model, {
-                                "dense_weight" : lm_head_dense_weight,
-                                "dense_bias" : lm_head_dense_bias,
-                                "norm_weight" : lm_head_norm_weight,
-                                "norm_bias" : lm_head_norm_bias if self.md.norm_has_bias else None,
-                            })
-                        self.check_message(msg)
-                        msg = self.queue_get()
-
-                    if msg != "done" and msg["name"] == "binary head":
-                        if not hasattr(self.models[pp_rank][0][0] if prefix is None else getattr(self.models[pp_rank][0][0], prefix), 'binary_head'):
-                            print("ERROR: got a binary head, but model does not have one")
-                            exit(1)
-                        print("received binary head")
-                        binary_head_weight = msg.pop("weight")
-                        binary_head_bias = msg.pop("bias")
-                        for model in pp_local_models:
-                            schema.set("binary_head", model, {
-                                "weight" : binary_head_weight,
-                                "bias" : binary_head_bias,
-                            })
-                        self.check_message(msg)
-                        msg = self.queue_get()
-
-                    # TODO: delete weight when not used
-                    if msg != "done":
-                        print("ERROR: got some more data but was expecting to be done")
+                    self._receive_final_layer_outputs(schema, pp_rank, out_word_embed, prefix)
         else:
             total_layer_num = 0
             for pp_rank in range(self.args.target_pipeline_parallel_size):
@@ -732,98 +749,7 @@ class MegatronCheckpointSaverBase:
                     self.check_message(msg)
 
                 if pp_rank == self.args.target_pipeline_parallel_size - 1:
-                    msg = self.queue_get("final norm")
-                    final_norm_weight = msg.pop("weight")
-                    if self.md.norm_has_bias:
-                        final_norm_bias = msg.pop("bias")
-                    pp_local_models = [self.get_local_model(pp_rank, ep_rank, tp_rank) for ep_rank in range(self.args.target_expert_parallel_size)
-                        for tp_rank in range(self.args.target_tensor_parallel_size)]
-                    for eptp_rank, model in enumerate(pp_local_models):
-                        tp_rank = eptp_rank % self.args.target_tensor_parallel_size
-                        schema.set("final_norm", model, {
-                            "weight" : final_norm_weight,
-                            "bias" : final_norm_bias if self.md.norm_has_bias else None,
-                        })
-                        if pp_rank != 0 and not self.md.output_layer:
-                            # Copy word embeddings to final pipeline rank
-                            schema.set("output_layer", model, {
-                                "weight" : out_word_embed[tp_rank],
-                            })
-                    del final_norm_weight
-                    if self.md.norm_has_bias:
-                        del final_norm_bias
-                    self.check_message(msg)
-
-                    if self.md.output_layer:
-                        msg = self.queue_get("output layer")
-                        if not hasattr(pp_local_models[0] if prefix is None else getattr(pp_local_models[0], prefix), 'output_layer'):
-                            print("ERROR: got an output layer, but model does not have one")
-                            exit(1)
-                        output_layer_weight = pad_weight(msg.pop("weight"), self.md.true_vocab_size)
-                        output_layer_weight = torch.chunk(output_layer_weight, self.args.target_tensor_parallel_size, dim=0)
-                        for eptp_rank, model in enumerate(pp_local_models):
-                            tp_rank = eptp_rank % self.args.target_tensor_parallel_size
-                            schema.set("output_layer", model, {
-                                "weight" : output_layer_weight[tp_rank],
-                            })
-                        self.check_message(msg)
-
-                    msg = self.queue_get()
-                    if msg != "done" and msg["name"] == "pooler":
-                        if not hasattr(self.models[pp_rank][0][0] if prefix is None else getattr(self.models[pp_rank][0][0], prefix), 'pooler'):
-                            print("ERROR: got a pooler, but model does not have one")
-                            exit(1)
-                        print("received pooler")
-                        pooler_weight = msg.pop("weight")
-                        pooler_bias = msg.pop("bias")
-                        for model in pp_local_models:
-                            schema.set("pooler", model, {
-                                "weight" : pooler_weight,
-                                "bias" : pooler_bias,
-                            })
-                        del pooler_weight
-                        del pooler_bias
-                        self.check_message(msg)
-                        msg = self.queue_get()
-
-                    if msg != "done" and msg["name"] == "lm head":
-                        if not hasattr(self.models[pp_rank][0][0] if prefix is None else getattr(self.models[pp_rank][0][0], prefix), 'lm_head'):
-                            print("ERROR: got an lm head, but model does not have one")
-                            exit(1)
-                        print("received lm head")
-                        lm_head_dense_weight = msg.pop("dense weight")
-                        lm_head_dense_bias = msg.pop("dense bias")
-                        lm_head_norm_weight = msg.pop("norm weight")
-                        if self.md.norm_has_bias:
-                            lm_head_norm_bias = msg.pop("norm bias")
-                        for model in pp_local_models:
-                            schema.set("lm_head", model, {
-                                "dense_weight" : lm_head_dense_weight,
-                                "dense_bias" : lm_head_dense_bias,
-                                "norm_weight" : lm_head_norm_weight,
-                                "norm_bias" : lm_head_norm_bias if self.md.norm_has_bias else None,
-                            })
-                        self.check_message(msg)
-                        msg = self.queue_get()
-
-                    if msg != "done" and msg["name"] == "binary head":
-                        if not hasattr(self.models[pp_rank][0][0] if prefix is None else getattr(self.models[pp_rank][0][0], prefix), 'binary_head'):
-                            print("ERROR: got a binary head, but model does not have one")
-                            exit(1)
-                        print("received binary head")
-                        binary_head_weight = msg.pop("weight")
-                        binary_head_bias = msg.pop("bias")
-                        for model in pp_local_models:
-                            schema.set("binary_head", model, {
-                                "weight" : binary_head_weight,
-                                "bias" : binary_head_bias,
-                            })
-                        self.check_message(msg)
-                        msg = self.queue_get()
-
-                    # TODO: delete weight when not used
-                    if msg != "done":
-                        print("ERROR: got some more data but was expecting to be done")
+                    self._receive_final_layer_outputs(schema, pp_rank, out_word_embed, prefix)
 
     def import_model_provider(self):
         """Return the correct model_provider function."""
