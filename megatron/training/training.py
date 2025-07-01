@@ -957,6 +957,9 @@ def pretrain(
 
     ft_integration.shutdown()
     one_logger_utils.finish()
+    # Write a success sentinel file at the end of the training
+    with open(os.path.join(args.save, "SUCCESS_SENTINEL.txt"), "w") as f:
+        f.write("Training completed successfully")
 
 
 def update_train_iters(args):
