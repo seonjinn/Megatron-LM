@@ -10,7 +10,7 @@
 #SBATCH --overcommit
 #SBATCH --exclusive
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=sft_llama_3p1_8b_radio_vlm_rc3_v13p16_fp8_0624
+#SBATCH --job-name=sft_llama_3p1_8b_radio_vlm_rc3_v13p16_0701
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
@@ -23,8 +23,12 @@ BATCH=$((1-$?))
 
 DEBUG=0
 USE_TILING=0
-USE_PACKING=1
+USE_PACKING=0
 USE_ONLINE_PACKING=1
+USE_DYNAMIC_RES=1
+USE_FP8=1
+USE_PRECISION_AWARE_OPTIMIZER=1
+USE_CP=0
 
 # Remember to update model and job name if running in batch mode!!
 if [[ $BATCH -eq 0 ]]; then
@@ -33,7 +37,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="sft_llama_3p1_8b_radio_vlm_rc3_v13p16_fp8_0624"
+    MODEL_NAME="sft_llama_3p1_8b_radio_vlm_rc3_v13p16_0701"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -48,7 +52,11 @@ TENSORBOARD_DIR="${OUTPUT}/tensorboard"
 
 TP=4
 
-CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/pretrain_llama_3p1_8b_cradio_rc3_dynamic_res_commercial_0618/checkpoints"
+if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
+    CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/pretrain_llama_3p1_8b_cradio_rc3_dynamic_res_commercial_0618/checkpoints"
+else
+    CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/amalasanjayd/checkpoints/pretrain_llama_3p1_8b_cradio_rc3_commercial_0416"
+fi
 
 if [[ $USE_ONLINE_PACKING -eq 1 ]]; then
     DATA_TRAIN="${SOURCE}/examples/multimodal/v2/data_config/sft_dataset_commercial_v13.16_online_packing.yaml"
@@ -61,8 +69,8 @@ DECODER_SEQ_LEN=16384
 
 if [[ $DEBUG -eq 1 ]]; then
     MBZ=1
-    BZ=8
-    NW=2
+    BZ=1
+    NW=1
     AD=0.0
     HD=0.0
     LI=1
@@ -70,9 +78,9 @@ if [[ $DEBUG -eq 1 ]]; then
 
     NONDETERMINISTIC_ATTN=1
 
-    NUM_GPU=8
-    #NUM_GPU=4
-    #export CUDA_VISIBLE_DEVICES=0,1,2,3
+    # NUM_GPU=8
+    NUM_GPU=4
+    export CUDA_VISIBLE_DEVICES=0,1,2,3
 else
     MBZ=1
     BZ=128
@@ -91,7 +99,6 @@ if [[ $USE_TILING -eq 1 ]]; then
     SEQ_LEN=256
 fi
 
-USE_FP8=1
 if [[ $USE_FP8 -eq 1 ]]; then
     # Recipe 1: More accurate but not the fastest.
     EXTRA_ARGS+=" --fp8-recipe blockwise --fp8-format e4m3 --first-last-layers-bf16 --num-layers-at-start-in-bf16 1 --num-layers-at-end-in-bf16 1"
@@ -109,12 +116,10 @@ if [[ $USE_ONLINE_PACKING -eq 1 ]]; then
     EXTRA_ARGS+=" --packing-buffer-size 3247 --packing-seq-length ${DECODER_SEQ_LEN} --packing-knapsack-algorithm balanced_greedy_knapsack "
 fi
 
-USE_PRECISION_AWARE_OPTIMIZER=1
 if [[ $USE_PRECISION_AWARE_OPTIMIZER -eq 1 ]]; then
     EXTRA_ARGS+=" --use-precision-aware-optimizer --main-grads-dtype bf16 --main-params-dtype fp16 --exp-avg-dtype fp16 --exp-avg-sq-dtype fp16 "
 fi
 
-USE_CP=0
 if [[ $USE_CP -eq 1 ]]; then
     # TODO: Loss scaling is not enabled for context parallel yet. Implementation exists but not committed yet.
     EXTRA_ARGS+=" --context-parallel-size 2 --sequence-parallel "
@@ -122,7 +127,6 @@ else
     EXTRA_ARGS+=" --use-loss-scaling "
 fi
 
-USE_DYNAMIC_RES=1
 if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
     SEQ_LEN=12288
 
@@ -178,7 +182,7 @@ OPTIONS=" \
     --min-lr 0.0 \
     --lr-decay-style cosine \
     --log-interval ${LI} \
-    --eval-iters 10 \
+    --eval-iters 0 \
     --eval-interval ${EVAL_INTERVAL} \
     --data-path ${DATA_TRAIN} \
     --prompt-path ${SOURCE}/examples/multimodal/manual_prompts.json \
@@ -212,6 +216,7 @@ OPTIONS=" \
     --disable-vision-class-token \
     --online-evaluation-config ${SOURCE}/examples/multimodal/eagle/eval_config/sft_time_eval.yaml \
     --inference-max-seq-length ${DECODER_SEQ_LEN} \
+    --use-vision-backbone-fp8-arch \
 "
 
 export NVTE_APPLY_QK_LAYER_SCALING=0
@@ -226,7 +231,7 @@ else
     DATETIME=`date +'date_%y-%m-%d_time_%H-%M-%S'`
 
     srun -l --verbose \
-    --container-image /lustre/fsw/portfolios/llmservice/users/matthieul/docker/megatron-dev-img-05142025-pytorch-dev-te-cd37379-energon-710-mamba-fix-vlmeval.sqsh \
+    --container-image /lustre/fsw/portfolios/llmservice/users/matthieul/docker/megatron-dev-img-05142025-pytorch-dev-te-cd37379-energon-fix_repeat_dataset-mamba-fix-vlmeval.sqsh \
     --container-mounts "/lustre,/home" \
     --output=${LOGS_DIR}/%x_%j_$DATETIME.log \
     sh -c "${run_cmd}"
