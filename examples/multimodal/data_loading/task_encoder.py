@@ -408,7 +408,7 @@ class MultiModalTaskEncoder(
             for fragment in message.fragments:
                 if isinstance(fragment, str):
                     content += fragment
-                    assert IMAGE_TOKEN not in fragment, f"{IMAGE_TOKEN!r} in {fragment!r}. This breaks further processing."
+                    assert IMAGE_TOKEN not in fragment, f"{IMAGE_TOKEN!r} in {fragment!r}. This breaks further processing of {message!r}."
                 elif isinstance(fragment, ImageMedia):
                     content += IMAGE_TOKEN
                     image_media.append(fragment)
