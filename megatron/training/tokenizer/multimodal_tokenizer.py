@@ -49,6 +49,7 @@ nemotron_aligned_custom_template = "{{- bos_token}}{% for message in messages %}
 
 llama_nemotron_template = "{%- if messages[0]['role'] == 'system' -%}{%- set system_message = 'detailed thinking off\n\n' + messages[0]['content'] | trim -%}{%- set messages = messages[1:] -%}{%- else -%}{%- set system_message = 'detailed thinking off' -%}{%- endif -%}{%- if tools is not none -%}{{- '<|begin_of_text|><|start_header_id|>system<|end_header_id|>' + '\n\n' + system_message -}} {{- '\n\n' if system_message else '' -}} {{- '<AVAILABLE_TOOLS>[' -}} {% for t in tools %}{{- (t.function if t.function is defined else t) | tojson() -}}{{- ', ' if not loop.last else '' -}}{%- endfor -%} {{- ']</AVAILABLE_TOOLS>' -}} {{- '<|eot_id|>' -}}{%- else -%}{{- '<|begin_of_text|><|start_header_id|>system<|end_header_id|>' + '\n\n' + system_message + '<|eot_id|>' -}}{%- endif -%}{%- for message in messages -%}{%- if message['role'] == 'user' -%}{{- '<|start_header_id|>user<|end_header_id|>' + '\n\n' + message['content'] | trim + '<|eot_id|>' -}}{%- elif message['role'] == 'tool' -%}{%- set tool_response = '<TOOL_RESPONSE>[' + message['content'] | trim + ']</TOOL_RESPONSE>' -%}{{- '<|start_header_id|>user<|end_header_id|>' + '\n\n' + tool_response + '<|eot_id|>' -}}{%- elif message['role'] == 'assistant' and message.get('tool_calls') is not none -%}{%- set tool_calls = message['tool_calls'] -%}{{- '<|start_header_id|>assistant<|end_header_id|>' + '\n\n' + '<TOOLCALL>[' -}}{%- for tool_call in tool_calls -%}{{ '{' + '\"name\": \"' + tool_call.function.name + '\", \"arguments\": ' + tool_call.function.arguments | tojson + '}' }}{%- if not loop.last -%}{{ ', ' }}{%- else -%}{{ ']</TOOLCALL>' + '<|eot_id|>' }}{%- endif -%}{%- endfor -%}{%- elif message['role'] == 'assistant' -%}{{- '<|start_header_id|>assistant<|end_header_id|>' + '\n\n' + message['content'] | trim + '<|eot_id|>' -}}{%- endif -%}{%- endfor -%}{%- if add_generation_prompt -%}{{ '<|start_header_id|>assistant<|end_header_id|>' + '\n\n' }}{%- endif -%}"
 
+nemotron_h_reasoning_template = "{{ '<SPECIAL_10>System\n' }}{%- if messages and messages[0]['role'] == 'system' -%}{{ messages[0]['content'].strip() }}{%- endif -%}{% for message in (messages[1:] if messages[0]['role'] == 'system' else messages) %}{%- if message['role'] == 'user' -%}{{ '\n<SPECIAL_11>User\n' + message['content'].strip() + '\n<SPECIAL_11>Assistant\n' }}{%- if loop.last -%}{%- if messages[0]['role'] == 'system' -%}{%- if \"{'reasoning': True}\" in messages[0]['content'] -%}{{ '<think>\n' }}{%- elif \"{'reasoning': False}\" in messages[0]['content'] -%}{{ '<think></think>' }}{%- endif -%}{%- endif -%}{%- endif -%}{%- elif message['role'] == 'assistant' -%}{{ message['content'].strip() }}{%- endif -%}{%- endfor -%}"
 
 @dataclass
 class PromptConfig:
@@ -91,7 +92,6 @@ class MultimodalTokenizer(MegatronTokenizer):
             special_tokens (List[str]): Non-text tokens.
             image_tag_type (str): Image tag to apply, if any. For example <img><image></img>.
         """
-
         num_added_tokens = tokenizer.add_tokens(special_tokens, special_tokens=True)
         assert num_added_tokens == len(
             special_tokens
@@ -194,6 +194,14 @@ class MultimodalTokenizer(MegatronTokenizer):
                 has_bos=True,
                 has_system_role=True,
             )
+        elif prompt_format == "nemotron-h-reasoning":
+            self._prompt_config = PromptConfig(
+                assistant_prefix_len=3,
+                pad_token_id=tokenizer.convert_tokens_to_ids("<SPECIAL_11>"),
+                custom_chat_template=nemotron_h_reasoning_template,
+                has_bos=False,
+                has_system_role=True,
+            )
         else:
             raise NotImplementedError("unknown multimodal tokenizer type", prompt_format)
 
@@ -275,6 +283,22 @@ class MultimodalTokenizer(MegatronTokenizer):
             return tokens
 
         target = tokens.copy()
+
+        # Temp hack for nemotron hybrid reasoning model.
+        if self._prompt_format == "nemotron-h-reasoning":
+            idx = np.where(tokens == 11)[0]
+            target[:idx[1]] = IGNORE_INDEX  # system prompt + initial user prompt
+
+            for i in range(1, len(idx)):
+                # user message
+                if i % 2 == 0:
+                    target[idx[i]:idx[i+1]] = IGNORE_INDEX
+                else:
+                    # assistant message. Mask `<SPECIAL_11>Assistant\n`.
+                    target[idx[i]:idx[i]+self._prompt_config.assistant_prefix_len] = IGNORE_INDEX
+
+
+            return tokens, target
 
         # Mask system and user tokens in the target.
         idx = 0

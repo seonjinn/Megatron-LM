@@ -55,6 +55,7 @@ def get_language_model_config(config, enable_fusions=False):
         config.add_bias_linear = False
         config.gated_linear_unit = False
         config.activation_func = squared_relu
+        config.bias_activation_fusion = False
         config.ffn_hidden_size = 21504
         config.masked_softmax_fusion = True
         config.attention_softmax_in_fp32 = True
@@ -103,6 +104,19 @@ def get_language_model_config(config, enable_fusions=False):
         config.ffn_hidden_size = 29568
     elif config.language_model_type == "nemotron5-hybrid-8b":
         config.activation_func = squared_relu
+        config.bias_activation_fusion = False
+        config.squared_relu = True
+        config.add_bias_linear = False
+        config.apply_query_key_layer_scaling = False
+        config.gated_linear_unit = False
+        config.layernorm_zero_centered_gamma = (
+            False  # Zero centered gamma not supported for RMSNorm
+        )
+        config.attention_softmax_in_fp32 = True
+        config.ffn_hidden_size = 21504
+    elif config.language_model_type == "nemotron5-hybrid-8b-reasoning":
+        config.activation_func = squared_relu
+        config.bias_activation_fusion = False
         config.squared_relu = True
         config.add_bias_linear = False
         config.apply_query_key_layer_scaling = False
@@ -114,6 +128,7 @@ def get_language_model_config(config, enable_fusions=False):
         config.ffn_hidden_size = 21504
     elif config.language_model_type == "nemotron5-hybrid-12b":
         config.activation_func = squared_relu
+        config.bias_activation_fusion = False
         config.squared_relu = True
         config.add_bias_linear = False
         config.apply_query_key_layer_scaling = False
@@ -128,6 +143,7 @@ def get_language_model_config(config, enable_fusions=False):
         config.mamba_head_dim = 80
     elif config.language_model_type == "nemotron5-hybrid-56b":
         config.activation_func = squared_relu
+        config.bias_activation_fusion = False
         config.squared_relu = True
         config.add_bias_linear = False
         config.apply_query_key_layer_scaling = False
@@ -356,12 +372,15 @@ def get_vision_projection_config(config, hidden_size, enable_fusions=False):
     elif config.language_model_type == "nemotron5-hybrid-56b":
         config.ffn_hidden_size = 32768
         config.activation_func = squared_relu
+        config.bias_activation_fusion = False
     elif config.language_model_type in ("nemotron5-8b", "nemotron5-hybrid-8b"):
         config.ffn_hidden_size = 21504
         config.activation_func = squared_relu
+        config.bias_activation_fusion = False
     elif config.language_model_type == "nemotron5-hybrid-12b":
         config.ffn_hidden_size = 20480
         config.activation_func = squared_relu
+        config.bias_activation_fusion = False
     elif config.language_model_type == "llama3.2_1b":
         config.ffn_hidden_size = 2048
         config.activation_func = torch.nn.functional.gelu
