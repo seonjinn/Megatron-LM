@@ -383,20 +383,32 @@ class MambaMixer(MegatronModule):
             D_has_hdim=self.D_has_hdim,
         )
 
-    def get_packed_seq_idx(self, packed_seq_params: PackedSeqParams, max_seqlen: int):
+    def _create_packed_seq_idx(self, packed_seq_params: PackedSeqParams, total_tokens: int):
         """
-        this method takes packed_seq_params.cu_seqlens_q which is of the form [   0, 6445, 8060, 8176]
-        and returns a tensor which has [0, 0, 0, 0 (repeats 6445 times), 1, 1, 1, 1 (repeats 8060 - 6445 times), 2, 2, 2, 2 (repeats 8176 - 8060 times), 3, 3, 3, 3 (repeats 8192 - 8176 times)]
+        If total_tokens is 16 (for example), this method takes packed_seq_params.cu_seqlens_q_padded
+        (or cu_seqlens_q) which is of the form [0, 5, 7, 11] and returns a tensor of the form
+        [0, 0, 0, 0, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3],
+        which is [0]*(5-0) + [1]*(7-5) + [2]*(11-7) + [3]*(16-11)
+        In the above example, there are three sequences in the pack.
+        In general, the output has an additional sequence index (e.g. 0, 1, 2, 3) so that any tokens
+        beyond the last padded input sequence are accounted for as an extra sequence. However, If
+        cu_seqlens_q_padded[-1] == max_seqlen then this additional sequence index will not be
+        included.
         """
-        # Extract the cumulative sequence lengths tensor.
-        max_seqlen_tensor = torch.tensor([max_seqlen]).type_as(packed_seq_params.cu_seqlens_q)
-        cu_seqlens = torch.cat([packed_seq_params.cu_seqlens_q, max_seqlen_tensor]).type_as(packed_seq_params.cu_seqlens_q)
-        # Compute the differences between consecutive entries to determine each sequence length.
-        seq_lengths = cu_seqlens[1:] - cu_seqlens[:-1]
-        # Create indices for each sequence (0, 1, 2, ...) and repeat each according to its sequence length.
-        seq_idx = torch.repeat_interleave(torch.arange(seq_lengths.numel(), device=cu_seqlens.device), seq_lengths)
-        # make seq_idx be of type torch int32
-        seq_idx = seq_idx.to(torch.int32).unsqueeze(0)
+        # Example: [0, 5, 7, 11] -> [0, 5, 7, 11, 16]
+        if packed_seq_params.cu_seqlens_q_padded is not None:
+            cu_seqlens = packed_seq_params.cu_seqlens_q_padded
+        else:
+            cu_seqlens = packed_seq_params.cu_seqlens_q
+        total_tokens_tensor = torch.tensor([total_tokens]).type_as(cu_seqlens)
+        cu_seqlens_with_max = torch.cat([cu_seqlens, total_tokens_tensor]).type_as(cu_seqlens)
+        # Example: [0, 5, 7, 11, 16] -> [5, 2, 4, 5]
+        seq_lengths = cu_seqlens_with_max[1:] - cu_seqlens_with_max[:-1]
+        # Example: [5, 2, 4, 5] -> [0, 0, 0, 0, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3]
+        seq_idx = torch.repeat_interleave(
+            torch.arange(seq_lengths.numel(), device=cu_seqlens.device), seq_lengths
+        )
+        seq_idx = seq_idx.to(torch.int32).unsqueeze(0)  # Add a batch dimension
         return seq_idx
 
     def forward(
@@ -430,7 +442,7 @@ class MambaMixer(MegatronModule):
 
         zxBCdt, _ = self.in_proj(hidden_states)
 
-        zxBCdt = self.cp.pre_conv_ssm(zxBCdt)
+        zxBCdt = self.cp.pre_conv_ssm(zxBCdt, packed_seq_params)
 
         # transpose: l b pd --> b l pd
         zxBCdt = rearrange(zxBCdt, "l b d -> b l d").contiguous()
@@ -447,7 +459,7 @@ class MambaMixer(MegatronModule):
 
             seq_idx = None
             if packed_seq_params is not None:
-                seq_idx = self.get_packed_seq_idx(packed_seq_params, hidden_states.shape[0])
+                seq_idx = self._create_packed_seq_idx(packed_seq_params, zxBCdt.shape[1])
 
             y = mamba_split_conv1d_scan_combined(
                 zxBCdt,
@@ -469,7 +481,7 @@ class MambaMixer(MegatronModule):
             )
 
             y = rearrange(y, "b l d -> l b d").contiguous()
-            y = self.cp.post_conv_ssm(y)
+            y = self.cp.post_conv_ssm(y, packed_seq_params)
 
             if self.rmsnorm:
                 y = self.norm(y)
