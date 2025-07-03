@@ -22,11 +22,16 @@ which srun
 BATCH=$((1-$?))
 
 DEBUG=0
-USE_TILING=1
-USE_DYNAMIC_RES=0
+USE_TILING=0
+USE_DYNAMIC_RES=1
 USE_FP8=1
 USE_FUSIONS=1
 USE_OPTIMIZE_BROADCAST=1
+
+if [[ $USE_TILING == $USE_DYNAMIC_RES ]]; then
+    echo "USE_TILING and USE_DYNAMIC_RES cannot be enabled at the same time"
+    exit 1
+fi
 
 # Remember to update model and job name if running in batch mode!!
 if [[ $BATCH -eq 0 ]]; then

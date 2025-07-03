@@ -21,14 +21,19 @@ which srun
 BATCH=$((1-$?))
 
 DEBUG=0
-USE_TILING=1
+USE_TILING=0
 USE_ONLINE_PACKING=0
-USE_DYNAMIC_RES=0
+USE_DYNAMIC_RES=1
 USE_FP8=1
 USE_PRECISION_AWARE_OPTIMIZER=1
 USE_CP=0
 USE_FUSIONS=1
 USE_OPTIMIZE_BROADCAST=1
+
+if [[ $USE_TILING == $USE_DYNAMIC_RES ]]; then
+    echo "USE_TILING and USE_DYNAMIC_RES cannot be enabled at the same time"
+    exit 1
+fi
 
 # Remember to update model and job name if running in batch mode!!
 if [[ $BATCH -eq 0 ]]; then
@@ -52,7 +57,11 @@ TENSORBOARD_DIR="${OUTPUT}/tensorboard"
 
 TP=4
 
-CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/output/pretrain_nemotron_5_hybrid_reasoning_8b_cradio_vlm_v1_rc3_0702_DEV_DONOTUSE/checkpoints"
+if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
+    CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/output/pretrain_nemotron_5_hybrid_reasoning_8b_cradio_vlm_v1_rc3_0703_dynamic_res_DEV_DONOTUSE/checkpoints"
+else
+    CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/output/pretrain_nemotron_5_hybrid_reasoning_8b_cradio_vlm_v1_rc3_0702_DEV_DONOTUSE/checkpoints"
+fi
 
 #DATA_TRAIN="${SOURCE}/examples/multimodal/v2/data_config/sft_dataset_commercial_v11_update.yaml"
 DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/eagle_sft_v13.28/eagle_sft_v13.28/wds/recipe.yaml"
