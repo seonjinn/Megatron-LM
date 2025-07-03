@@ -219,6 +219,7 @@ OPTIONS=" \
     --disable-vision-class-token \
     --online-evaluation-config ${SOURCE}/examples/multimodal/eagle/eval_config/sft_time_eval.yaml \
     --inference-max-seq-length ${DECODER_SEQ_LEN} \
+    --dataloader-seed 1 \
 "
 
 export NVTE_APPLY_QK_LAYER_SCALING=0
