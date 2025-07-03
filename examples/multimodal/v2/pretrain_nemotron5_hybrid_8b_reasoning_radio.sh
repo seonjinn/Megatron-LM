@@ -200,7 +200,6 @@ OPTIONS=" \
     --ckpt-format torch \
     --image-tag-type internvl \
     --disable-vision-class-token \
-    --eos-id 15 \
     --attention-backend flash \
     --use-vision-backbone-fp8-arch \
 "

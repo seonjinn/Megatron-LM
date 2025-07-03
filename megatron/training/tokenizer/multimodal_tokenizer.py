@@ -297,7 +297,6 @@ class MultimodalTokenizer(MegatronTokenizer):
                     # assistant message. Mask `<SPECIAL_11>Assistant\n`.
                     target[idx[i]:idx[i]+self._prompt_config.assistant_prefix_len] = IGNORE_INDEX
 
-
             return tokens, target
 
         # Mask system and user tokens in the target.
