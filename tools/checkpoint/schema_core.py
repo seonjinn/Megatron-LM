@@ -71,6 +71,16 @@ class CoreLocalSchema(CoreSchema):
             "mlp_fc2_weight" : "mlp.linear_fc2.weight",
             "mlp_fc2_bias" : "mlp.linear_fc2.bias",
 
+            # Replace with linear (nemotron-nas)
+            "linear_attn_norm_weight" : "input_layernorm.weight",
+            "linear_attn_norm_bias" : "input_layernorm.bias",
+            "linear_attn_weight" : "self_attention.weight",
+            "linear_attn_bias" : "self_attention.bias",
+            "linear_mlp_norm_weight" : "pre_mlp_layernorm.weight",
+            "linear_mlp_norm_bias" : "pre_mlp_layernorm.bias",
+            "linear_mlp_weight" : "mlp.weight",
+            "linear_mlp_bias" : "mlp.bias",
+
         } | extra_layer_schema, prefix=prefix)
 
 
@@ -95,6 +105,16 @@ class CoreTESchema(CoreSchema):
             "mlp_fc1_bias" : "mlp.linear_fc1.bias",
             "mlp_fc2_weight" : "mlp.linear_fc2.weight",
             "mlp_fc2_bias" : "mlp.linear_fc2.bias",
+
+            # Replace with linear (nemotron-nas)
+            "linear_attn_norm_weight" : "self_attention.layer_norm_weight",
+            "linear_attn_norm_bias" : "self_attention.layer_norm_bias",
+            "linear_attn_weight" : "self_attention.weight",
+            "linear_attn_bias" : "self_attention.bias",
+            "linear_mlp_norm_weight" : "mlp.layer_norm_weight",
+            "linear_mlp_norm_bias" : "mlp.layer_norm_bias",
+            "linear_mlp_weight" : "mlp.weight",
+            "linear_mlp_bias" : "mlp.bias",
 
         } | extra_layer_schema, prefix=prefix)
 
