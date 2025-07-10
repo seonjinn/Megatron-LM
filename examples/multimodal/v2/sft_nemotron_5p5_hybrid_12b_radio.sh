@@ -9,7 +9,7 @@
 #SBATCH --nodes=64
 #SBATCH --exclusive
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=sft_nemotron_5p5_hybrid_12b_cradio_vlm_v1_rc3_0625
+#SBATCH --job-name=sft_nemotron_5p5_hybrid_12b_cradio_vlm_v1_rc3_0701
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
@@ -21,6 +21,13 @@ which srun
 BATCH=$((1-$?))
 
 DEBUG=0
+USE_TILING=0
+USE_PACKING=0
+USE_ONLINE_PACKING=1
+USE_DYNAMIC_RES=1
+USE_FP8=1
+USE_PRECISION_AWARE_OPTIMIZER=1
+USE_CP=0
 
 # Remember to update model and job name if running in batch mode!!
 if [[ $BATCH -eq 0 ]]; then
@@ -29,7 +36,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="sft_nemotron_5p5_hybrid_12b_cradio_vlm_v1_rc3_0625"
+    MODEL_NAME="sft_nemotron_5p5_hybrid_12b_cradio_vlm_v1_rc3_0701"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -44,9 +51,13 @@ TENSORBOARD_DIR="${OUTPUT}/tensorboard"
 
 TP=8
 
-CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/pretrain_nemotron_5p5_hybrid_12b_cradio_vlm_v1_rc3_0624/checkpoints"
+CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/pretrain_nemotron_5p5_hybrid_12b_cradio_vlm_v1_rc3_0701/checkpoints"
 
-DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe/eagle_sft_v13.16_sft1/wds/out.yaml"
+if [[ $USE_ONLINE_PACKING -eq 1 ]]; then
+    DATA_TRAIN="${SOURCE}/examples/multimodal/v2/data_config/sft_dataset_commercial_v13.16_online_packing.yaml"
+else
+    DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe/eagle_sft_v13.16_sft1/wds/out.yaml"
+fi
 
 SEQ_LEN=1024
 DECODER_SEQ_LEN=16384
@@ -75,13 +86,11 @@ else
     NUM_GPU=8
 fi
 
-USE_TILING=0
 if [[ $USE_TILING -eq 1 ]]; then
     EXTRA_ARGS+=" --pixel-shuffle --use-tiling --max-num-tiles 12 --use-thumbnail "
     SEQ_LEN=256
 fi
 
-USE_FP8=1
 if [[ $USE_FP8 -eq 1 ]]; then
     # Recipe 1: More accurate but not the fastest.
     EXTRA_ARGS+=" --fp8-recipe blockwise --fp8-format e4m3 --first-last-layers-bf16 --num-layers-at-start-in-bf16 1 --num-layers-at-end-in-bf16 1 "
@@ -91,12 +100,25 @@ if [[ $USE_FP8 -eq 1 ]]; then
     EXTRA_ARGS+=" --use-vision-backbone-fp8-arch "
 fi
 
-USE_PRECISION_AWARE_OPTIMIZER=1
+if [[ $USE_PACKING -eq 1 ]]; then
+    EXTRA_ARGS+=" --packing-seq-length ${DECODER_SEQ_LEN} "
+fi
+
+if [[ $USE_ONLINE_PACKING -eq 1 ]]; then
+    EXTRA_ARGS+=" --packing-buffer-size 3247 --packing-seq-length ${DECODER_SEQ_LEN} --packing-knapsack-algorithm balanced_greedy_knapsack "
+fi
+
 if [[ $USE_PRECISION_AWARE_OPTIMIZER -eq 1 ]]; then
     EXTRA_ARGS+=" --use-precision-aware-optimizer --main-grads-dtype bf16 --main-params-dtype fp16 --exp-avg-dtype fp16 --exp-avg-sq-dtype fp16 "
 fi
 
-USE_DYNAMIC_RES=1
+if [[ $USE_CP -eq 1 ]]; then
+    # TODO: Loss scaling is not enabled for context parallel yet. Implementation exists but not committed yet.
+    EXTRA_ARGS+=" --context-parallel-size 2 --sequence-parallel "
+else
+    EXTRA_ARGS+=" --use-loss-scaling "
+fi
+
 if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
     SEQ_LEN=12288
 
@@ -197,22 +219,6 @@ OPTIONS=" \
 
 export NVTE_APPLY_QK_LAYER_SCALING=0
 export NVTE_ALLOW_NONDETERMINISTIC_ALGO=${NONDETERMINISTIC_ATTN}
-
-# TODO: Why are these used?
-#export NCCL_IB_TIMEOUT=19
-#export UB_TIMEOUT=720
-#export NVTE_FWD_LAYERNORM_SM_MARGIN=16
-#export NVTE_BWD_LAYERNORM_SM_MARGIN=16
-#export NVTE_FUSED_ATTN=0  # Disable cuDNN fused attention.
-#export NCCL_P2P_NET_CHUNKSIZE=2097152
-#export NCCL_DEBUG=WARN
-#export NCCL_SHM_DISABLE=1
-#export NCCL_PROTO=simple
-#export NCCL_NVLS_ENABLE=0
-
-# for online eval
-#export NCCL_P2P_LEVEL=NVL
-#export NCCL_P2P_DISABLE=0
 
 # Interactive or batch mode
 if [[ $BATCH -eq 0 ]]; then

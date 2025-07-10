@@ -10,7 +10,7 @@
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=pretrain_nemotron_5p5_hybrid_12b_cradio_vlm_v1_rc3_0624
+#SBATCH --job-name=pretrain_nemotron_5p5_hybrid_12b_cradio_vlm_v1_rc3_0701
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
@@ -31,7 +31,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="pretrain_nemotron_5p5_hybrid_12b_cradio_vlm_v1_rc3_0624"
+    MODEL_NAME="pretrain_nemotron_5p5_hybrid_12b_cradio_vlm_v1_rc3_0701"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -45,7 +45,8 @@ LOGS_DIR="${OUTPUT}/logs"
 TENSORBOARD_DIR="${OUTPUT}/tensorboard"
 
 TP=8
-CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/mcore_mmodal_models/nemotron5p5_hybrid_12b_dq_patch_vocab_cradio_vlm_v1_rc3_tp8_no_extra_state"
+# CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/mcore_mmodal_models/nemotron5p5_hybrid_12b_dq_patch_vocab_cradio_vlm_v1_rc3_tp8_no_extra_state"
+CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/mcore_mmodal_models/nemotron5p5_hybrid_12b_0701_cradio_vlm_v1_rc3_tp8"
 # TP=4
 # CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/mcore_mmodal_models/nemotron5p5_hybrid_12b_dq_patch_vocab_cradio_vlm_v1_rc3_tp4_no_extra_state"
 
@@ -54,7 +55,7 @@ DATA_TRAIN="${SOURCE}/examples/multimodal/v2/data_config/pretrain_dataset_commer
 if [[ $DEBUG -eq 1 ]]; then
     MBZ=1
     BZ=8
-    NW=2
+    NW=0
     AD=0.0
     HD=0.0
     LI=1
@@ -110,6 +111,8 @@ if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
     fi
     EXTRA_ARGS+=" ${IMAGE_BREAK_TOKEN} --dynamic-resolution --dynamic-resolution-min-patches 1024 --conv-merging --allow-missing-conv-merge-checkpoint"
 fi
+
+# --tokenizer-model /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/mcore_mmodal_models/models--nvidia--Nemotron-H-8B-Base-8K/snapshots/281935db305672111f043428fe4982969876613c/ \
 
 OPTIONS=" \
     --use-checkpoint-args \
@@ -199,22 +202,6 @@ OPTIONS=" \
 
 export NVTE_APPLY_QK_LAYER_SCALING=0
 export NVTE_ALLOW_NONDETERMINISTIC_ALGO=1
-
-# TODO: Why are these needed?
-#export NCCL_IB_TIMEOUT=19
-#export UB_TIMEOUT=720
-#export NVTE_FWD_LAYERNORM_SM_MARGIN=16
-#export NVTE_BWD_LAYERNORM_SM_MARGIN=16
-#export NVTE_FUSED_ATTN=0  # Disable cuDNN fused attention.
-#export NCCL_P2P_NET_CHUNKSIZE=2097152
-#export NCCL_DEBUG=WARN
-#export NCCL_SHM_DISABLE=1
-#export NCCL_PROTO=simple
-#export NCCL_NVLS_ENABLE=0
-
-# for online eval
-#export NCCL_P2P_LEVEL=NVL
-#export NCCL_P2P_DISABLE=0
 
 # Interactive or batch mode
 if [[ $BATCH -eq 0 ]]; then
