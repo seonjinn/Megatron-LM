@@ -46,6 +46,7 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
     imgs_sizes = None
     vision_cu_lengths = None
     vision_max_lengths = None
+    vision_packed_seq_params = None
     has_pad_img = None
     samples_seen = None
 
@@ -55,7 +56,7 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
     pp_size = get_pipeline_model_parallel_world_size()
     if not is_first_or_last_stage(pp_size, args.encoder_pipeline_model_parallel_size):
         # Note these are all set to None above.
-        return tokens, labels, loss_mask, attention_mask, position_ids, imgs, num_tiles, packed_seq_params, imgs_sizes, vision_cu_lengths, vision_max_lengths, has_pad_img, samples_seen
+        return tokens, labels, loss_mask, attention_mask, position_ids, imgs, num_tiles, packed_seq_params, imgs_sizes, vision_packed_seq_params, has_pad_img, samples_seen
 
     # Broadcast data.
     torch.cuda.nvtx.range_push("get_data")

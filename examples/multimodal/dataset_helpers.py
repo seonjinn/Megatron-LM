@@ -911,6 +911,13 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
             cu_lengths_padded = torch.stack([s.cu_lengths_padded for s in samples])
             max_lengths = torch.tensor([s.max_length for s in samples], dtype=torch.int32)
 
+            if self.dataloader_seq_length is not None:
+                for i in range(len(samples)):
+                    cu_lengths[i][-1] = self.dataloader_seq_length
+                    cu_lengths_padded[i][-1] = self.dataloader_seq_length
+                    new_max_length = cu_lengths_padded[i][-1] - cu_lengths[i][-2]
+                    max_lengths[i] = torch.max(max_lengths[i], new_max_length)
+
         return ImageTaskBatchPacked(
             __key__=[s.__key__ for s in samples],
             __restore_key__=[s.__restore_key__ for s in samples],

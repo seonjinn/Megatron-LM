@@ -8,6 +8,7 @@ from config import get_language_model_config, get_vision_model_config, get_visio
 from layer_specs import (get_layer_spec, get_layer_spec_te, get_mlp_module_spec, get_norm_mlp_module_spec_te,
                          get_mamba_layer_spec_te)
 
+from megatron.core.models.gpt.heterogeneous.heterogeneous_layer_specs import get_gpt_heterogeneous_layer_spec
 from megatron.core.models.multimodal.llava_model import IMAGE_TOKEN, LLaVAModel
 from megatron.core.models.vision.clip_vit_model import get_num_image_embeddings
 from megatron.training import get_args, get_tokenizer, print_rank_0
@@ -120,6 +121,8 @@ def model_provider(
 
     if language_model_type.startswith("hf://"):
         language_transformer_layer_spec = None
+    elif args.heterogeneous_layers_config_path is not None:
+        language_transformer_layer_spec = get_gpt_heterogeneous_layer_spec(language_config, use_te)
     elif use_te:
         # Padding mask needed for SP/CP.
         padding = args.context_parallel_size > 1 and args.sequence_parallel
@@ -134,7 +137,19 @@ def model_provider(
             is_vit=False, normalization=language_config.normalization
         )
 
-    vision_config = deepcopy(base_config)
+
+    if args.heterogeneous_layers_config_path is not None:
+        without_hetero = get_args()
+        without_hetero.heterogeneous_layers_config_path = None
+        without_hetero.heterogeneous_layers_config_encoded_json = None
+        vision_config = core_transformer_config_from_args(without_hetero)
+        vision_config.language_model_type = args.language_model_type
+        vision_config.vision_model_type = args.vision_model_type
+        vision_config.calculate_per_token_loss = True
+        vision_config.num_layers_in_first_pipeline_stage = None
+        vision_config.num_layers_in_last_pipeline_stage = None
+    else:
+        vision_config = deepcopy(base_config)
     vision_config = get_vision_model_config(
         vision_config, enable_fusions=args.enable_fusions
     )
@@ -173,7 +188,17 @@ def model_provider(
     else:
         raise RuntimeError("unsupported vision model type", vision_model_type)
 
-    vision_projection_config = deepcopy(base_config)
+
+    if args.heterogeneous_layers_config_path is not None:
+        without_hetero = get_args()
+        without_hetero.heterogeneous_layers_config_path = None
+        without_hetero.heterogeneous_layers_config_encoded_json = None
+        vision_projection_config = core_transformer_config_from_args(without_hetero)
+        vision_projection_config.language_model_type = args.language_model_type
+        vision_projection_config.vision_model_type = args.vision_model_type
+        vision_projection_config.calculate_per_token_loss = True
+    else:
+        vision_projection_config = deepcopy(base_config)
 
     vision_projection_config = get_vision_projection_config(
         vision_projection_config, language_config.hidden_size, enable_fusions=args.enable_fusions

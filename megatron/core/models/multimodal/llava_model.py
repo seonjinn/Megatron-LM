@@ -28,6 +28,7 @@ from megatron.core.parallel_state import get_context_parallel_group
 from megatron.core.transformer import MegatronModule
 from megatron.core.transformer.spec_utils import ModuleSpec
 from megatron.core.transformer.transformer_config import TransformerConfig
+from megatron.core.transformer.heterogeneous.heterogeneous_config import HeterogeneousTransformerConfig
 from megatron.core.utils import deprecate_inference_params, log_single_rank
 
 try:
@@ -173,7 +174,8 @@ class LLaVAModel(MegatronModule):
         self.tp_comm_overlap_lm = language_transformer_config.tp_comm_overlap
         self.context_parallel_lm = language_transformer_config.context_parallel_size
         if self.sequence_parallel_lm or self.context_parallel_lm > 1:
-            if not language_model_type.startswith('nemotron5-hybrid'):
+            # TODO: maybe need a better check for when using heterogeneous layer config
+            if not language_model_type.startswith('nemotron5-hybrid') and not isinstance(language_transformer_config, HeterogeneousTransformerConfig):
                 attn_module = language_transformer_layer_spec.submodules.self_attention
                 assert (
                     attn_module.submodules.core_attention == TEDotProductAttention and HAVE_TE
@@ -195,10 +197,10 @@ class LLaVAModel(MegatronModule):
         self.share_embeddings_and_output_weights = share_embeddings_and_output_weights
 
         class_token_len = 1
+        self._drop_vision_class_token = drop_vision_class_token
         if self.add_encoder:
             self._vision_fp8 = vision_transformer_config.fp8 or use_vision_backbone_fp8_arch
             vision_projection_input_size = vision_transformer_config.hidden_size
-            self._drop_vision_class_token = drop_vision_class_token
             add_class_token = True
             if vision_transformer_config.vision_model_type.startswith(
                 ("clip", "siglip", "internvit")
@@ -411,6 +413,9 @@ class LLaVAModel(MegatronModule):
 
         self.image_token_index = image_token_index
         self.image_break_token = image_break_token
+        self._patch_dim = patch_dim
+        self._class_token_len = class_token_len #WARNING: this will be wrong for PP > 1 when encoder isn't created. On most models we remove class token so it's okay, but keep this in mind.
+        self._use_conv_merging = getattr(self, "conv_merge", None) is not None
         self._pixel_shuffle = pixel_shuffle
         self._tile_tags = tile_tags
         self._max_num_tiles = max_num_tiles
@@ -532,11 +537,11 @@ class LLaVAModel(MegatronModule):
         img_seq_len = self.img_seq_len
         if self._dynamic_resolution:
             img_seq_len = torch.prod(
-                imgs_sizes // self.vision_model.patch_dim, dim=-1, dtype=torch.int32
-            ) + (0 if self._drop_vision_class_token else self.vision_model.class_token_len)
+                imgs_sizes // self._patch_dim, dim=-1, dtype=torch.int32
+            ) + (0 if self._drop_vision_class_token else self._class_token_len)
             if self._pixel_shuffle:
                 img_seq_len = (img_seq_len * (0.5**2)).int()
-            if self.conv_merge is not None:
+            if self._use_conv_merging:
                 img_seq_len = (img_seq_len * (0.5**2)).int()
             if self.image_break_token is not None and insertion_nums is not None:
                 img_seq_len = img_seq_len + insertion_nums.to(device=img_seq_len.device)
@@ -584,6 +589,7 @@ class LLaVAModel(MegatronModule):
                     num_image_tiles_batch * img_seq_len - num_images_per_sample + text_seq_len
                 )
             max_seq_len = seq_lens.max()
+            #TODO: should remove this code and force people to us dataloader-seq-length when using pipeline parallelism?
             # Pipeline parallel expects fixed input size. Check if we need to pad.
             if (
                 self._language_is_pipeline_parallel
