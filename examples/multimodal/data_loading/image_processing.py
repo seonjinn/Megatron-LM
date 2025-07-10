@@ -472,6 +472,7 @@ class TileDegradationStrategy(ImageTilingStrategy):
         num_tokens_available: int | None = None,
     ) -> list[ImageTilingParams]:
         max_num_tiles = self._max_num_tiles
+        degradation_map = {} if len(media_list) == 1 else self._tile_degradation_map
         while True:
             params = []
             img_num_tiles = []
@@ -481,6 +482,7 @@ class TileDegradationStrategy(ImageTilingStrategy):
                         [media], max_num_tiles * self._embeddings_per_tile
                     )[0]
                 elif isinstance(media, VideoFrameMedia):
+                    max_num_tiles = 1
                     media_params = self._video_frame_strategy.compute_params(
                         [media], max_num_tiles * self._embeddings_per_tile
                     )[0]
@@ -491,8 +493,8 @@ class TileDegradationStrategy(ImageTilingStrategy):
             if max_num_tiles == 1 or num_tokens_available is None:
                 break
             if sum(img_num_tiles) > max_num_tiles:
-                if max_num_tiles in self._tile_degradation_map:
-                    max_num_tiles = self._tile_degradation_map[max_num_tiles]
+                if max_num_tiles in degradation_map:
+                    max_num_tiles = degradation_map[max_num_tiles]
                 else:
                     # End of degradation
                     break
