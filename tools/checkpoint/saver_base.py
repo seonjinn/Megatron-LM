@@ -73,6 +73,7 @@ class MegatronCheckpointSaverBase:
                             'train_iters', 'lr_decay_iters', 'lr_warmup_iters', 'lr_warmup_fraction',
                             'start_weight_decay', 'end_weight_decay',
                             'ckpt_format',
+                            'ckpt_step',
                             'first_last_layers_bf16', #TODO: does this mess anything up?
             ]
 
@@ -131,6 +132,10 @@ class MegatronCheckpointSaverBase:
         margs.transformer_impl = self.args.saver_transformer_impl
         if self.args.saver_transformer_impl == "local" and margs.normalization == "RMSNorm":
             margs.no_persist_layer_norm = True
+        
+        if self.args.ckpt_step is not None:
+            margs.ckpt_step = self.args.ckpt_step
+            margs.iteration = self.args.ckpt_step
 
         self.margs = margs
 
@@ -256,7 +261,9 @@ class MegatronCheckpointSaverBase:
                     '--ckpt-format', 'torch', # only 'torch' supported for conversion
                     '--no-one-logger',
                     ]
-
+        
+        if self.args.ckpt_step is not None:
+            my_argv.extend(['--ckpt-step', str(self.args.ckpt_step)])
         if getattr(self.args, "make_vocab_size_divisible_by", None) is not None:
             my_argv.extend(['--make-vocab-size-divisible-by', str(self.args.make_vocab_size_divisible_by)])
         elif self.md.make_vocab_size_divisible_by is not None:

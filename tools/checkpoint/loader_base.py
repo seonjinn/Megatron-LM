@@ -86,6 +86,10 @@ class MegatronCheckpointLoaderBase:
         if self.args.loader_transformer_impl == "local" and margs.normalization == "RMSNorm":
             margs.no_persist_layer_norm = True
 
+        if self.args.ckpt_step is not None:
+            margs.ckpt_step = self.args.ckpt_step
+            margs.iteration = self.args.ckpt_step
+
         self.margs = margs
         self.checkpoint_args = checkpoint_args
 
@@ -586,6 +590,9 @@ class MegatronCheckpointLoaderBase:
             md.hybrid_mlp_ratio = self.margs.hybrid_mlp_ratio
             md.hybrid_override_pattern = self.margs.hybrid_override_pattern
             md.mamba_state_dim = self.margs.mamba_state_dim
+        if self.args.ckpt_step is not None:
+            md.ckpt_step = self.args.ckpt_step
+            md.iteration = self.args.ckpt_step
         return md
 
     def build_sys_argv(self):
@@ -594,7 +601,7 @@ class MegatronCheckpointLoaderBase:
         This centralizes the hack of overwriting sys.argv.
         """
 
-        return [
+        my_argv = [
             'script.py',
             '--no-masked-softmax-fusion',
             '--no-bias-gelu-fusion',
@@ -613,6 +620,9 @@ class MegatronCheckpointLoaderBase:
             '--use-mp-args-from-checkpoint-args',
             '--no-one-logger',
         ]
+        if self.args.ckpt_step is not None:
+            my_argv.extend(['--ckpt-step', str(self.args.ckpt_step)]) 
+        return my_argv
 
     def import_model_provider(self):
         """Return the correct model_provider function depending on GPT vs. BERT."""

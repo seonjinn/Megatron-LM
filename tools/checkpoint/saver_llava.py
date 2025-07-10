@@ -69,7 +69,7 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
                             'distribute_saved_activations',
                             'train_iters', 'lr_decay_iters', 'lr_warmup_iters', 'lr_warmup_fraction',
                             'start_weight_decay', 'end_weight_decay',
-                            'ckpt_format', 'inference_batch_times_seqlen_threshold',
+                            'ckpt_format', 'inference_batch_times_seqlen_threshold', 'ckpt_step'
             ]
 
             for arg, value in vars(self.md.checkpoint_args).items():
@@ -116,6 +116,8 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
                     '--exit-on-missing-checkpoint',
                     ]
 
+        if self.args.ckpt_step is not None:
+            my_argv.extend(['--ckpt-step', str(self.args.ckpt_step)])
         if self.args.make_vocab_size_divisible_by is not None:
             my_argv.extend(['--make-vocab-size-divisible-by', str(self.args.make_vocab_size_divisible_by)])
         elif self.md.make_vocab_size_divisible_by is not None:
