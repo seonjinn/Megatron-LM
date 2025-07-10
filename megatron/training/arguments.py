@@ -96,21 +96,24 @@ def parse_args(extra_args_provider=None, ignore_unknown_args=False, yaml_config=
     if ignore_unknown_args:
         args, _ = parser.parse_known_args()
     elif yaml_config is not None:
-        # Load YAML configuration
-        with open(yaml_config, 'r') as f:
-            yaml_data = yaml.safe_load(f)
-        # Convert YAML data to a list of strings for argparse
-        yaml_args = []
-        for key, value in yaml_data.items():
-            if isinstance(value, bool):  # Handle store-true arguments
-                if value:
+        if isinstance(yaml_config, list):
+            yaml_args = yaml_config
+        else:
+            # Load YAML configuration
+            with open(yaml_config, 'r') as f:
+                yaml_data = yaml.safe_load(f)
+            # Convert YAML data to a list of strings for argparse
+            yaml_args = []
+            for key, value in yaml_data.items():
+                if isinstance(value, bool):  # Handle store-true arguments
+                    if value:
+                        yaml_args.append(f"--{key}")
+                elif isinstance(value, list):
                     yaml_args.append(f"--{key}")
-            elif isinstance(value, list):
-                yaml_args.append(f"--{key}")
-                yaml_args.extend([str(v) for v in value])
-            else:
-                yaml_args.append(f"--{key}")
-                yaml_args.append(str(value))
+                    yaml_args.extend([str(v) for v in value])
+                else:
+                    yaml_args.append(f"--{key}")
+                    yaml_args.append(str(value))
         args = parser.parse_args(yaml_args)
     else:
         args = parser.parse_args()
