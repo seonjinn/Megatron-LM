@@ -434,8 +434,7 @@ class MultiModalTaskEncoder(
             + "".join([f"{m.sender}: {m.fragments}\n" for m in sample.conversation])
         )
 
-        max_image_token_allowed = max(
-            int((self.args.decoder_seq_length - len(input_ids) - 4) / max(len(image_media), 1)), 1)
+        max_image_token_allowed = self.args.decoder_seq_length - len(input_ids) - 4
         image_media_params = self.image_tiling_strategy.compute_params(
             image_media, max_image_token_allowed
         )
@@ -894,7 +893,7 @@ class MultiModalTaskEncoder(
         )
         total_num_images = len(image_tiling_params)
         max_text_tokens = (
-            self.packing_seq_length - 12 - total_img_embeddings_len + total_num_images
+            self.packing_seq_length - total_img_embeddings_len + total_num_images
         )
 
         truncated_input_ids = input_ids[:max_text_tokens]
