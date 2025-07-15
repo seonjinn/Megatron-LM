@@ -90,11 +90,8 @@ def add_text_generation_args(parser):
             "MotionBench",
             "PhysGameBench",
             "MVBench",
-<<<<<<< HEAD
             "inference",
-=======
             "Math500",
->>>>>>> 132e7de14 (10 commits from ksapra/reasoning_attempt2)
         ],
         help="Generation task to run",
     )
