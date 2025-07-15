@@ -287,6 +287,8 @@ class MultimodalTokenizer(MegatronTokenizer):
         # Temp hack for nemotron hybrid reasoning model.
         if self._prompt_format == "nemotron-h-reasoning":
             idx = np.where(tokens == 11)[0]
+            assert tokens[-1] == 11, "last token should be <SPECIAL_11>"
+            idx = idx[:-1]
             target[:idx[1]] = IGNORE_INDEX  # system prompt + initial user prompt
 
             for i in range(1, len(idx)):
