@@ -1,15 +1,16 @@
 #!/bin/bash
 
 #SBATCH -A llmservice_fm_vision
-#SBATCH -p batch_block1,batch_large,batch_long
+#SBATCH -p batch_block1,backfill,batch_large,batch_long
 #SBATCH -t 04:00:00
 #SBATCH --mem=0
 #SBATCH --ntasks-per-node=8
 #SBATCH --dependency=singleton
 #SBATCH --nodes=32
+#SBATCH --overcommit
 #SBATCH --exclusive
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=sft_nemotron_5_hybrid_8b_reasoning_cradio_vlm_v1_rc3_0703
+#SBATCH --job-name=sft_llama_3p1_8b_radio_vlm_rc3_v13p16_video_0716
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
@@ -21,29 +22,30 @@ which srun
 BATCH=$((1-$?))
 
 DEBUG=0
-USE_TILING=0
-USE_ONLINE_PACKING=1
-USE_DYNAMIC_RES=1
+USE_TILING=1    # Video training forces 1 tile for videos.
+USE_PACKING=1
+USE_ONLINE_PACKING=1    # This script supports ONLY online packing.
+USE_DYNAMIC_RES=0
 USE_FP8=1
 USE_PRECISION_AWARE_OPTIMIZER=1
-DECODER_SEQ_LEN=16384
-USE_CP=0
 USE_FUSIONS=1
 USE_OPTIMIZE_BROADCAST=1
+USE_VIDEO_AND_IMAGES=1
 
-if [[ $USE_TILING == $USE_DYNAMIC_RES ]]; then
-    echo "USE_TILING and USE_DYNAMIC_RES cannot be enabled at the same time"
-    exit 1
-fi
+# Video options.
+SEQ_LEN=256     # Vision encoder per image.
+DECODER_SEQ_LEN=40960 # 16384 # 32768 # 65536
+VIDEO_MAX_NUM_FRAMES=128     # Values > 0 enable video max num frames.
+USE_CP=1
 
 # Remember to update model and job name if running in batch mode!!
 if [[ $BATCH -eq 0 ]]; then
     DATETIME=`date +'%y-%m-%d-%H-%M-%S'`
-    MODEL_NAME="interactive_sft_nemotron_5_hybrid_8b_reasoning_cradio_vlm_v1_rc3_${DATETIME}"
+    MODEL_NAME="interactive_sft_llama_3p1_8b_radio_video_${DATETIME}"
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="sft_nemotron_5_hybrid_8b_reasoning_cradio_vlm_v1_rc3_0617"
+    MODEL_NAME="sft_llama_3p1_8b_radio_vlm_rc3_v13p16_video_0716"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -58,25 +60,21 @@ TENSORBOARD_DIR="${OUTPUT}/tensorboard"
 
 TP=4
 
-if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
-    CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/output/pretrain_nemotron_5_hybrid_reasoning_8b_cradio_vlm_v1_rc3_0703_dynamic_res_DEV_DONOTUSE/checkpoints"
-else
-    CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/output/pretrain_nemotron_5_hybrid_reasoning_8b_cradio_vlm_v1_rc3_0702_DEV_DONOTUSE/checkpoints"
-fi
+CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/output/sft_llama_3p1_8b_radio_vlm_rc3_v13p16_0710/checkpoints"
 
-if [[ $USE_ONLINE_PACKING -eq 1 ]]; then
-    DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/megatron-lm5/DST_PATH/eagle_sft_v13.29.yaml"
-else
-    DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/eagle_sft_v13.28/eagle_sft_v13.28/wds/recipe.yaml"
+DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/megatron-lm5/DST_PATH2/eagle_video.yaml"
+if [[ $USE_VIDEO_AND_IMAGES -eq 1 ]]; then
+    DATA_TRAIN="${SOURCE}/examples/multimodal/v2/data_config/sft_dataset_commercial_v13.16_images_and_video_online_packing.yaml"
 fi
 
 if [[ $DEBUG -eq 1 ]]; then
     MBZ=1
-    BZ=16
+    BZ=8
     NW=2
     AD=0.0
     HD=0.0
     LI=1
+    EVAL_INTERVAL=9999
 
     NONDETERMINISTIC_ATTN=1
 
@@ -93,26 +91,28 @@ else
     EXTRA_ARGS=""
     NONDETERMINISTIC_ATTN=1
     NUM_GPU=8
+    EVAL_INTERVAL=9999999999
 fi
 
 if [[ $USE_TILING -eq 1 ]]; then
-    EXTRA_ARGS+=" --pixel-shuffle --use-tiling --max-num-tiles 12 --use-thumbnail "
-    SEQ_LEN=256
+    EXTRA_ARGS+=" --pixel-shuffle --use-tiling --max-num-tiles 12 --use-thumbnail"
 fi
 
 if [[ $USE_FP8 -eq 1 ]]; then
     # Recipe 1: More accurate but not the fastest.
-    EXTRA_ARGS+=" --fp8-recipe blockwise --fp8-format e4m3 --first-last-layers-bf16 --num-layers-at-start-in-bf16 1 --num-layers-at-end-in-bf16 1 "
+    EXTRA_ARGS+=" --fp8-recipe blockwise --fp8-format e4m3 --first-last-layers-bf16 --num-layers-at-start-in-bf16 1 --num-layers-at-end-in-bf16 1"
     # Recipes 2 and 3: Faster but metrics can become a bit noisier. Still the difference to bf16 should be small < 1%.
     #EXTRA_ARGS+=" --fp8-recipe blockwise --fp8-format e4m3 "
     #EXTRA_ARGS+=" --fp8-recipe blocwise --fp8-format e4m3 --fp8-param-gather "
     EXTRA_ARGS+=" --use-vision-backbone-fp8-arch "
 fi
 
+if [[ $USE_PACKING -eq 1 ]]; then
+    EXTRA_ARGS+=" --packing-seq-length ${DECODER_SEQ_LEN} "
+fi
+
 if [[ $USE_ONLINE_PACKING -eq 1 ]]; then
     EXTRA_ARGS+=" --packing-buffer-size 3247 --packing-seq-length ${DECODER_SEQ_LEN} --packing-knapsack-algorithm balanced_greedy_knapsack "
-else
-    EXTRA_ARGS+=" --packing-seq-length ${DECODER_SEQ_LEN} "
 fi
 
 if [[ $USE_PRECISION_AWARE_OPTIMIZER -eq 1 ]]; then
@@ -126,37 +126,14 @@ else
     EXTRA_ARGS+=" --use-loss-scaling "
 fi
 
-if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
-    SEQ_LEN=12288
-
-    if [[ $BATCH -eq 0 ]]; then
-        IMAGE_BREAK_TOKEN="--image-break-token <image_break>"
-        SPECIAL_TOKENS+=" <image_break>"
-    else
-        IMAGE_BREAK_TOKEN="--image-break-token \<image_break\>"
-        SPECIAL_TOKENS+=" \<image_break\>"
-    fi
-    EXTRA_ARGS+=" ${IMAGE_BREAK_TOKEN} --dynamic-resolution --dynamic-resolution-min-patches 1024 --conv-merging "
-fi
-
-if [[ $USE_FUSIONS -eq 1 ]]; then
-    EXTRA_ARGS+=" --enable-fusions "
-    # This requires a new TE version due to a bug fix. But it gives another speed boost.
-    # --cross-entropy-loss-fusion --cross-entropy-loss-fusion-impl te
-fi
-
-if [[ $USE_OPTIMIZE_BROADCAST -eq 1 ]]; then
-    EXTRA_ARGS+=" --optimize-broadcast "
-fi
-
-EXTRA_ARGS+=" --recompute-granularity full --recompute-method block --recompute-num-layers 52 --recompute-vision "
+EXTRA_ARGS+=" --recompute-granularity full --recompute-method block --recompute-num-layers 16 --recompute-vision"
+EXTRA_ARGS+=" --video-min-num-frames 8 --video-max-num-frames ${VIDEO_MAX_NUM_FRAMES} "
 
 OPTIONS=" \
     --use-checkpoint-args \
     --disable-bias-linear \
     --tokenizer-type MultimodalTokenizer \
-    --tokenizer-model nvidia/Nemotron-H-8B-Reasoning-128K \
-    --make-vocab-size-divisible-by 32800 \
+    --tokenizer-model /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/mcore_mmodal_models/models--meta-llama--Meta-Llama-3.1-8B-Instruct/snapshots/5206a32e0bd3067aef1ce90f5528ade7d866253f/ \
     --transformer-impl transformer_engine \
     --normalization RMSNorm \
     --group-query-attention \
@@ -166,16 +143,16 @@ OPTIONS=" \
     --attention-dropout ${AD} \
     --hidden-dropout ${HD} \
     --untie-embeddings-and-output-weights \
-    --position-embedding-type none \
-    --hybrid-override-pattern M-M-M-M*-M-M-M-M-M*-M-M-M-M-M*-M-M-M-M-M*-M-M-M-M-M- \
-    --spec megatron.core.models.mamba.mamba_layer_specs mamba_stack_spec \
-    --squared-relu \
-    --norm-epsilon 1e-05 \
-    --tensor-model-parallel-size ${TP} \
+    --position-embedding-type rope \
+    --rotary-percent 1.0 \
+    --rotary-base 500000 \
+    --use-rope-scaling \
+    --swiglu \
+    --tensor-model-parallel-size ${TP}  \
     --pipeline-model-parallel-size 1 \
-    --num-layers 52 \
+    --num-layers 32 \
     --hidden-size 4096 \
-    --ffn-hidden-size 21504 \
+    --ffn-hidden-size 14336 \
     --num-attention-heads 32 \
     --use-distributed-optimizer \
     --use-te \
@@ -183,7 +160,7 @@ OPTIONS=" \
     --exit-duration-in-mins 230 \
     --seq-length ${SEQ_LEN} \
     --decoder-seq-length ${DECODER_SEQ_LEN} \
-    --max-position-embeddings ${DECODER_SEQ_LEN} \
+    --max-position-embeddings 131072 \
     --train-full-dataset \
     --lr-warmup-fraction 0.03 \
     --micro-batch-size ${MBZ} \
@@ -193,7 +170,7 @@ OPTIONS=" \
     --lr-decay-style cosine \
     --log-interval ${LI} \
     --eval-iters 0 \
-    --eval-interval 100000 \
+    --eval-interval ${EVAL_INTERVAL} \
     --data-path ${DATA_TRAIN} \
     --prompt-path ${SOURCE}/examples/multimodal/manual_prompts.json \
     --save-interval 2000 \
@@ -212,18 +189,20 @@ OPTIONS=" \
     --patch-dim 16 \
     --img-h 512 \
     --img-w 512 \
+    --use-area-weighted-aspect-ratio \
     --dataloader-type external \
     --tensorboard-dir ${TENSORBOARD_DIR} \
-    --language-model-type nemotron5-hybrid-8b \
+    --language-model-type=llama3.1_8b \
     ${EXTRA_ARGS} \
     --distributed-timeout-minutes 60 \
     --vision-model-type radio \
-    --tokenizer-prompt-format nemotron-h-reasoning \
+    --tokenizer-prompt-format llama3p1 \
     ${SPECIAL_TOKENS} \
     --ckpt-format torch \
     --image-tag-type internvl \
     --disable-vision-class-token \
-    --use-vision-backbone-fp8-arch \
+    --online-evaluation-config ${SOURCE}/examples/multimodal/eagle/eval_config/sft_time_eval.yaml \
+    --inference-max-seq-length ${DECODER_SEQ_LEN} \
 "
 
 export NVTE_APPLY_QK_LAYER_SCALING=0
