@@ -48,29 +48,32 @@ def datasets_provider(task_encoder,worker_config=None):
         packing_buffer_size=args.packing_buffer_size,
         handler=print_error_handler,
     )
-    val_datasets = get_val_datasets(
-        dname,
-        batch_size=args.micro_batch_size,
-        # This is the total number over all workers
-        # limit=args.eval_iters * get_num_microbatches(),
-        task_encoder=val_task_encoder,
-        worker_config=worker_config,
-        # TODO: Currently disabled for val, there is no non-packed val dataset yet.
-        # packing_buffer_size=args.packing_buffer_size,
-        packing_buffer_size=None,
-        handler=print_error_handler,
-    )
-    val_datasets_without_source_datasets = [
-        # Limit the dataset to eval_iters * num_microbatches
-        LimitDataset(
-            # Repeat the inner dataset in case it's too short
-            RepeatDataset(val_ds, worker_config=worker_config),
-            length=args.eval_iters * get_num_microbatches(),
+
+    val_datasets_without_source_datasets = None
+    if args.eval_iters > 0:
+        val_datasets = get_val_datasets(
+            dname,
+            batch_size=args.micro_batch_size,
+            # This is the total number over all workers
+            # limit=args.eval_iters * get_num_microbatches(),
+            task_encoder=val_task_encoder,
             worker_config=worker_config,
-            reset_after_epoch=True,
+            # TODO: Currently disabled for val, there is no non-packed val dataset yet.
+            # packing_buffer_size=args.packing_buffer_size,
+            packing_buffer_size=None,
+            handler=print_error_handler,
         )
-        for val_ds, _src_ds in val_datasets
-    ]
+        val_datasets_without_source_datasets = [
+            # Limit the dataset to eval_iters * num_microbatches
+            LimitDataset(
+                # Repeat the inner dataset in case it's too short
+                RepeatDataset(val_ds, worker_config=worker_config),
+                length=args.eval_iters * get_num_microbatches(),
+                worker_config=worker_config,
+                reset_after_epoch=True,
+            )
+            for val_ds, _src_ds in val_datasets
+        ]
 
     return train_dataset, val_datasets_without_source_datasets, None
 
@@ -166,20 +169,22 @@ def train_valid_test_dataloaders_provider(train_val_test_num_samples, task_encod
             else:
                 print(f"dataset state {data_save_name} does not exist")
 
-    if args.packing_buffer_size is None:
-        valid_dataloader = [
-            EnergonDataloader(get_loader(valid_ds, worker_config=worker_config))
-            for valid_ds in valid_ds1
-        ]
-    else:
-        valid_dataloader = [
-            EnergonDataloader(get_loader(
-                valid_ds,
-                cache_pool=FileStoreCachePool(method="raw"),
-                watchdog_initial_timeout_seconds=180 + (args.packing_buffer_size or 0) * 0.0075,
-            ))
-            for valid_ds in valid_ds1
-        ]
+    valid_dataloader = None
+    if valid_ds1 is not None:
+        if args.packing_buffer_size is None:
+            valid_dataloader = [
+                EnergonDataloader(get_loader(valid_ds, worker_config=worker_config))
+                for valid_ds in valid_ds1
+            ]
+        else:
+            valid_dataloader = [
+                EnergonDataloader(get_loader(
+                    valid_ds,
+                    cache_pool=FileStoreCachePool(method="raw"),
+                    watchdog_initial_timeout_seconds=180 + (args.packing_buffer_size or 0) * 0.0075,
+                ))
+                for valid_ds in valid_ds1
+            ]
 
     test_dataloader = None
 

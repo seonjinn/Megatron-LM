@@ -292,9 +292,9 @@ class MultimodalTokenizer(MegatronTokenizer):
             target[:idx[1]] = IGNORE_INDEX  # system prompt + initial user prompt
 
             for i in range(1, len(idx)):
-                # user message
                 if i % 2 == 0:
-                    target[idx[i]:idx[i+1]] = IGNORE_INDEX
+                    # user message. Do not mask <SPECIAL_11> because it is also reused for termination the previous assistant.
+                    target[idx[i]+1:idx[i+1]] = IGNORE_INDEX
                 else:
                     # assistant message. Mask `<SPECIAL_11>Assistant\n`.
                     target[idx[i]:idx[i]+self._prompt_config.assistant_prefix_len] = IGNORE_INDEX

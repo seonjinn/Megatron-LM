@@ -22,13 +22,26 @@ BATCH=$((1-$?))
 
 DEBUG=0
 USE_TILING=0
-USE_ONLINE_PACKING=0
+USE_ONLINE_PACKING=1
 USE_DYNAMIC_RES=1
 USE_FP8=1
 USE_PRECISION_AWARE_OPTIMIZER=1
+DECODER_SEQ_LEN=16384
 USE_CP=0
 USE_FUSIONS=1
 USE_OPTIMIZE_BROADCAST=1
+
+VIDEO_MAX_NUM_FRAMES=0 # 0 -> uses default of 32.
+
+USE_VIDEO=0
+if [[ $USE_VIDEO -eq 1 ]]; then
+    # Need to tune dynamic res for video. Currently it uses a lot of tokens.
+    USE_TILING=1
+    USE_DYNAMIC_RES=0
+    DECODER_SEQ_LEN=40960 # 16384 # 32768 # 65536
+    VIDEO_MAX_NUM_FRAMES=128     # Values > 0 enable video max num frames.
+    USE_CP=1
+fi
 
 if [[ $USE_TILING == $USE_DYNAMIC_RES ]]; then
     echo "USE_TILING and USE_DYNAMIC_RES cannot be enabled at the same time"
@@ -64,13 +77,14 @@ else
 fi
 
 if [[ $USE_ONLINE_PACKING -eq 1 ]]; then
-    DATA_TRAIN="${SOURCE}/examples/multimodal/v2/data_config/sft_dataset_v13.29_online_packing.yaml"
+    DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/megatron-lm5/DST_PATH/eagle_sft_v13.29.yaml"
+
+    if [[ $USE_VIDEO -eq 1 ]]; then
+        DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/megatron-lm5/DST_PATH2/eagle_video.yaml"
+    fi
 else
     DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/eagle_sft_v13.28/eagle_sft_v13.28/wds/recipe.yaml"
 fi
-
-SEQ_LEN=1024
-DECODER_SEQ_LEN=16384
 
 if [[ $DEBUG -eq 1 ]]; then
     MBZ=1
@@ -149,6 +163,10 @@ fi
 
 if [[ $USE_OPTIMIZE_BROADCAST -eq 1 ]]; then
     EXTRA_ARGS+=" --optimize-broadcast "
+fi
+
+if [[ $VIDEO_MAX_NUM_FRAMES -gt 0 ]]; then
+    EXTRA_ARGS+=" --video-min-num-frames 8 --video-max-num-frames $VIDEO_MAX_NUM_FRAMES "
 fi
 
 EXTRA_ARGS+=" --recompute-granularity full --recompute-method block --recompute-num-layers 52 --recompute-vision "
