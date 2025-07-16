@@ -15,10 +15,11 @@ logger = logging.getLogger(__name__)
 
 
 class Symbols:
-    MAMBA = "M"
-    ATTENTION = "*"
-    MLP = "-"
-    VALID = {MAMBA, ATTENTION, MLP}
+    MAMBA = 'M'
+    ATTENTION = '*'
+    MLP = '-'
+    MOE = 'E'
+    VALID = {MAMBA, ATTENTION, MLP, MOE}
 
 
 def _allocate_auto(
