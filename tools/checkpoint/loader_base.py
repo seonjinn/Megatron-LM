@@ -8,6 +8,7 @@ from datetime import timedelta
 
 from utils import _ConverterFakeProcessGroup, print_memory_usage, combine_in_proj, combine_conv1d
 
+
 class MegatronCheckpointLoaderBase:
     """Orchestrates loading a Megatron checkpoint and sending
     model parameters over a given multiprocessing queue.
@@ -48,6 +49,7 @@ class MegatronCheckpointLoaderBase:
         try:
             from megatron.training.arguments import parse_args, validate_args
             from megatron.training.checkpointing import load_args_from_checkpoint
+
         except ModuleNotFoundError:
             print("Unable to import Megatron. Please specify --megatron-path. Exiting.")
             self.queue.put("exit")
