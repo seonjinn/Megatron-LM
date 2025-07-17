@@ -277,7 +277,14 @@ def loss_func(loss_mask, output_tensor, samples_seen):
     loss_mask = loss_mask.contiguous().view(-1).float()
     loss = torch.sum(losses * loss_mask)
 
-    num_tokens = loss_mask.sum().clone().detach().to(torch.int)
+    if args.context_parallel_size > 1:
+        # num_tokens are all-reduced from all CP ranks and loss will be divided by the total num_tokens = args.context_parallel_size.
+        # So we need to multiply loss by args.context_parallel_size to get the correct loss.
+        num_tokens = torch.tensor(1, dtype=torch.int, device=losses.device)
+        loss *= args.context_parallel_size
+    else:
+        num_tokens = loss_mask.sum().clone().detach().to(torch.int)
+
     reporting_loss = torch.cat([loss.clone().detach().view(1), num_tokens.view(1)])
 
     return (
@@ -288,7 +295,6 @@ def loss_func(loss_mask, output_tensor, samples_seen):
             '_samples_seen': samples_seen.detach(),
         },
     )
-
 
 def forward_step(data_iterator, model: LLaVAModel):
     """Forward training step.
@@ -335,9 +341,11 @@ def forward_step(data_iterator, model: LLaVAModel):
         has_pad_img=has_pad_img,
     )
     args = get_args()
-    if args.use_loss_scaling:
+    if args.use_loss_scaling and args.context_parallel_size <= 1:
         loss_function = partial(scaled_loss_func, loss_mask, samples_seen=samples_seen)
     else:
+        # For context parallel, we use the regular loss func because the scaling factors are already applied to loss_mask.
+        # We do this because the CP sharding ignores turn boundaries in the conversation.
         loss_function = partial(loss_func, loss_mask, samples_seen=samples_seen)
 
     return output_tensor, loss_function

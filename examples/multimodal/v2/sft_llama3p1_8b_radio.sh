@@ -121,8 +121,6 @@ fi
 if [[ $USE_CP -eq 1 ]]; then
     # TODO: Loss scaling is not enabled for context parallel yet. Implementation exists but not committed yet.
     EXTRA_ARGS+=" --context-parallel-size 2 --sequence-parallel "
-else
-    EXTRA_ARGS+=" --use-loss-scaling "
 fi
 
 EXTRA_ARGS+=" --recompute-granularity full --recompute-method block --recompute-num-layers 16 --recompute-vision"
@@ -201,6 +199,7 @@ OPTIONS=" \
     --disable-vision-class-token \
     --online-evaluation-config ${SOURCE}/examples/multimodal/eagle/eval_config/sft_time_eval.yaml \
     --inference-max-seq-length ${DECODER_SEQ_LEN} \
+    --use-loss-scaling \
 "
 
 

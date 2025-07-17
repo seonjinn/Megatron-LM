@@ -126,8 +126,6 @@ fi
 if [[ $USE_CP -eq 1 ]]; then
     # TODO: Loss scaling is not enabled for context parallel yet. Implementation exists but not committed yet.
     EXTRA_ARGS+=" --context-parallel-size 2 --sequence-parallel "
-else
-    EXTRA_ARGS+=" --use-loss-scaling "
 fi
 
 if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
@@ -220,6 +218,7 @@ OPTIONS=" \
     --online-evaluation-config ${SOURCE}/examples/multimodal/eagle/eval_config/sft_time_eval.yaml \
     --inference-max-seq-length ${DECODER_SEQ_LEN} \
     --dataloader-seed 1 \
+    --use-loss-scaling \
 "
 
 export NVTE_APPLY_QK_LAYER_SCALING=0

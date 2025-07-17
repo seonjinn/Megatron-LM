@@ -34,7 +34,7 @@ def model_provider(
         model: A multimodal model.
     """
     args = get_args()
-    
+
     # Deprecation warning for encoder pipeline parallelism
     if args.encoder_pipeline_model_parallel_size > 0 or args.encoder_tensor_model_parallel_size > 0:
         warnings.warn(
@@ -49,7 +49,7 @@ def model_provider(
             DeprecationWarning,
             stacklevel=2
         )
-    
+
     assert args.encoder_pipeline_model_parallel_size <= 1, "LLaVA does not support pp>1 for encoder on it's own pipeline rank"
 
     use_te = args.use_te

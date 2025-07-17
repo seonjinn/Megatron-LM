@@ -738,7 +738,7 @@ class LLaVAModel(MegatronModule):
         return final_embedding, final_labels, final_loss_mask
 
     def _process_embedding_token_parallel(
-        self, combined_embeddings, new_labels, new_loss_mask, packed_seq_params
+        self, combined_embeddings, new_labels, new_loss_mask, loss_weight, packed_seq_params
     ):
         """Processes the input data for model parallelism support.
 
@@ -794,6 +794,7 @@ class LLaVAModel(MegatronModule):
             if self.post_process and new_labels is not None:
                 batch["new_labels"] = new_labels
                 batch["new_loss_mask"] = new_loss_mask
+                batch["loss_weight"] = loss_weight
             # Distribute sequence across CP ranks
             if packed_seq_params is None or packed_seq_params.qkv_format == 'sbhd':
                 from megatron.training.utils import get_batch_on_this_cp_rank
@@ -819,7 +820,7 @@ class LLaVAModel(MegatronModule):
                 ).contiguous()  # [B,S/CP,H] -> [S/CP,B,H]
             if self.post_process and new_labels is not None:
                 new_labels = batch["new_labels"]
-                new_loss_mask = batch["new_loss_mask"]
+                new_loss_mask = batch["new_loss_mask"] * batch["loss_weight"]
 
         if self.sequence_parallel_lm and self.pre_process:
             combined_embeddings = tensor_parallel.scatter_to_sequence_parallel_region(
@@ -1100,9 +1101,14 @@ class LLaVAModel(MegatronModule):
         )  # [combined_seq_len, b, h_language], [b, combined_seq_len], [b, combined_seq_len]
 
         if self.context_parallel_lm > 1 or self.sequence_parallel_lm:
+            acc_lengths = packed_seq_params.cu_seqlens_q_padded
+            num_samples = len(acc_lengths) - 1
+            loss_weight = pre_calc_loss_weight(num_samples, acc_lengths, new_labels[0])
+            loss_weight = loss_weight.unsqueeze(0)
+
             combined_embeddings, new_labels, new_loss_mask, packed_seq_params = (
                 self._process_embedding_token_parallel(
-                    combined_embeddings, new_labels, new_loss_mask, packed_seq_params
+                    combined_embeddings, new_labels, new_loss_mask, loss_weight, packed_seq_params
                 )
             )
 
@@ -1263,3 +1269,22 @@ def insert_image_break_tokens(x, patch_sizes, image_break_token):
         start_new += interval
 
     return new_image_embeddings, torch.tensor(num_insertions, device=new_image_embeddings.device)
+
+
+def pre_calc_loss_weight(num_samples, acc_lengths, shift_labels):
+    """Loss weighting when using context parallel with packed sequences."""
+    loss_weight = torch.ones(shift_labels.shape[0], device=shift_labels.device, dtype=torch.float32)
+    num_valid_labels_list = []
+    loss_weight[shift_labels==IGNORE_INDEX] = 0
+    all_num_valid_labels = (shift_labels!=IGNORE_INDEX).sum()
+    for sample_idx in range(num_samples):
+        weight_this_sample = loss_weight[acc_lengths[sample_idx]: acc_lengths[sample_idx+1]]
+        shift_labels_this_sample = shift_labels[acc_lengths[sample_idx]:acc_lengths[sample_idx+1]]
+        num_valid_labels = (shift_labels_this_sample!=IGNORE_INDEX).sum(-1)
+        if num_valid_labels > 0:
+            weight_this_sample = weight_this_sample / num_valid_labels * num_valid_labels.sqrt()
+            num_valid_labels_list.append(num_valid_labels)
+        loss_weight[acc_lengths[sample_idx]: acc_lengths[sample_idx+1]] = weight_this_sample
+    base_num = torch.stack(num_valid_labels_list).sqrt().sum()
+    loss_weight = loss_weight / base_num
+    return loss_weight

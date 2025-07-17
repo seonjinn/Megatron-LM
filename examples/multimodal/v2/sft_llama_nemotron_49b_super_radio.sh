@@ -126,8 +126,6 @@ fi
 if [[ $USE_CP -eq 1 ]]; then
     # TODO: Loss scaling is not enabled for context parallel yet. Implementation exists but not committed yet.
     EXTRA_ARGS+=" --context-parallel-size 2 --sequence-parallel "
-else
-    EXTRA_ARGS+=" --use-loss-scaling "
 fi
 
 if [[ $USE_PP -eq 1 ]]; then
@@ -243,6 +241,7 @@ OPTIONS=" \
     --use-vision-backbone-fp8-arch \
     --log-timers-to-tensorboard \
     --log-throughput \
+    --use-loss-scaling \
 "
 
 export NVTE_APPLY_QK_LAYER_SCALING=0

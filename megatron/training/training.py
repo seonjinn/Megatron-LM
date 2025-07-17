@@ -1273,7 +1273,7 @@ def setup_model_and_optimizer(
         # set dense model related args in to global args before getting dense model
         args.num_experts = None
         args.expert_model_parallel_size = 1
-        args.ffn_hidden_size = moe_ffn_hidden_size * args.moe_upcycling_granularity 
+        args.ffn_hidden_size = moe_ffn_hidden_size * args.moe_upcycling_granularity
 
         # get dense model
         dense_model_for_upcycling = get_model(model_provider_func, model_type)

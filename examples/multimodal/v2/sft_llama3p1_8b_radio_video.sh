@@ -10,7 +10,7 @@
 #SBATCH --overcommit
 #SBATCH --exclusive
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=sft_llama_3p1_8b_radio_vlm_rc3_v13p16_video_0716
+#SBATCH --job-name=sft_llama_3p1_8b_radio_vlm_rc3_v13p16_video_0717
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
@@ -30,7 +30,7 @@ USE_FP8=1
 USE_PRECISION_AWARE_OPTIMIZER=1
 USE_FUSIONS=1
 USE_OPTIMIZE_BROADCAST=1
-USE_VIDEO_AND_IMAGES=1
+USE_VIDEO_AND_IMAGES=0  # Combine image and video training in the same.
 
 # Video options.
 SEQ_LEN=256     # Vision encoder per image.
@@ -45,7 +45,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="sft_llama_3p1_8b_radio_vlm_rc3_v13p16_video_0716"
+    MODEL_NAME="sft_llama_3p1_8b_radio_vlm_rc3_v13p16_video_0717"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -122,11 +122,9 @@ fi
 if [[ $USE_CP -eq 1 ]]; then
     # TODO: Loss scaling is not enabled for context parallel yet. Implementation exists but not committed yet.
     EXTRA_ARGS+=" --context-parallel-size 2 --sequence-parallel "
-else
-    EXTRA_ARGS+=" --use-loss-scaling "
 fi
 
-EXTRA_ARGS+=" --recompute-granularity full --recompute-method block --recompute-num-layers 16 --recompute-vision"
+EXTRA_ARGS+=" --recompute-granularity full --recompute-method block --recompute-num-layers 16 --recompute-vision --recompute-vision-num-layers 16 "
 EXTRA_ARGS+=" --video-min-num-frames 8 --video-max-num-frames ${VIDEO_MAX_NUM_FRAMES} "
 
 OPTIONS=" \
@@ -203,6 +201,7 @@ OPTIONS=" \
     --disable-vision-class-token \
     --online-evaluation-config ${SOURCE}/examples/multimodal/eagle/eval_config/sft_time_eval.yaml \
     --inference-max-seq-length ${DECODER_SEQ_LEN} \
+    --use-loss-scaling \
 "
 
 export NVTE_APPLY_QK_LAYER_SCALING=0
