@@ -30,8 +30,6 @@ USE_FP8=1
 USE_PRECISION_AWARE_OPTIMIZER=1
 USE_CP=0
 USE_PP=1
-USE_FUSIONS=0
-USE_OPTIMIZE_BROADCAST=0
 
 # Remember to update model and job name if running in batch mode!!
 if [[ $BATCH -eq 0 ]]; then
@@ -151,16 +149,6 @@ fi
 
 # EXTRA_ARGS+=" --recompute-granularity full --recompute-method block --recompute-num-layers 16 --recompute-vision "
 EXTRA_ARGS+=" --recompute-granularity full --recompute-method block --recompute-num-layers 80 --recompute-vision "
-
-if [[ $USE_FUSIONS -eq 1 ]]; then
-    EXTRA_ARGS+=" --enable-fusions "
-    # This requires a new TE version due to a bug fix. But it gives another speed boost.
-    # --cross-entropy-loss-fusion --cross-entropy-loss-fusion-impl te
-fi
-
-if [[ $USE_OPTIMIZE_BROADCAST -eq 1 ]]; then
-    EXTRA_ARGS+=" --optimize-broadcast "
-fi
 
 OPTIONS=" \
     --use-checkpoint-args \

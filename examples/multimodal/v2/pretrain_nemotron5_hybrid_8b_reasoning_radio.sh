@@ -25,8 +25,6 @@ DEBUG=0
 USE_TILING=0
 USE_DYNAMIC_RES=1
 USE_FP8=1
-USE_FUSIONS=1
-USE_OPTIMIZE_BROADCAST=1
 
 if [[ $USE_TILING == $USE_DYNAMIC_RES ]]; then
     echo "USE_TILING and USE_DYNAMIC_RES cannot be enabled at the same time"
@@ -116,16 +114,6 @@ if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
         SPECIAL_TOKENS+=" \<image_break\>"
     fi
     EXTRA_ARGS+=" ${IMAGE_BREAK_TOKEN} --dynamic-resolution --dynamic-resolution-min-patches 1024 --conv-merging --allow-missing-conv-merge-checkpoint"
-fi
-
-if [[ $USE_FUSIONS -eq 1 ]]; then
-    EXTRA_ARGS+=" --enable-fusions "
-    # This requires a new TE version due to a bug fix. But it gives another speed boost.
-    # --cross-entropy-loss-fusion --cross-entropy-loss-fusion-impl te
-fi
-
-if [[ $USE_OPTIMIZE_BROADCAST -eq 1 ]]; then
-    EXTRA_ARGS+=" --optimize-broadcast "
 fi
 
 OPTIONS=" \

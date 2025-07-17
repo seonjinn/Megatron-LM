@@ -27,8 +27,6 @@ USE_ONLINE_PACKING=1
 USE_DYNAMIC_RES=0
 USE_FP8=1
 USE_PRECISION_AWARE_OPTIMIZER=1
-USE_FUSIONS=1
-USE_OPTIMIZE_BROADCAST=1
 USE_VIDEO_AND_IMAGES=0  # Combine image and video training in the same.
 
 # Video options.
@@ -136,16 +134,6 @@ if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
         SPECIAL_TOKENS+=" \<image_break\>"
     fi
     EXTRA_ARGS+=" ${IMAGE_BREAK_TOKEN} --dynamic-resolution --dynamic-resolution-min-patches 1024 --conv-merging "
-fi
-
-if [[ $USE_FUSIONS -eq 1 ]]; then
-    EXTRA_ARGS+=" --enable-fusions "
-    # This requires a new TE version due to a bug fix. But it gives another speed boost.
-    # --cross-entropy-loss-fusion --cross-entropy-loss-fusion-impl te
-fi
-
-if [[ $USE_OPTIMIZE_BROADCAST -eq 1 ]]; then
-    EXTRA_ARGS+=" --optimize-broadcast "
 fi
 
 EXTRA_ARGS+=" --video-min-num-frames 8 --video-max-num-frames ${VIDEO_MAX_NUM_FRAMES} "

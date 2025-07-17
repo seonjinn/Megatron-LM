@@ -128,10 +128,10 @@ def add_multimodal_extra_args(parser):
         "--video-frame-temporal-jitter", action="store_true", default=False, help="Enable temporal jittering of the frames to sample from the video as input to the model.",
     )
     group.add_argument(
-        "--enable-fusions", action="store_true", default=False, help="Enable fusions in the model."
+        "--enable-fusions", action="store_true", default=True, help="Enable fusions in the model."
     )
     group.add_argument(
-        "--optimize-broadcast", action="store_true", default=False, help="Optimize the broadcast of data.",
+        "--optimize-broadcast", action="store_true", default=True, help="Optimize the broadcast of data.",
     )
     group.add_argument(
         "--recompute-vision-num-layers", type=int, default=0, help="Number of layers to recompute in the vision model."

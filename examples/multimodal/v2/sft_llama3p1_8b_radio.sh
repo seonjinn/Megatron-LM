@@ -29,8 +29,6 @@ USE_DYNAMIC_RES=0
 USE_FP8=1
 USE_PRECISION_AWARE_OPTIMIZER=1
 USE_CP=0
-USE_FUSIONS=0
-USE_OPTIMIZE_BROADCAST=0
 
 # Remember to update model and job name if running in batch mode!!
 if [[ $BATCH -eq 0 ]]; then

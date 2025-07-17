@@ -28,8 +28,6 @@ USE_ONLINE_PACKING=1    # This script supports ONLY online packing.
 USE_DYNAMIC_RES=0
 USE_FP8=1
 USE_PRECISION_AWARE_OPTIMIZER=1
-USE_FUSIONS=1
-USE_OPTIMIZE_BROADCAST=1
 USE_VIDEO_AND_IMAGES=0  # Combine image and video training in the same.
 
 # Video options.
