@@ -33,8 +33,10 @@ USE_OPTIMIZE_BROADCAST=1
 
 VIDEO_MAX_NUM_FRAMES=0 # 0 -> uses default of 32.
 
+USE_VIDEO_AND_IMAGES=1
 USE_VIDEO=0
-if [[ $USE_VIDEO -eq 1 ]]; then
+
+if [[ $USE_VIDEO -eq 1 || $USE_VIDEO_AND_IMAGES -eq 1 ]]; then
     # Need to tune dynamic res for video. Currently it uses a lot of tokens.
     USE_TILING=1
     USE_DYNAMIC_RES=0
@@ -81,6 +83,8 @@ if [[ $USE_ONLINE_PACKING -eq 1 ]]; then
 
     if [[ $USE_VIDEO -eq 1 ]]; then
         DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/megatron-lm5/DST_PATH2/eagle_video.yaml"
+    elif [[ $USE_VIDEO_AND_IMAGES -eq 1 ]]; then
+        DATA_TRAIN="${SOURCE}/examples/multimodal/v2/data_config/sft_dataset_commercial_v13.16_images_and_video_online_packing.yaml"
     fi
 else
     DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/eagle_sft_v13.28/eagle_sft_v13.28/wds/recipe.yaml"
