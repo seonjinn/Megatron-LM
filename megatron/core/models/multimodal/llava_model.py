@@ -157,8 +157,6 @@ class LLaVAModel(MegatronModule):
         language_rotary_base: int = 10000,
         language_rope_scaling: bool = False,
         language_rope_scaling_factor: float = 8.0,
-        hybrid_attention_ratio: float = 1.0,
-        hybrid_mlp_ratio: float = 1.0,
         hybrid_override_pattern: str = None,
         fp16_lm_cross_entropy: bool = False,
         image_token_index: int = DEFAULT_IMAGE_TOKEN_INDEX,
