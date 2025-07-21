@@ -51,6 +51,8 @@ llama_nemotron_template = "{%- if messages[0]['role'] == 'system' -%}{%- set sys
 
 nemotron_h_reasoning_template = "{{ '<SPECIAL_10>System\n' }}{%- if messages and messages[0]['role'] == 'system' -%}{{ messages[0]['content'].strip() }}{%- endif -%}{% for message in (messages[1:] if messages[0]['role'] == 'system' else messages) %}{%- if message['role'] == 'user' -%}{{ '\n<SPECIAL_11>User\n' + message['content'].strip() + '\n<SPECIAL_11>Assistant\n' }}{%- if loop.last -%}{%- if messages[0]['role'] == 'system' -%}{%- if \"{'reasoning': True}\" in messages[0]['content'] -%}{{ '<think>\n' }}{%- elif \"{'reasoning': False}\" in messages[0]['content'] -%}{{ '<think></think>' }}{%- endif -%}{%- endif -%}{%- endif -%}{%- elif message['role'] == 'assistant' -%}{{ message['content'].strip() }}{%- endif -%}{%- endfor -%}<SPECIAL_11>"
 
+nemotron_h_5p5_reasoning_template = "{% for message in messages %}{% set content = message['content'] %}{% if message['role'] == 'system' %}{{ '<SPECIAL_10>System\n' + content.replace('/think', '').replace('/no_think', '').strip() + '\n' }}{% elif message['role'] == 'user' %}{{ '<SPECIAL_11>User\n' + content.replace('/think', '').replace('/no_think', '').strip() + '\n' }}{% elif message['role'] == 'assistant' %}{{ '<SPECIAL_11>Assistant\n' + content.strip() + '\n<SPECIAL_12>\n' }}{% endif %}{% endfor %}"
+
 @dataclass
 class PromptConfig:
     """Config options for different prompt formats."""
@@ -202,6 +204,14 @@ class MultimodalTokenizer(MegatronTokenizer):
                 has_bos=False,
                 has_system_role=True,
             )
+        elif prompt_format == "nemotron-h-5p5-reasoning":
+            self._prompt_config = PromptConfig(
+                assistant_prefix_len=3,
+                pad_token_id=tokenizer.convert_tokens_to_ids("<unk>"),
+                custom_chat_template=nemotron_h_5p5_reasoning_template,
+                has_bos=False,
+                has_system_role=True,
+            )
         else:
             raise NotImplementedError("unknown multimodal tokenizer type", prompt_format)
 
@@ -285,10 +295,23 @@ class MultimodalTokenizer(MegatronTokenizer):
         target = tokens.copy()
 
         # Temp hack for nemotron hybrid reasoning model.
-        if self._prompt_format == "nemotron-h-reasoning":
+        if self._prompt_format in ("nemotron-h-reasoning"):
             idx = np.where(tokens == 11)[0]
             assert tokens[-1] == 11, "last token should be <SPECIAL_11>"
             idx = idx[:-1]
+            target[:idx[1]] = IGNORE_INDEX  # system prompt + initial user prompt
+
+            for i in range(1, len(idx)):
+                if i % 2 == 0:
+                    # user message. Do not mask <SPECIAL_11> because it is also reused for termination the previous assistant.
+                    target[idx[i]+1:idx[i+1]] = IGNORE_INDEX
+                else:
+                    # assistant message. Mask `<SPECIAL_11>Assistant\n`.
+                    target[idx[i]:idx[i]+self._prompt_config.assistant_prefix_len] = IGNORE_INDEX
+
+            return tokens, target
+        elif self._prompt_format in ("nemotron-h-5p5-reasoning"):
+            idx = np.where(tokens == 11)[0]
             target[:idx[1]] = IGNORE_INDEX  # system prompt + initial user prompt
 
             for i in range(1, len(idx)):

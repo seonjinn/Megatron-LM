@@ -10,7 +10,7 @@
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=pretrain_nemotron_5p5_hybrid_12b_cradio_vlm_v1_rc3_0701
+#SBATCH --job-name=pretrain_nm_5p5_h_12b_cradio_vlm_v1_rc3_0720_online_tiling
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
@@ -31,7 +31,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="pretrain_nemotron_5p5_hybrid_12b_cradio_vlm_v1_rc3_0701"
+    MODEL_NAME="pretrain_nm_5p5_h_12b_cradio_vlm_v1_rc3_0720_online_tiling"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -45,10 +45,9 @@ LOGS_DIR="${OUTPUT}/logs"
 TENSORBOARD_DIR="${OUTPUT}/tensorboard"
 
 TP=8
-# CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/mcore_mmodal_models/nemotron5p5_hybrid_12b_dq_patch_vocab_cradio_vlm_v1_rc3_tp8_no_extra_state"
-CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/mcore_mmodal_models/nemotron5p5_hybrid_12b_0701_cradio_vlm_v1_rc3_tp8"
+CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/mcore_mmodal_models/n5p5_12b_sft_0718_cradio_vlm_v1_rc3_tp8"
 # TP=4
-# CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/mcore_mmodal_models/nemotron5p5_hybrid_12b_dq_patch_vocab_cradio_vlm_v1_rc3_tp4_no_extra_state"
+# CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/mcore_mmodal_models/n5p5_12b_sft_0718_cradio_vlm_v1_rc3_tp4"
 
 DATA_TRAIN="${SOURCE}/examples/multimodal/v2/data_config/pretrain_dataset_commercial.yaml"
 
@@ -82,7 +81,7 @@ fi
 SEQ_LEN=1024
 DECODER_SEQ_LEN=16384
 
-USE_TILING=0
+USE_TILING=1
 if [[ $USE_TILING -eq 1 ]]; then
     EXTRA_ARGS+=" --pixel-shuffle --use-tiling --max-num-tiles 12 --use-thumbnail"
     SEQ_LEN=256
@@ -98,7 +97,7 @@ if [[ $USE_FP8 -eq 1 ]]; then
     EXTRA_ARGS+=" --use-vision-backbone-fp8-arch "
 fi
 
-USE_DYNAMIC_RES=1
+USE_DYNAMIC_RES=0
 if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
     SEQ_LEN=12288
 
@@ -118,7 +117,8 @@ OPTIONS=" \
     --use-checkpoint-args \
     --disable-bias-linear \
     --tokenizer-type MultimodalTokenizer \
-    --tokenizer-model /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/mcore_mmodal_models/Mistral-Nemo-Instruct-2407/ \
+    --tokenizer-model /lustre/fsw/portfolios/llmservice/users/amalasanjayd/checkpoints/nano-v2-sft-lr5e-6-128k-nollama-thinkfix-ep2/checkpoints/nano-v2-sft-lr5e-6-128k-nollama-thinkfix-ep2/iter_0006000/ \
+    --tokenizer-prompt-format nemotron-h-5p5-reasoning \
     --make-vocab-size-divisible-by 16512 \
     --transformer-impl transformer_engine \
     --normalization RMSNorm \
@@ -185,7 +185,6 @@ OPTIONS=" \
     --distributed-timeout-minutes 60 \
     --allow-missing-vision-projection-checkpoint \
     --vision-model-type radio \
-    --tokenizer-prompt-format nemotron5 \
     --use-loss-scaling \
     ${SPECIAL_TOKENS} \
     --ckpt-format torch \

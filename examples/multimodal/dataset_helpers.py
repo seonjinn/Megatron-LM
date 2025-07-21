@@ -414,11 +414,23 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
                 has_image = True
 
         # Note: Some tokenizers may ignore the system prompt.
-        conversation = [{"role": "system", "content": "Answer the questions."}]
+        if self.args.tokenizer_prompt_format == "nemotron-h-5p5-reasoning":
+            conversation = [{"role": "system", "content": "You are a helpful assistant."}]
+        else:
+            conversation = [{"role": "system", "content": "Answer the questions."}]
         # Format the conversation as a list of "user" / "assistant" turns.
         for text in sample.texts:
             error_msg = f"unexpected role {text['from']} in {sample.texts}"
             assert text["from"] in ["human", "gpt"], error_msg
+            if self.args.tokenizer_prompt_format == "nemotron-h-5p5-reasoning":
+                if text["from"] == "gpt":
+                    # Append empty think tokens if missing
+                    if not("<think>" in text["value"] and "</think>" in text["value"]):
+                        text["value"] = "<think></think>\n" + text["value"].strip()
+                elif text["from"] == "human":
+                    # Remove legacy reasoning instructions from training prompt
+                    text["value"] = text["value"].replace("detailed thinking on\n", "", 1).strip()
+                    assert "detailed thinking on" not in text["value"], f"Found sample with detailed thinking on: {sample.texts} {sample.__key__}"
             conversation.append({
                 "role": "user" if text["from"] == "human" else "assistant",
                 "content": text["value"]})

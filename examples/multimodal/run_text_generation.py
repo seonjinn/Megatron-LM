@@ -772,7 +772,7 @@ def get_prompt_and_generated(prompt_and_generation, prompt_format):
         generated = splitted[1]
         generated = generated.split("[PREFIX]")[0]
         generated = generated.split("\\n")[0]
-    elif prompt_format in ("nemotron-h-reasoning"):
+    elif prompt_format in ("nemotron-h-reasoning", "nemotron-h-5p5-reasoning"):
         splitted = prompt_and_generation.split("\n<SPECIAL_11>Assistant\n")
         prompt = splitted[0]
         generated = splitted[1]

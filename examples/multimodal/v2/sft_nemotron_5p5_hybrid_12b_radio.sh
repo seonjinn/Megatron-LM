@@ -9,7 +9,7 @@
 #SBATCH --nodes=64
 #SBATCH --exclusive
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=sft_nemotron_5p5_hybrid_12b_cradio_vlm_v1_rc3_0701
+#SBATCH --job-name=sft_nm_5p5_h_12b_cradio_vlm_v1_rc3_0720_online_tiling
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
@@ -21,10 +21,10 @@ which srun
 BATCH=$((1-$?))
 
 DEBUG=0
-USE_TILING=0
+USE_TILING=1
 USE_PACKING=0
 USE_ONLINE_PACKING=1
-USE_DYNAMIC_RES=1
+USE_DYNAMIC_RES=0
 USE_FP8=1
 USE_PRECISION_AWARE_OPTIMIZER=1
 USE_CP=0
@@ -36,7 +36,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="sft_nemotron_5p5_hybrid_12b_cradio_vlm_v1_rc3_0701"
+    MODEL_NAME="sft_nm_5p5_h_12b_cradio_vlm_v1_rc3_0720_online_tiling"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -51,10 +51,10 @@ TENSORBOARD_DIR="${OUTPUT}/tensorboard"
 
 TP=8
 
-CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/pretrain_nemotron_5p5_hybrid_12b_cradio_vlm_v1_rc3_0701/checkpoints"
+CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/amalasanjayd/workspace/output/pretrain_nm_5p5_h_12b_cradio_vlm_v1_rc3_0720_online_tiling/checkpoints"
 
 if [[ $USE_ONLINE_PACKING -eq 1 ]]; then
-    DATA_TRAIN="${SOURCE}/examples/multimodal/v2/data_config/sft_dataset_commercial_v13.16_online_packing.yaml"
+    DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/eagle_sft_v13.30_nmh5r.yaml"
 else
     DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe/eagle_sft_v13.16_sft1/wds/out.yaml"
 fi
@@ -136,7 +136,7 @@ OPTIONS=" \
     --use-checkpoint-args \
     --disable-bias-linear \
     --tokenizer-type MultimodalTokenizer \
-    --tokenizer-model /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/mcore_mmodal_models/Mistral-Nemo-Instruct-2407 \
+    --tokenizer-model /lustre/fsw/portfolios/llmservice/users/amalasanjayd/checkpoints/nano-v2-sft-lr5e-6-128k-nollama-thinkfix-ep2/checkpoints/nano-v2-sft-lr5e-6-128k-nollama-thinkfix-ep2/iter_0006000/ \
     --make-vocab-size-divisible-by 16512 \
     --transformer-impl transformer_engine \
     --normalization RMSNorm \
@@ -167,7 +167,7 @@ OPTIONS=" \
     --decoder-seq-length ${DECODER_SEQ_LEN} \
     --max-position-embeddings ${DECODER_SEQ_LEN} \
     --train-full-dataset \
-    --lr-warmup-fraction 0.03 \
+    --lr-warmup-fraction 0.1 \
     --micro-batch-size ${MBZ} \
     --global-batch-size ${BZ} \
     --lr 2e-5 \
@@ -200,7 +200,7 @@ OPTIONS=" \
     ${EXTRA_ARGS} \
     --distributed-timeout-minutes 60 \
     --vision-model-type radio \
-    --tokenizer-prompt-format nemotron5 \
+    --tokenizer-prompt-format nemotron-h-5p5-reasoning \
     --use-loss-scaling \
     --packing-seq-length ${DECODER_SEQ_LEN} \
     ${SPECIAL_TOKENS} \
@@ -214,6 +214,10 @@ OPTIONS=" \
     --mamba-num-heads 128 \
     --mamba-state-dim 128 \
     --use-loss-scaling \
+    --recompute-granularity full \
+    --recompute-method block \
+    --recompute-num-layers 62 \
+    --recompute-vision \
 "
 
 export NVTE_APPLY_QK_LAYER_SCALING=0
