@@ -380,10 +380,15 @@ class MultiModalTaskEncoder(
     def preencode_sample(self, sample: ConversationSample) -> PreEncodedTaskSample:
         """Encode sample."""
         # In-place convert VideoMedia to VideoFrameMedia (and text)
+        # Some really large video files cause decoding to take a long time potentially leading to issues.
+        allow_large_videos = getattr(self.args, "allow_large_videos", False)
         for message in sample.conversation:
             idx = 0
             while idx < len(message.fragments):
                 if isinstance(message.fragments[idx], VideoMedia):
+                    if not allow_large_videos and message.fragments[idx].value.entry.data_size / 1e6 > 160:
+                        raise ValueError(f"Video is too large: {str(message.fragments[idx].value.entry.source_info.dataset_path) + "/" + message.fragments[idx].value.entry.fname}")
+
                     frames = self.video_to_frames(message.fragments[idx])
                     message.fragments[idx : idx + 1] = frames
                     idx += len(frames)
@@ -750,7 +755,7 @@ class MultiModalTaskEncoder(
                     for frame in frames:
                         frame.media.value = media_value
                 else:
-                    raise ValueError(f"Unexpected media type: {type(media_value)}")
+                    raise ValueError(f"Unexpected media type: {type(media_value)}. Path: {str(media.entry.source_info.dataset_path) + "/" + media.entry.fname}")
         else:
             for media in sample.images:
                 media.media.value = media.media.value.get()

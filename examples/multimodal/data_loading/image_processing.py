@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 import math
 from typing import Callable, Optional
+import numpy as np
 
 import einops
 import torch
@@ -84,6 +85,16 @@ def find_closest_area_weighted_aspect_ratio(
             best_factor = factor_based_on_area_n_ratio
             best_ratio = ratio
     return best_ratio
+
+
+# Mike's optimized ToTensor.
+def _fast_to_tensor(pic) -> torch.Tensor:
+    np_img = np.array(pic, copy=False)
+    img = torch.from_numpy(np_img)
+    img = img.permute(2, 0, 1)  # HWC to CHW
+    fp_img = img.to(dtype=torch.float32, memory_format=torch.contiguous_format)
+    fp_img.div_(255)
+    return fp_img
 
 
 @dataclass
@@ -203,7 +214,7 @@ class _FixedSizeStrategy(ImageTilingStrategy):
                         (target_size[1], target_size[0]),
                         interpolation=InterpolationMode.BICUBIC,
                     ),
-                    T.ToTensor(),
+                    T.ToTensor(), #T.Lambda(lambda img: _fast_to_tensor(img)),
                     T.Normalize(mean=pixel_mean, std=pixel_std),
                 ]
             )
@@ -220,7 +231,7 @@ class _FixedSizeStrategy(ImageTilingStrategy):
                     T.Lambda(
                         lambda img: img.convert("RGB") if img.mode != "RGB" else img
                     ),
-                    T.ToTensor(),
+                    T.ToTensor(), #T.Lambda(lambda img: _fast_to_tensor(img)),
                     T.Normalize(mean=pixel_mean, std=pixel_std),
                 ]
             )
@@ -588,7 +599,7 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
         self._transform = T.Compose(
             [
                 T.Lambda(lambda img: img.convert("RGB") if img.mode != "RGB" else img),
-                T.ToTensor(),
+                T.ToTensor(), #T.Lambda(lambda img: _fast_to_tensor(img)),
                 T.Normalize(mean=pixel_mean, std=pixel_std),
             ]
         )

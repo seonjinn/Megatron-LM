@@ -136,5 +136,8 @@ def add_multimodal_extra_args(parser):
     group.add_argument(
         "--recompute-vision-num-layers", type=int, default=0, help="Number of layers to recompute in the vision model."
     )
+    group.add_argument(
+        "--allow-large-videos", action="store_true", default=False, help="Allow large videos to be loaded into the model."
+    )
 
     return parser

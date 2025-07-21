@@ -3,6 +3,7 @@ import logging
 from collections import namedtuple
 from copy import deepcopy
 from functools import partial
+import os
 from typing import List, Optional, Tuple
 
 import torch
@@ -948,7 +949,7 @@ class LLaVAModel(MegatronModule):
                     images, imgs_sizes=imgs_sizes, packed_seq_params=vision_packed_seq_params
                 )  # [num_tiles, img_seq_len, h_vision]
             else:
-                if self.context_parallel_lm > 1:
+                if self.context_parallel_lm > 1 and images.shape[0] >= 2:
                     images, pad = split_to_context_parallel_ranks(images)
 
                 image_embeddings = self.vision_model(images)  # [num_tiles, img_seq_len, h_vision]
@@ -1049,7 +1050,7 @@ class LLaVAModel(MegatronModule):
                 image_embeddings = self._apply_tile_tagging(image_embeddings, num_image_tiles)
 
             torch.cuda.nvtx.range_push("gather_from_context_parallel_ranks")
-            if self.context_parallel_lm > 1 and not self._dynamic_resolution:
+            if self.context_parallel_lm > 1 and pad is not None and not self._dynamic_resolution:
                 image_embeddings = gather_from_context_parallel_ranks(image_embeddings, pad)
 
             torch.cuda.nvtx.range_pop()
