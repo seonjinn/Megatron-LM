@@ -91,6 +91,7 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
         margs.conv_merging = getattr(checkpoint_args, "conv_merging", False)
         margs.allow_missing_conv_merge_checkpoint = getattr(checkpoint_args, "allow_missing_conv_merge_checkpoint", False)
         margs.enable_fusions = getattr(checkpoint_args, "enable_fusions", False)
+        margs.context_parallel_size = 1
 
         return margs
 

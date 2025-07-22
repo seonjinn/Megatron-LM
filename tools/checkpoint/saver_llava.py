@@ -173,6 +173,7 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
         margs.token_merging_variant = getattr(self.md.checkpoint_args, "token_merging_variant", None)
         margs.token_merging_out_tokens = getattr(self.md.checkpoint_args, "token_merging_out_tokens", None)
         margs.enable_fusions = getattr(self.md.checkpoint_args, "enable_fusions", False)
+        margs.context_parallel_size = 1
 
         return margs
 
@@ -200,7 +201,7 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
 
         # ViT Embeddings.
         #-----------
-        # The ViT embeddings are put on the PP / EP / TP 0 
+        # The ViT embeddings are put on the PP / EP / TP 0
         vit_embeddings_msg = self.queue_get("vit embeddings")
 
         if self.md.vision_model_type in ("radio", "radio-g", "cradio-g"):
@@ -366,7 +367,7 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
                 conv_merge_l1_bias = vision_projection_msg.pop("conv merge l1 bias")
 
         for tp_rank in range(self.args.target_tensor_parallel_size):
-            # The vision projection is on the PP / EP 0 
+            # The vision projection is on the PP / EP 0
             model = self.get_local_model(0, 0, tp_rank)
             model.vision_projection.encoder.linear_fc1.weight.data.copy_(
                 vision_projection_l0_weight[tp_rank])
@@ -442,4 +443,4 @@ def save_checkpoint(queue, args):
         saver.save()
     except Exception as e:
         raise e
-    
+

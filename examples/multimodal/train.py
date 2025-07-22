@@ -247,13 +247,9 @@ def scaled_loss_func(loss_mask, output_tensor, samples_seen):
         # normalize loss for each turn
         loss_list[idx] = loss_list[idx] * math.sqrt(num_valid_labels_list[idx]) / base_num
 
-    # Some ranks may not get loss tokens due to Context Parallel Sharding
     if len(loss_list) > 0:
         total_loss = torch.stack(loss_list).sum()
         total_tokens = torch.ones_like(total_loss)
-    elif len(loss_list) == 0 and args.context_parallel_size > 1:
-        total_tokens = loss_mask.sum()
-        total_loss = torch.sum(losses.view(-1) * loss_mask)
     else:
         raise RuntimeError("loss_list for loss scaling per conversation unexpectedly got empty list")
 
