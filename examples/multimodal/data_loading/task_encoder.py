@@ -683,6 +683,10 @@ class MultiModalTaskEncoder(
         )
 
         # For batch mode, wrap in additional dimension for consistency
+        if imgs is None:
+            imgs = torch.tensor([[0]], dtype=torch.float32)
+        if imgs_sizes is None:
+            imgs_sizes = torch.tensor([[0, 0]], dtype=torch.int32)
         # Set default values if no vision metadata was returned (static resolution case)
         if vision_cu_lengths is None:
             vision_cu_lengths = torch.tensor([[0]], dtype=torch.int32)

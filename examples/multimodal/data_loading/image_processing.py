@@ -267,10 +267,10 @@ class _FixedSizeStrategy(ImageTilingStrategy):
         self, images: list[torch.Tensor]
     ) -> tuple[torch.Tensor, list[tuple[int, int]], list[int] | None, list[int] | None]:
         return (
-            torch.stack(images),
+            torch.stack(images) if len(images) > 0 else None,
             torch.tensor(
                 [(img.shape[1], img.shape[2]) for img in images], dtype=torch.int32
-            ),
+            ) if len(images) > 0 else None,
             None,
             None,
         )
