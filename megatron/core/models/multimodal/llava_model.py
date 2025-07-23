@@ -201,6 +201,7 @@ class LLaVAModel(MegatronModule):
         self._drop_vision_class_token = drop_vision_class_token
         if self.add_encoder:
             self._vision_fp8 = vision_transformer_config.fp8 or use_vision_backbone_fp8_arch
+            self._vision_fp8_no_arch = vision_transformer_config.fp8
             vision_projection_input_size = vision_transformer_config.hidden_size
             add_class_token = True
             if vision_transformer_config.vision_model_type.startswith(
@@ -421,6 +422,8 @@ class LLaVAModel(MegatronModule):
         self._tile_tags = tile_tags
         self._max_num_tiles = max_num_tiles
         self._dynamic_resolution = dynamic_resolution
+        self._img_h = img_h
+        self._img_w = img_w
 
     def shared_embedding_or_output_weight(self):
         """This is a convenience method to surface the language model's word embeddings, which is
@@ -533,7 +536,7 @@ class LLaVAModel(MegatronModule):
 
         # If using the inference KV cache, the image tokens are already computed.
         if use_inference_kv_cache:
-            return language_embeddings, loss_mask, labels
+            return language_embeddings.transpose(0, 1).contiguous(), loss_mask, labels
 
         img_seq_len = self.img_seq_len
         if self._dynamic_resolution:
@@ -581,9 +584,15 @@ class LLaVAModel(MegatronModule):
             if self._dynamic_resolution:
                 # Currently makes assumption that mbz is length 1
                 assert (
-                    num_images_per_sample.shape[0] == 1
+                    inference_context is not None or num_images_per_sample.shape[0] == 1
                 ), "Dynamic resolution only works for mbz=1"
                 packed_length_per_batch = torch.sum(img_seq_len, dim=-1)
+
+                # In inference, we assume mbz > 1 implies that we're using padding (e.g. for fp8)
+                # so we spoof the number of images per sample to be the same as the max,
+                # which we assume is the "real" batch.
+                if inference_context is not None and num_images_per_sample.shape[0] > 1:
+                    num_images_per_sample = num_images_per_sample[0]
                 seq_lens = packed_length_per_batch - num_images_per_sample + text_seq_len
             else:
                 seq_lens = (
@@ -866,6 +875,64 @@ class LLaVAModel(MegatronModule):
 
         return image_embeddings  # [tile_seq_len + img_seq_len, num_tiles, h_language]
 
+    def _add_fp8_padding_for_inference(self, images, imgs_sizes, vision_packed_seq_params, has_pad_img):
+        """Add FP8 padding for inference when not using context parallelism.
+        
+        This method applies FP8 padding to images during inference to ensure proper alignment
+        for FP8 operations, similar to split_to_context_parallel_ranks_dynamic_res but for
+        the non-context-parallel case.
+
+        Args:
+            images (torch.Tensor): Input images tensor.
+            imgs_sizes (torch.Tensor): Image sizes tensor.
+            vision_packed_seq_params (PackedSeqParams): Vision packed sequence parameters.
+            has_pad_img (bool): Whether padding image is already present.
+
+        Returns:
+            tuple: (images, imgs_sizes, vision_packed_seq_params, has_pad_img) with FP8 padding applied.
+        """
+        final_seqlen = images.shape[1]
+        
+        padding_needed = get_padding(final_seqlen, 1, 1, False, fp8_enabled=True)
+        
+        if padding_needed > 0:
+            patch_dim = self.vision_model.patch_dim
+            
+            pad_img = torch.zeros([1, padding_needed, patch_dim * patch_dim * 3], device=images.device, dtype=images.dtype)
+            
+            # Concatenate padding image to the batch
+            images = torch.cat([images, pad_img], dim=1)
+            
+            # Update imgs_sizes with padding dimensions
+            pad_img_size = torch.tensor([[patch_dim, patch_dim * padding_needed]], device=imgs_sizes.device, dtype=imgs_sizes.dtype)
+            
+            imgs_sizes = torch.cat([imgs_sizes, pad_img_size])
+            
+            # Update vision_packed_seq_params
+            if vision_packed_seq_params is not None:
+                cu_seqlens = vision_packed_seq_params.cu_seqlens_q
+                
+                new_cu_seqlens = torch.cat([cu_seqlens, torch.tensor([final_seqlen + padding_needed], device=cu_seqlens.device, dtype=cu_seqlens.dtype)])
+                vision_packed_seq_params.cu_seqlens_q = new_cu_seqlens
+                vision_packed_seq_params.cu_seqlens_kv = new_cu_seqlens
+                
+                # Update padded sequence lengths if they exist
+                if vision_packed_seq_params.cu_seqlens_q_padded is not None:
+                    cu_seqlens_padded = vision_packed_seq_params.cu_seqlens_q_padded
+                    new_cu_seqlens_padded = torch.cat([cu_seqlens_padded, torch.tensor([final_seqlen + padding_needed], device=cu_seqlens_padded.device, dtype=cu_seqlens_padded.dtype)])
+                    vision_packed_seq_params.cu_seqlens_q_padded = new_cu_seqlens_padded
+                    vision_packed_seq_params.cu_seqlens_kv_padded = new_cu_seqlens_padded
+                
+                # Update max sequence lengths
+                seqlens = new_cu_seqlens[1:] - new_cu_seqlens[:-1]
+                max_seqlen = max(seqlens).to(torch.int32)
+                vision_packed_seq_params.max_seqlen_q = max_seqlen
+                vision_packed_seq_params.max_seqlen_kv = max_seqlen
+            
+            has_pad_img = True
+        
+        return images, imgs_sizes, vision_packed_seq_params, has_pad_img
+
     def forward(
         self,
         images: torch.Tensor,
@@ -944,10 +1011,18 @@ class LLaVAModel(MegatronModule):
                 if self.context_parallel_lm > 1:
                     # This will split the images and imgs_sizes to context parallel ranks. Each rank will have a different imgs_sizes.
                     images, imgs_sizes, vision_packed_seq_params, has_pad_img = split_to_context_parallel_ranks_dynamic_res(images, imgs_sizes, vision_packed_seq_params, self._vision_fp8)
+                else:
+                    # TODO: should we replace the dataset_helper/task_encoder code in training that adds the padding image with this?
+                    # Add FP8 padding for inference when not using context parallelism
+                    if inference_context is not None and not has_pad_img and self._vision_fp8_no_arch:
+                        images, imgs_sizes, vision_packed_seq_params, has_pad_img = self._add_fp8_padding_for_inference(
+                            images, imgs_sizes, vision_packed_seq_params, has_pad_img
+                        )
 
                 image_embeddings = self.vision_model(
                     images, imgs_sizes=imgs_sizes, packed_seq_params=vision_packed_seq_params
                 )  # [num_tiles, img_seq_len, h_vision]
+
             else:
                 if self.context_parallel_lm > 1 and images.shape[0] >= 2:
                     images, pad = split_to_context_parallel_ranks(images)
@@ -1010,7 +1085,7 @@ class LLaVAModel(MegatronModule):
             ).contiguous()  # [img_seq_len, num_tiles, h_vision]
 
             vision_projection_padding_needed = 0
-            if self._vision_fp8 and self._dynamic_resolution:
+            if self._vision_fp8_no_arch and self._dynamic_resolution:
                 vision_projection_padding_needed = get_padding(image_embeddings.shape[0], self.context_parallel_lm, self.tensor_model_parallel_size_lm, self.sequence_parallel_lm, fp8_enabled=self._vision_fp8)
                 if vision_projection_padding_needed > 0:
                     padding_image_embeddings = torch.zeros([vision_projection_padding_needed, image_embeddings.shape[1], image_embeddings.shape[2]]).to(image_embeddings.device).to(image_embeddings.dtype)
