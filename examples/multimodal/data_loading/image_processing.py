@@ -202,7 +202,7 @@ class _FixedSizeStrategy(ImageTilingStrategy):
         """
         Build a transform for a given vision model type and target size.
         """
-        if vision_model_type in ("siglip", "internvit", "radio", "radio-g"):
+        if vision_model_type in ("siglip", "internvit", "radio", "radio-g", "cradio-g"):
             pixel_mean, pixel_std = pixel_statistics[vision_model_type]
 
             transform = T.Compose(
@@ -786,3 +786,261 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
 
     def __str__(self):
         return f"DynamicResolutionImageTransform(vision_model_type={self._vision_model_type}, min_num_patches={self._min_num_patches}, max_num_patches={self._max_num_patches}, patch_size={self._patch_size}, pixel_shuffle={self._pixel_shuffle}, conv_merging={self._conv_merging})"
+
+
+@dataclass
+class MatchTilingDynamicResolutionParams(ImageTilingParams):
+    tiling: tuple[int, int]
+
+
+class MatchTilingDynamicResolutionStrategy(ImageTilingStrategy):
+    """
+    Strategy that uses tiling logic to determine optimal image dimensions but processes
+    the image as a single dynamic resolution image instead of splitting into tiles.
+    
+    This combines the aspect ratio optimization from ImageTilingStrategyV1 with the
+    dynamic resolution processing from DynamicResolutionImageTilingStrategy.
+    
+    Also includes tile degradation logic similar to TileDegradationStrategy.
+    """
+    
+    def __init__(
+        self,
+        vision_model_type: str,
+        tile_size: int,
+        use_thumbnail: bool,
+        augment: bool,
+        min_num_tiles: int,
+        max_num_tiles: int,
+        embeddings_per_tile: int,
+        patch_size: int,
+        get_num_embeddings: Callable[[int, int], int],
+        find_closest_aspect_ratio_fn=find_closest_aspect_ratio,
+        pixel_shuffle: bool = False,
+        conv_merging: bool = False,
+        tile_degradation_map: dict[int, int] = None,
+        video_frame_strategy: ImageTilingStrategy = None,
+        enable_tile_degradation: bool = True,
+    ):
+        """
+        Args:
+            vision_model_type: Vision model type (should support dynamic resolution)
+            tile_size: Size of each tile for tiling calculation
+            use_thumbnail: Whether tiling logic should include thumbnail
+            augment: Whether to use augmentation (not implemented)
+            min_num_tiles: Minimum number of tiles for tiling calculation
+            max_num_tiles: Maximum number of tiles for tiling calculation
+            embeddings_per_tile: Embeddings per tile for tiling calculation
+            patch_size: Patch size for dynamic resolution processing
+            get_num_embeddings: Function to get number of embeddings from dimensions
+            find_closest_aspect_ratio_fn: Function to find closest aspect ratio
+            pixel_shuffle: Whether to ensure compatibility with pixel shuffle
+            conv_merging: Whether to ensure compatibility with convolution merging
+            tile_degradation_map: Map for degrading tiles when tokens are insufficient
+            video_frame_strategy: Strategy for processing video frames
+            enable_tile_degradation: Whether to enable tile degradation (default: True)
+        """
+        assert "radio" in vision_model_type, (
+            "MatchTilingDynamicResolution is only supported for radio models"
+        )
+        
+        self._vision_model_type = vision_model_type
+        self._tile_size = tile_size
+        self._use_thumbnail = use_thumbnail
+        self._min_num_tiles = min_num_tiles
+        self._max_num_tiles = max_num_tiles
+        self._embeddings_per_tile = embeddings_per_tile
+        self._patch_size = patch_size
+        self._get_num_embeddings = get_num_embeddings
+        self._find_closest_aspect_ratio_fn = find_closest_aspect_ratio_fn
+        self._pixel_shuffle = pixel_shuffle
+        self._conv_merging = conv_merging
+        self._enable_tile_degradation = enable_tile_degradation
+        
+        # Tile degradation logic (similar to TileDegradationStrategy)
+        if tile_degradation_map is None:
+            self._tile_degradation_map = {12: 8, 8: 6, 6: 4, 4: 2, 2: 1}
+        else:
+            self._tile_degradation_map = tile_degradation_map
+        
+        # Video frame strategy (similar to TileDegradationStrategy)
+        if video_frame_strategy is None:
+            self._video_frame_strategy = NoTilingStrategy(
+                vision_model_type=vision_model_type,
+                target_width=tile_size,
+                target_height=tile_size,
+                embeddings_per_image=embeddings_per_tile,
+                augment=False,
+            )
+        else:
+            self._video_frame_strategy = video_frame_strategy
+        
+        # Calculate all possible aspect ratios for each max_num_tiles (borrowed from ImageTilingStrategyV1)
+        self.target_ratios = {
+            max_num_tiles: sorted(
+                set(
+                    (x, y)
+                    for n in range(self._min_num_tiles, max_num_tiles + 1)
+                    for x in range(1, n + 1)
+                    for y in range(1, n + 1)
+                    if x * y <= max_num_tiles and x * y >= self._min_num_tiles
+                ),
+                key=lambda x: x[0] * x[1],
+            )
+            for max_num_tiles in range(self._min_num_tiles, self._max_num_tiles + 1)
+        }
+        
+        assert not augment, "Image augmentation not implemented."
+        
+        # Set up transform for dynamic resolution processing
+        pixel_mean, pixel_std = pixel_statistics[self._vision_model_type]
+        self._transform = T.Compose(
+            [
+                T.Lambda(lambda img: img.convert("RGB") if img.mode != "RGB" else img),
+                T.ToTensor(),
+                T.Normalize(mean=pixel_mean, std=pixel_std),
+            ]
+        )
+
+    def apply_params(self, params: MatchTilingDynamicResolutionParams) -> list[torch.Tensor]:
+        # Handle video frames using the video frame strategy
+        if isinstance(params.media, VideoFrameMedia):
+            return self._video_frame_strategy.apply_params(params)
+        
+        # Handle images with dynamic resolution processing
+        image = params.media.value
+        # Calculate the target width and height (same logic as ImageTilingStrategyV1)
+        target_width = self._tile_size * params.tiling[0]
+        target_height = self._tile_size * params.tiling[1]
+        
+        # Resize the image to the target dimensions (same as ImageTilingStrategyV1)
+        resized_img = image.resize((target_width, target_height))
+        
+        # Instead of splitting into tiles, process as single dynamic resolution image
+        return [self._transform(resized_img)]
+
+    def compute_params(
+        self,
+        media_list: list[ImageMedia | VideoFrameMedia],
+        num_tokens_available: int | None = None,
+    ) -> list[MatchTilingDynamicResolutionParams]:
+        # Implement tile degradation logic similar to TileDegradationStrategy
+        max_num_tiles = self._max_num_tiles
+        degradation_map = self._tile_degradation_map
+        
+        while True:
+            params = []
+            total_embeddings_needed = 0
+            
+            for media in media_list:
+                if isinstance(media, ImageMedia):
+                    # Use tiling logic for images
+                    img_size = (media.width, media.height)
+                    aspect_ratio = img_size[0] / img_size[1]
+                    
+                    # Find the closest aspect ratio to the target
+                    target_ratios = self.target_ratios[max_num_tiles]
+                    tiling = self._find_closest_aspect_ratio_fn(
+                        aspect_ratio, target_ratios, img_size[0], img_size[1], self._tile_size
+                    )
+                    
+                    # Calculate target dimensions for dynamic resolution processing
+                    target_width = self._tile_size * tiling[0]
+                    target_height = self._tile_size * tiling[1]
+                    num_embeddings = self._get_num_embeddings(target_width, target_height)
+                    
+                    media_params = MatchTilingDynamicResolutionParams(
+                        media=media,
+                        num_tiles=1,  # Always 1 since we process as single dynamic resolution image
+                        num_embeddings=num_embeddings,
+                        tiling=tiling,
+                    )
+                elif isinstance(media, VideoFrameMedia):
+                    # Use video frame strategy for video frames (always 1 tile)
+                    video_params = self._video_frame_strategy.compute_params(
+                        [media], 1 * self._embeddings_per_tile
+                    )[0]
+                    media_params = MatchTilingDynamicResolutionParams(
+                        media=media,
+                        num_tiles=video_params.num_tiles,
+                        num_embeddings=video_params.num_embeddings,
+                        tiling=(1, 1),  # Video frames always use 1x1 tiling
+                    )
+                else:
+                    raise ValueError(f"Unsupported media type: {type(media)}")
+                
+                params.append(media_params)
+                total_embeddings_needed += media_params.num_embeddings
+            
+            # Check if we need to degrade (only if degradation is enabled)
+            if not self._enable_tile_degradation:
+                break
+            if max_num_tiles == 1 or num_tokens_available is None:
+                break
+            if total_embeddings_needed > num_tokens_available:
+                if max_num_tiles in degradation_map:
+                    max_num_tiles = degradation_map[max_num_tiles]
+                    # Recalculate target ratios for the new max_num_tiles
+                    if max_num_tiles not in self.target_ratios:
+                        self.target_ratios[max_num_tiles] = sorted(
+                            set(
+                                (x, y)
+                                for n in range(self._min_num_tiles, max_num_tiles + 1)
+                                for x in range(1, n + 1)
+                                for y in range(1, n + 1)
+                                if x * y <= max_num_tiles and x * y >= self._min_num_tiles
+                            ),
+                            key=lambda x: x[0] * x[1],
+                        )
+                else:
+                    # End of degradation
+                    break
+            else:
+                break
+        
+        return params
+
+    def stack(
+        self, images: list[torch.Tensor]
+    ) -> tuple[torch.Tensor, list[tuple[int, int]], list[int], list[int]]:
+        """Stack images using dynamic resolution approach with sequence packing"""
+        imgs_sizes = torch.tensor(
+            [[img.shape[1], img.shape[2]] for img in images], dtype=torch.int32
+        )
+
+        def rearrange_img(x):
+            py = x.shape[-2] // self._patch_size
+            px = x.shape[-1] // self._patch_size
+            x = einops.rearrange(
+                x,
+                "c (py yy) (px xx) -> (py px) (c yy xx)",
+                py=py,
+                yy=self._patch_size,
+                px=px,
+                xx=self._patch_size,
+            )
+            return x
+
+        imgs = [rearrange_img(img) for img in images]
+
+        current_length = 0
+        max_length = 0
+        vision_cu_lengths = [0]
+        for img in imgs:
+            if max_length < img.shape[0]:
+                max_length = img.shape[0]
+            current_length += img.shape[0]
+            vision_cu_lengths.append(current_length)
+
+        vision_cu_lengths = torch.tensor(vision_cu_lengths, dtype=torch.int32)
+        vision_max_lengths = torch.tensor(max_length, dtype=torch.int32)
+
+        return (
+            torch.cat(imgs, dim=0).unsqueeze(0),
+            imgs_sizes,
+            vision_cu_lengths,
+            vision_max_lengths,
+        )
+
+    def __str__(self):
+        return f"MatchTilingDynamicResolutionStrategy(vision_model_type={self._vision_model_type}, tile_size={self._tile_size}, use_thumbnail={self._use_thumbnail}, min_num_tiles={self._min_num_tiles}, max_num_tiles={self._max_num_tiles}, patch_size={self._patch_size}, pixel_shuffle={self._pixel_shuffle}, conv_merging={self._conv_merging}, enable_tile_degradation={self._enable_tile_degradation}, video_frame_strategy={self._video_frame_strategy})"

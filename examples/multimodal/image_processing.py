@@ -152,7 +152,7 @@ def process_images(sample_imgs, patch_dim, dynamic_resolution, batch_mode=False)
 class ImageTransform:
     """Image transformation."""
 
-    def __init__(self, input_size, vision_model_type, *, dynamic_resolution=False, res_step=16, min_num_patches=1, max_num_patches=128,  pixel_shuffle=False, min_side=None, conv_merging=False):
+    def __init__(self, input_size, vision_model_type, *, dynamic_resolution=False, res_step=16, min_num_patches=1, max_num_patches=128,  pixel_shuffle=False, min_side=None, conv_merging=False, match_tiling_dynamic_resolution=False):
         self._transform = _build_transform(input_size, vision_model_type)
         self._vision_model_type = vision_model_type
         self._dynamic_resolution = dynamic_resolution
@@ -162,6 +162,7 @@ class ImageTransform:
         self._pixel_shuffle = pixel_shuffle
         self._min_side = min_side
         self._conv_merging = conv_merging
+        self._match_tiling_dynamic_resolution = match_tiling_dynamic_resolution
 
     def __call__(self, img, img_h, img_w, use_tiling=False, max_num_tiles=1, use_thumbnail=False, augment=False, find_closest_aspect_ratio_fn=find_closest_aspect_ratio):
         assert not augment, "Image augmentation not implemented."
@@ -171,6 +172,39 @@ class ImageTransform:
                 img, min_num=1, max_num=max_num_tiles, image_size=img_h, use_thumbnail=use_thumbnail,
                 find_closest_aspect_ratio_fn=find_closest_aspect_ratio_fn)
             imgs = [self._transform(img) for img in imgs]
+        elif self._match_tiling_dynamic_resolution:
+            assert img_h == img_w, "match tiling dynamic resolution expects equal tile height and width"
+            assert "radio" in self._vision_model_type, "Match tiling dynamic resolution is only supported for radio models"
+            
+            # Use tiling logic to determine optimal dimensions
+            orig_width, orig_height = img.size
+            aspect_ratio = orig_width / orig_height
+            
+            # Calculate target ratios (same logic as tiling)
+            target_ratios = set(
+                (i, j) for n in range(1, max_num_tiles + 1) for i in range(1, n + 1) for j in range(1, n + 1) if
+                i * j <= max_num_tiles and i * j >= 1)
+            target_ratios = sorted(target_ratios, key=lambda x: x[0] * x[1])
+            
+            # Find the closest aspect ratio to the target
+            target_aspect_ratio = find_closest_aspect_ratio_fn(
+                aspect_ratio, target_ratios, orig_width, orig_height, img_h)
+            
+            # Calculate the target width and height using tiling logic
+            target_width = img_h * target_aspect_ratio[0]
+            target_height = img_w * target_aspect_ratio[1]
+            
+            # Resize image to target dimensions (same as tiling, but don't split)
+            resized_img = img.resize((target_width, target_height))
+            
+            # Process as single dynamic resolution image
+            pixel_mean, pixel_std = pixel_statistics[self._vision_model_type]
+            transform = T.Compose([
+                T.Lambda(lambda img: img.convert('RGB') if img.mode != 'RGB' else img),
+                T.ToTensor(),
+                T.Normalize(mean=pixel_mean, std=pixel_std),
+            ])
+            imgs = [transform(resized_img)]
         elif self._dynamic_resolution:
             pixel_mean, pixel_std = pixel_statistics[self._vision_model_type]
             transform = T.Compose([

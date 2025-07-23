@@ -110,6 +110,10 @@ def add_multimodal_extra_args(parser):
         "--dynamic-resolution-min-side", type=int, default=None, help="Minimum side length for dynamic resolution"
     )
     group.add_argument(
+        "--match-tiling-dynamic-resolution", action="store_true", default=False, 
+        help="Use match-tiling dynamic resolution strategy that combines tiling logic with dynamic resolution processing"
+    )
+    group.add_argument(
         "--image-break-token", type=str, default=None, help="Token to use for image break tokens, must be added to --special-tokens as well"
     )
     group.add_argument("--conv-merging", action="store_true", default=False, help="Use convolution merging which uses a convolution to merge tokens after the vision encoder")

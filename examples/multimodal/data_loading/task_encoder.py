@@ -39,6 +39,7 @@ from .image_processing import (
     DynamicResolutionImageTilingStrategy,
     ImageTilingParams,
     ImageTilingStrategyV1,
+    MatchTilingDynamicResolutionStrategy,
     NoTilingStrategy,
     TileDegradationStrategy,
     find_closest_area_weighted_aspect_ratio,
@@ -206,14 +207,16 @@ class MultiModalTaskEncoder(
         self.num_tiles_degradation_map = {12: 8, 8: 6, 6: 4, 4: 2, 2: 1, 1: 1}
 
         assert self.args.img_h == self.args.img_w, "img_h and img_w must be the same"
+        
+        if self.args.match_tiling_dynamic_resolution:
+            assert self.args.dynamic_resolution, "must enable --dynamic-resolution if using --match-tiling-dynamic-resolution"
+            assert not self.args.use_tiling, "cannot use --use-tiling and --match-tiling-dynamic-resolution together"
+
         if self.args.dynamic_resolution:
-            self.image_tiling_strategy = DynamicResolutionImageTilingStrategy(
-                vision_model_type=self.args.vision_model_type,
-                min_num_patches=self.args.dynamic_resolution_min_patches,
-                patch_size=self.args.patch_dim,
-                get_num_embeddings=lambda width, height: get_num_image_embeddings(
-                    img_h=height,
-                    img_w=width,
+            if self.args.match_tiling_dynamic_resolution:
+                num_image_embeddings_per_tile = get_num_image_embeddings(
+                    img_h=self.args.img_h,
+                    img_w=self.args.img_w,
                     patch_dim=self.args.patch_dim,
                     vision_model_type=self.args.vision_model_type,
                     disable_vision_class_token=self.args.disable_vision_class_token,
@@ -224,11 +227,61 @@ class MultiModalTaskEncoder(
                     tokenizer_type=self.args.tokenizer_prompt_format,
                     use_image_break_token=self.args.image_break_token is not None,
                     conv_merging=self.args.conv_merging,
-                ),
-                pixel_shuffle=self.args.pixel_shuffle,
-                min_side=self.args.dynamic_resolution_min_side,
-                conv_merging=self.args.conv_merging,
-            )
+                )
+                self.image_tiling_strategy = MatchTilingDynamicResolutionStrategy(
+                    vision_model_type=self.args.vision_model_type,
+                    tile_size=self.args.img_h,
+                    use_thumbnail=self.args.use_thumbnail,
+                    augment=False,
+                    min_num_tiles=1,
+                    max_num_tiles=self.args.max_num_tiles,
+                    embeddings_per_tile=num_image_embeddings_per_tile,
+                    patch_size=self.args.patch_dim,
+                    get_num_embeddings=lambda width, height: get_num_image_embeddings(
+                        img_h=height,
+                        img_w=width,
+                        patch_dim=self.args.patch_dim,
+                        vision_model_type=self.args.vision_model_type,
+                        disable_vision_class_token=self.args.disable_vision_class_token,
+                        class_token_len=1,
+                        pixel_shuffle=self.args.pixel_shuffle,
+                        use_tile_tags=self.args.use_tile_tags,
+                        max_num_tiles=self.args.max_num_tiles,
+                        tokenizer_type=self.args.tokenizer_prompt_format,
+                        use_image_break_token=self.args.image_break_token is not None,
+                        conv_merging=self.args.conv_merging,
+                    ),
+                    find_closest_aspect_ratio_fn=(
+                        find_closest_area_weighted_aspect_ratio
+                        if self.args.use_area_weighted_aspect_ratio
+                        else find_closest_aspect_ratio
+                    ),
+                    pixel_shuffle=self.args.pixel_shuffle,
+                    conv_merging=self.args.conv_merging,
+                )
+            else:
+                self.image_tiling_strategy = DynamicResolutionImageTilingStrategy(
+                    vision_model_type=self.args.vision_model_type,
+                    min_num_patches=self.args.dynamic_resolution_min_patches,
+                    patch_size=self.args.patch_dim,
+                    get_num_embeddings=lambda width, height: get_num_image_embeddings(
+                        img_h=height,
+                        img_w=width,
+                        patch_dim=self.args.patch_dim,
+                        vision_model_type=self.args.vision_model_type,
+                        disable_vision_class_token=self.args.disable_vision_class_token,
+                        class_token_len=1,
+                        pixel_shuffle=self.args.pixel_shuffle,
+                        use_tile_tags=self.args.use_tile_tags,
+                        max_num_tiles=self.args.max_num_tiles,
+                        tokenizer_type=self.args.tokenizer_prompt_format,
+                        use_image_break_token=self.args.image_break_token is not None,
+                        conv_merging=self.args.conv_merging,
+                    ),
+                    pixel_shuffle=self.args.pixel_shuffle,
+                    min_side=self.args.dynamic_resolution_min_side,
+                    conv_merging=self.args.conv_merging,
+                )
         else:
             num_image_embeddings_per_tile = get_num_image_embeddings(
                 img_h=self.args.img_h,

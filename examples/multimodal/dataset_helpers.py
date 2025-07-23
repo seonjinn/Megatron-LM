@@ -227,6 +227,7 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
             pixel_shuffle=self.args.pixel_shuffle,
             min_side=self.args.dynamic_resolution_min_side,
             conv_merging=self.args.conv_merging,
+            match_tiling_dynamic_resolution=self.args.match_tiling_dynamic_resolution,
         )
 
     def _get_total_seq_length(self, input_ids, num_tiles, imgs=None):
