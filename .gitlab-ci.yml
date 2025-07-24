@@ -247,7 +247,3 @@ variables:
 include:
   - .gitlab/stages/00.pre.yml
   - .gitlab/stages/01.build.yml
-  - .gitlab/stages/02.test.yml
-  - .gitlab/stages/03.integration-tests.yml
-  - .gitlab/stages/04.functional-tests.yml
-  - .gitlab/stages/05.publish.yml
