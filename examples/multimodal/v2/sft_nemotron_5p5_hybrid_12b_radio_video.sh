@@ -30,7 +30,6 @@ USE_ONLINE_PACKING=1
 USE_DYNAMIC_RES=0
 USE_FP8=1
 USE_PRECISION_AWARE_OPTIMIZER=1
-USE_CP=0
 
 # Video options.
 SEQ_LEN=256     # Vision encoder per image.
@@ -123,7 +122,6 @@ if [[ $USE_PRECISION_AWARE_OPTIMIZER -eq 1 ]]; then
 fi
 
 if [[ $USE_CP -eq 1 ]]; then
-    # TODO: Loss scaling is not enabled for context parallel yet. Implementation exists but not committed yet.
     EXTRA_ARGS+=" --context-parallel-size 2 --sequence-parallel "
 fi
 

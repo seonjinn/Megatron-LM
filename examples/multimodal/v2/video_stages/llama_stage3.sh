@@ -10,7 +10,7 @@
 #SBATCH --overcommit
 #SBATCH --exclusive
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=sft_llama_3p1_8b_radio_vlm_rc3_v13p16_video_0722
+#SBATCH --job-name=sft_llama_3p1_8b_radio_vlm_rc3_v13p16_video_stage3_0724
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
@@ -34,19 +34,20 @@ USE_PRECISION_AWARE_OPTIMIZER=1
 
 # Video options.
 SEQ_LEN=256     # Vision encoder per image.
-DECODER_SEQ_LEN=49152 #81920 # 16384 # 32768 # 65536
+DECODER_SEQ_LEN=65536   # Note: 131072 in batch mode. CP size=2 for debugging and CP size=4 for batch.
 VIDEO_MAX_NUM_FRAMES=128     # Values > 0 enable video max num frames.
 USE_CP=1
 
 # Remember to update model and job name if running in batch mode!!
 if [[ $BATCH -eq 0 ]]; then
     DATETIME=`date +'%y-%m-%d-%H-%M-%S'`
-    MODEL_NAME="interactive_sft_llama_3p1_8b_radio_video_${DATETIME}"
+    MODEL_NAME="interactive_sft_llama_3p1_8b_radio_video_stage2_${DATETIME}"
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="sft_llama_3p1_8b_radio_vlm_rc3_v13p16_video_0722"
+    MODEL_NAME="sft_llama_3p1_8b_radio_vlm_rc3_v13p16_video_stage3_0724"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
+    DECODER_SEQ_LEN=131072
 fi
 
 WORKSPACE="/lustre/fsw/portfolios/llmservice/users/${USER}/workspace"
@@ -63,6 +64,9 @@ TP=4
 CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/output/sft_llama_3p1_8b_radio_vlm_rc3_v13p16_0710/checkpoints"
 
 DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/megatron-lm5/DST_PATH2/eagle_video.yaml"
+if [[ $USE_VIDEO_AND_IMAGES -eq 1 ]]; then
+    DATA_TRAIN="${SOURCE}/examples/multimodal/v2/data_config/sft_dataset_commercial_v13.16_images_and_video_online_packing.yaml"
+fi
 
 if [[ $DEBUG -eq 1 ]]; then
     MBZ=1
@@ -115,7 +119,12 @@ if [[ $USE_PRECISION_AWARE_OPTIMIZER -eq 1 ]]; then
 fi
 
 if [[ $USE_CP -eq 1 ]]; then
-    EXTRA_ARGS+=" --context-parallel-size 2 --sequence-parallel "
+    CP_SIZE=2
+    if [[ $BATCH -eq 1 ]]; then
+        CP_SIZE=4
+    fi
+
+    EXTRA_ARGS+=" --context-parallel-size ${CP_SIZE} --sequence-parallel "
 fi
 
 EXTRA_ARGS+=" --recompute-granularity full --recompute-method block --recompute-num-layers 16 --recompute-vision --recompute-vision-num-layers 16 "

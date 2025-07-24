@@ -10,7 +10,7 @@
 #SBATCH --overcommit
 #SBATCH --exclusive
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=sft_llama_3p1_8b_radio_vlm_rc3_v13p16_video_0722
+#SBATCH --job-name=sft_llama_3p1_8b_radio_vlm_rc3_v13p16_video_stage2_0724
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
@@ -34,18 +34,18 @@ USE_PRECISION_AWARE_OPTIMIZER=1
 
 # Video options.
 SEQ_LEN=256     # Vision encoder per image.
-DECODER_SEQ_LEN=49152 #81920 # 16384 # 32768 # 65536
-VIDEO_MAX_NUM_FRAMES=128     # Values > 0 enable video max num frames.
+DECODER_SEQ_LEN=65536
+VIDEO_MAX_NUM_FRAMES=96     # Values > 0 enable video max num frames.
 USE_CP=1
 
 # Remember to update model and job name if running in batch mode!!
 if [[ $BATCH -eq 0 ]]; then
     DATETIME=`date +'%y-%m-%d-%H-%M-%S'`
-    MODEL_NAME="interactive_sft_llama_3p1_8b_radio_video_${DATETIME}"
+    MODEL_NAME="interactive_sft_llama_3p1_8b_radio_video_stage2_${DATETIME}"
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="sft_llama_3p1_8b_radio_vlm_rc3_v13p16_video_0722"
+    MODEL_NAME="sft_llama_3p1_8b_radio_vlm_rc3_v13p16_video_stage2_0724"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
