@@ -10,7 +10,7 @@
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=pretrain_llama_nemotron_49b_super_cradio_rc3_dynamic_res_commercial_0708
+#SBATCH --job-name=pretrain_llama_nemotron_49b_super_cradio_rc3_dynamic_res_commercial_0724
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
@@ -22,8 +22,8 @@ which srun
 BATCH=$((1-$?))
 
 DEBUG=0
-USE_TILING=0
-USE_DYNAMIC_RES=1
+USE_TILING=1
+USE_DYNAMIC_RES=0
 USE_PP=0
 USE_FP8=1
 
@@ -34,7 +34,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="pretrain_llama_nemotron_49b_super_cradio_rc3_dynamic_res_commercial_0708"
+    MODEL_NAME="pretrain_llama_nemotron_49b_super_cradio_rc3_dynamic_res_commercial_0724"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -49,7 +49,7 @@ TENSORBOARD_DIR="${OUTPUT}/tensorboard"
 
 TP=8
 
-CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/tpoon/checkpoints/llama-nemotron-super-49b-cradio-vlm-v1-rc3-mcore-tp8-no-extra-state"
+CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/tpoon/checkpoints/llama-nemotron-super-v1_1-49b-cradio-vlm-v1-rc3-mcore-tp8-no-extra-state"
 
 DATA_TRAIN="${SOURCE}/examples/multimodal/v2/data_config/pretrain_dataset_commercial.yaml"
 
@@ -117,7 +117,7 @@ OPTIONS=" \
     --use-checkpoint-args \
     --disable-bias-linear \
     --tokenizer-type MultimodalTokenizer \
-    --tokenizer-model /lustre/fsw/portfolios/llmservice/users/tpoon/checkpoints/Llama-3_3-Nemotron-Super-49B-v1 \
+    --tokenizer-model /lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/tpoon/checkpoints/llama-nemotron-super-v1_1-final-checkpoint-HF \
     --transformer-impl transformer_engine \
     --normalization RMSNorm \
     --group-query-attention \
@@ -146,7 +146,7 @@ OPTIONS=" \
     --seq-length ${SEQ_LEN} \
     --decoder-seq-length ${DECODER_SEQ_LEN} \
     --max-position-embeddings 131072 \
-    --heterogeneous-layers-config-path /lustre/fsw/portfolios/llmservice/users/tpoon/checkpoints/Llama-3_3-Nemotron-Super-49B-v1/config.json \
+    --heterogeneous-layers-config-path /lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/tpoon/checkpoints/llama-nemotron-super-v1_1-final-checkpoint-HF/config.json \
     --train-full-dataset \
     --lr-warmup-samples 102400 \
     --micro-batch-size ${MBZ} \
@@ -186,7 +186,7 @@ OPTIONS=" \
     --distributed-timeout-minutes 60 \
     --allow-missing-vision-projection-checkpoint \
     --vision-model-type radio \
-    --tokenizer-prompt-format llama3p1 \
+    --tokenizer-prompt-format llama-nemotron-super \
     --use-loss-scaling \
     ${SPECIAL_TOKENS} \
     --ckpt-format torch \

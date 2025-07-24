@@ -6,11 +6,11 @@
 #SBATCH --mem=0
 #SBATCH --ntasks-per-node=8
 #SBATCH --dependency=singleton
-#SBATCH --nodes=4
+#SBATCH --nodes=32
 #SBATCH --overcommit
 #SBATCH --exclusive
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=sft_nemotron_49b_cradio_vlm_rc3_v13p16_0709
+#SBATCH --job-name=sft_nemotron_49b_cradio_vlm_rc3_v13p16_0724
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
@@ -22,10 +22,10 @@ which srun
 BATCH=$((1-$?))
 
 DEBUG=0
-USE_TILING=0
+USE_TILING=1
 USE_PACKING=0
 USE_ONLINE_PACKING=1
-USE_DYNAMIC_RES=1
+USE_DYNAMIC_RES=0
 USE_FP8=1
 USE_PRECISION_AWARE_OPTIMIZER=1
 USE_CP=0
@@ -38,7 +38,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="sft_llama_nemotron_49b_super_cradio_vlm_rc3_v13p16_0709"
+    MODEL_NAME="sft_llama_nemotron_49b_super_cradio_vlm_rc3_v13p16_0724"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -55,7 +55,7 @@ TP=8
 PP=1
 
 if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
-    CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/tpoon/workspace/output/pretrain_llama_nemotron_49b_super_cradio_rc3_dynamic_res_commercial_0708/checkpoints"
+    CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/tpoon/workspace/output/pretrain_llama_nemotron_49b_super_cradio_rc3_dynamic_res_commercial_0724/checkpoints"
 else
     CHECKPOINT_DIR="fake"
 fi
@@ -128,10 +128,10 @@ fi
 
 if [[ $USE_PP -eq 1 ]]; then
     PP=4
-    CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/tpoon/workspace/output/pretrain_llama_nemotron_49b_super_cradio_rc3_dynamic_res_commercial_0708_pp4/checkpoints"
+    CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/tpoon/workspace/output/pretrain_llama_nemotron_49b_super_cradio_rc3_dynamic_res_commercial_0724_pp4/checkpoints"
     EXTRA_ARGS+=" --dataloader-seq-length ${DECODER_SEQ_LEN} --decoder-first-pipeline-num-layers 10 --decoder-last-pipeline-num-layers 30"
 else
-    CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/tpoon/workspace/output/pretrain_llama_nemotron_49b_super_cradio_rc3_dynamic_res_commercial_0708/checkpoints"
+    CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/tpoon/workspace/output/pretrain_llama_nemotron_49b_super_cradio_rc3_dynamic_res_commercial_0724/checkpoints"
 fi
 
 if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
@@ -154,7 +154,7 @@ OPTIONS=" \
     --use-checkpoint-args \
     --disable-bias-linear \
     --tokenizer-type MultimodalTokenizer \
-    --tokenizer-model /lustre/fsw/portfolios/llmservice/users/tpoon/checkpoints/Llama-3_3-Nemotron-Super-49B-v1 \
+    --tokenizer-model /lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/tpoon/checkpoints/llama-nemotron-super-v1_1-final-checkpoint-HF \
     --transformer-impl transformer_engine \
     --normalization RMSNorm \
     --group-query-attention \
@@ -183,7 +183,7 @@ OPTIONS=" \
     --seq-length ${SEQ_LEN} \
     --decoder-seq-length ${DECODER_SEQ_LEN} \
     --max-position-embeddings 131072 \
-    --heterogeneous-layers-config-path /lustre/fsw/portfolios/llmservice/users/tpoon/checkpoints/Llama-3_3-Nemotron-Super-49B-v1/config.json \
+    --heterogeneous-layers-config-path /lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/tpoon/checkpoints/llama-nemotron-super-v1_1-final-checkpoint-HF/config.json \
     --train-full-dataset \
     --lr-warmup-fraction 0.03 \
     --micro-batch-size ${MBZ} \
