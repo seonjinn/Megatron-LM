@@ -57,7 +57,7 @@ def add_multimodal_extra_args(parser):
         type=str,
         choices=["mistral", "llama3", "chatml", "nvlm-yi-34b", "qwen2p0", "qwen2p5", "llama3p1", "nemotron5",
                  "nemotron5-aligned", "llama_nemotron_8b", "nemotron-h-reasoning", "nemotron-h-5p5-reasoning",
-                 "nemotron-h-5p5-reasoning-inference"],
+                 "nemotron-h-5p5-reasoning-inference", "llama-nemotron-super"],
         required=True,
         help="Prompt format to use with the tokenizer.",
     )

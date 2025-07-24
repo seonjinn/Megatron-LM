@@ -130,6 +130,7 @@ OPTIONS=" \
     --position-embedding-type rope \
     --rotary-percent 1.0 \
     --rotary-base 500000 \
+    --rope-scaling-factor 16 \
     --use-rope-scaling \
     --use-rotary-position-embeddings \
     --swiglu \

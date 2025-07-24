@@ -359,6 +359,9 @@ class MultimodalTokenizer(MegatronTokenizer):
             if self._prompt_config.has_bos and turn_idx > 0:
                 if self._prompt_config.custom_chat_template == llama_nemotron_template:
                     turn_tokens = turn_tokens[10:]
+                elif self._prompt_config.custom_chat_template == llama_nemotron_super_template:
+                    # Skip BOS token (1) + empty system header (5) = 6 tokens total
+                    turn_tokens = turn_tokens[6:]
                 else:
                     turn_tokens = turn_tokens[1:]
 
