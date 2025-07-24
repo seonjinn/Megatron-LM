@@ -1,0 +1,526 @@
+#!/usr/bin/env python3
+"""
+Script to create YAML inference configuration from Megatron checkpoint.
+
+This script loads args from a Megatron checkpoint, converts it to a dictionary,
+updates it with inference-specific parameters, and saves as a YAML config file.
+
+Usage:
+    python create_yaml_inference_config.py --ckpt_path /path/to/checkpoint.pt --output_config /path/to/config.yaml
+"""
+
+import argparse
+import torch
+import yaml
+import sys
+from pathlib import Path
+
+# =============================================================================
+# INFERENCE PARAMETER OVERRIDES
+# Define the inference parameters that will overwrite the checkpoint args
+# =============================================================================
+
+INFERENCE_PARAMS = {
+    # Sampling parameters
+    "temperature": 1.0,              # Sampling temperature
+    "top_k": 1,                      # Top-k sampling
+    
+    # Sequence length parameters  
+    "out_seq_length": 1024,          # Output sequence length (will become out-seq-length)
+    "inference_max_seq_length": 32768, # Maximum sequence length for inference
+    "max_tokens_to_oom": 32768,      # Maximum tokens before OOM
+    
+    # Dropout parameters
+    "attention_dropout": 0.0,        # Attention dropout for inference
+    "hidden_dropout": 0.0,           # Hidden dropout for inference
+    
+    # Batch processing
+    "micro_batch_size": 1,           # Micro batch size for inference
+    
+    # Precision settings
+    "bf16": True,                    # Use bfloat16 precision
+    
+    # Model loading settings
+    "no_load_rng": True,             # Don't load RNG state
+    "no_load_optim": True,           # Don't load optimizer state
+    
+    # Tokenizer settings
+    "eos_id": 15,                    # End-of-sequence token ID
+    
+    # Vision/multimodal settings
+    "max_num_tiles": 12,             # Maximum number of image tiles
+    
+    # Backend settings - Note: this might conflict with the skipped parameter
+    # "attention_backend": "flash",    # Use Flash Attention backend - commented out since it causes issues
+    "flash_decode": True,            # Enable flash decode
+    "attention_backend": "flash"
+}
+
+EXCLUDED_PARAMS = {
+    # =================================================================
+    # INTERNAL PYTHON OBJECTS & STATE
+    # =================================================================
+    '__class__', '__dict__', '__doc__', '__module__', '__weakref__',
+    'attention_backend', 'model_type',
+    
+    # Internal state variables
+    'consumed_train_samples', 'consumed_valid_samples', 'iteration', 'rank', 'world_size',
+    'skipped_train_samples', 'local_rank', 'data_parallel_size', 'iterations_to_skip',
+    
+    # Computed/derived values  
+    'padded_vocab_size', 'params_dtype', 'main_grads_dtype', 'main_params_dtype',
+    'exp_avg_dtype', 'exp_avg_sq_dtype',
+    
+    # Internal flags that shouldn't be CLI args
+    'add_position_embedding', 'align_grad_reduce', 'barrier_with_L1_time', 
+    'bert_binary_head', 'bias_swiglu_fusion', 'check_for_nan_in_loss_and_grad',
+    'clone_scatter_output_in_embedding', 'create_attention_mask_in_dataloader',
+    'data_sharding', 'enable_gloo_process_groups', 'enable_msc', 'enable_one_logger',
+    'fp8_wgrad', 'gradient_accumulation_fusion', 'gradient_reduce_div_fusion',
+    'log_loss_scale_to_tensorboard', 'manual_gc_eval', 'mmap_bin_files',
+    'pin_cpu_grads', 'pin_cpu_params', 'retro_verify_neighbor_count',
+    'scatter_gather_tensors_in_pipeline', 'torch_fsdp2_reshard_after_forward',
+    'tp_comm_bulk_dgrad', 'tp_comm_bulk_wgrad', 'tp_comm_overlap_ag',
+    'tp_comm_overlap_rs', 'tp_comm_split_ag', 'tp_comm_split_rs',
+    'transformer_pipeline_model_parallel_size', 'use_tokenizer_model_from_checkpoint_args',
+    'inference_max_batch_size',
+    
+    # Encoder-specific (usually not needed for decoder-only inference)
+    'encoder_num_layers', 'encoder_pipeline_model_parallel_size', 
+    'encoder_seq_length', 'encoder_tensor_model_parallel_size',
+    
+    # =================================================================
+    # OPTIMIZER & LEARNING RATE PARAMETERS
+    # =================================================================
+    'adam_beta1', 'adam_beta2', 'adam_eps', 'lr', 'lr_decay_samples', 'lr_decay_style',
+    'lr_warmup_init', 'lr_warmup_iters', 'lr_warmup_samples', 'lr_wsd_decay_style',
+    'weight_decay', 'weight_decay_incr_style', 'start_weight_decay', 'end_weight_decay',
+    'clip_grad', 'sgd_momentum', 'optimizer', 'optimizer_cpu_offload', 
+    'optimizer_offload_fraction', 'min_lr',
+    
+    # =================================================================
+    # TRAINING DATA & BATCHING
+    # =================================================================
+    'global_batch_size', 'train_samples', 'train_full_dataset', 'split', 'num_workers',
+    'num_dataset_builder_threads', 'dataloader_type', 'sample_rate', 'mask_prob',
+    'short_seq_prob', 'classes_fraction', 'data_per_class_fraction', 
+    'data_parallel_random_init', 'data_parallel_sharding_strategy',
+    
+    # =================================================================
+    # CHECKPOINTING & SAVING
+    # =================================================================
+    'save', 'save_interval', 'no_save_optim', 'no_save_rng', 'ckpt_step',
+    'ckpt_fully_parallel_save', 'ckpt_fully_parallel_save_deprecated',
+    'ckpt_assume_constant_structure', 'pretrained_checkpoint', 'finetune',
+    'sft', 'sft_tokenizer_prompt_format',
+    
+    # =================================================================
+    # LOGGING & MONITORING
+    # =================================================================
+    'log_interval', 'log_energy', 'log_memory_to_tensorboard', 'log_num_zeros_in_grad',
+    'log_params_norm', 'log_progress', 'log_straggler', 'log_throughput',
+    'log_timers_to_tensorboard', 'log_validation_ppl_to_tensorboard',
+    'log_world_size_to_tensorboard', 'tensorboard_log_interval', 'tensorboard_queue_size',
+    'wandb_exp_name', 'wandb_project', 'wandb_save_dir', 'one_logger_async',
+    'one_logger_project',
+    
+    # =================================================================
+    # TRAINING INFRASTRUCTURE
+    # =================================================================
+    'eval_interval', 'eval_iters', 'skip_train', 'test_mode', 'exit_duration_in_mins',
+    'exit_signal_handler', 'manual_gc', 'manual_gc_interval', 'profile', 'profile_ranks',
+    'profile_step_end', 'profile_step_start', 'record_memory_history', 'memory_snapshot_path',
+    
+    # =================================================================
+    # TRAINING-SPECIFIC OPTIMIZATIONS
+    # =================================================================
+    'accumulate_allreduce_grads_in_fp32', 'grad_reduce_in_bf16', 'overlap_grad_reduce',
+    'overlap_param_gather', 'overlap_param_gather_with_optimizer_step',
+    'overlap_cpu_optimizer_d2h_h2d', 'use_distributed_optimizer', 'calculate_per_token_loss',
+    'loss_scale_window', 'initial_loss_scale', 'min_loss_scale', 'hysteresis',
+    'align_param_gather', 'ddp_average_in_collective', 'ddp_pad_buckets_for_high_nccl_busbw',
+    'defer_embedding_wgrad_compute', 'delay_wgrad_compute', 'wgrad_deferral_limit',
+    
+    # =================================================================
+    # VISION TRAINING SPECIFIC
+    # =================================================================
+    'vision_pretraining', 'vision_pretraining_type', 'head_lr_mult', 'iter_per_epoch',
+    'dino_bottleneck_size', 'dino_freeze_last_layer', 'dino_head_hidden_size',
+    'dino_local_crops_number', 'dino_local_img_size', 'dino_norm_last_layer',
+    'dino_teacher_temp', 'dino_warmup_teacher_temp', 'dino_warmup_teacher_temp_epochs',
+    'freeze_LM', 'freeze_ViT', 'mask_type', 'mask_factor',
+    
+    # =================================================================
+    # SYSTEM/INFRASTRUCTURE (mostly training-related)
+    # =================================================================
+    'straggler_ctrlr_port', 'straggler_minmax_count', 'disable_straggler_on_startup',
+    'inprocess_active_world_size', 'inprocess_barrier_timeout', 'inprocess_completion_timeout',
+    'inprocess_empty_cuda_cache', 'inprocess_granularity', 'inprocess_hard_timeout',
+    'inprocess_heartbeat_interval', 'inprocess_heartbeat_timeout', 'inprocess_last_call_wait',
+    'inprocess_monitor_process_interval', 'inprocess_monitor_thread_interval',
+    'inprocess_progress_watchdog_interval', 'inprocess_restart', 'inprocess_soft_timeout',
+    'inprocess_termination_grace_time', 'error_injection_rate', 'error_injection_type',
+    'rerun_mode', 'adlr_autoresume', 'adlr_autoresume_interval',
+    
+    # =================================================================
+    # BIENCODER/RETRIEVAL (usually not needed for standard inference)
+    # =================================================================
+    'biencoder_projection_dim', 'biencoder_shared_query_context_model',
+    'retriever_score_scaling', 'retriever_seq_length', 'query_in_block_prob',
+    'retro_add_retriever', 'retro_attention_gate', 'retro_encoder_attention_dropout',
+    'retro_encoder_hidden_dropout', 'retro_encoder_layers', 'retro_num_neighbors',
+    'retro_num_retrieved_chunks', 'indexer_batch_size', 'indexer_log_interval',
+    
+    # =================================================================
+    # MOE TRAINING SPECIFIC
+    # =================================================================
+    'moe_apply_probs_on_input', 'moe_aux_loss_coeff', 'moe_deepep_num_sms',
+    'moe_enable_deepep', 'moe_layer_recompute', 'moe_pad_expert_input_to_capacity',
+    'moe_per_layer_logging', 'moe_permute_fusion', 'moe_router_bias_update_rate',
+    'moe_router_enable_expert_bias', 'moe_router_force_load_balancing',
+    'moe_router_padding_for_fp8', 'moe_shared_expert_overlap', 'moe_token_drop_policy',
+    'moe_upcycling_granularity', 'moe_use_upcycling',
+    
+    # =================================================================
+    # MISCELLANEOUS TRAINING/UNUSED
+    # =================================================================
+    'app_tag_run_version', 'calc_ft_timeouts', 'config_logger_dir', 'decrease_batch_size_if_needed',
+    'deprecated_use_mcore_models', 'eod_mask_loss', 'enable_ft_package', 'enable_te_ce',
+    'fsdp_double_buffer', 'init_method_xavier_uniform', 'mid_level_dataset_surplus',
+    'non_persistent_local_ckpt_algo', 'num_channels', 'num_classes', 'output_bert_embeddings',
+    'override_opt_param_scheduler', 'perform_initialization', 'replication', 'replication_factor',
+    'reset_attention_mask', 'reset_position_ids', 'run_workload_inspector_server',
+    'tiktoken_num_special_tokens', 'timing_log_level', 'timing_log_option',
+    'use_checkpoint_opt_param_scheduler', 'use_one_sent_docs', 'use_persistent_ckpt_worker',
+    'use_pytorch_profiler', 'variable_seq_lengths', 'vocab_extra_ids',
+
+    # =================================================================
+    # MOE TRAINING/UNUSED
+    # =================================================================
+    'expert_model_parallel_size', 'expert_tensor_parallel_size',
+    'moe_extended_tp', 'moe_grouped_gemm', 'moe_layer_freq',
+    'moe_router_load_balancing_type', 'moe_router_pre_softmax',
+    'moe_router_score_function', 'moe_router_topk',
+    'moe_token_dispatcher_type', 'moe_use_legacy_grouped_gemm',
+
+    # =================================================================
+    # FP8 TRAINING/UNUSED
+    # =================================================================
+    'fp8_amax_compute_algo', 'fp8_amax_history_len', 'fp8_interval',
+    'fp8_margin', 'fp8_param_gather', 'fp8_recipe', "fp8",
+    'fp16', 'fp16_lm_cross_entropy', 'fp32_residual_connection',
+    'first_last_layers_bf16',
+
+    # =================================================================
+    # OTHER TRAINING/UNUSED
+    # =================================================================
+    'use_cpu_initialization', 'recompute_vision',
+
+}
+
+# Some args need to be renamed:
+RENAME_PARAMS = {
+    "top-k": "top_k",
+}
+
+
+def load_checkpoint_args(ckpt_path):
+    """
+    Load checkpoint and extract the args namespace.
+    
+    Args:
+        ckpt_path (str): Path to the checkpoint file
+        
+    Returns:
+        argparse.Namespace: The args namespace from the checkpoint
+    """
+    print(f"Loading checkpoint from: {ckpt_path}")
+    
+    try:
+        ckpt = torch.load(ckpt_path, map_location='cpu', weights_only=False)
+    except Exception as e:
+        print(f"Error loading checkpoint: {e}")
+        sys.exit(1)
+    
+    if 'args' not in ckpt:
+        print("Error: Checkpoint does not contain 'args' key")
+        sys.exit(1)
+    
+    args_namespace = ckpt['args']
+    print(f"Successfully loaded args namespace with {len(vars(args_namespace))} parameters")
+    
+    return args_namespace
+
+
+def namespace_to_dict(namespace):
+    """
+    Convert argparse.Namespace to dictionary, handling nested objects.
+    
+    Args:
+        namespace: argparse.Namespace object
+        
+    Returns:
+        dict: Dictionary representation of the namespace
+    """
+    def convert_value(value, depth=0, max_depth=3):
+        # Prevent infinite recursion
+        if depth > max_depth:
+            return str(value)
+            
+        if value is None:
+            return None
+        elif isinstance(value, (str, int, float, bool)):
+            return value
+        elif hasattr(value, '__dict__') and not isinstance(value, type):
+            # Handle nested namespace objects, but avoid types/classes
+            try:
+                return {k: convert_value(v, depth+1, max_depth) for k, v in vars(value).items()}
+            except:
+                return str(value)
+        elif isinstance(value, (list, tuple)):
+            # Handle lists and tuples
+            try:
+                output = [convert_value(item, depth+1, max_depth) for item in value]
+                if len(output) == 0:
+                    return None
+                return output
+            except:
+                return str(value)
+        elif isinstance(value, dict):
+            # Handle dictionaries
+            try:
+                return {k: convert_value(v, depth+1, max_depth) for k, v in value.items()}
+            except:
+                return str(value)
+        elif hasattr(value, 'dtype') and hasattr(value, 'tolist'):
+            # Handle numpy arrays or torch tensors
+            try:
+                return value.tolist()
+            except:
+                return str(value)
+        elif callable(value) or isinstance(value, type):
+            # Handle functions/callables/types
+            return str(value)
+        else:
+            # Handle other types
+            try:
+                # Try to convert to basic types
+                if hasattr(value, '__dict__'):
+                    return str(value)
+                else:
+                    return value
+            except:
+                return str(value)
+    
+    result = {}
+    for key, value in vars(namespace).items():
+        if key in EXCLUDED_PARAMS:
+            print(f"  Skipping complex parameter: {key}")
+            continue
+            
+        try:
+            if convert_value(value) is not None:
+                converted_value = convert_value(value)
+                # Test if the value can be serialized to YAML
+                yaml.dump({key: converted_value}, stream=None)
+                result[key] = converted_value
+        except Exception as e:
+            print(f"Warning: Could not convert parameter '{key}': {e}")
+            # Try to store as string
+            try:
+                result[key] = str(value)
+                # Test YAML serialization again
+                yaml.dump({key: result[key]}, stream=None)
+            except:
+                print(f"  Skipping parameter '{key}' - cannot serialize to YAML")
+                continue
+    
+    return result
+
+
+def convert_param_name_for_yaml(param_name):
+    """
+    Convert parameter name from Python format (underscores) to YAML/CLI format (dashes).
+    
+    Args:
+        param_name (str): Parameter name with underscores
+        
+    Returns:
+        str: Parameter name with dashes for YAML/CLI compatibility
+    """
+    param_name = param_name.replace('_', '-')
+    if param_name in RENAME_PARAMS:
+        param_name = RENAME_PARAMS[param_name]
+    return param_name
+
+
+def save_yaml_config(config_dict, output_path, inference_params_keys):
+    """
+    Save configuration dictionary as YAML file with inference params at the top.
+    
+    Args:
+        config_dict (dict): Configuration to save
+        output_path (str): Output YAML file path
+        inference_params_keys (list): List of inference parameter keys to put at top
+    """
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Clean and convert parameter names for YAML
+    clean_config = {}
+    
+    for key, value in config_dict.items():
+        try:
+            # Convert parameter name to YAML format (underscores to dashes)
+            yaml_key = convert_param_name_for_yaml(key)
+            
+            # Test if this key-value pair can be serialized
+            yaml.dump({yaml_key: value}, stream=None)
+            clean_config[yaml_key] = value
+        except Exception as e:
+            print(f"Warning: Skipping parameter '{key}' due to YAML serialization error: {e}")
+            # Try to convert to string as fallback
+            try:
+                yaml_key = convert_param_name_for_yaml(key)
+                clean_config[yaml_key] = str(value)
+                yaml.dump({yaml_key: clean_config[yaml_key]}, stream=None)
+            except:
+                print(f"  Cannot serialize '{key}' even as string, skipping")
+                continue
+    
+    # Convert inference parameter keys to YAML format
+    yaml_inference_keys = [convert_param_name_for_yaml(k) for k in inference_params_keys]
+    
+    # Create ordered config with inference params first
+    ordered_config = {}
+    
+    # Add inference parameters first (in the order they were defined)
+    print("\nInference parameters (at top of YAML):")
+    for param_key in yaml_inference_keys:
+        if param_key in clean_config:
+            ordered_config[param_key] = clean_config[param_key]
+            print(f"  {param_key}: {clean_config[param_key]}")
+    
+    # Add all other parameters (sorted alphabetically)
+    print(f"\nOther parameters from checkpoint: {len(clean_config) - len(ordered_config)} params")
+    for key in sorted(clean_config.keys()):
+        if key not in yaml_inference_keys:
+            ordered_config[key] = clean_config[key]
+    
+    try:
+        with open(output_path, 'w') as f:
+            # Write inference parameters section
+            f.write("# ===== Inference Parameters =====\n")
+            inference_config = {k: v for k, v in ordered_config.items() if k in yaml_inference_keys}
+            yaml.dump(inference_config, f, default_flow_style=False, indent=2, sort_keys=False, allow_unicode=True)
+            
+            # Write separator
+            f.write("\n# ===== Checkpoint Parameters =====\n")
+            
+            # Write checkpoint parameters
+            checkpoint_config = {k: v for k, v in ordered_config.items() if k not in yaml_inference_keys}
+            yaml.dump(checkpoint_config, f, default_flow_style=False, indent=2, sort_keys=True, allow_unicode=True)
+            
+        print(f"Successfully saved configuration to: {output_path}")
+        print(f"Final config contains {len(clean_config)} parameters")
+        print(f"  - Inference parameters: {len(inference_config)}")
+        print(f"  - Checkpoint parameters: {len(checkpoint_config)}")
+    except Exception as e:
+        print(f"Error saving configuration: {e}")
+        sys.exit(1)
+
+
+def update_inference_params(config_dict, inference_params):
+    """
+    Update configuration dictionary with inference parameters.
+    
+    Args:
+        config_dict (dict): Configuration dictionary from checkpoint
+        inference_params (dict): Inference parameters to override
+        
+    Returns:
+        dict: Updated configuration dictionary
+    """
+    print("Updating configuration with inference parameters:")
+    
+    updated_config = config_dict.copy()
+    
+    for key, value in inference_params.items():
+        if key in updated_config:
+            old_value = updated_config[key]
+            print(f"  Overriding {key}: {old_value} -> {value}")
+        else:
+            print(f"  Adding {key}: {value}")
+        
+        updated_config[key] = value
+    
+    return updated_config
+
+
+def main():
+    """Main function to create YAML inference configuration."""
+    parser = argparse.ArgumentParser(
+        description="Create YAML inference configuration from Megatron checkpoint",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    
+    parser.add_argument(
+        "--ckpt_path",
+        type=str,
+        required=True,
+        help="Path to the Megatron checkpoint file (.pt)"
+    )
+    
+    parser.add_argument(
+        "--output_config", 
+        type=str,
+        required=True,
+        help="Output path for the YAML configuration file"
+    )
+    
+    parser.add_argument(
+        "--show_params",
+        action="store_true",
+        help="Show all parameters that will be included in the config"
+    )
+    
+    args = parser.parse_args()
+    
+    # Validate input file exists
+    if not Path(args.ckpt_path).exists():
+        print(f"Error: Checkpoint file does not exist: {args.ckpt_path}")
+        sys.exit(1)
+    
+    print("=" * 60)
+    print("Creating YAML Inference Configuration")
+    print("=" * 60)
+    
+    # Step 1: Load checkpoint args
+    checkpoint_args = load_checkpoint_args(args.ckpt_path)
+    
+    # Step 2: Convert namespace to dictionary
+    print("\nConverting args namespace to dictionary...")
+    config_dict = namespace_to_dict(checkpoint_args)
+    
+    # Step 3: Update with inference parameters
+    print(f"\nUpdating with {len(INFERENCE_PARAMS)} inference parameters...")
+    final_config = update_inference_params(config_dict, INFERENCE_PARAMS)
+    
+    # Step 4: Show parameters if requested
+    if args.show_params:
+        print(f"\nFinal configuration contains {len(final_config)} parameters:")
+        for key in sorted(final_config.keys()):
+            print(f"  {key}: {final_config[key]}")
+    
+    # Step 5: Save YAML configuration with inference params at top
+    print(f"\nSaving configuration to: {args.output_config}")
+    inference_keys = list(INFERENCE_PARAMS.keys())
+    save_yaml_config(final_config, args.output_config, inference_keys)
+    
+    print("\n" + "=" * 60)
+    print("Configuration creation completed successfully!")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    main()
