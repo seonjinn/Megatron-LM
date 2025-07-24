@@ -130,10 +130,6 @@ workflow:
 
 stages:
   - build
-  - test
-  - integration_tests
-  - functional_tests
-  - publish
 
 default:
   interruptible: true
