@@ -1,6 +1,10 @@
 include:
   - template: Security/Secret-Detection.gitlab-ci.yml
 
+secret_detection:
+  rules:
+    - when: never
+
 .pre_rules:
   rules:
     - if: $CI_PIPELINE_SOURCE == 'main'
@@ -160,7 +164,7 @@ pre:maybe_cherry_pick_commit:
           echo Release branch does not yet exist, will not  cherry-pick
           continue
         fi
-        
+
         (
           git fetch origin $RELEASE_BRANCH:$RELEASE_BRANCH
           git switch --force-create cherry-pick-$MR_ID-$RELEASE_BRANCH $RELEASE_BRANCH

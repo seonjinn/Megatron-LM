@@ -247,3 +247,10 @@ variables:
 include:
   - .gitlab/stages/00.pre.yml
   - .gitlab/stages/01.build.yml
+
+secret_detection:
+  rules:
+    - when: never
+
+.secret-analyzer:
+  stage: build
