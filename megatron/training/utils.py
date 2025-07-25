@@ -297,22 +297,19 @@ def print_params_min_max_norm(optimizer, iteration):
     print(string, flush=True)
 
 
-def check_adlr_autoresume_termination(iteration, model, optimizer, opt_param_scheduler):
-    """Check for autoresume signal and exit if it is received."""
-    from megatron.training.checkpointing import save_checkpoint
+def check_adlr_termination_and_request_autoresume() -> bool:
+    """Check for autoresume signal and return True if it is received."""
 
-    args = get_args()
     autoresume = get_adlr_autoresume()
     # Add barrier to ensure consistnecy.
     torch.distributed.barrier()
     if autoresume.termination_requested():
-        if args.save:
-            save_checkpoint(iteration, model, optimizer, opt_param_scheduler)
         print_rank_0(">>> autoresume termination request found!")
         if torch.distributed.get_rank() == 0:
             autoresume.request_resume()
         print_rank_0(">>> training terminated. Returning")
-        sys.exit(0)
+        return True
+    return False
 
 
 def get_ltor_masks_and_position_ids(
