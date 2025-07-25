@@ -74,7 +74,6 @@ def get_inference_engine(args: Namespace, model: MegatronModule) -> StaticInfere
         AbstractBackend: The chosen backend
     """
     tokenizer = get_tokenizer()
-
     inference_wrapper_config = InferenceWrapperConfig(
         hidden_size=args.hidden_size,
         inference_batch_times_seqlen_threshold=args.inference_batch_times_seqlen_threshold,
@@ -84,6 +83,7 @@ def get_inference_engine(args: Namespace, model: MegatronModule) -> StaticInfere
         inference_max_requests=args.inference_max_batch_size,
         inference_max_seq_length=args.inference_max_seq_length,
         nccl_all_reduce_for_prefill=args.nccl_all_reduce_for_prefill,
+        fp8=args.fp8
     )
 
     inference_context = StaticInferenceContext.from_config(inference_wrapper_config)
