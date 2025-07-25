@@ -466,7 +466,7 @@ class MultiModalTaskEncoder(
             for fragment in message.fragments:
                 if isinstance(fragment, str):
                     content += fragment
-                    assert IMAGE_TOKEN not in fragment, f"{IMAGE_TOKEN!r} in {fragment!r}. This breaks further processing of {message!r}."
+                    assert IMAGE_TOKEN not in fragment, f"{IMAGE_TOKEN!r} in sample with key: {sample.__key__} and subflavors: {sample.__subflavors__}"
                 elif isinstance(fragment, ImageMedia):
                     content += IMAGE_TOKEN
                     image_media.append(fragment)
@@ -479,6 +479,25 @@ class MultiModalTaskEncoder(
                     )
                 elif isinstance(fragment, AudioMedia):
                     raise ValueError("Audio not supported yet.")
+
+            if self.args.tokenizer_prompt_format == "nemotron-h-5p5-reasoning" and message.sender == "assistant":
+                think_start_count = content.count("<think>")
+                think_end_count = content.count("</think>")
+                if think_start_count == 0 and think_end_count == 0:
+                    # Add think tags in non-reasoning mode, if missing
+                    content = "<think></think>\n" + content
+                else:
+                    # There should be exactly one of each, otherwise it's invalid
+                    assert think_start_count == 1 and think_end_count == 1, (
+                        f"Found sample with {think_start_count} <think> tags and {think_end_count} </think> tags in sample with "
+                        f"key: {sample.__key__} and subflavors: {sample.__subflavors__}")
+
+                    # </think> should come after <think>, otherwise it's invalid
+                    start_idx = content.find("<think>")
+                    end_idx = content.find("</think>")
+                    assert start_idx < end_idx, (
+                        f"Found sample with </think> tags before </think> tags in sample with "
+                        f"key: {sample.__key__} and subflavors: {sample.__subflavors__}")
 
             legacy_conversation.append({"role": message.sender, "content": content})
 
