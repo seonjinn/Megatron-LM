@@ -104,7 +104,7 @@ from .async_utils import maybe_finalize_async_save
 from .utils import (
     append_to_progress_log,
     calc_params_l2_norm,
-    check_adlr_autoresume_termination,
+    check_adlr_termination_and_request_autoresume,
     logical_and_across_model_parallel_group,
     reduce_max_stat_across_model_parallel_group,
     reduce_sum_across_data_parallel_group,
@@ -1946,10 +1946,6 @@ def post_training_step_callbacks(
         if should_disable_forward_pre_hook(args):
             enable_forward_pre_hook(model)
 
-    # Autoresume.
-    if args.adlr_autoresume and (iteration % args.adlr_autoresume_interval == 0):
-        check_adlr_autoresume_termination(iteration, model, optimizer, opt_param_scheduler)
-
     # Profiling.
     if (
         args.profile
@@ -1975,104 +1971,70 @@ def checkpoint_and_decide_exit(
     iteration,
     num_floating_point_operations_so_far,
     checkpointing_context,
-    train_data_iterator,
+    train_data_iterator
 ):
     """Save checkpoint and decide whether to exit based on arguments (e.g., if
     --exit-duration-in-mins is set). Actual exit happens in main training loop
     based on the return value of this function."""
     args = get_args()
-    timers = get_timers()
+
+    should_save_checkpoint = False
+    non_persistent_checkpoint = False
+    should_exit = False
 
     # Exit based on signal handler.
-    saved_checkpoint = False
     if args.exit_signal_handler:
         signal_handler = get_signal_handler()
         if any(signal_handler.signals_received()):
-            if args.save:
-                save_checkpoint_and_time(
-                    iteration,
-                    model,
-                    optimizer,
-                    opt_param_scheduler,
-                    num_floating_point_operations_so_far,
-                    checkpointing_context,
-                    train_data_iterator=train_data_iterator,
-                )
+            should_save_checkpoint = should_exit = True
             print_datetime('exiting program after receiving SIGTERM.')
 
-            return True
-
     # Regular save (persistent and non-persistent).
-    if args.save and args.save_interval and iteration % args.save_interval == 0:
-        save_checkpoint_and_time(
-            iteration,
-            model,
-            optimizer,
-            opt_param_scheduler,
-            num_floating_point_operations_so_far,
-            checkpointing_context,
-            train_data_iterator=train_data_iterator,
-        )
-        saved_checkpoint = True
+    if args.save_interval and iteration % args.save_interval == 0:
+        should_save_checkpoint = True
 
-    elif (
-        args.save
-        and args.non_persistent_save_interval
-        and iteration % args.non_persistent_save_interval == 0
-    ):
-        save_checkpoint_and_time(
-            iteration,
-            model,
-            optimizer,
-            opt_param_scheduler,
-            num_floating_point_operations_so_far,
-            checkpointing_context,
-            non_persistent_ckpt=True,
-            train_data_iterator=train_data_iterator,
-        )
-        saved_checkpoint = True
+    elif args.non_persistent_save_interval and iteration % args.non_persistent_save_interval == 0:
+        should_save_checkpoint = non_persistent_checkpoint = True
+
+    # ADLR AutoResume.
+    if args.adlr_autoresume and (iteration % args.adlr_autoresume_interval == 0):
+        termination_requested = check_adlr_termination_and_request_autoresume()
+        should_save_checkpoint |= termination_requested
+        should_exit |= termination_requested
 
     # Exit based on duration.
     if args.exit_duration_in_mins:
         train_time = (time.time() - _TRAIN_START_TIME) / 60.0
         done_cuda = torch.tensor(
-            [train_time > args.exit_duration_in_mins], dtype=torch.int, device='cuda'
-        )
-        torch.distributed.all_reduce(done_cuda, op=torch.distributed.ReduceOp.MAX)
+            [train_time > args.exit_duration_in_mins],
+            dtype=torch.int, device='cuda')
+        torch.distributed.all_reduce(
+            done_cuda, op=torch.distributed.ReduceOp.MAX)
         done = done_cuda.item()
         if done:
-            if args.save and not saved_checkpoint:
-                save_checkpoint_and_time(
-                    iteration,
-                    model,
-                    optimizer,
-                    opt_param_scheduler,
-                    num_floating_point_operations_so_far,
-                    checkpointing_context,
-                    train_data_iterator=train_data_iterator,
-                )
+            should_save_checkpoint = should_exit = True
             print_datetime(f'exiting program after {train_time} minutes')
-
-            return True
 
     # Exit based on iterations.
     if args.exit_interval and iteration % args.exit_interval == 0:
-        if args.save and not saved_checkpoint:
-            save_checkpoint_and_time(
-                iteration,
-                model,
-                optimizer,
-                opt_param_scheduler,
-                num_floating_point_operations_so_far,
-                checkpointing_context,
-                train_data_iterator=train_data_iterator,
-            )
-        torch.distributed.barrier()
+        should_save_checkpoint = should_exit = True
         print_datetime(f'exiting program at iteration {iteration}')
 
-        return True
+    torch.distributed.barrier()
 
-    return False
+    if should_save_checkpoint and args.save:  # `args.save` is the location, which can be empty
+        save_checkpoint_and_time(
+            iteration,
+            model,
+            optimizer,
+            opt_param_scheduler,
+            num_floating_point_operations_so_far,
+            checkpointing_context,
+            non_persistent_ckpt=non_persistent_checkpoint,
+            train_data_iterator=train_data_iterator
+        )
+
+    return should_exit
 
 
 def train(
