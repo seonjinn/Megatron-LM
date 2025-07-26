@@ -44,8 +44,7 @@ INFERENCE_PARAMS = {
     "no_load_rng": True,             # Don't load RNG state
     "no_load_optim": True,           # Don't load optimizer state
     
-    # Tokenizer settings
-    "eos_id": 15,                    # End-of-sequence token ID
+    # NOTE: eos_id will be set dynamically based on prompt format
     
     # Vision/multimodal settings
     "max_num_tiles": 12,             # Maximum number of image tiles
@@ -55,6 +54,60 @@ INFERENCE_PARAMS = {
     "flash_decode": True,            # Enable flash decode
     "attention_backend": "flash"
 }
+
+# =============================================================================
+# PROMPT FORMAT MAPPINGS
+# =============================================================================
+
+def map_prompt_format_for_inference(prompt_format):
+    """
+    Map training prompt formats to their inference equivalents.
+    
+    Args:
+        prompt_format (str): The original prompt format from checkpoint
+        
+    Returns:
+        str: The mapped prompt format for inference
+    """
+    format_mappings = {
+        "nemotron-h-5p5-reasoning": "nemotron-h-5p5-reasoning-inference",
+        # Add more mappings here as needed
+        # "training-format": "inference-format",
+    }
+    
+    mapped_format = format_mappings.get(prompt_format, prompt_format)
+    
+    if mapped_format != prompt_format:
+        print(f"  Mapping prompt format: {prompt_format} -> {mapped_format}")
+    
+    return mapped_format
+
+
+def get_eos_id_for_prompt_format(prompt_format):
+    """
+    Determine the appropriate eos_id based on the prompt format.
+    
+    Args:
+        prompt_format (str): The prompt format string
+        
+    Returns:
+        int: The appropriate eos token ID
+    """
+    # Common eos token IDs for different model families
+    eos_id_mappings = {        
+        # Nemotron family models
+        "nemotron5": 15,                      
+        "nemotron-h-reasoning": 11,         
+        "nemotron-h-5p5-reasoning": 12,       
+        "nemotron-h-5p5-reasoning-inference": 12, 
+    }
+    
+    eos_id = eos_id_mappings.get(prompt_format, None)  # Default fallback
+    
+    print(f"  Setting eos_id={eos_id} for prompt format '{prompt_format}'")
+    
+    return eos_id
+
 
 EXCLUDED_PARAMS = {
     # =================================================================
@@ -445,6 +498,17 @@ def update_inference_params(config_dict, inference_params):
     
     updated_config = config_dict.copy()
     
+    # Handle prompt format mapping
+    if 'tokenizer_prompt_format' in updated_config:
+        original_format = updated_config['tokenizer_prompt_format']
+        mapped_format = map_prompt_format_for_inference(original_format)
+        updated_config['tokenizer_prompt_format'] = mapped_format
+        
+        # Determine eos_id based on the mapped prompt format
+        eos_id = get_eos_id_for_prompt_format(mapped_format)
+        if eos_id is not None:
+            updated_config['eos_id'] = eos_id
+    
     for key, value in inference_params.items():
         if key in updated_config:
             old_value = updated_config[key]
@@ -514,7 +578,7 @@ def main():
     
     # Step 5: Save YAML configuration with inference params at top
     print(f"\nSaving configuration to: {args.output_config}")
-    inference_keys = list(INFERENCE_PARAMS.keys())
+    inference_keys = list(INFERENCE_PARAMS.keys()) + ['tokenizer_prompt_format', 'eos_id']
     save_yaml_config(final_config, args.output_config, inference_keys)
     
     print("\n" + "=" * 60)
