@@ -123,6 +123,11 @@ def _apply_rotary_pos_emb_bshd(
 
 
 def _get_thd_freqs_on_this_cp_rank(cp_rank: int, cp_size: int, x: Tensor, freqs: Tensor) -> Tensor:
+    """
+    Args:
+        x:     [t//cp_size,...]
+        freqs: [t,...]
+    """
     if cp_size > 1:
         cp_seg = x.size(0) // 2
         full_seqlen = cp_size * x.size(0)
@@ -149,9 +154,13 @@ def _apply_rotary_pos_emb_thd(
 
     Args:
         t (Tensor): Input tensor T is of shape [t, h, d]
+        If CP is enabled, input tensor will be already sharded
+
         cu_seqlens(Tensor):  Cumulative sum of sequence lengths in a batch for `t`,
-        with shape [b + 1] and dtype torch.int32.
-        freqs (Tensor): Rotary Positional embedding tensor freq is of shape [max_s, 1, 1, d]
+        with shape [b + 1] and dtype torch.int32. Regardless whether CP is enabled
+        or not, input tensor will always contain full sequence lengths.
+
+        freqs (Tensor): Rotary Positional embedding tensor freq is of shape [max_s, 1, 1, d] or [t, 1, 1, d]
         cp_group (torch.distributed.ProcessGroup): The context parallel group
 
     Returns:
@@ -162,21 +171,34 @@ def _apply_rotary_pos_emb_thd(
         raise ValueError("cp_group must be provided for THD format RoPE")
     cp_size = cp_group.size()
     cp_rank = cp_group.rank()
-    cu_seqlens = cu_seqlens // cp_size
-    seqlens = (cu_seqlens[1:] - cu_seqlens[:-1]).tolist()
+    cp_cu_seqlens = cu_seqlens // cp_size
+    cp_seqlens = (cp_cu_seqlens[1:] - cp_cu_seqlens[:-1]).tolist()
 
-    return torch.cat(
-        [
-            _apply_rotary_pos_emb_bshd(
-                x.unsqueeze(1),
-                _get_thd_freqs_on_this_cp_rank(cp_rank, cp_size, x, freqs),
-                rotary_interleaved=rotary_interleaved,
-                multi_latent_attention=multi_latent_attention,
-                mscale=mscale,
-            )
-            for x in torch.split(t, seqlens)
-        ]
-    ).squeeze(1)
+    if len(t) == len(freqs):
+        # @ekhvedchenia
+        # If the length of t and freqs are the same, we assume that
+        # freqs were computed from position_ids (that are already CP-sharded)
+        # So we can simply apply RoPe without any acrobatics
+        return _apply_rotary_pos_emb_bshd(
+            t=t.unsqueeze(1),
+            freqs=freqs,
+            rotary_interleaved=rotary_interleaved,
+            multi_latent_attention=multi_latent_attention,
+            mscale=mscale,
+        ).squeeze(1)
+    else:
+        return torch.cat(
+            [
+                _apply_rotary_pos_emb_bshd(
+                    x.unsqueeze(1),
+                    _get_thd_freqs_on_this_cp_rank(cp_rank, cp_size, x, freqs),
+                    rotary_interleaved=rotary_interleaved,
+                    multi_latent_attention=multi_latent_attention,
+                    mscale=mscale,
+                )
+                for x in torch.split(t, cp_seqlens)
+            ]
+        ).squeeze(1)
 
 
 def apply_rotary_pos_emb(

@@ -283,7 +283,7 @@ class GPTModel(LanguageModule):
                 # Flash decoding uses precomputed cos and sin for RoPE
                 rotary_pos_cos, rotary_pos_sin = self.rotary_pos_emb_cache.setdefault(
                     inference_context.max_sequence_length,
-                    self.rotary_pos_emb.get_cos_sin(inference_context.max_sequence_length),
+                    self.rotary_pos_emb.get_cos_sin(inference_context.max_sequence_length, position_ids=position_ids),
                 )
             else:
                 rotary_seq_len = self.rotary_pos_emb.get_rotary_seq_len(
@@ -293,6 +293,7 @@ class GPTModel(LanguageModule):
                     rotary_seq_len,
                     packed_seq=packed_seq_params is not None
                     and packed_seq_params.qkv_format == 'thd',
+                    position_ids=position_ids,
                 )
         elif self.position_embedding_type == 'mrope' and not self.config.multi_latent_attention:
             if self.training or not self.config.flash_decode:
