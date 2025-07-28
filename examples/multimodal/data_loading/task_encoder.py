@@ -3,6 +3,7 @@ import dataclasses
 import json
 import os
 import random
+import re
 from collections import defaultdict
 from typing import List, Literal, TypedDict, Union
 
@@ -49,6 +50,14 @@ from .knapsacks import (
     balanced_greedy_knapsack,
     greedy_knapsack,
 )
+
+def _clean_think(match: re.Match) -> str:
+    """Helper to strip whitespace inside <think> tags during preprocessing."""
+    clean_content = match.group(1).strip()
+    if clean_content:
+        clean_content = "\n" + clean_content + "\n"
+    return f"<think>{clean_content}</think>"
+
 
 try:
     from megatron.core.models.multimodal.context_parallel import get_padding
@@ -485,7 +494,7 @@ class MultiModalTaskEncoder(
                 think_end_count = content.count("</think>")
                 if think_start_count == 0 and think_end_count == 0:
                     # Add think tags in non-reasoning mode, if missing
-                    content = "<think></think>\n" + content
+                    content = "<think></think>\n\n" + content.strip()
                 else:
                     # There should be exactly one of each, otherwise it's invalid
                     assert think_start_count == 1 and think_end_count == 1, (
@@ -498,6 +507,12 @@ class MultiModalTaskEncoder(
                     assert start_idx < end_idx, (
                         f"Found sample with </think> tags before </think> tags in sample with "
                         f"key: {sample.__key__} and subflavors: {sample.__subflavors__}")
+
+                    # Clean up content inside <think> tags and strip surrounding whitespace
+                    content = re.sub(r"<think>(.*?)</think>", _clean_think, content, re.DOTALL)
+
+                    # Ensure </think> is always followed by 2 newlines and no other whitespace
+                    content = re.sub(r'</think>\s*', '</think>\n\n', content)
 
             legacy_conversation.append({"role": message.sender, "content": content})
 
