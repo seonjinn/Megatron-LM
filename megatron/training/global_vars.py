@@ -186,6 +186,7 @@ def _set_wandb_writer(args):
     global _GLOBAL_WANDB_WRITER
     _ensure_var_is_not_initialized(_GLOBAL_WANDB_WRITER,
                                    'wandb writer')
+    from megatron.training.wandb_utils import save_wandb_id_to_local, load_wandb_id_from_local
     if getattr(args, 'wandb_project', '') and args.rank == (args.world_size - 1):
         if args.wandb_exp_name == '':
             raise ValueError("Please specify the wandb experiment name!")
@@ -208,6 +209,20 @@ def _set_wandb_writer(args):
             'project': args.wandb_project,
             'config': wandb_config}
         os.makedirs(wandb_kwargs['dir'], exist_ok=True)
+
+
+        # check for the wandb.id file, or create one
+        if args.wandb_resume_same_run:
+            run_id = load_wandb_id_from_local(save_dir)
+            if run_id is None:
+                run_id = wandb.util.generate_id()
+                save_wandb_id_to_local(save_dir, run_id)
+
+            wandb_kwargs.update({
+                'id': run_id,
+                'resume': "allow",
+            })
+
         wandb.init(**wandb_kwargs)
         _GLOBAL_WANDB_WRITER = wandb
 

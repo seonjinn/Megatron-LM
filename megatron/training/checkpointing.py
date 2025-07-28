@@ -27,7 +27,7 @@ from megatron.core.num_microbatches_calculator import update_num_microbatches
 from megatron.core.fp8_utils import is_float8tensor, dequantize_fp8_tensor
 from megatron.core.rerun_state_machine import get_rerun_state_machine
 from .async_utils import schedule_async_save, is_empty_async_queue
-from .global_vars import get_args
+from .global_vars import get_args, get_wandb_writer
 from .utils import unwrap_model, print_rank_0, append_to_progress_log, is_last_rank
 from ..core.dist_checkpointing.serialization import \
     get_default_save_sharded_strategy
@@ -592,7 +592,7 @@ def save_checkpoint(iteration, model, optimizer, opt_param_scheduler, num_floati
     if not torch.distributed.is_initialized() \
        or is_last_rank():
         def wandb_finalize_fn():
-            wandb_utils.on_save_checkpoint_success(checkpoint_name, get_checkpoint_tracker_filename(save_dir), save_dir, iteration)
+            wandb_utils.on_save_checkpoint_success(get_wandb_writer(), checkpoint_name, get_checkpoint_tracker_filename(save_dir), save_dir, iteration)
         if args.async_save:
             assert async_save_request is not None
             async_save_request.add_finalize_fn(wandb_finalize_fn)
@@ -1550,7 +1550,7 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load', 
     # Additional callback for wandb (last rank)
     if not torch.distributed.is_initialized() \
        or is_last_rank():
-        wandb_utils.on_load_checkpoint_success(checkpoint_name, load_dir)
+        wandb_utils.on_load_checkpoint_success(get_wandb_writer(), checkpoint_name, load_dir)
 
     torch.cuda.empty_cache()
 
