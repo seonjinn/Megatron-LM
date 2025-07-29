@@ -943,6 +943,7 @@ class LLaVAModel(MegatronModule):
         loss_mask: Optional[torch.Tensor] = None,
         inference_context: Optional[BaseInferenceContext] = None,
         num_image_tiles: Optional[List[int]] = None,
+        num_frames: Optional[List[int]] = None,
         image_token_index: Optional[int] = None,
         runtime_gather_output: Optional[bool] = None,
         packed_seq_params: Optional[PackedSeqParams] = None,
