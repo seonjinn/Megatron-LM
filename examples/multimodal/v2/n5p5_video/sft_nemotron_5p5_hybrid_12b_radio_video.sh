@@ -9,7 +9,7 @@
 #SBATCH --nodes=32
 #SBATCH --exclusive
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=sft_nm_5p5_h_12b_cradio_vlm_v1_rc3_video_0722
+#SBATCH --job-name=sft_nm_5p5_h_12b_6k_cradio_vlm_v1_rc3_video_13p36_0725
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
@@ -30,6 +30,7 @@ USE_ONLINE_PACKING=1
 USE_DYNAMIC_RES=0
 USE_FP8=1
 USE_PRECISION_AWARE_OPTIMIZER=1
+USE_CP=0
 
 # Video options.
 SEQ_LEN=256     # Vision encoder per image.
@@ -44,7 +45,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="sft_nm_5p5_h_12b_cradio_vlm_v1_rc3_video_0722"
+    MODEL_NAME="sft_nm_5p5_h_12b_6k_cradio_vlm_v1_rc3_video_13p36_0725"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -57,7 +58,7 @@ FINETUNE_DIR=${OUTPUT}/checkpoints
 LOGS_DIR="${OUTPUT}/logs"
 TENSORBOARD_DIR="${OUTPUT}/tensorboard"
 
-DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/megatron-lm5/DST_PATH2/eagle_video.yaml"
+DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/v13p36_video/v13p36_video.yaml"
 
 if [[ $DEBUG -eq 1 ]]; then
     MBZ=1
@@ -89,7 +90,7 @@ if [[ $DEBUG -eq 1 ]]; then
     TP=4
 else
     TP=8
-    CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/amalasanjayd/workspace/output/sft_nm_5p5_h_12b_cradio_vlm_v1_rc3_0720_online_tiling/checkpoints"
+    CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/amalasanjayd/workspace/output/pretrain_nm_5p5_h_12b_cradio_vlm_v1_rc3_0720_online_tiling/checkpoints"
     EXTRA_ARGS=" --pretrained-checkpoint ${CHECKPOINT_DIR} "
 fi
 
@@ -120,6 +121,7 @@ if [[ $USE_PRECISION_AWARE_OPTIMIZER -eq 1 ]]; then
 fi
 
 if [[ $USE_CP -eq 1 ]]; then
+    # TODO: Loss scaling is not enabled for context parallel yet. Implementation exists but not committed yet.
     EXTRA_ARGS+=" --context-parallel-size 2 --sequence-parallel "
 fi
 
@@ -211,7 +213,7 @@ OPTIONS=" \
     ${SPECIAL_TOKENS} \
     --ckpt-format torch \
     --image-tag-type internvl \
-    --eos-id 15 \
+    --eos-id 12 \
     --disable-vision-class-token \
     --use-vision-backbone-fp8-arch \
     --is-hybrid-model \
@@ -220,6 +222,7 @@ OPTIONS=" \
     --mamba-state-dim 128 \
     --use-loss-scaling \
     --allow-large-videos \
+    --force-system-message \
 "
 
 export NVTE_APPLY_QK_LAYER_SCALING=0
