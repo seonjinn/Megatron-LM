@@ -797,14 +797,6 @@ class TextGenerationController:
                     batch_prompt_tokens[generation_started, context_end_position] = sampled_logits[
                         generation_started
                     ]
-                    
-                    # Fix for FP8: Sync the generated tokens back to the padded tensor
-                    # This ensures final extraction gets correct tokens instead of EOS padding
-                    if fp8:
-                        # Only update the first batch_size rows to match the unpadded tensor
-                        padded_batch_prompt_tokens[:batch_size, context_end_position][generation_started] = sampled_logits[
-                            generation_started
-                        ]
 
                 # Compute log probs
                 if sampling_params.return_log_probs:
