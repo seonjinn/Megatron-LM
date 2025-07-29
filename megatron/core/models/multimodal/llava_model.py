@@ -1,4 +1,5 @@
 # Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
+import copy
 import logging
 from collections import namedtuple
 from copy import deepcopy
@@ -20,6 +21,7 @@ from megatron.core.models.multimodal.context_parallel import (
     split_to_context_parallel_ranks_dynamic_res,
     gather_from_context_parallel_ranks_dynamic_res,
 )
+from megatron.core.models.multimodal.efficient_video_sampling import EVSVariant
 from megatron.core.models.vision.clip_vit_model import CLIPViTModel, get_num_image_embeddings
 from megatron.core.models.vision.conv_merging import ConvTokenMerge
 from megatron.core.models.vision.multimodal_projector import MultimodalProjector
@@ -148,9 +150,9 @@ class LLaVAModel(MegatronModule):
         image_break_token: Optional[str] = None,
         conv_merging: bool = False,
         allow_missing_conv_merge_checkpoint: bool = False,
+        efficient_video_sampling_variant: Optional[str] = None,
     ) -> None:
         super().__init__(config=language_transformer_config)
-
         if has_config_logger_enabled(language_transformer_config):
             log_config_to_disk(language_transformer_config, locals(), prefix=type(self).__name__)
 
@@ -424,6 +426,19 @@ class LLaVAModel(MegatronModule):
         self._dynamic_resolution = dynamic_resolution
         self._img_h = img_h
         self._img_w = img_w
+        self.efficient_video_sampler: EVSVariant = self._init_efficient_video_sampling(efficient_video_sampling_variant)
+
+    def _init_efficient_video_sampling(self, evs_variant: str) -> EVSVariant | None:
+        evs = EVSVariant.from_string(evs_variant)
+        if evs is None:
+            return None
+        if self._dynamic_resolution:
+            raise NotImplementedError("EVS does not support dynamic resolution, yet")
+        if self.image_break_token is not None:
+            raise NotImplementedError("EVS does not support image break token, yet")
+        if self._vision_fp8 or self._vision_fp8_no_arch:
+            raise NotImplementedError("EVS does not support fp8 training, yet")
+        return evs
 
     def shared_embedding_or_output_weight(self):
         """This is a convenience method to surface the language model's word embeddings, which is
@@ -488,6 +503,8 @@ class LLaVAModel(MegatronModule):
         *,
         inference_params: Optional[BaseInferenceContext] = None,
         insertion_nums=None,
+        packed_seq_params: Optional[PackedSeqParams] = None,
+        vision_tokens_retention_mask: Optional[torch.Tensor] = None,
     ):
         """Preprocess input data before input to language model.
 
@@ -523,6 +540,8 @@ class LLaVAModel(MegatronModule):
             final_embedding (torch.Tensor): image and text embeddings [combined_seq_len, b, h].
             final_labels (torch.Tensor): labels for image and text positions [b, combined_seq_len].
             final_loss_mask (torch.Tensor): loss mask [b, combined_seq_len].
+            final_position_ids (Optional[torch.Tensor]): position_ids [b, combined_seq_len].
+            packed_seq_params (Optional[PackedSeqParams]): updated PackedSeqParams in case pruning took place.
         """
 
         inference_context = deprecate_inference_params(inference_context, inference_params)
@@ -532,11 +551,11 @@ class LLaVAModel(MegatronModule):
         # No pre- or postprocessing needed.
         # With pipeline parallel > 2, this means a chunk in the middle of the model.
         if not self.pre_process and not self.post_process:
-            return None, None, None
+            return None, None, None, None, packed_seq_params
 
         # If using the inference KV cache, the image tokens are already computed.
         if use_inference_kv_cache:
-            return language_embeddings.transpose(0, 1).contiguous(), loss_mask, labels
+            return language_embeddings.transpose(0, 1).contiguous(), loss_mask, labels, None, packed_seq_params
 
         img_seq_len = self.img_seq_len
         if self._dynamic_resolution:
@@ -725,6 +744,27 @@ class LLaVAModel(MegatronModule):
 
             final_loss_mask[valid_batch_image_indices, valid_before_image_indices] = 0
 
+        final_position_ids = None
+
+        if vision_tokens_retention_mask is not None:
+            assert self.efficient_video_sampler is not None
+            assert images_mask.sum() == vision_tokens_retention_mask.numel()
+            final_retention_mask = torch.ones_like(images_mask)
+            final_retention_mask[images_mask] = vision_tokens_retention_mask.view(-1)
+            assert final_retention_mask.sum() == vision_tokens_retention_mask.sum() + text_position_ids.numel()
+
+            initial_packed_seq_params = copy.deepcopy(packed_seq_params) if packed_seq_params is not None else None
+            shard_factor = self._calc_shard_factor()
+
+            final_embedding, final_position_ids, packed_seq_params = self.efficient_video_sampler.mask_embeddings(
+                embeddings=final_embedding, evs_mask=final_retention_mask, packed_seq_params=initial_packed_seq_params, pad_to_divisibility=shard_factor
+            )
+            if has_labels:
+                final_labels, final_loss_mask = self.efficient_video_sampler.mask_labels_and_loss_mask(
+                    labels=final_labels, loss_mask=final_loss_mask, evs_mask=final_retention_mask, packed_seq_params=initial_packed_seq_params,
+                    pad_to_divisibility=shard_factor, labels_padding_value=IGNORE_INDEX, loss_padding_value=0
+                )
+
         if final_embedding is not None and final_labels is not None:
             assert (
                 final_embedding.shape[:2] == final_labels.shape == final_loss_mask.shape
@@ -738,6 +778,14 @@ class LLaVAModel(MegatronModule):
             if self.context_parallel_lm == 1:
                 final_embedding = final_embedding.transpose(1, 0).contiguous()
 
+        if final_position_ids is not None:
+            # Truncate if exceeding the language model's max sequence length.
+            if final_position_ids.shape[1] > self._language_max_sequence_length:
+                final_position_ids = final_position_ids[:, : self._language_max_sequence_length]
+            # Transpose to [s,b,h] only if not using CP because CP Sharding expects seq in dim=1
+            if self.context_parallel_lm == 1:
+                final_position_ids = final_position_ids.transpose(1, 0).contiguous()
+
         truncate_labels = (
             final_labels is not None and final_labels.shape[1] > self._language_max_sequence_length
         )
@@ -745,10 +793,38 @@ class LLaVAModel(MegatronModule):
             final_labels = final_labels[:, : self._language_max_sequence_length]
             final_loss_mask = final_loss_mask[:, : self._language_max_sequence_length]
 
-        return final_embedding, final_labels, final_loss_mask
+        return final_embedding, final_labels, final_loss_mask, final_position_ids, packed_seq_params
+
+    def _calc_shard_factor(self, *, validate_with_combined_embeddings=None):
+        shard_factor = seq_dim = None
+        if not self.pre_process:
+            return None
+
+        if self.context_parallel_lm > 1 and self.sequence_parallel_lm:
+            shard_factor = max(self.tensor_model_parallel_size_lm * self.context_parallel_lm, self.context_parallel_lm * 2)
+            seq_dim = 1
+        elif self.context_parallel_lm > 1:
+            shard_factor = self.context_parallel_lm * 2
+            seq_dim = 1
+        elif self.sequence_parallel_lm:
+            shard_factor = self.tensor_model_parallel_size_lm
+            seq_dim = 0
+
+        if validate_with_combined_embeddings is not None and shard_factor is not None:
+            assert (
+                    validate_with_combined_embeddings.shape[seq_dim] % shard_factor == 0
+            ), f"Sequence length should be divisible by {shard_factor} for \
+                        Sequence/Context parallelism"
+            if self.sequence_parallel_lm and self.tp_comm_overlap_lm:
+                assert (
+                        validate_with_combined_embeddings.shape[seq_dim] == self._language_max_sequence_length
+                ), f"TP Comm overlap either requires Vision+Text token length \
+                        == language_max_sequence_length"
+
+        return shard_factor
 
     def _process_embedding_token_parallel(
-        self, combined_embeddings, new_labels, new_loss_mask, loss_weight, packed_seq_params
+        self, combined_embeddings, new_labels, new_loss_mask, loss_weight, position_ids: Optional[torch.Tensor], packed_seq_params
     ):
         """Processes the input data for model parallelism support.
 
@@ -768,39 +844,22 @@ class LLaVAModel(MegatronModule):
             combined_embeddings (torch.Tensor): image and text embeddings combined and distributed.
             new_labels (torch.Tensor): Distributed labels for image and text positions.
             new_loss_mask (torch.Tensor): Distributed loss mask.
+            position_ids (torch.Tensor): Distributed position ids. If input is None, it will be None.
             packed_seq_params (PackedSeqParams): Dict with padded token information.
 
         """
         # No pre or post processing needed with PP middle chunks.
         if not self.pre_process and not self.post_process:
-            return combined_embeddings, new_labels, new_loss_mask, packed_seq_params
+            return combined_embeddings, new_labels, new_loss_mask, position_ids, packed_seq_params
 
-        shard_factor = seq_dim = None
-        if self.pre_process:
-            if self.context_parallel_lm > 1 and self.sequence_parallel_lm:
-                shard_factor = max(self.tensor_model_parallel_size_lm * self.context_parallel_lm, self.context_parallel_lm * 2)
-                seq_dim = 1
-            elif self.context_parallel_lm > 1:
-                shard_factor = self.context_parallel_lm * 2
-                seq_dim = 1
-            elif self.sequence_parallel_lm:
-                shard_factor = self.tensor_model_parallel_size_lm
-                seq_dim = 0
-
-            assert (
-                combined_embeddings.shape[seq_dim] % shard_factor == 0
-            ), f"Sequence length should be divisible by {shard_factor} for \
-                Sequence/Context parallelism"
-            if self.sequence_parallel_lm and self.tp_comm_overlap_lm:
-                assert (
-                    combined_embeddings.shape[seq_dim] == self._language_max_sequence_length
-                ), f"TP Comm overlap either requires Vision+Text token length \
-                == language_max_sequence_length"
+        _ = self._calc_shard_factor(validate_with_combined_embeddings=combined_embeddings)  # used just to assert we're good
 
         if self.context_parallel_lm > 1:
             batch = dict()
             if self.pre_process:
                 batch["combined_embeddings"] = combined_embeddings
+                if position_ids is not None:
+                    batch["position_ids"] = position_ids
             if self.post_process and new_labels is not None:
                 batch["new_labels"] = new_labels
                 batch["new_loss_mask"] = new_loss_mask
@@ -828,6 +887,9 @@ class LLaVAModel(MegatronModule):
                 combined_embeddings = combined_embeddings.transpose(
                     1, 0
                 ).contiguous()  # [B,S/CP,H] -> [S/CP,B,H]
+                if "position_ids" in batch:
+                    position_ids = batch["position_ids"]
+                    position_ids = position_ids.transpose(1, 0).contiguous()  # [B,S/CP] -> [S/CP,B]
             if self.post_process and new_labels is not None:
                 new_labels = batch["new_labels"]
                 new_loss_mask = batch["new_loss_mask"] * batch["loss_weight"]
@@ -837,7 +899,7 @@ class LLaVAModel(MegatronModule):
                 combined_embeddings
             )  # [S/(CP*TP),B,H]
 
-        return combined_embeddings, new_labels, new_loss_mask, packed_seq_params
+        return combined_embeddings, new_labels, new_loss_mask, position_ids, packed_seq_params
 
     def _apply_tile_tagging(self, image_embeddings, num_image_tiles):
         """Apply tile tagging.
@@ -968,6 +1030,7 @@ class LLaVAModel(MegatronModule):
             loss_mask (torch.Tensor): Text loss mask [batch, text_seq_len].
             inference_context (BaseInferenceContext): Inference-time parameters including KV cache.
             num_image_tiles (list of int): Number of tiles per image. Default 1 tile per image.
+            num_frames (list of int): Number of frames. Images have a single frame, video clips can have multiple frames.
             image_token_index (int): ID for input images. Default None means `image_token_index`
                 arg in the constructor will be used.
             runtime_gather_output (bool): Gather output at runtime. Default None means
@@ -983,7 +1046,6 @@ class LLaVAModel(MegatronModule):
                 otherwise logits of shape [b, s, vocab_size].
             loss_mask (torch.Tensor): Loss mask expanded to combined sequence length. Shape [b, s].
         """
-
         inference_context = deprecate_inference_params(inference_context, inference_params)
 
         # Keep a copy of the original imgs_sizes in case we split to context parallel ranks later.
@@ -996,6 +1058,7 @@ class LLaVAModel(MegatronModule):
         has_images = images is not None and images.shape[0] > 0
 
         insertion_nums = None
+        image_tokens_retention_mask = None
 
         # If running inference, we can skip image token computation
         # if they were computed already earlier for this sample.
@@ -1026,9 +1089,10 @@ class LLaVAModel(MegatronModule):
 
             else:
                 if self.context_parallel_lm > 1 and images.shape[0] >= 2:
-                    images, pad = split_to_context_parallel_ranks(images)
-
-                image_embeddings = self.vision_model(images)  # [num_tiles, img_seq_len, h_vision]
+                    cp_images, pad = split_to_context_parallel_ranks(images)
+                    image_embeddings = self.vision_model(cp_images)
+                else:
+                    image_embeddings = self.vision_model(images)  # [num_tiles, img_seq_len, h_vision]
 
             if self._drop_vision_class_token:
                 if self._dynamic_resolution:
@@ -1123,6 +1187,8 @@ class LLaVAModel(MegatronModule):
 
             # Apply tile tagging if enabled and an image token is present.
             if self._tile_tags is not None and torch.any(input_ids == self.image_token_index):
+                if self.efficient_video_sampler is not None:
+                    raise NotImplementedError  # TODO: must rearrange `masks_seqlen` as well
                 image_embeddings = self._apply_tile_tagging(image_embeddings, num_image_tiles)
 
             torch.cuda.nvtx.range_push("gather_from_context_parallel_ranks")
@@ -1131,13 +1197,34 @@ class LLaVAModel(MegatronModule):
 
             torch.cuda.nvtx.range_pop()
 
+            # Here, `image_embeddings` and `images` represent entire batch (not cp chunk).
+
+            if self.efficient_video_sampler is not None and num_frames is None:
+                raise ValueError("`num_frames` is not available, however, Efficient Video Sampling is enabled, and requires it.")
+            image_tokens_retention_mask, masks_seqlen = None, None
+            if self.efficient_video_sampler is not None and num_frames is not None:
+                is_video = [_ > 1 for _ in num_frames]
+                evs_masks, masks_seqlen = self.efficient_video_sampler.calculate_mask(
+                    images=images, embeddings=image_embeddings, num_tiles=num_image_tiles, num_frames=num_frames, is_video=is_video, is_training=self.training,
+                    # noqa
+                )
+                # For simplicity of dealing with list of images, we concat all
+                image_tokens_retention_mask = torch.cat(evs_masks, dim=0)
+                # assert len(evs_masks) == len(media_types)
+                assert sum(map(len, evs_masks)) == len(images)
+
+                if masks_seqlen != image_embeddings.shape[0]:
+                    raise ValueError(f"Mismatch between EVS mask seqlen ({masks_seqlen}) to the image embeddings seqlen ({image_embeddings.shape[0]})")
+
             # TODO: Support batched inference.
             # In inference, the language model KV cache will be updated for image token positions.
             # Store the image tokens sequence length to be used as an offset to the KV cache later.
             if inference_context is not None:
-                inference_context.key_value_memory_dict["image_tokens_count"] = (
-                    image_embeddings.shape[0] * image_embeddings.shape[1]
-                )
+                if image_tokens_retention_mask is not None:
+                    image_tokens_count = torch.count_nonzero(image_tokens_retention_mask)
+                else:
+                    image_tokens_count = image_embeddings.shape[0] * image_embeddings.shape[1]
+                inference_context.key_value_memory_dict["image_tokens_count"] = image_tokens_count
         else:
             image_embeddings = self.encoder_hidden_state
 
@@ -1163,7 +1250,7 @@ class LLaVAModel(MegatronModule):
         if num_image_tiles is None and images is not None:
             num_image_tiles = torch.ones(images.shape[0], dtype=torch.int, device=input_ids.device)
 
-        combined_embeddings, new_labels, new_loss_mask = self._preprocess_data(
+        combined_embeddings, new_labels, new_loss_mask, position_ids, packed_seq_params = self._preprocess_data(
             image_embeddings,
             language_embeddings,
             input_ids,
@@ -1175,6 +1262,8 @@ class LLaVAModel(MegatronModule):
             num_image_tiles,
             imgs_sizes,
             insertion_nums=insertion_nums,
+            packed_seq_params=packed_seq_params,
+            vision_tokens_retention_mask=image_tokens_retention_mask,
         )  # [combined_seq_len, b, h_language], [b, combined_seq_len], [b, combined_seq_len]
 
         if self.context_parallel_lm > 1 or self.sequence_parallel_lm:
@@ -1183,15 +1272,15 @@ class LLaVAModel(MegatronModule):
             loss_weight = pre_calc_loss_weight(num_samples, acc_lengths, new_labels[0])
             loss_weight = loss_weight.unsqueeze(0)
 
-            combined_embeddings, new_labels, new_loss_mask, packed_seq_params = (
+            combined_embeddings, new_labels, new_loss_mask, position_ids, packed_seq_params = (
                 self._process_embedding_token_parallel(
-                    combined_embeddings, new_labels, new_loss_mask, loss_weight, packed_seq_params
+                    combined_embeddings, new_labels, new_loss_mask, loss_weight, position_ids, packed_seq_params
                 )
             )
 
         output = self.language_model(
             input_ids=None,
-            position_ids=None,
+            position_ids=position_ids,
             attention_mask=attention_mask,
             decoder_input=combined_embeddings,
             labels=new_labels,

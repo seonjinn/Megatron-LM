@@ -301,6 +301,7 @@ def model_provider(
         image_break_token=tokenizer.convert_tokens_to_ids(args.image_break_token) if args.image_break_token is not None else None,
         conv_merging=args.conv_merging,
         allow_missing_conv_merge_checkpoint=args.allow_missing_conv_merge_checkpoint,
+        efficient_video_sampling_variant=args.efficient_video_sampling_variant,
     )
 
     model.freeze(

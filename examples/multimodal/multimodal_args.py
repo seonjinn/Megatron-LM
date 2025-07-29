@@ -145,4 +145,8 @@ def add_multimodal_extra_args(parser):
         "--allow-large-videos", action="store_true", default=False, help="Allow large videos to be loaded into the model."
     )
 
+    group.add_argument(
+        "--efficient-video-sampling-variant", type=str, default=None, help="The EVS variant. Read docstring on EVSHelper"
+    )
+
     return parser
