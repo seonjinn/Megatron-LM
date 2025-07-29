@@ -1,4 +1,3 @@
-# Copyright (c) 2024, NVIDIA CORPORATION.  All rights reserved.
 """Pretrain or SFT multimodal."""
 import math
 import os
@@ -69,8 +68,10 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
     labels = tensor_parallel.broadcast_data(["labels"], data, torch.int64, optimize=args.optimize_broadcast)["labels"]
 
     imgs = tensor_parallel.broadcast_data(["imgs"], data, torch.float32, optimize=args.optimize_broadcast)["imgs"]
-    num_tiles = tensor_parallel.broadcast_data(["num_tiles"], data, torch.int32, optimize=args.optimize_broadcast)["num_tiles"]
-
+    
+    tiles_and_frames = tensor_parallel.broadcast_data(["num_tiles", "num_frames"], data, torch.int32, optimize=args.optimize_broadcast)
+    num_tiles, num_frames = tiles_and_frames["num_tiles"], tiles_and_frames["num_frames"]
+    
     cu_lengths = tensor_parallel.broadcast_data(["cu_lengths"], data, torch.int32, optimize=args.optimize_broadcast)["cu_lengths"]
     cu_lengths_padded = tensor_parallel.broadcast_data(["cu_lengths_padded"], data, torch.int32, optimize=args.optimize_broadcast)["cu_lengths_padded"]
     max_lengths = tensor_parallel.broadcast_data(["max_lengths"], data, torch.int32, optimize=args.optimize_broadcast)["max_lengths"]
@@ -92,13 +93,13 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
         # model and then add image embeddings with a zero multiplier.
         if args.use_torch_fsdp2:
             imgs = torch.zeros((1, 3, args.img_h, args.img_w), dtype=torch.float32, device=data_text.device)
-            num_tiles = torch.tensor([], dtype=torch.int, device=data_text.device)
         else:
             # Similar workaround is not needed without FSDP and we can use an empty image.
             # FIXME: text-only data can cause still cause a hang in the special case where
             # the vision model is own its own pipeline rank and --freeze-ViT is enabled.
             imgs = torch.tensor([], dtype=torch.float32, device=data_text.device)
-            num_tiles = torch.tensor([], dtype=torch.int, device=data_text.device)
+        num_tiles = torch.tensor([], dtype=torch.int, device=data_text.device)
+        num_frames = torch.tensor([], dtype=torch.int, device=data_text.device)
 
     # Last pipeline parallel stage doesn't need images.
     if pp_size > 1 and is_pipeline_last_stage():
@@ -165,6 +166,7 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
         position_ids,
         imgs,
         num_tiles,
+        num_frames,
         packed_seq_params,
         imgs_sizes,
         vision_packed_seq_params,
@@ -315,6 +317,7 @@ def forward_step(data_iterator, model: LLaVAModel):
         position_ids,
         images,
         num_image_tiles,
+        num_frames,
         packed_seq_params,
         imgs_sizes,
         vision_packed_seq_params,
@@ -331,6 +334,7 @@ def forward_step(data_iterator, model: LLaVAModel):
         labels,
         loss_mask,
         num_image_tiles=num_image_tiles,
+        num_frames=num_frames,
         packed_seq_params=packed_seq_params,
         imgs_sizes=imgs_sizes,
         vision_packed_seq_params=vision_packed_seq_params,
@@ -436,7 +440,6 @@ def write_online_eval_to_tensorboard(data, iteration, writer, walltime=None):
 
 
 if __name__ == "__main__":
-
     train_valid_test_dataloaders_provider.is_distributed = True
 
     pretrain(

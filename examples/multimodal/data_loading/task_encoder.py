@@ -5,7 +5,7 @@ import os
 import random
 import re
 from collections import defaultdict
-from typing import List, Literal, TypedDict, Union
+from typing import List, Literal, TypedDict, Union, Tuple
 
 import torch
 from PIL import Image
@@ -83,6 +83,7 @@ class PreEncodedTaskSample(Sample):
     images: list[ImageTilingParams]
     total_len: int
     total_len_padded: int
+    num_frames: list[int]
 
 
 @edataclass
@@ -111,6 +112,9 @@ class PackedTaskSample(Sample):
     imgs: list[torch.Tensor]
     # Number of tiles for each image of each sample (num_imgs)
     num_tiles: list[int]
+
+    # Number of frames used per VideoMedia / ImageMedia (1 frame for ImageMedia)
+    num_frames: list[int]
 
     # Number of samples in the packed sample
     samples_seen: int
@@ -154,6 +158,9 @@ class BatchedPackedTaskSample(Batch):
 
     # Whether the batch has a padded image
     has_pad_img: bool
+
+    # "Batched" version of number of frames used per VideoMedia / ImageMedia (1 frame for ImageMedia)
+    num_frames: list[list[int]]
 
 
 class LegacyConversation(TypedDict):
@@ -388,7 +395,7 @@ class MultiModalTaskEncoder(
 
         return seq
 
-    def video_to_frames(self, video: VideoMedia) -> list[Media]:
+    def video_to_frames(self, video: VideoMedia) -> Tuple[list[Media], int]:
         """Convert a video to a list of video frame and text according to the settings."""
         video_duration = video.metadata["video_duration"]
         video_num_frames = video.metadata["video_num_frames"]
@@ -431,12 +438,12 @@ class MultiModalTaskEncoder(
                     timestamp=float(timestamp),
                     metadata={
                         "video_width": video.video_width,
-                        "video_height": video.video_height,
+                        "video_height": video.video_height
                     },
                 ),
                 "\n",
             )
-        ]
+        ], len(frame_timestamps)
 
     @stateless(restore_seeds=True)
     def preencode_sample(self, sample: ConversationSample) -> PreEncodedTaskSample:
@@ -444,17 +451,22 @@ class MultiModalTaskEncoder(
         # In-place convert VideoMedia to VideoFrameMedia (and text)
         # Some really large video files cause decoding to take a long time potentially leading to issues.
         allow_large_videos = getattr(self.args, "allow_large_videos", False)
+        aggregated_num_frames = []
         for message in sample.conversation:
             idx = 0
             while idx < len(message.fragments):
                 if isinstance(message.fragments[idx], VideoMedia):
                     if not allow_large_videos and message.fragments[idx].value.entry.data_size / 1e6 > 160:
-                        raise ValueError(f"Video is too large: {str(message.fragments[idx].value.entry.source_info.dataset_path) + "/" + message.fragments[idx].value.entry.fname}")
+                        raise ValueError(f"Video is too large: {str(message.fragments[idx].value.entry.source_info.dataset_path) + '/' + message.fragments[idx].value.entry.fname}")
 
-                    frames = self.video_to_frames(message.fragments[idx])
+                    frames, num_frames = self.video_to_frames(message.fragments[idx])
                     message.fragments[idx : idx + 1] = frames
                     idx += len(frames)
+                    aggregated_num_frames.append(num_frames)
                 else:
+                    if isinstance(message.fragments[idx], (ImageMedia, VideoFrameMedia)):
+                        # Image or a single frame
+                        aggregated_num_frames.append(1)
                     idx += 1
 
         legacy_conversation: list[LegacyConversation] = [
@@ -553,6 +565,7 @@ class MultiModalTaskEncoder(
             images=image_media_params,
             total_len=total_len,
             total_len_padded=total_len_padded,
+            num_frames=aggregated_num_frames,
         )
 
     @stateless(restore_seeds=True)
@@ -572,6 +585,7 @@ class MultiModalTaskEncoder(
             labels=sample.labels,
             imgs=image_tiles,
             num_tiles=[media.num_tiles for media in sample.images],
+            num_frames=sample.num_frames,
             max_length=sample.total_len_padded,
             cu_lengths=torch.tensor([0, sample.total_len], dtype=torch.int32),
             cu_lengths_padded=torch.tensor(
@@ -682,6 +696,7 @@ class MultiModalTaskEncoder(
             cu_lengths_padded=torch.tensor(cu_lengths_padded, dtype=torch.int32),
             max_length=max(sample.max_length for sample in samples),
             num_tiles=[n for s in samples for n in s.num_tiles],
+            num_frames=[n for s in samples for n in s.num_frames],
             samples_seen=sum(s.samples_seen for s in samples),
         )
 
@@ -760,6 +775,12 @@ class MultiModalTaskEncoder(
         if len(num_tiles) == 0:
             num_tiles = torch.tensor([[0]], dtype=torch.int32)
 
+        num_frames = torch.tensor(
+            [n for s in samples for n in s.num_frames], dtype=torch.int32
+        )
+        if len(num_frames) == 0:
+            num_frames = torch.tensor([[0]], dtype=torch.int32)
+
         cu_lengths = torch.stack([s.cu_lengths for s in samples])
         cu_lengths_padded = torch.stack([s.cu_lengths_padded for s in samples])
         max_lengths = torch.tensor([s.max_length for s in samples], dtype=torch.int32)
@@ -796,6 +817,7 @@ class MultiModalTaskEncoder(
             labels=labels,
             imgs=imgs,
             num_tiles=num_tiles,
+            num_frames=num_frames,
             cu_lengths=cu_lengths,
             cu_lengths_padded=cu_lengths_padded,
             max_lengths=max_lengths,
@@ -846,7 +868,7 @@ class MultiModalTaskEncoder(
                     for frame in frames:
                         frame.media.value = media_value
                 else:
-                    raise ValueError(f"Unexpected media type: {type(media_value)}. Path: {str(media.entry.source_info.dataset_path) + "/" + media.entry.fname}")
+                    raise ValueError(f"Unexpected media type: {type(media_value)}. Path: {str(media.entry.source_info.dataset_path) + '/' + media.entry.fname}")
         else:
             for media in sample.images:
                 media.media.value = media.media.value.get()
