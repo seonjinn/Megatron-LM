@@ -174,6 +174,7 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
         margs.token_merging_out_tokens = getattr(self.md.checkpoint_args, "token_merging_out_tokens", None)
         margs.enable_fusions = getattr(self.md.checkpoint_args, "enable_fusions", False)
         margs.context_parallel_size = 1
+        margs.efficient_video_sampling_variant = getattr(self.md.checkpoint_args, "efficient_video_sampling_variant", None)
 
         return margs
 
