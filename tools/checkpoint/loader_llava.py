@@ -93,6 +93,7 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
         margs.enable_fusions = getattr(checkpoint_args, "enable_fusions", False)
         margs.efficient_video_sampling_variant = getattr(checkpoint_args, "efficient_video_sampling_variant", None)
         margs.context_parallel_size = 1
+        margs.use_cpu_initialization = False
 
         return margs
 
