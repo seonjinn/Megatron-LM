@@ -136,6 +136,8 @@ class MegatronCheckpointSaverBase:
         if self.args.ckpt_step is not None:
             margs.ckpt_step = self.args.ckpt_step
             margs.iteration = self.args.ckpt_step
+        
+        margs.use_cpu_initialization = False
 
         self.margs = margs
 

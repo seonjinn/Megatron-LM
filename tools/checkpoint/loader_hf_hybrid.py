@@ -120,6 +120,8 @@ class HuggingFaceCheckpointLoaderHybrid(MegatronCheckpointLoaderBase):
         margs.transformer_impl = "local"
         margs.no_persist_layer_norm = True
 
+        margs.use_cpu_initialization = False
+
         self.margs = margs
         self.checkpoint_args = checkpoint_args
 
@@ -197,6 +199,7 @@ class HuggingFaceCheckpointLoaderHybrid(MegatronCheckpointLoaderBase):
         md.make_vocab_size_divisible_by = 128
         md.checkpoint_args = self.checkpoint_args
         md.use_legacy_models = False
+        md.use_cpu_initialization = False
         
         # Hybrid-specific metadata
         if self.args.model_type == "hybrid":
