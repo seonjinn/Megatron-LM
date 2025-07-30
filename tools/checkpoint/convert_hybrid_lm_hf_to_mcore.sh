@@ -56,9 +56,8 @@ MAX_QUEUE_SIZE=1     # Fixed value
 MCORE_TORCH_CKPT_DIR="${MCORE_CKPT_DIR}/torch"
 MCORE_DIST_CKPT_DIR="${MCORE_CKPT_DIR}/dist"
 
-WORKSPACE="/lustre/fsw/portfolios/llmservice/users/${USER}/workspace"
 SOURCE=`pwd`
-LOGS_DIR="${WORKSPACE}/logs"
+LOGS_DIR="${MCORE_CKPT_DIR}/logs"
 
 # Create logs directory if it doesn't exist
 mkdir -p ${LOGS_DIR}
@@ -100,6 +99,7 @@ srun -l --verbose \
 --container-image /lustre/fsw/portfolios/llmservice/users/matthieul/docker/adlr+megatron-lm+pytorch+nemotron5p5-apr2025-nvrx-patchedte+datasets+convert_hf_to_mcore.sqsh \
 --container-mounts "/lustre" \
 --output=${LOGS_DIR}/%x_%j_$DATETIME.log \
+--no-container-mount-home \
 sh -c "${run_cmd}; bash tools/checkpoint/convert_legacy_to_dist.sh ${MCORE_TORCH_CKPT_DIR} ${MCORE_DIST_CKPT_DIR} ${TARGET_TP}"
 
 echo "Conversion completed. Check logs at: ${LOGS_DIR}/" 
