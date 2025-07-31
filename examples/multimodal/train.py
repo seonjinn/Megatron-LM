@@ -69,6 +69,14 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
 
     imgs = tensor_parallel.broadcast_data(["imgs"], data, torch.float32, optimize=args.optimize_broadcast)["imgs"]
     
+    # Handle datasets that don't provide num_frames (for backward compatibility with image-only datasets)
+    if get_tensor_model_parallel_rank() == 0 and data is not None and "num_frames" not in data:
+        # For image-only datasets, each tile corresponds to 1 frame
+        if "num_tiles" in data:
+            data["num_frames"] = torch.ones_like(data["num_tiles"], dtype=torch.int32)
+        else:
+            data["num_frames"] = torch.tensor([], dtype=torch.int32)
+    
     tiles_and_frames = tensor_parallel.broadcast_data(["num_tiles", "num_frames"], data, torch.int32, optimize=args.optimize_broadcast)
     num_tiles, num_frames = tiles_and_frames["num_tiles"], tiles_and_frames["num_frames"]
     
