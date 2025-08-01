@@ -9,7 +9,7 @@
 #SBATCH --nodes=32
 #SBATCH --exclusive
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=sft_nm_5p5_h_12b_6k_cradio_vlm_v1_rc3_video_13p40_div_2_0801
+#SBATCH --job-name=sft_nm_5p5_h_12b_6k_cradio_vlm_v1_rc3_video_13p38_div_2_0801
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
@@ -34,8 +34,8 @@ USE_CP=0
 
 # Video options.
 SEQ_LEN=256     # Vision encoder per image.
-# DECODER_SEQ_LEN=49152 # 16384 # 32768 # 65536
-DECODER_SEQ_LEN=65536
+DECODER_SEQ_LEN=49152 # 16384 # 32768 # 65536
+# DECODER_SEQ_LEN=65536
 VIDEO_MAX_NUM_FRAMES=128     # Values > 0 enable video max num frames.
 USE_CP=1
 
@@ -46,7 +46,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="sft_nm_5p5_h_12b_6k_cradio_vlm_v1_rc3_video_13p40_div_2_0801"
+    MODEL_NAME="sft_nm_5p5_h_12b_6k_cradio_vlm_v1_rc3_video_13p38_div_2_0801"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -59,7 +59,7 @@ FINETUNE_DIR=${OUTPUT}/checkpoints
 LOGS_DIR="${OUTPUT}/logs"
 TENSORBOARD_DIR="${OUTPUT}/tensorboard"
 
-DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/v13p40_video/v13p40_video_divide_2.0.yaml"
+DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/v13p38_video/v13p38_video_divide_2.0.yaml"
 
 if [[ $DEBUG -eq 1 ]]; then
     MBZ=1
@@ -91,7 +91,7 @@ if [[ $DEBUG -eq 1 ]]; then
     TP=4
 else
     TP=8
-    CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/amalasanjayd/workspace/output/sft_nm_5p5_h_12b_cradio_0730_online_tiling_v1340/checkpoints"
+    CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/amalasanjayd/workspace/output/sft_nm_5p5_h_12b_cradio_0728_online_tiling_v1338/checkpoints"
     EXTRA_ARGS=" --pretrained-checkpoint ${CHECKPOINT_DIR} "
 fi
 
