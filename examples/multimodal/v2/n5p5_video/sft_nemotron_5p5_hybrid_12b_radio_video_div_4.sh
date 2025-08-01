@@ -9,7 +9,7 @@
 #SBATCH --nodes=32
 #SBATCH --exclusive
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=sft_nm_5p5_h_12b_6k_cradio_vlm_v1_rc3_video_13p40_div_2_0801
+#SBATCH --job-name=sft_nm_5p5_h_12b_6k_cradio_vlm_v1_rc3_video_13p40_div_4_0801
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
@@ -46,7 +46,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="sft_nm_5p5_h_12b_6k_cradio_vlm_v1_rc3_video_13p40_div_2_0801"
+    MODEL_NAME="sft_nm_5p5_h_12b_6k_cradio_vlm_v1_rc3_video_13p40_div_4_0801"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -59,7 +59,7 @@ FINETUNE_DIR=${OUTPUT}/checkpoints
 LOGS_DIR="${OUTPUT}/logs"
 TENSORBOARD_DIR="${OUTPUT}/tensorboard"
 
-DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/v13p40_video/v13p40_video_divide_2.0.yaml"
+DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/v13p40_video/v13p40_video_divide_4.0.yaml"
 
 if [[ $DEBUG -eq 1 ]]; then
     MBZ=1

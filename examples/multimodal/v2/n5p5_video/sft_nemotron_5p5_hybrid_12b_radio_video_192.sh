@@ -139,6 +139,7 @@ if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
 fi
 
 EXTRA_ARGS+=" --recompute-granularity full --recompute-method block --recompute-num-layers 16 --recompute-vision --recompute-vision-num-layers 16 "
+EXTRA_ARGS+=" --video-min-num-frames 8 --video-max-num-frames ${VIDEO_MAX_NUM_FRAMES} "
 
 OPTIONS=" \
     --use-checkpoint-args \
