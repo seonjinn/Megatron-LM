@@ -2,14 +2,21 @@ import torch
 import os
 import matplotlib.pyplot as plt
 
+import sys
+sys.path.append("/lustre/fsw/portfolios/llmservice/users/matthieul/repos_rebase/megatron-lm-vlm-hybrid-packing")
+
+
 # orig_dir = "/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/nemotron5p5_hybrid_12b_tp_4/torch"
 # new_dir = "/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/nemotron5p5_hybrid_12b_patch_vocab_tp_4"
 
-orig_dir = "/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/nemotron5p5_hybrid_12b_tp_4_dq/torch"
-new_dir = "/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/nemotron5p5_hybrid_12b_tp_4_dq_patch_vocab"
+# orig_dir = "/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/nemotron_5p5_12b_sft_11600_0711_tp_8/torch"
+# new_dir = "/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/nemotron_5p5_12b_sft_11600_0711_patch_vocab_tp_8"
 
-TP = 4
-iter_dir = "iter_2560000"
+orig_dir = "/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/nano-v2-sft-lr5e-6-128k-nollama-thinkfix-ep2-iter_0006000-tp_8/torch"
+new_dir = "/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/nano-v2-sft-lr5e-6-128k-nollama-thinkfix-ep2-iter_0006000-path-vocab-tp_8"
+
+TP = 8
+iter_dir = "iter_0006000"
 
 # We're patching the embeddings weights from size 131072 to size 131584
 if TP == 8:
@@ -37,8 +44,8 @@ plt.plot(output_embeddings.to(torch.float32).numpy().mean(axis=1)[:2000])
 plt.savefig("output_embeddings.png")
 plt.close()
 
-input_embeddings[:1000, :] = torch.randn(1000, input_embeddings.shape[1]) * input_embeddings[1000:, :].std() + input_embeddings[1000:, :].mean()
-output_embeddings[:1000, :] = torch.randn(1000, output_embeddings.shape[1]) * output_embeddings[1000:, :].std() + output_embeddings[1000:, :].mean()
+# input_embeddings[:1000, :] = torch.randn(1000, input_embeddings.shape[1]) * input_embeddings[1000:, :].std() + input_embeddings[1000:, :].mean()
+# output_embeddings[:1000, :] = torch.randn(1000, output_embeddings.shape[1]) * output_embeddings[1000:, :].std() + output_embeddings[1000:, :].mean()
 
 plt.plot(input_embeddings.to(torch.float32).numpy().mean(axis=1)[:2000])
 plt.savefig("input_embeddings_patched.png")
