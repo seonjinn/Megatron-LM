@@ -179,102 +179,15 @@ def set_current_microbatch(model, microbatch_id):
     if decoder_exists and decoder is not None:
         for layer in decoder.layers:
             layer.current_microbatch = microbatch_id
-        if hasattr(model_with_decoder, 'mtp'):
-            for layer in model_with_decoder.mtp.layers:
-                layer.transformer_layer.current_microbatch = microbatch_id
-
-
-def forward_step_calc_loss(
-    model,
-    output_tensor,
-    loss_func,
-    config,
-    vp_stage,
-    collect_non_loss_data,
-    num_microbatches,
-    forward_data_store,
-    cp_group_size=None,
-    is_last_stage=None,
-):
-    """Calculate the loss and number of tokens for forward_step()"""
-
-    from megatron.core.transformer.multi_token_prediction import MTPLossAutoScaler
-
-    model_vp_stage = getattr(model, "vp_stage", None)
-    if vp_stage is not None and model_vp_stage is not None:
-        assert (
-            vp_stage == model_vp_stage
-        ), f"vp_stage ({vp_stage}) doesn't match model_vp_stage ({model_vp_stage})"
-
-    if cp_group_size is None and is_last_stage is None:
-        # fallback to parallel state
-        cp_group_size = parallel_state.get_context_parallel_world_size()
-        is_last_stage = parallel_state.is_pipeline_last_stage(
-            ignore_virtual=False, vp_stage=vp_stage
-        )
-    else:
-        assert (
-            cp_group_size is not None and is_last_stage is not None
-        ), "cp_group_size and is_last_stage must be provided"
-
-    num_tokens = torch.tensor(0, dtype=torch.int)
-    if is_last_stage:
-        if not collect_non_loss_data:
-            outputs = loss_func(output_tensor)
-            if len(outputs) == 3:
-                output_tensor, num_tokens, loss_reduced = outputs
-                if not config.calculate_per_token_loss:
-                    # Protect against division by zero when all tokens are masked
-                    #   in a microbatch.
-                    output_tensor /= torch.clamp(num_tokens, min=1)
-                    output_tensor /= num_microbatches
-            else:
-                # preserve legacy loss averaging behavior (ie, over the number of microbatches)
-                assert len(outputs) == 2
-                output_tensor, loss_reduced = outputs
-                output_tensor *= cp_group_size
-                output_tensor /= num_microbatches
-            forward_data_store.append(loss_reduced)
-        else:
-            data = loss_func(output_tensor, non_loss_data=True)
-            forward_data_store.append(data)
-
-    if config.timers is not None:
-        config.timers('forward-compute').stop()
-
-    # Set the loss scale for the auxiliary loss of the MoE layer.
-    # Since we use a trick to do backward on the auxiliary loss, we need to set the scale
-    # explicitly.
-    if hasattr(config, 'num_moe_experts') and config.num_moe_experts is not None:
-        # Calculate the loss scale based on the grad_scale_func if available, else default to 1.
-        loss_scale = (
-            config.grad_scale_func(torch.ones(1, device=output_tensor.device))
-            if config.grad_scale_func is not None
-            else torch.ones(1, device=output_tensor.device)
-        )
-        # Set the loss scale
-        if config.calculate_per_token_loss:
-            MoEAuxLossAutoScaler.set_loss_scale(loss_scale)
-        else:
-            # See https://github.com/NVIDIA/Megatron-LM/pull/2217 for detailed explanation
-            # of scaling by cp_group_size
-            MoEAuxLossAutoScaler.set_loss_scale(loss_scale * cp_group_size / num_microbatches)
-
-    # Set the loss scale for Multi-Token Prediction (MTP) loss.
-    if hasattr(config, 'mtp_num_layers') and config.mtp_num_layers is not None:
-        # Calculate the loss scale based on the grad_scale_func if available, else default to 1.
-        loss_scale = (
-            config.grad_scale_func(torch.ones(1, device=output_tensor.device))
-            if config.grad_scale_func is not None
-            else torch.ones(1, device=output_tensor.device)
-        )
-        # Set the loss scale
-        if config.calculate_per_token_loss:
-            MTPLossAutoScaler.set_loss_scale(loss_scale)
-        else:
-            MTPLossAutoScaler.set_loss_scale(loss_scale / num_microbatches)
-
-    return output_tensor, num_tokens
+    mtp_exists = True
+    mtp = None
+    try:
+        mtp = get_attr_wrapped_model(model, "mtp")
+    except RuntimeError:
+        mtp_exists = False
+    if mtp_exists and mtp is not None:
+        for layer in mtp.layers:
+            layer.transformer_layer.current_microbatch = microbatch_id
 
 
 def forward_step(
