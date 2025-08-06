@@ -141,6 +141,21 @@ def get_language_model_config(config, enable_fusions=False):
         config.mamba_state_dim = 128
         config.mamba_num_heads = 128
         config.mamba_head_dim = 80
+    elif config.language_model_type == "nemotron5-hybrid-9b":
+        config.activation_func = squared_relu
+        config.bias_activation_fusion = False
+        config.squared_relu = True
+        config.add_bias_linear = False
+        config.apply_query_key_layer_scaling = False
+        config.gated_linear_unit = False
+        config.layernorm_zero_centered_gamma = (
+            False  # Zero centered gamma not supported for RMSNorm
+        )
+        config.attention_softmax_in_fp32 = True
+        config.ffn_hidden_size = 15680
+        config.mamba_state_dim = 128
+        config.mamba_num_heads = 128
+        config.mamba_head_dim = 80
     elif config.language_model_type == "nemotron5-hybrid-56b":
         config.activation_func = squared_relu
         config.bias_activation_fusion = False
@@ -393,6 +408,10 @@ def get_vision_projection_config(config, hidden_size, enable_fusions=False):
         config.bias_activation_fusion = False
     elif config.language_model_type == "nemotron5-hybrid-12b":
         config.ffn_hidden_size = 20480
+        config.activation_func = squared_relu
+        config.bias_activation_fusion = False
+    elif config.language_model_type == "nemotron5-hybrid-9b":
+        config.ffn_hidden_size = 15680
         config.activation_func = squared_relu
         config.bias_activation_fusion = False
     elif config.language_model_type == "llama3.2_1b":
