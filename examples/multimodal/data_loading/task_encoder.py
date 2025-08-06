@@ -189,8 +189,9 @@ class MultiModalTaskEncoder(
         Cooker(cook_conversation, has_subflavors={"cook": "conversation"}),
     ]
 
-    def __init__(self, is_val: bool = False):
+    def __init__(self, is_val: bool = False, tiling_augment_prob: float = 0.4):
         super().__init__()
+        self.is_val = is_val
         self.args = get_args()
         self.tokenizer = get_tokenizer()
         with open(self.args.prompt_path, "r") as f:
@@ -222,6 +223,8 @@ class MultiModalTaskEncoder(
         # larger than the decoder_seq_length.
         self.num_tiles_degradation_map = {12: 8, 8: 6, 6: 4, 4: 2, 2: 1, 1: 1}
 
+        self.tiling_augment_prob = tiling_augment_prob
+
         assert self.args.img_h == self.args.img_w, "img_h and img_w must be the same"
         
         if self.args.match_tiling_dynamic_resolution:
@@ -248,7 +251,6 @@ class MultiModalTaskEncoder(
                     vision_model_type=self.args.vision_model_type,
                     tile_size=self.args.img_h,
                     use_thumbnail=self.args.use_thumbnail,
-                    augment=False,
                     min_num_tiles=1,
                     max_num_tiles=self.args.max_num_tiles,
                     embeddings_per_tile=num_image_embeddings_per_tile,
@@ -318,7 +320,6 @@ class MultiModalTaskEncoder(
                     vision_model_type=self.args.vision_model_type,
                     tile_size=self.args.img_h,
                     use_thumbnail=self.args.use_thumbnail,
-                    augment=False,
                     min_num_tiles=1,
                     max_num_tiles=self.args.max_num_tiles,
                     embeddings_per_tile=num_image_embeddings_per_tile,
@@ -334,7 +335,6 @@ class MultiModalTaskEncoder(
                     embeddings_per_image=num_image_embeddings_per_tile,
                     target_width=self.args.img_w,
                     target_height=self.args.img_h,
-                    augment=False,
                 )
             self.image_tiling_strategy = TileDegradationStrategy(
                 image_strategy=image_tiling_strategy,
@@ -343,7 +343,6 @@ class MultiModalTaskEncoder(
                     embeddings_per_image=num_image_embeddings_per_tile,
                     target_width=self.args.img_w,
                     target_height=self.args.img_h,
-                    augment=False,
                 ),
                 embeddings_per_tile=num_image_embeddings_per_tile,
                 max_num_tiles=self.args.max_num_tiles,
@@ -451,6 +450,8 @@ class MultiModalTaskEncoder(
         # In-place convert VideoMedia to VideoFrameMedia (and text)
         # Some really large video files cause decoding to take a long time potentially leading to issues.
         allow_large_videos = getattr(self.args, "allow_large_videos", False)
+        data_augment = sample.__subflavors__.get("data_augment", False) and not self.is_val
+        tiling_augment_prob = sample.__subflavors__.get("tiling_augment_prob", self.tiling_augment_prob)
         aggregated_num_frames = []
         for message in sample.conversation:
             idx = 0
@@ -540,7 +541,10 @@ class MultiModalTaskEncoder(
 
         max_image_token_allowed = self.args.decoder_seq_length - len(input_ids) - 4
         image_media_params = self.image_tiling_strategy.compute_params(
-            image_media, max_image_token_allowed
+            image_media,
+            max_image_token_allowed,
+            data_augment=data_augment,
+            tiling_augment_prob=tiling_augment_prob
         )
 
         input_ids, target = self._truncate_to_decoder_seq_len(
@@ -572,10 +576,12 @@ class MultiModalTaskEncoder(
     def postencode_sample(self, sample: PreEncodedTaskSample) -> PackedTaskSample:
         self._load_media(sample)
 
+        data_augment = sample.__subflavors__.get("data_augment", False) and not self.is_val
+
         # Transform the images
         image_tiles = []
         for media in sample.images:
-            image_tiles.extend(self.image_tiling_strategy.apply_params(media))
+            image_tiles.extend(self.image_tiling_strategy.apply_params(media, data_augment=data_augment))
 
         # Make this a packed sample (if used without packing, it will be the same next code)
         return PackedTaskSample.derive_from(

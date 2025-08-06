@@ -4,6 +4,9 @@ from dataclasses import dataclass
 import math
 from typing import Callable, Optional
 import numpy as np
+import random
+from PIL import Image
+import albumentations as A
 
 import einops
 import torch
@@ -126,13 +129,13 @@ class ImageTilingStrategy(ABC):
         """
         transform_media_list = self.compute_params(media_list, num_tokens_available)
         return [
-            self.apply_params(transform_media)
+            self.apply_params(transform_media, **kwargs)
             for transform_media in transform_media_list
         ]
 
     @abstractmethod
     def compute_params(
-        self, media_list: list[ImageMedia | VideoFrameMedia], num_tokens_available: int
+        self, media_list: list[ImageMedia | VideoFrameMedia], num_tokens_available: int, **kwargs
     ) -> list[ImageTilingParams]:
         """
         Compute the transformation parameters and the number of tokens to use for the media.
@@ -147,7 +150,7 @@ class ImageTilingStrategy(ABC):
         ...
 
     @abstractmethod
-    def apply_params(self, transform_media: ImageTilingParams) -> list[torch.Tensor]:
+    def apply_params(self, transform_media: ImageTilingParams, **kwargs) -> list[torch.Tensor]:
         """
         Apply the transformation parameters to the media.
 
@@ -287,7 +290,6 @@ class NoTilingStrategy(_FixedSizeStrategy):
         target_width: int,
         target_height: int,
         embeddings_per_image: int,
-        augment: bool = False,
     ):
         super().__init__(
             vision_model_type=vision_model_type,
@@ -296,15 +298,14 @@ class NoTilingStrategy(_FixedSizeStrategy):
             embeddings_per_image=embeddings_per_image,
         )
 
-        assert not augment, "Image augmentation not implemented."
-
-    def apply_params(self, transform_media: ImageTilingParams) -> list[torch.Tensor]:
+    def apply_params(self, transform_media: ImageTilingParams, **kwargs) -> list[torch.Tensor]:
         return [self._transform(transform_media.media.value)]
 
     def compute_params(
         self,
         media_list: list[ImageMedia | VideoFrameMedia],
         num_tokens_available: Optional[int] = None,
+        **kwargs,
     ) -> list[ImageTilingParams]:
         return [
             ImageTilingParams(
@@ -336,7 +337,6 @@ class ImageTilingStrategyV1(_FixedSizeStrategy):
         vision_model_type: str,
         tile_size: int,
         use_thumbnail: bool,
-        augment: bool,
         min_num_tiles: int,
         max_num_tiles: int,
         embeddings_per_tile: int,
@@ -371,11 +371,28 @@ class ImageTilingStrategyV1(_FixedSizeStrategy):
             for max_num_tiles in range(self._min_num_tiles, self._max_num_tiles + 1)
         }
 
-        assert not augment, "Image augmentation not implemented."
+        self.transform = A.Compose([
+            A.OneOf([
+                A.GaussNoise(var_limit=(5.0, 30.0)),
+                A.ISONoise(color_shift=(0.01, 0.05), intensity=(0.1, 0.5)),
+            ], p=0.3),
+            A.OneOf([
+                A.MedianBlur(blur_limit=5),
+                A.GaussianBlur(blur_limit=5),
+            ], p=0.2),
+            A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.05, p=0.5),
+            A.HueSaturationValue(hue_shift_limit=5, sat_shift_limit=15, val_shift_limit=15, p=0.3),
+            A.ImageCompression(quality_lower=70, quality_upper=100, p=0.3),
+        ])
 
-    def apply_params(self, transform_media: ImageTilingParams) -> list[torch.Tensor]:
+    def apply_params(self, transform_media: ImageTilingParams, data_augment: bool = False, **kwargs) -> list[torch.Tensor]:
         assert isinstance(transform_media, ImageTilingParamsV1)
         image = transform_media.media.value
+
+        if data_augment:
+            image = self.transform(image=np.asarray(image))["image"]
+            image = Image.fromarray(image)
+
         # calculate the target width and height
         target_width = self._tile_size * transform_media.tiling[0]
         target_height = self._tile_size * transform_media.tiling[1]
@@ -405,6 +422,9 @@ class ImageTilingStrategyV1(_FixedSizeStrategy):
         self,
         media_list: list[ImageMedia | VideoFrameMedia],
         num_tokens_available: Optional[int] = None,
+        data_augment: bool = False,
+        tiling_augment_prob: float = 0.4,
+        **kwargs,
     ) -> list[ImageTilingParamsV1]:
         max_num_tiles = min(
             num_tokens_available // self._embeddings_per_image, self._max_num_tiles
@@ -428,6 +448,8 @@ class ImageTilingStrategyV1(_FixedSizeStrategy):
             tiling = self._find_closest_aspect_ratio_fn(
                 aspect_ratio, target_ratios, img_size[0], img_size[1], self._tile_size
             )
+            if data_augment and isinstance(media, ImageMedia) and random.random() < tiling_augment_prob:
+                tiling = self.augment_tiling(tiling)
             num_tiles = tiling[0] * tiling[1]
             if self._use_thumbnail and num_tiles != 1:
                 num_tiles += 1
@@ -442,6 +464,45 @@ class ImageTilingStrategyV1(_FixedSizeStrategy):
             )
 
         return params
+
+    def augment_tiling(self, tiling: tuple[int, int]) -> tuple[int, int]:
+        def num_tiles(tiling: tuple[int, int]) -> int:
+            return tiling[0] * tiling[1]
+
+        def plus_minus_one(tiling: tuple[int, int], minus_prob: float = 0.65) -> tuple[int, int]:
+            if random.random() < minus_prob:
+                # Minus one
+                if tiling[0] == 1 and tiling[1] == 1:
+                    return tiling
+                elif tiling[0] == 1:
+                    return (tiling[0], tiling[1] - 1)
+                elif tiling[1] == 1:
+                    return (tiling[0] - 1, tiling[1])
+                else:
+                    if random.random() < 0.5:
+                        return (tiling[0] - 1, tiling[1])
+                    else:
+                        return (tiling[0], tiling[1] - 1)
+            else:
+                # Plus one
+                if num_tiles(tiling) < self._max_num_tiles:
+                    tiling0 = (tiling[0] + 1, tiling[1])
+                    tiling1 = (tiling[0], tiling[1] + 1)
+                    if num_tiles(tiling0) > self._max_num_tiles and num_tiles(tiling1) > self._max_num_tiles:
+                        return tiling
+                    elif num_tiles(tiling0) > self._max_num_tiles:
+                        return tiling1
+                    elif num_tiles(tiling1) > self._max_num_tiles:
+                        return tiling0
+                    else:
+                        if random.random() < 0.5:
+                            return tiling0
+                        else:
+                            return tiling1
+                return tiling
+
+        new_tiling = plus_minus_one(tiling)
+        return new_tiling
 
     def __str__(self):
         return f"TilingImageTransform(vision_model_type={self._vision_model_type}, tile_size={self._tile_size}, use_thumbnail={self._use_thumbnail}, min_num_tiles={self._min_num_tiles}, max_num_tiles={self._max_num_tiles}, embeddings_per_tile={self._embeddings_per_image}, find_closest_aspect_ratio_fn={self._find_closest_aspect_ratio_fn})"
@@ -469,11 +530,11 @@ class TileDegradationStrategy(ImageTilingStrategy):
         self._max_num_tiles = max_num_tiles
         self._tile_degradation_map = tile_degradation_map
 
-    def apply_params(self, transform_media: ImageTilingParams) -> list[torch.Tensor]:
+    def apply_params(self, transform_media: ImageTilingParams, **kwargs) -> list[torch.Tensor]:
         if isinstance(transform_media.media, ImageMedia):
-            return self._image_strategy.apply_params(transform_media)
+            return self._image_strategy.apply_params(transform_media, **kwargs)
         elif isinstance(transform_media.media, VideoFrameMedia):
-            return self._video_frame_strategy.apply_params(transform_media)
+            return self._video_frame_strategy.apply_params(transform_media, **kwargs)
         else:
             raise ValueError(f"Unsupported media type: {type(transform_media.media)}")
 
@@ -481,6 +542,7 @@ class TileDegradationStrategy(ImageTilingStrategy):
         self,
         media_list: list[ImageMedia | VideoFrameMedia],
         num_tokens_available: int | None = None,
+        **kwargs,
     ) -> list[ImageTilingParams]:
         max_num_tiles = self._max_num_tiles
         degradation_map = self._tile_degradation_map
@@ -491,12 +553,12 @@ class TileDegradationStrategy(ImageTilingStrategy):
             for media in media_list:
                 if isinstance(media, ImageMedia):
                     media_params = self._image_strategy.compute_params(
-                        [media], max_num_tiles * self._embeddings_per_tile
+                        [media], max_num_tiles * self._embeddings_per_tile, **kwargs
                     )[0]
                 elif isinstance(media, VideoFrameMedia):
                     max_num_tiles = 1
                     media_params = self._video_frame_strategy.compute_params(
-                        [media], max_num_tiles * self._embeddings_per_tile
+                        [media], max_num_tiles * self._embeddings_per_tile, **kwargs
                     )[0]
                 else:
                     raise ValueError(f"Unsupported media type: {type(media)}")
@@ -604,7 +666,7 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
             ]
         )
 
-    def apply_params(self, params: DynamicResolutionParams) -> list[torch.Tensor]:
+    def apply_params(self, params: DynamicResolutionParams, **kwargs) -> list[torch.Tensor]:
         # resize the image
         resized_img = params.media.value.resize(
             (
@@ -618,6 +680,7 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
         self,
         media_list: list[ImageMedia | VideoFrameMedia],
         num_tokens_available: int | None = None,
+        **kwargs,
     ) -> list[ImageTilingParams]:
         params = []
         for media in media_list:
@@ -809,7 +872,6 @@ class MatchTilingDynamicResolutionStrategy(ImageTilingStrategy):
         vision_model_type: str,
         tile_size: int,
         use_thumbnail: bool,
-        augment: bool,
         min_num_tiles: int,
         max_num_tiles: int,
         embeddings_per_tile: int,
@@ -827,7 +889,6 @@ class MatchTilingDynamicResolutionStrategy(ImageTilingStrategy):
             vision_model_type: Vision model type (should support dynamic resolution)
             tile_size: Size of each tile for tiling calculation
             use_thumbnail: Whether tiling logic should include thumbnail
-            augment: Whether to use augmentation (not implemented)
             min_num_tiles: Minimum number of tiles for tiling calculation
             max_num_tiles: Maximum number of tiles for tiling calculation
             embeddings_per_tile: Embeddings per tile for tiling calculation
@@ -870,7 +931,6 @@ class MatchTilingDynamicResolutionStrategy(ImageTilingStrategy):
                 target_width=tile_size,
                 target_height=tile_size,
                 embeddings_per_image=embeddings_per_tile,
-                augment=False,
             )
         else:
             self._video_frame_strategy = video_frame_strategy
@@ -890,8 +950,6 @@ class MatchTilingDynamicResolutionStrategy(ImageTilingStrategy):
             for max_num_tiles in range(self._min_num_tiles, self._max_num_tiles + 1)
         }
         
-        assert not augment, "Image augmentation not implemented."
-        
         # Set up transform for dynamic resolution processing
         pixel_mean, pixel_std = pixel_statistics[self._vision_model_type]
         self._transform = T.Compose(
@@ -902,10 +960,10 @@ class MatchTilingDynamicResolutionStrategy(ImageTilingStrategy):
             ]
         )
 
-    def apply_params(self, params: MatchTilingDynamicResolutionParams) -> list[torch.Tensor]:
+    def apply_params(self, params: MatchTilingDynamicResolutionParams, **kwargs) -> list[torch.Tensor]:
         # Handle video frames using the video frame strategy
         if isinstance(params.media, VideoFrameMedia):
-            return self._video_frame_strategy.apply_params(params)
+            return self._video_frame_strategy.apply_params(params, **kwargs)
         
         # Handle images with dynamic resolution processing
         image = params.media.value
@@ -923,6 +981,7 @@ class MatchTilingDynamicResolutionStrategy(ImageTilingStrategy):
         self,
         media_list: list[ImageMedia | VideoFrameMedia],
         num_tokens_available: int | None = None,
+        **kwargs,
     ) -> list[MatchTilingDynamicResolutionParams]:
         # Implement tile degradation logic similar to TileDegradationStrategy
         max_num_tiles = self._max_num_tiles
