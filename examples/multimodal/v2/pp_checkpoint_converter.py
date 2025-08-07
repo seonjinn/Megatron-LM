@@ -30,6 +30,7 @@ def split(input_dir, base_output_dir, input_pp, output_pp, num_tp, num_layers_pe
             layer_ub = layer_lb + num_layers_per_pp_rank[pp]
 
             new_sd = sd.copy()
+            sd["args"].pipeline_model_parallel_size = output_pp
             new_sd["model"] = dict()
             for k, v in sd["model"].items():
                 # First pp rank has vision model.
