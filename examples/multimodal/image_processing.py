@@ -152,7 +152,7 @@ def process_images(sample_imgs, patch_dim, dynamic_resolution, batch_mode=False)
 class ImageTransform:
     """Image transformation."""
 
-    def __init__(self, input_size, vision_model_type, *, dynamic_resolution=False, res_step=16, min_num_patches=1, max_num_patches=128,  pixel_shuffle=False, min_side=None, conv_merging=False, match_tiling_dynamic_resolution=False):
+    def __init__(self, input_size, vision_model_type, *, dynamic_resolution=False, res_step=16, min_num_patches=1, max_num_patches=128,  pixel_shuffle=False, min_side=None, conv_merging=False, match_tiling_dynamic_resolution=False, thumbnail_area_threshold=0.8):
         self._transform = _build_transform(input_size, vision_model_type)
         self._vision_model_type = vision_model_type
         self._dynamic_resolution = dynamic_resolution
@@ -163,6 +163,7 @@ class ImageTransform:
         self._min_side = min_side
         self._conv_merging = conv_merging
         self._match_tiling_dynamic_resolution = match_tiling_dynamic_resolution
+        self._thumbnail_area_threshold = thumbnail_area_threshold
 
     def __call__(self, img, img_h, img_w, use_tiling=False, max_num_tiles=1, use_thumbnail=False, augment=False, find_closest_aspect_ratio_fn=find_closest_aspect_ratio):
         assert not augment, "Image augmentation not implemented."
@@ -204,7 +205,15 @@ class ImageTransform:
                 T.ToTensor(),
                 T.Normalize(mean=pixel_mean, std=pixel_std),
             ])
-            imgs = [transform(resized_img)]
+            processed_images = [resized_img]
+            
+            # Add thumbnail if use_thumbnail=True and there's more than 1 tile
+            blocks = target_aspect_ratio[0] * target_aspect_ratio[1]
+            if use_thumbnail and blocks != 1:
+                thumbnail_img = img.resize((img_h, img_h))
+                processed_images.append(thumbnail_img)
+            
+            imgs = [transform(img) for img in processed_images]
         elif self._dynamic_resolution:
             pixel_mean, pixel_std = pixel_statistics[self._vision_model_type]
             transform = T.Compose([
@@ -212,8 +221,23 @@ class ImageTransform:
                 T.ToTensor(),
                 T.Normalize(mean=pixel_mean, std=pixel_std),
             ])
-            img = dynamic_res_preprocess(img, min_patches=self._min_num_patches, max_patches=self._max_num_patches, res_step=self._res_step, pixel_shuffle=self._pixel_shuffle, min_side=self._min_side, conv_merging=self._conv_merging)
-            imgs = [transform(img)]
+            processed_img = dynamic_res_preprocess(img, min_patches=self._min_num_patches, max_patches=self._max_num_patches, res_step=self._res_step, pixel_shuffle=self._pixel_shuffle, min_side=self._min_side, conv_merging=self._conv_merging)
+            processed_images = [processed_img]
+            
+            # Add thumbnail if enabled and image area is below threshold
+            if use_thumbnail:
+                # Calculate areas
+                processed_width, processed_height = processed_img.size
+                resized_area = processed_width * processed_height
+                thumbnail_area = img_h * img_h  # img_h should be square thumbnail size
+                area_ratio = resized_area / thumbnail_area
+                
+                # Only add thumbnail if resized image area is less than threshold % of thumbnail area
+                if area_ratio < self._thumbnail_area_threshold:
+                    thumbnail_img = img.resize((img_h, img_h))  # Use square thumbnail with img_h size
+                    processed_images.append(thumbnail_img)
+            
+            imgs = [transform(img) for img in processed_images]
         else:
             imgs = [self._transform(img)]
 

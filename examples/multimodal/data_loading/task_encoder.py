@@ -299,6 +299,9 @@ class MultiModalTaskEncoder(
                     pixel_shuffle=self.args.pixel_shuffle,
                     min_side=self.args.dynamic_resolution_min_side,
                     conv_merging=self.args.conv_merging,
+                    use_thumbnail=self.args.use_thumbnail,
+                    thumbnail_size=self.args.img_h,
+                    thumbnail_area_threshold=self.args.thumbnail_area_threshold,
                 )
         else:
             num_image_embeddings_per_tile = get_num_image_embeddings(

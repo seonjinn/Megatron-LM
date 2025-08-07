@@ -228,6 +228,7 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
             min_side=self.args.dynamic_resolution_min_side,
             conv_merging=self.args.conv_merging,
             match_tiling_dynamic_resolution=self.args.match_tiling_dynamic_resolution,
+            thumbnail_area_threshold=self.args.thumbnail_area_threshold,
         )
 
     def _get_total_seq_length(self, input_ids, num_tiles, imgs=None):
@@ -236,11 +237,17 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
             assert imgs is not None
 
             img_seq_len = 0
-            for img in imgs:
-                img_seq_len += self._get_num_image_embeddings(
-                    img_h=img.shape[1],
-                    img_w=img.shape[2],
-                )
+            img_idx = 0
+            # For dynamic resolution, we need to group embeddings by conceptual image
+            # since match tiling can return multiple tensors (main + thumbnail) per image
+            for num_tiles_for_image in num_tiles:
+                # Sum embeddings for all tiles/images belonging to this conceptual image
+                for _ in range(num_tiles_for_image):
+                    img_seq_len += self._get_num_image_embeddings(
+                        img_h=imgs[img_idx].shape[1],
+                        img_w=imgs[img_idx].shape[2],
+                    )
+                    img_idx += 1
 
             total_len = len(input_ids) + img_seq_len - len(num_tiles)
         else:
@@ -257,11 +264,17 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
             assert imgs is not None
 
             total_img_embeddings_len = 0
-            for img in imgs:
-                total_img_embeddings_len += self._get_num_image_embeddings(
-                    img_h=img.shape[1],
-                    img_w=img.shape[2],
-                )
+            img_idx = 0
+            # For dynamic resolution, we need to group embeddings by conceptual image
+            # since match tiling can return multiple tensors (main + thumbnail) per image
+            for num_tiles_for_image in num_tiles:
+                # Sum embeddings for all tiles/images belonging to this conceptual image
+                for _ in range(num_tiles_for_image):
+                    total_img_embeddings_len += self._get_num_image_embeddings(
+                        img_h=imgs[img_idx].shape[1],
+                        img_w=imgs[img_idx].shape[2],
+                    )
+                    img_idx += 1
         else:
             total_img_embeddings_len = total_num_tiles * self.num_image_embeddings_per_tile
         max_text_tokens = self.packing_seq_length - total_img_embeddings_len + total_num_images
@@ -604,11 +617,19 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
         expanded_target[input_ids==self.img_token_id] = self.img_token_id
         if self.args.dynamic_resolution:
             img_embeddings_len = []
-            for img in imgs:
-                img_embeddings_len.append(self._get_num_image_embeddings(
-                    img_h=img.shape[1],
-                    img_w=img.shape[2],
-                ))
+            img_idx = 0
+            # For dynamic resolution, we need to group embeddings by conceptual image
+            # since match tiling can return multiple tensors (main + thumbnail) per image
+            for num_tiles_for_image in num_tiles:
+                total_embeddings_for_image = 0
+                # Sum embeddings for all tiles/images belonging to this conceptual image
+                for _ in range(num_tiles_for_image):
+                    total_embeddings_for_image += self._get_num_image_embeddings(
+                        img_h=imgs[img_idx].shape[1],
+                        img_w=imgs[img_idx].shape[2],
+                    )
+                    img_idx += 1
+                img_embeddings_len.append(total_embeddings_for_image)
         else:
             img_embeddings_len = np.array(num_tiles) * self.num_image_embeddings_per_tile
 

@@ -27,6 +27,10 @@ def add_multimodal_extra_args(parser):
         "--use-thumbnail", action="store_true", default=False, help="Add image thumbnail as a tile"
     )
     group.add_argument(
+        "--thumbnail-area-threshold", type=float, default=0.8, 
+        help="Maximum area percentage (0.0-1.0) of resized image relative to thumbnail area for which to add thumbnail. Default 0.8 (80%)"
+    )
+    group.add_argument(
         "--dataloader-seq-length",
         type=int,
         help="Make dataloader to produce sequences of specific length.",

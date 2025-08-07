@@ -629,6 +629,9 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
         pixel_shuffle: bool = False,
         min_side: int | None = None,
         conv_merging: bool = False,
+        use_thumbnail: bool = False,
+        thumbnail_size: int = 448,
+        thumbnail_area_threshold: float = 0.8,
     ):
         """
         Args:
@@ -644,6 +647,11 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
                 Defaults to None.
             conv_merging: Whether to ensure compatibility with convolution merging by rounding to even patch dimensions.
                 Defaults to False.
+            use_thumbnail: Whether to add a thumbnail image when processing. Defaults to False.
+            thumbnail_size: Size of the thumbnail image (width and height). Defaults to 448.
+            thumbnail_area_threshold: Maximum area percentage (0.0-1.0) of the resized image relative to thumbnail area
+                for which to add a thumbnail. If the resized image area is larger than this threshold of the thumbnail
+                area, no thumbnail will be added. Defaults to 0.8 (80%).
         """
         assert "radio" in vision_model_type, (
             "Dynamic resolution is only supported for radio models"
@@ -656,6 +664,9 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
         self._pixel_shuffle = pixel_shuffle
         self._min_side = min_side
         self._conv_merging = conv_merging
+        self._use_thumbnail = use_thumbnail
+        self._thumbnail_size = thumbnail_size
+        self._thumbnail_area_threshold = thumbnail_area_threshold
 
         pixel_mean, pixel_std = pixel_statistics[self._vision_model_type]
         self._transform = T.Compose(
@@ -674,7 +685,21 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
                 params.patch_size[1] * self._patch_size,
             )
         )
-        return [self._transform(resized_img)]
+        processed_images = [resized_img]
+        
+        # Add thumbnail if enabled and image area is below threshold
+        if self._use_thumbnail:
+            # Calculate areas
+            resized_area = resized_img.size[0] * resized_img.size[1]
+            thumbnail_area = self._thumbnail_size * self._thumbnail_size
+            area_ratio = resized_area / thumbnail_area
+            
+            # Only add thumbnail if resized image area is less than threshold % of thumbnail area
+            if area_ratio < self._thumbnail_area_threshold:
+                thumbnail_img = params.media.value.resize((self._thumbnail_size, self._thumbnail_size))
+                processed_images.append(thumbnail_img)
+        
+        return [self._transform(img) for img in processed_images]
 
     def compute_params(
         self,
@@ -793,14 +818,31 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
                         target_patch_width -= 1
             assert target_patch_height * target_patch_width <= num_tokens_available, f"num_tokens_available {num_tokens_available} patches {patches} math.sqrt(num_tokens_available / patches) {math.sqrt(num_tokens_available / patches)} self._factor_max {self._factor_max} self._min_num_patches {self._min_num_patches}"
 
+            # Calculate embeddings for the main dynamic resolution image
+            num_embeddings = self._get_num_embeddings(
+                target_patch_width * self._patch_size,
+                target_patch_height * self._patch_size,
+            )
+            
+            # Add thumbnail embeddings if enabled and image area is below threshold
+            num_tiles = 1  # Base dynamic resolution image
+            if self._use_thumbnail:
+                # Calculate areas
+                resized_area = (target_patch_width * self._patch_size) * (target_patch_height * self._patch_size)
+                thumbnail_area = self._thumbnail_size * self._thumbnail_size
+                area_ratio = resized_area / thumbnail_area
+                
+                # Only add thumbnail if resized image area is less than threshold % of thumbnail area
+                if area_ratio < self._thumbnail_area_threshold:
+                    num_tiles += 1  # Add 1 for thumbnail
+                    # Add embeddings for thumbnail (thumbnail_size x thumbnail_size)
+                    num_embeddings += self._get_num_embeddings(self._thumbnail_size, self._thumbnail_size)
+
             params.append(
                 DynamicResolutionParams(
                     media=media,
-                    num_tiles=1,
-                    num_embeddings=self._get_num_embeddings(
-                        target_patch_width * self._patch_size,
-                        target_patch_height * self._patch_size,
-                    ),
+                    num_tiles=num_tiles,
+                    num_embeddings=num_embeddings,
                     patch_size=(target_patch_width, target_patch_height),
                 )
             )
@@ -848,7 +890,7 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
         )
 
     def __str__(self):
-        return f"DynamicResolutionImageTransform(vision_model_type={self._vision_model_type}, min_num_patches={self._min_num_patches}, max_num_patches={self._max_num_patches}, patch_size={self._patch_size}, pixel_shuffle={self._pixel_shuffle}, conv_merging={self._conv_merging})"
+        return f"DynamicResolutionImageTransform(vision_model_type={self._vision_model_type}, min_num_patches={self._min_num_patches}, patch_size={self._patch_size}, pixel_shuffle={self._pixel_shuffle}, conv_merging={self._conv_merging}, use_thumbnail={self._use_thumbnail}, thumbnail_size={self._thumbnail_size}, thumbnail_area_threshold={self._thumbnail_area_threshold})"
 
 
 @dataclass
@@ -974,8 +1016,16 @@ class MatchTilingDynamicResolutionStrategy(ImageTilingStrategy):
         # Resize the image to the target dimensions (same as ImageTilingStrategyV1)
         resized_img = image.resize((target_width, target_height))
         
-        # Instead of splitting into tiles, process as single dynamic resolution image
-        return [self._transform(resized_img)]
+        # Process as single dynamic resolution image
+        processed_images = [resized_img]
+        
+        # Add thumbnail if use_thumbnail=True and there's more than 1 tile (same as ImageTilingStrategyV1)
+        blocks = params.tiling[0] * params.tiling[1]
+        if self._use_thumbnail and blocks != 1:
+            thumbnail_img = image.resize((self._tile_size, self._tile_size))
+            processed_images.append(thumbnail_img)
+        
+        return [self._transform(img) for img in processed_images]
 
     def compute_params(
         self,
@@ -1008,9 +1058,17 @@ class MatchTilingDynamicResolutionStrategy(ImageTilingStrategy):
                     target_height = self._tile_size * tiling[1]
                     num_embeddings = self._get_num_embeddings(target_width, target_height)
                     
+                    # Account for thumbnail (same logic as ImageTilingStrategyV1)
+                    num_tiles = 1  # Base dynamic resolution image
+                    blocks = tiling[0] * tiling[1]
+                    if self._use_thumbnail and blocks != 1:
+                        num_tiles += 1  # Add 1 for thumbnail
+                        # Add embeddings for thumbnail (tile_size x tile_size)
+                        num_embeddings += self._get_num_embeddings(self._tile_size, self._tile_size)
+                    
                     media_params = MatchTilingDynamicResolutionParams(
                         media=media,
-                        num_tiles=1,  # Always 1 since we process as single dynamic resolution image
+                        num_tiles=num_tiles,
                         num_embeddings=num_embeddings,
                         tiling=tiling,
                     )
