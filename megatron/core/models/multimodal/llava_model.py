@@ -436,8 +436,6 @@ class LLaVAModel(MegatronModule):
             raise NotImplementedError("EVS does not support dynamic resolution, yet")
         if self.image_break_token is not None:
             raise NotImplementedError("EVS does not support image break token, yet")
-        if self._vision_fp8 or self._vision_fp8_no_arch:
-            raise NotImplementedError("EVS does not support fp8 training, yet")
         return evs
 
     def shared_embedding_or_output_weight(self):
@@ -756,13 +754,21 @@ class LLaVAModel(MegatronModule):
             initial_packed_seq_params = copy.deepcopy(packed_seq_params) if packed_seq_params is not None else None
             shard_factor = self._calc_shard_factor()
 
+            sequence_pad_to_divisibility = None
+            if self.training and (self._vision_fp8 or self._vision_fp8_no_arch):
+                base_factor = shard_factor or 1
+                fp8_factor = 16 * base_factor
+                sequence_pad_to_divisibility = (base_factor + fp8_factor - 1) // fp8_factor * fp8_factor
+
             final_embedding, final_position_ids, packed_seq_params = self.efficient_video_sampler.mask_embeddings(
-                embeddings=final_embedding, evs_mask=final_retention_mask, packed_seq_params=initial_packed_seq_params, pad_to_divisibility=shard_factor
+                embeddings=final_embedding, evs_mask=final_retention_mask, packed_seq_params=initial_packed_seq_params,
+                per_sample_pad_to_divisibility=shard_factor, sequence_pad_to_divisibility=sequence_pad_to_divisibility,
             )
             if has_labels:
                 final_labels, final_loss_mask = self.efficient_video_sampler.mask_labels_and_loss_mask(
                     labels=final_labels, loss_mask=final_loss_mask, evs_mask=final_retention_mask, packed_seq_params=initial_packed_seq_params,
-                    pad_to_divisibility=shard_factor, labels_padding_value=IGNORE_INDEX, loss_padding_value=0
+                    per_sample_pad_to_divisibility=shard_factor, sequence_pad_to_divisibility=sequence_pad_to_divisibility,
+                    labels_padding_value=IGNORE_INDEX, loss_padding_value=0
                 )
 
         if final_embedding is not None and final_labels is not None:
@@ -1199,10 +1205,11 @@ class LLaVAModel(MegatronModule):
 
             # Here, `image_embeddings` and `images` represent entire batch (not cp chunk).
 
-            if self.efficient_video_sampler is not None and num_frames is None:
-                raise ValueError("`num_frames` is not available, however, Efficient Video Sampling is enabled, and requires it.")
             image_tokens_retention_mask, masks_seqlen = None, None
-            if self.efficient_video_sampler is not None and num_frames is not None:
+            if self.efficient_video_sampler is not None and self.efficient_video_sampler.enabled:
+                if num_frames is None:
+                    raise ValueError("`num_frames` is not available, however, Efficient Video Sampling is enabled, and requires it.")
+
                 is_video = [_ > 1 for _ in num_frames]
                 evs_masks, masks_seqlen = self.efficient_video_sampler.calculate_mask(
                     images=images, embeddings=image_embeddings, num_tiles=num_image_tiles, num_frames=num_frames, is_video=is_video, is_training=self.training,

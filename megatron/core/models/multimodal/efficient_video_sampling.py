@@ -310,6 +310,10 @@ class EVSVariant:
         )
         return cls(variant=variant, config=config)
 
+    @classmethod
+    def uses_special_position_ids(cls, variant: Optional[str]):
+        return variant and cls._process_position_ids_handling(variant) == "preserve"
+
     def __init__(self, *, variant: str, config: EVSConfig):
         self._config = config
         self.variant = variant  # for debugging, nice name, prints, etc
@@ -317,6 +321,7 @@ class EVSVariant:
             "pixels": self._create_pixel_level_evs_mask,
             "features": self._create_feature_level_evs_mask,
         }
+        self.enabled = True
         print(f"{self.__class__.__name__} initialized: {variant}")
 
     @classmethod
@@ -337,7 +342,6 @@ class EVSVariant:
         supported = list(cls.method_to_callable.keys())
         if method not in supported:
             raise ValueError(f"Only {supported} are supported, got: {method} (from {variant})")
-
 
         return method
 
@@ -498,7 +502,7 @@ class EVSVariant:
         masks = []
         for media, media_is_video in zip(split_media, is_video):
             mask = torch.ones((media.tensor.shape[0], expected_sequence_length), dtype=torch.bool, device=device)
-            if not media_is_video or self.method == "noop":
+            if not media_is_video or self.method == "noop" or not self.enabled:
                 masks.append(mask)
                 continue
 
@@ -538,7 +542,8 @@ class EVSVariant:
             embeddings: torch.Tensor,
             evs_mask: torch.Tensor,
             packed_seq_params: Optional["PackedSeqParams"] = None,
-            pad_to_divisibility: Optional[int] = None
+            per_sample_pad_to_divisibility: Optional[int] = None,
+            sequence_pad_to_divisibility: Optional[int] = None,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], "PackedSeqParams"]:
         assert embeddings.ndim == 3, f"Expected 3D inputs: [batch, seq, hidden], got: {embeddings.shape}"
         batch_size = embeddings.size(0)
@@ -552,7 +557,9 @@ class EVSVariant:
                 assert packed_seq_params.qkv_format == 'thd'  # Wasn't tested with other formats
 
             kept_embeddings_sequence_padded, adjusted_packed_seq_params = EVSHelper.masked_select(  # note, we override `packed_seq_params`
-                embeddings[i], evs_mask[i], packed_seq_params, pad_to_divisibility=pad_to_divisibility
+                embeddings[i], evs_mask[i], packed_seq_params=packed_seq_params,
+                per_sample_pad_to_divisibility=per_sample_pad_to_divisibility,
+                sequence_pad_to_divisibility=sequence_pad_to_divisibility,
             )
             final_embedding_list.append(kept_embeddings_sequence_padded)
         final_embedding = torch.nn.utils.rnn.pad_sequence(final_embedding_list, batch_first=True)
@@ -562,7 +569,7 @@ class EVSVariant:
         final_position_ids_list = []
         if self.position_ids_handling == "preserve":
             if packed_seq_params is not None:
-                position_ids = self.build_position_ids_for_packed_sequence(packed_seq_params).to(device=embeddings.device)
+                position_ids = self._build_position_ids_for_packed_sequence(packed_seq_params).to(device=embeddings.device)
             else:
                 position_ids = torch.arange(embeddings.size(1), device=embeddings.device).unsqueeze(0).repeat(batch_size, 1)
 
@@ -571,14 +578,17 @@ class EVSVariant:
 
             for i in range(batch_size):
                 kept_position_ids_sequence_padded, _ = EVSHelper.masked_select(
-                    position_ids[i], evs_mask[i], packed_seq_params, pad_to_divisibility=pad_to_divisibility
+                    position_ids[i], evs_mask[i], packed_seq_params=packed_seq_params,
+                    per_sample_pad_to_divisibility=per_sample_pad_to_divisibility,
+                    sequence_pad_to_divisibility=sequence_pad_to_divisibility,
                 )
                 final_position_ids_list.append(kept_position_ids_sequence_padded)
             final_position_ids = torch.nn.utils.rnn.pad_sequence(final_position_ids_list, batch_first=True)
 
         return final_embedding, final_position_ids, adjusted_packed_seq_params
 
-    def build_position_ids_for_packed_sequence(self, packed_seq_params: PackedSeqParams) -> torch.Tensor:
+    @staticmethod
+    def _build_position_ids_for_packed_sequence(packed_seq_params: PackedSeqParams) -> torch.Tensor:
         """
         Given an input packed sequence params object, that represents sequences A,B,C..
         we build the position ids for A,B,C independently and then concatenate them.
@@ -586,7 +596,7 @@ class EVSVariant:
         """
         chunks = packed_seq_params.cu_seqlens_q[1:] - packed_seq_params.cu_seqlens_q[:-1] # [Num sequences] where each element is the length of the sequence
         position_ids = [torch.arange(chunk_len, device=packed_seq_params.cu_seqlens_q.device) for chunk_len in chunks]
-        return torch.cat(position_ids, dim=0).view(1,-1)
+        return torch.cat(position_ids, dim=0).view(1, -1)
 
 
     def mask_labels_and_loss_mask(  # noqa: compains that can be static
@@ -596,7 +606,8 @@ class EVSVariant:
             loss_mask: torch.Tensor,
             evs_mask: torch.Tensor,
             packed_seq_params: Optional["PackedSeqParams"] = None,
-            pad_to_divisibility: Optional[int] = None,
+            per_sample_pad_to_divisibility: Optional[int] = None,
+            sequence_pad_to_divisibility: Optional[int] = None,
             labels_padding_value: Optional[int] = None,
             loss_padding_value: Optional[int] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -607,11 +618,17 @@ class EVSVariant:
         final_loss_mask_list = []
         for i in range(batch_size):
             kept_labels_sequence, _ = EVSHelper.masked_select(
-                labels[i], evs_mask[i], packed_seq_params, pad_to_divisibility=pad_to_divisibility, padding_value=labels_padding_value
+                labels[i], evs_mask[i], packed_seq_params=packed_seq_params,
+                per_sample_pad_to_divisibility=per_sample_pad_to_divisibility,
+                sequence_pad_to_divisibility=sequence_pad_to_divisibility,
+                padding_value=labels_padding_value,
             )
 
             kept_loss_mask_sequence, _ = EVSHelper.masked_select(
-                loss_mask[i], evs_mask[i], packed_seq_params, pad_to_divisibility=pad_to_divisibility, padding_value=loss_padding_value
+                loss_mask[i], evs_mask[i], packed_seq_params=packed_seq_params,
+                per_sample_pad_to_divisibility=per_sample_pad_to_divisibility,
+                sequence_pad_to_divisibility=sequence_pad_to_divisibility,
+                padding_value=loss_padding_value
             )
 
             final_labels_list.append(kept_labels_sequence)
@@ -664,82 +681,145 @@ class EVSHelper:
         return split
 
     @staticmethod
-    def masked_select(tensor: torch.Tensor, evs_mask: torch.Tensor, packed_seq_params: Optional["PackedSeqParams"] = None,
-                      pad_to_divisibility: Optional[int] = None,
-                      padding_dim: int = 0, padding_value: float | int | bool = 0):
-        if padding_dim >= tensor.ndim:
-            raise ValueError(f"Padding dimension {padding_dim} is greater than the number of dimensions of the tensor {tensor.ndim}")
+    def pad_right(tensor, *, padding_dim: int = 0, padding_value: float | int | bool = 0, required_padding=None, required_divisibility=None):
+        if required_padding is None and required_divisibility is None:
+            raise ValueError("Either `padding` or `divisibility` must be specified")
+        if required_padding is not None and required_divisibility is not None:
+            raise ValueError("Only one of `padding` or `divisibility` must be specified")
+        if required_divisibility == 0 or required_padding == 0:
+            return tensor, 0
+
+        if required_padding is None:
+            assert required_divisibility is not None
+            tensor_len = tensor.size(padding_dim)
+            tensor_len_padded = int(math.ceil(tensor_len / required_divisibility) * required_divisibility)
+            required_padding = tensor_len_padded - tensor_len
+
+        padding_tuple_prefix = (0, 0) * (tensor.ndim - padding_dim - 1)
+        if required_padding > 0:
+            padding_tuple = padding_tuple_prefix + (0, required_padding)
+            tensor_padded = torch.nn.functional.pad(tensor, padding_tuple, value=padding_value)
+        else:
+            tensor_padded = tensor
+
+        return tensor_padded, required_padding
+
+    @staticmethod
+    def _safety_checks(tensor: torch.Tensor, evs_mask: torch.Tensor, packed_seq_params: Optional["PackedSeqParams"] = None):
         if evs_mask.ndim > 1:
             raise ValueError(f"EVS mask has more than 1 dimension: {evs_mask.ndim}")
         if evs_mask.size(0) != tensor.size(0):
             raise ValueError(f"EVS mask has a different number of elements than the tensor: {evs_mask.size(0)=} != {tensor.size(0)=}")
+        if evs_mask.dtype != torch.bool:
+            raise TypeError(f"EVS mask has a non-bool type: {evs_mask.dtype}")
+        if evs_mask.device != tensor.device:
+            raise ValueError(f"EVS mask must be on the same device as the tensor: {evs_mask.device=} != {tensor.device=}")
 
-        def _pad_right(x) -> Tuple[torch.Tensor, int]:
-            padding_tuple_prefix = (0, 0) * (tensor.ndim - padding_dim - 1)
-            _seq_len = len(x)
-            _seq_len_padded = int(math.ceil(_seq_len / pad_to_divisibility) * pad_to_divisibility)
-            _padding = (_seq_len_padded - _seq_len)
-            if _padding > 0:
-                padding_tuple = padding_tuple_prefix + (0, _padding)
-                x_padded = torch.nn.functional.pad(x, padding_tuple, value=padding_value)
-            else:
-                x_padded = x
-            assert len(x_padded) % pad_to_divisibility == 0, len(x_padded)
-            return x_padded, _padding
+        if packed_seq_params is None:
+            return
+
+        # Here, we have `packed_seq_params`. Validate packed sequence bounds before using them as indices
+        if not torch.equal(packed_seq_params.cu_seqlens_q, packed_seq_params.cu_seqlens_q_padded):
+            raise NotImplementedError(f"At the moment, we assuming padded and not padded are equal,"
+                                      f" got: {packed_seq_params.cu_seqlens_q_padded=} != {packed_seq_params.cu_seqlens_q=}")
+
+        if packed_seq_params.cu_seqlens_q.device != evs_mask.device:
+            raise ValueError(f"PackedSeqParams are not on the same device as the tensor: {packed_seq_params.cu_seqlens_q.device=} != {evs_mask.device=}")
+
+        max_seq_idx = packed_seq_params.cu_seqlens_q[-1].item()
+        if max_seq_idx > tensor.size(0):
+            raise ValueError(f"Packed sequence cumulative length ({max_seq_idx}) exceeds tensor size ({tensor.size(0)})")
+        if max_seq_idx > evs_mask.size(0):
+            raise ValueError(f"Packed sequence cumulative length ({max_seq_idx}) exceeds EVS mask size ({evs_mask.size(0)})")
+
+
+    @staticmethod
+    def masked_select(tensor: torch.Tensor, evs_mask: torch.Tensor, *, packed_seq_params: Optional["PackedSeqParams"] = None,
+                      per_sample_pad_to_divisibility: Optional[int] = None,
+                      sequence_pad_to_divisibility: Optional[int] = None,
+                      padding_dim: int = 0, padding_value: float | int | bool = 0):
+
+        EVSHelper._safety_checks(tensor, evs_mask, packed_seq_params)
+
+        if padding_dim >= tensor.ndim:
+            raise ValueError(f"Padding dimension {padding_dim} is greater than the number of dimensions of the tensor {tensor.ndim}")
+
+        original_length = tensor.size(0)
 
         if packed_seq_params is None:
             post_evs_tensor = tensor[evs_mask]
-            if pad_to_divisibility is not None:
-                post_evs_tensor, _ = _pad_right(post_evs_tensor)
-        else:
-            # We need to update the packed_seq_params to reflect the new sequence length
-            # How: keep_embeddings_mask is a boolean mask that is True for the embeddings that should be kept
-            # A packed_seq_params contains indexes like [0, 1002, 4123, 4123]
-            # We take each slice and count how many values are False in that range. And subtract that value from the end of the slice.
-            # We repeat this for each slice.
-            # This way we can keep the packed_seq_params consistent with the new sequence length.
+            if per_sample_pad_to_divisibility is not None or sequence_pad_to_divisibility is not None:
+                post_evs_tensor, _ = EVSHelper.pad_right(
+                    post_evs_tensor,
+                    required_divisibility=max(per_sample_pad_to_divisibility or 0, sequence_pad_to_divisibility or 0),
+                    padding_dim=padding_dim, padding_value=padding_value
+                )
+            assert post_evs_tensor.size(0) <= original_length
+            return post_evs_tensor, packed_seq_params
 
-            post_evs_tensor = []
-            evs_seqlens = torch.zeros_like(packed_seq_params.cu_seqlens_q)
-            evs_seqlens_padding = torch.zeros_like(packed_seq_params.cu_seqlens_q)
-            max_seq_len = 0
+        # We need to update the packed_seq_params to reflect the new sequence length
+        # How: keep_embeddings_mask is a boolean mask that is True for the embeddings that should be kept
+        # A packed_seq_params contains indexes like [0, 1002, 4123, 4321]
+        # We take each slice and count how many values are False in that range. And subtract that value from the end of the slice.
+        # We repeat this for each slice.
+        # This way we can keep the packed_seq_params consistent with the new sequence length.
 
-            for i in range(len(packed_seq_params.cu_seqlens_q) - 1):
-                start_idx = packed_seq_params.cu_seqlens_q[i]
-                end_idx = packed_seq_params.cu_seqlens_q[i + 1]
-                seq_len = evs_mask[start_idx:end_idx].sum()
-                evs_seqlens[i + 1] = seq_len
-                relevant_sequence = tensor[start_idx:end_idx]
-                kept_sequence_after_evs = relevant_sequence[evs_mask[start_idx:end_idx]]
-                assert len(kept_sequence_after_evs) == seq_len
-                if pad_to_divisibility is not None:
-                    kept_sequence_after_evs, padding = _pad_right(kept_sequence_after_evs)
-                    evs_seqlens_padding[i + 1] = padding
-                    seq_len = len(kept_sequence_after_evs)
-                max_seq_len = max(max_seq_len, seq_len)
-                post_evs_tensor.append(kept_sequence_after_evs)
+        post_evs_tensor = []
+        evs_seqlens = torch.zeros_like(packed_seq_params.cu_seqlens_q)
+        evs_seqlens_padding = torch.zeros_like(packed_seq_params.cu_seqlens_q)
+        max_seq_len = 0
+        for i in range(len(packed_seq_params.cu_seqlens_q) - 1):
+            start_idx = packed_seq_params.cu_seqlens_q[i]
+            end_idx = packed_seq_params.cu_seqlens_q[i + 1]
+            assert 0 <= start_idx < end_idx <= tensor.size(0)
+            seq_len = evs_mask[start_idx:end_idx].sum()
+            if seq_len == 0:
+                raise AssertionError("This should never happen, because there must be some text in the sequence!")
+            evs_seqlens[i + 1] = seq_len
+            relevant_sequence = tensor[start_idx:end_idx]
+            kept_sequence_after_evs = relevant_sequence[evs_mask[start_idx:end_idx]]
+            assert len(kept_sequence_after_evs) == seq_len
+            if per_sample_pad_to_divisibility is not None:
+                kept_sequence_after_evs, padding = EVSHelper.pad_right(
+                    kept_sequence_after_evs,
+                    required_divisibility=per_sample_pad_to_divisibility,
+                    padding_dim=padding_dim, padding_value=padding_value
+                )
+                evs_seqlens_padding[i + 1] = padding
+                seq_len = len(kept_sequence_after_evs)
+            if sequence_pad_to_divisibility is not None and i == len(packed_seq_params.cu_seqlens_q) - 2:  # we now operate on the last sample
+                # we should calculate required padding based on the entire sequence, not the current sample
+                remainder = torch.sum(evs_seqlens + evs_seqlens_padding) % sequence_pad_to_divisibility
+                required_padding = sequence_pad_to_divisibility - remainder if remainder != 0 else 0
+                kept_sequence_after_evs, padding = EVSHelper.pad_right(
+                    kept_sequence_after_evs,
+                    required_padding=required_padding,
+                    padding_dim=padding_dim, padding_value=padding_value
+                )
+                evs_seqlens_padding[i + 1] += padding
+                seq_len = len(kept_sequence_after_evs)
 
-            post_evs_tensor = torch.cat(post_evs_tensor, dim=0)
-            evs_cu_seqlens = evs_seqlens.cumsum(dim=0)
-            assert evs_cu_seqlens[0] == 0
-            # assert evs_cu_seqlens[-1] == evs_cu_seqlens[-2]
+            max_seq_len = max(max_seq_len, seq_len)
+            post_evs_tensor.append(kept_sequence_after_evs)
 
-            evs_cu_seqlens_padded = evs_cu_seqlens + evs_seqlens_padding.cumsum(0)
+        post_evs_tensor = torch.cat(post_evs_tensor, dim=0)
+        evs_cu_seqlens = evs_seqlens.cumsum(dim=0)
+        assert evs_cu_seqlens[0] == 0
 
-            # FIXME (@nbagrov, @ekhvedchenia): cu_seqlens should also be padded for some reason...
-            evs_cu_seqlens = evs_cu_seqlens_padded
+        evs_cu_seqlens_padded = evs_cu_seqlens + evs_seqlens_padding.cumsum(0)
 
-            assert evs_cu_seqlens[0] == evs_cu_seqlens_padded[0] == 0
-            # assert evs_cu_seqlens_padded[-1] == evs_cu_seqlens_padded[-2]
+        # (@nbagrov, @ekhvedchenia): cu_seqlens should also be padded for some reason...
+        evs_cu_seqlens = torch.clone(evs_cu_seqlens_padded)
+        assert evs_cu_seqlens[0] == evs_cu_seqlens_padded[0] == 0
 
-            packed_seq_params = PackedSeqParams(
-                qkv_format=packed_seq_params.qkv_format,
-                max_seqlen_q=max_seq_len,
-                max_seqlen_kv=max_seq_len,
-                cu_seqlens_q=evs_cu_seqlens.to(dtype=torch.int32),
-                cu_seqlens_kv=evs_cu_seqlens.to(dtype=torch.int32),
-                cu_seqlens_q_padded=evs_cu_seqlens_padded.to(dtype=torch.int32),
-                cu_seqlens_kv_padded=evs_cu_seqlens_padded.to(dtype=torch.int32),
-            )
+        modified_packed_seq_params = PackedSeqParams(
+            qkv_format=packed_seq_params.qkv_format,
+            max_seqlen_q=max_seq_len,
+            max_seqlen_kv=max_seq_len,
+            cu_seqlens_q=evs_cu_seqlens.to(dtype=torch.int32),
+            cu_seqlens_kv=evs_cu_seqlens.to(dtype=torch.int32),
+            cu_seqlens_q_padded=evs_cu_seqlens_padded.to(dtype=torch.int32),
+            cu_seqlens_kv_padded=evs_cu_seqlens_padded.to(dtype=torch.int32),
+        )
 
-        return post_evs_tensor, packed_seq_params
+        return post_evs_tensor, modified_packed_seq_params
