@@ -392,10 +392,14 @@ class MegatronCheckpointSaverBase:
         D = chunk_bias(msg.pop("D"), "column", self.args.target_tensor_parallel_size)
         A_log = chunk_bias(msg.pop("A log"), "column", self.args.target_tensor_parallel_size)
 
-        d_inner = self.md.hidden_size * 2 #TODO: can I know expansion factor?
+        if self.margs.mamba_num_heads is not None:
+            nheads = self.margs.mamba_num_heads
+            d_inner = nheads * self.margs.mamba_head_dim
+        else:
+            d_inner = self.md.hidden_size * 2  # TODO: can I know expansion factor?
+            nheads = d_inner // self.margs.mamba_head_dim
         ngroups = self.margs.mamba_num_groups
         d_state = self.md.mamba_state_dim
-        nheads = self.margs.mamba_num_heads if self.margs.mamba_num_heads is not None else d_inner // self.margs.mamba_head_dim
         in_proj_weight = split_in_proj(msg.pop("in proj weight"), d_inner, ngroups, d_state, nheads, self.args.target_tensor_parallel_size)
         conv_1d_weight = split_conv1d(msg.pop("conv1d weight"), "weight", d_inner, ngroups, d_state, self.args.target_tensor_parallel_size)
         conv_1d_bias = split_conv1d(msg.pop("conv1d bias"), "bias", d_inner, ngroups, d_state, self.args.target_tensor_parallel_size)

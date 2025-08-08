@@ -390,10 +390,14 @@ class MegatronCheckpointLoaderBase:
         message["A log"] = torch.cat(A_log, dim=0)
 
         # Combine specialized parameters
-        d_inner = self.md.hidden_size * 2  # TODO: can I know expansion factor?
+        if self.margs.mamba_num_heads is not None:
+            nheads = self.margs.mamba_num_heads
+            d_inner = nheads * self.margs.mamba_head_dim
+        else:
+            d_inner = self.md.hidden_size * 2  # TODO: can I know expansion factor?
+            nheads = d_inner // self.margs.mamba_head_dim
         ngroups = self.margs.mamba_num_groups
         d_state = self.md.mamba_state_dim
-        nheads = self.margs.mamba_num_heads if self.margs.mamba_num_heads is not None else d_inner // self.margs.mamba_head_dim
         message["in proj weight"] = combine_in_proj(in_proj_weight, d_inner, ngroups, d_state, nheads, tp_size=tp_size)
         message["conv1d weight"] = combine_conv1d(conv_1d_weight, "weight", d_inner, ngroups, d_state, tp_size=tp_size)
         message["conv1d bias"] = combine_conv1d(conv_1d_bias, "bias", d_inner, ngroups, d_state, tp_size=tp_size)
