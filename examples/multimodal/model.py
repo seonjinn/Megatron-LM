@@ -9,6 +9,7 @@ from layer_specs import (get_layer_spec, get_layer_spec_te, get_mlp_module_spec,
                          get_mamba_layer_spec_te)
 
 from megatron.core.models.gpt.heterogeneous.heterogeneous_layer_specs import get_gpt_heterogeneous_layer_spec
+from megatron.core.models.multimodal.efficient_video_sampling import EVSVariant
 from megatron.core.models.multimodal.llava_model import IMAGE_TOKEN, LLaVAModel
 from megatron.core.models.vision.clip_vit_model import get_num_image_embeddings
 from megatron.training import get_args, get_tokenizer, print_rank_0
@@ -111,7 +112,10 @@ def model_provider(
     base_config.calculate_per_token_loss = True
 
     language_config = deepcopy(base_config)
-    language_config = get_language_model_config(language_config, args.enable_fusions)
+    language_config = get_language_model_config(
+        language_config, args.enable_fusions,
+        apply_rope_fusion=not EVSVariant.uses_special_position_ids(args.efficient_video_sampling_variant)
+    )
 
     if language_model_type.startswith("hf://"):
         assert args.tensor_model_parallel_size == 1, "Huggingface models do not support --tensor-model-parallel-size > 1"

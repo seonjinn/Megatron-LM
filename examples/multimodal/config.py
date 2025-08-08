@@ -6,10 +6,12 @@ import torch
 from megatron.training.activations import fast_gelu, quick_gelu, squared_relu
 
 
-def get_language_model_config(config, enable_fusions=False):
+def get_language_model_config(config, enable_fusions=False, apply_rope_fusion=None):
     config.bias_activation_fusion = enable_fusions
     config.bias_dropout_fusion = enable_fusions
     config.apply_rope_fusion = enable_fusions
+    if apply_rope_fusion is not None:
+        config.apply_rope_fusion = apply_rope_fusion
 
     if config.language_model_type == "llama3_8b":
         config.activation_func = torch.nn.functional.silu
