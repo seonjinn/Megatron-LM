@@ -526,6 +526,7 @@ class VLMForwardStep(ForwardStep):
         num_img_embeddings,
         images,
         num_tiles,
+        num_frames,
         decoder_seq_length,
         imgs_sizes,
         vision_cu_lengths,
@@ -540,6 +541,7 @@ class VLMForwardStep(ForwardStep):
         super().__init__(model, inference_context)
         self._images = images
         self._num_tiles = num_tiles
+        self._num_frames = num_frames
         self._num_img_embeddings = num_img_embeddings
         self.decoder_seq_length = decoder_seq_length
         self._imgs_sizes = imgs_sizes
@@ -573,12 +575,16 @@ class VLMForwardStep(ForwardStep):
             attention_mask=None,
             inference_context=self.inference_context,
             num_image_tiles=self._num_tiles,
+            num_frames=self._num_frames,
             runtime_gather_output=True,
             imgs_sizes=self._imgs_sizes,
             vision_packed_seq_params=self._vision_packed_seq_params,
         )
 
     def __call__(self, tokens, position_ids, attention_mask):
+        # Make sure we use the *updated* number of image tokens that may have been pruned in `_preprocess_data`.
+        if "image_tokens_count" in self.inference_context.key_value_memory_dict:
+            self._num_img_embeddings = self.inference_context.key_value_memory_dict["image_tokens_count"]
         num_image_tokens = (tokens == self.model.module.image_token_index).sum().item()
         num_tokens = tokens.size(1)
         recv_buffer_seq_length = None
