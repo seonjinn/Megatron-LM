@@ -1,16 +1,19 @@
 # Copyright (c) 2024, NVIDIA CORPORATION.  All rights reserved.
+from functools import partial
 import warnings
 import logging
 from copy import deepcopy
 
 import torch
-from config import get_language_model_config, get_vision_model_config, get_vision_projection_config
+
+from config import get_language_model_config, get_vision_model_config, get_vision_projection_config, get_sound_model_config, get_sound_projection_config
 from layer_specs import (get_layer_spec, get_layer_spec_te, get_mlp_module_spec, get_norm_mlp_module_spec_te,
                          get_mamba_layer_spec_te)
 
 from megatron.core.models.gpt.heterogeneous.heterogeneous_layer_specs import get_gpt_heterogeneous_layer_spec
 from megatron.core.models.multimodal.efficient_video_sampling import EVSVariant
 from megatron.core.models.multimodal.llava_model import IMAGE_TOKEN, LLaVAModel
+from megatron.core.models.vision.multimodal_projector import MultimodalProjector
 from megatron.core.models.vision.clip_vit_model import get_num_image_embeddings
 from megatron.training import get_args, get_tokenizer, print_rank_0
 from megatron.training.arguments import core_transformer_config_from_args
@@ -109,6 +112,7 @@ def model_provider(
     base_config = core_transformer_config_from_args(get_args())
     base_config.language_model_type = args.language_model_type
     base_config.vision_model_type = args.vision_model_type
+    base_config.sound_model_type = getattr(args, "sound_model_type", None)
     base_config.calculate_per_token_loss = True
 
     language_config = deepcopy(base_config)
@@ -266,6 +270,8 @@ def model_provider(
 
     tile_tags = _get_tile_tags(args, tokenizer)
 
+    sound_model, sound_projection = sound_model_provider(base_config, language_config.hidden_size)
+
     model = LLaVAModel(
         language_transformer_config=language_config,
         language_transformer_layer_spec=language_transformer_layer_spec,
@@ -306,12 +312,16 @@ def model_provider(
         conv_merging=args.conv_merging,
         allow_missing_conv_merge_checkpoint=args.allow_missing_conv_merge_checkpoint,
         efficient_video_sampling_variant=args.efficient_video_sampling_variant,
+        sound_model=sound_model,
+        sound_projection=sound_projection,
     )
 
     model.freeze(
         freeze_language_model=args.freeze_LM,
         freeze_vision_model=args.freeze_ViT,
         freeze_vision_projection=False,
+        freeze_sound_model=getattr(args, "freeze_sound_model", False),
+        freeze_sound_projection=False,
     )
 
     return model
@@ -350,3 +360,98 @@ def _get_tile_tags(args, tokenizer):
     tile_tags = [tokenizer.tokenize(t)[start_idx:] for t in tile_tags_text]
 
     return tile_tags
+
+
+def sound_model_provider(base_config, language_hidden_size):
+    args = get_args()
+
+    if getattr(args, "sound_model_type", None) is None:
+        return None, None
+
+    sound_config = deepcopy(base_config)
+    sound_config = get_sound_model_config(sound_config)
+
+    sound_projection_config = deepcopy(base_config)
+
+    sound_projection_config = get_sound_projection_config(
+        sound_projection_config, language_hidden_size, enable_fusions=args.enable_fusions
+    )
+    if "hf://" in sound_projection_config.sound_model_type and "NV-Whisper" in sound_projection_config.sound_model_type:
+        sound_projection_config.input_size = 1280
+    elif "hf://" in sound_projection_config.sound_model_type and "whisper" in sound_projection_config.sound_model_type:
+        sound_projection_config.input_size = 1280
+
+    if args.recompute_sound:
+        if sound_config.recompute_method is not None and sound_config.recompute_granularity is not None:
+            sound_config.recompute_num_layers = sound_config.num_layers
+    else:
+        sound_config.recompute_granularity = None
+        sound_config.recompute_method = None
+        sound_config.recompute_num_layers = None
+
+    sound_projection_config.recompute_granularity = None
+    sound_projection_config.recompute_method = None
+    sound_projection_config.recompute_num_layers = None
+
+    sound_projection_config.sequence_parallel = False
+    sound_projection_config.context_parallel_size = 1
+    sound_projection_config.tp_comm_overlap = False
+
+    if sound_projection_config.normalization:
+        sound_projection_layer_spec = get_norm_mlp_module_spec_te().submodules
+    else:
+        sound_projection_layer_spec = get_mlp_module_spec(use_te=args.use_te).submodules
+
+    if sound_config.sound_model_type.startswith("hf://"):
+        from megatron.core.models.huggingface.module import build_hf_model
+
+        sound_model = build_hf_model(
+            sound_config, sound_config.sound_model_type
+        )
+    else:
+        raise ValueError(
+            "Sound model "
+            f"{sound_config.sound_model_type} is not "
+            "supported."
+        )
+
+    from megatron.core.models.multimodal.llava_model import _load_state_dict_hook_ignore_extra_state, _load_state_dict_hook_ignore_param_names
+
+    sound_model.register_load_state_dict_post_hook(
+        _load_state_dict_hook_ignore_extra_state
+    )
+    if 'parakeet' in sound_config.sound_model_type:
+        sound_projection_input_size = 1024
+    else:
+        sound_projection_input_size = sound_projection_config.input_size
+
+    # Map (intermediate) sound model outputs to the language model input dimension.
+    sound_projection = MultimodalProjector(
+        sound_projection_config,
+        sound_projection_layer_spec,
+        "mlp",
+        sound_projection_input_size,
+    )
+    # Ignore missing weights for the sound projection during checkpoint loading.
+    # This should be disabled by default but can be enabled if your checkpoint contains
+    # pretrained sound and language models but not the projection from sound model
+    # outputs to language model inputs.
+    if args.allow_missing_sound_projection_checkpoint:
+        sound_projection_param_names = [
+            f"sound_projection.{name}"
+            for name in sound_projection.state_dict().keys()
+        ]
+        sound_projection.register_load_state_dict_post_hook(
+            partial(_load_state_dict_hook_ignore_param_names, sound_projection_param_names)
+        )
+
+    if args.allow_missing_sound_model_checkpoint:
+        sound_model_param_names = [
+            f"sound_model.{name}"
+            for name in sound_model.state_dict().keys()
+        ]
+        sound_model.register_load_state_dict_post_hook(
+            partial(_load_state_dict_hook_ignore_param_names, sound_model_param_names)
+        )
+
+    return sound_model, sound_projection

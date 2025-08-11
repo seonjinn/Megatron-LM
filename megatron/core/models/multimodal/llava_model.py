@@ -151,6 +151,8 @@ class LLaVAModel(MegatronModule):
         conv_merging: bool = False,
         allow_missing_conv_merge_checkpoint: bool = False,
         efficient_video_sampling_variant: Optional[str] = None,
+        sound_model: Optional[torch.nn.Module] = None,
+        sound_projection: Optional[torch.nn.Module] = None,
     ) -> None:
         super().__init__(config=language_transformer_config)
         if has_config_logger_enabled(language_transformer_config):
@@ -171,6 +173,9 @@ class LLaVAModel(MegatronModule):
         self.vision_model = None
         self.vision_projection = None
         self.language_model = None
+
+        self.sound_model = sound_model
+        self.sound_projection = sound_projection
 
         language_model_type = getattr(language_transformer_config, "language_model_type", "")
         self.sequence_parallel_lm = language_transformer_config.sequence_parallel
@@ -463,7 +468,8 @@ class LLaVAModel(MegatronModule):
             self.language_model.set_input_tensor(input_tensor[0])
 
     def freeze(
-        self, freeze_language_model: bool, freeze_vision_model: bool, freeze_vision_projection: bool
+        self, freeze_language_model: bool, freeze_vision_model: bool, freeze_vision_projection: bool,
+        freeze_sound_model: bool, freeze_sound_projection: bool
     ):
         """Freeze model modules.
 
@@ -481,6 +487,10 @@ class LLaVAModel(MegatronModule):
             modules.append(self.vision_model)
         if freeze_vision_projection and self.vision_projection is not None:
             modules.append(self.vision_projection)
+        if freeze_sound_model and self.sound_model is not None:
+            modules.append(self.sound_model)
+        if freeze_sound_projection and self.sound_projection is not None:
+            modules.append(self.sound_projection)
 
         for module in modules:
             for param in module.parameters():
@@ -945,7 +955,7 @@ class LLaVAModel(MegatronModule):
 
     def _add_fp8_padding_for_inference(self, images, imgs_sizes, vision_packed_seq_params, has_pad_img):
         """Add FP8 padding for inference when not using context parallelism.
-        
+
         This method applies FP8 padding to images during inference to ensure proper alignment
         for FP8 operations, similar to split_to_context_parallel_ranks_dynamic_res but for
         the non-context-parallel case.
@@ -960,45 +970,45 @@ class LLaVAModel(MegatronModule):
             tuple: (images, imgs_sizes, vision_packed_seq_params, has_pad_img) with FP8 padding applied.
         """
         final_seqlen = images.shape[1]
-        
+
         padding_needed = get_padding(final_seqlen, 1, 1, False, fp8_enabled=True)
-        
+
         if padding_needed > 0:
             patch_dim = self.vision_model.patch_dim
-            
+
             pad_img = torch.zeros([1, padding_needed, patch_dim * patch_dim * 3], device=images.device, dtype=images.dtype)
-            
+
             # Concatenate padding image to the batch
             images = torch.cat([images, pad_img], dim=1)
-            
+
             # Update imgs_sizes with padding dimensions
             pad_img_size = torch.tensor([[patch_dim, patch_dim * padding_needed]], device=imgs_sizes.device, dtype=imgs_sizes.dtype)
-            
+
             imgs_sizes = torch.cat([imgs_sizes, pad_img_size])
-            
+
             # Update vision_packed_seq_params
             if vision_packed_seq_params is not None:
                 cu_seqlens = vision_packed_seq_params.cu_seqlens_q
-                
+
                 new_cu_seqlens = torch.cat([cu_seqlens, torch.tensor([final_seqlen + padding_needed], device=cu_seqlens.device, dtype=cu_seqlens.dtype)])
                 vision_packed_seq_params.cu_seqlens_q = new_cu_seqlens
                 vision_packed_seq_params.cu_seqlens_kv = new_cu_seqlens
-                
+
                 # Update padded sequence lengths if they exist
                 if vision_packed_seq_params.cu_seqlens_q_padded is not None:
                     cu_seqlens_padded = vision_packed_seq_params.cu_seqlens_q_padded
                     new_cu_seqlens_padded = torch.cat([cu_seqlens_padded, torch.tensor([final_seqlen + padding_needed], device=cu_seqlens_padded.device, dtype=cu_seqlens_padded.dtype)])
                     vision_packed_seq_params.cu_seqlens_q_padded = new_cu_seqlens_padded
                     vision_packed_seq_params.cu_seqlens_kv_padded = new_cu_seqlens_padded
-                
+
                 # Update max sequence lengths
                 seqlens = new_cu_seqlens[1:] - new_cu_seqlens[:-1]
                 max_seqlen = max(seqlens).to(torch.int32)
                 vision_packed_seq_params.max_seqlen_q = max_seqlen
                 vision_packed_seq_params.max_seqlen_kv = max_seqlen
-            
+
             has_pad_img = True
-        
+
         return images, imgs_sizes, vision_packed_seq_params, has_pad_img
 
     def forward(

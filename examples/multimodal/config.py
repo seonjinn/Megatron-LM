@@ -442,6 +442,48 @@ def get_vision_projection_config(config, hidden_size, enable_fusions=False):
     return config
 
 
+def get_sound_model_config(config):
+    if config.sound_model_type.startswith("hf://"):
+        import transformers
+
+        if "parakeet" in config.sound_model_type:
+            from megatron.core.models.huggingface.fastconformer.configuration_fastconformer import FastConformerConfig
+            hf_config = FastConformerConfig.from_pretrained(config.sound_model_type.split("hf://")[1])
+        else:
+            hf_config = transformers.AutoConfig.from_pretrained(config.sound_model_type.split("hf://")[1])
+        config.hf_config = hf_config
+        if "NV-Whisper" in config.sound_model_type:
+            config.hidden_size = hf_config.audio_config.d_model
+        elif "parakeet" in config.sound_model_type:
+            config.hidden_size = hf_config.d_model
+        else:
+            config.hidden_size = hf_config.hidden_size
+    else:
+        raise ValueError(f"unknown sound model type {config.sound_model_type}")
+
+    return config
+
+def get_sound_projection_config(config, hidden_size, enable_fusions=False):
+    config.gated_linear_unit = False
+    config.add_bias_linear = False
+    config.hidden_size = hidden_size  # Used as the vision projection output size, i.e., the input to the language model.
+
+    config.bias_activation_fusion = enable_fusions
+    config.bias_dropout_fusion = enable_fusions
+    config.apply_rope_fusion = enable_fusions
+
+    if config.language_model_type == "llama3.1_8b":
+        config.ffn_hidden_size = 4096
+        config.activation_func = torch.nn.functional.gelu
+        config.layernorm_epsilon = 1e-5
+        config.add_bias_linear = True
+        config.normalization = "LayerNorm"
+    else:
+        raise ValueError(f"unknown language model type {config.language_model_type}")
+
+    return config
+
+
 @dataclass
 class EvaluationConfig:
     """Evaluation related configuration."""

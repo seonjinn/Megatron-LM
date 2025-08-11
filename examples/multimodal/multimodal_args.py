@@ -98,6 +98,9 @@ def add_multimodal_extra_args(parser):
         "--recompute-vision", action="store_true", default=False, help="Enable activation checkpointing in the vision model"
     )
     group.add_argument(
+        "--recompute-sound", action="store_true", default=False, help="Enable activation checkpointing in the sound model"
+    )
+    group.add_argument(
         "--use-loss-scaling", action="store_true", default=False, help="Scale loss based on conversation turn length (in tokens)."
     )
     group.add_argument(
