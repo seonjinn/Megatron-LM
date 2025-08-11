@@ -9,11 +9,19 @@ def add_multimodal_extra_args(parser):
     group.add_argument("--prompt-path", type=str, default=None)
     group.add_argument('--freeze-LM', action='store_true', default=False)
     group.add_argument('--freeze-ViT', action='store_true', default=False)
+    group.add_argument('--freeze-sound-model', action='store_true', default=False)
     group.add_argument('--language-model-type', type=str, required=True)
     group.add_argument('--vision-model-type', type=str, default="clip")
+    group.add_argument('--sound-model-type', type=str, default=None)
     group.add_argument("--disable-vision-class-token", action="store_true", default=False)
     group.add_argument(
         "--allow-missing-vision-projection-checkpoint", action="store_true", default=False
+    )
+    group.add_argument(
+        "--allow-missing-sound-projection-checkpoint", action="store_true", default=False
+    )
+    group.add_argument(
+        "--allow-missing-sound-model-checkpoint", action="store_true", default=False
     )
     group.add_argument("--use-te", action="store_true", default=False)
     group.add_argument(
@@ -27,7 +35,7 @@ def add_multimodal_extra_args(parser):
         "--use-thumbnail", action="store_true", default=False, help="Add image thumbnail as a tile"
     )
     group.add_argument(
-        "--thumbnail-area-threshold", type=float, default=0.8, 
+        "--thumbnail-area-threshold", type=float, default=0.8,
         help="Maximum area percentage (0.0-1.0) of resized image relative to thumbnail area for which to add thumbnail. Default 0.8 (80%)"
     )
     group.add_argument(
@@ -114,7 +122,7 @@ def add_multimodal_extra_args(parser):
         "--dynamic-resolution-min-side", type=int, default=None, help="Minimum side length for dynamic resolution"
     )
     group.add_argument(
-        "--match-tiling-dynamic-resolution", action="store_true", default=False, 
+        "--match-tiling-dynamic-resolution", action="store_true", default=False,
         help="Use match-tiling dynamic resolution strategy that combines tiling logic with dynamic resolution processing"
     )
     group.add_argument(
@@ -148,9 +156,14 @@ def add_multimodal_extra_args(parser):
     group.add_argument(
         "--allow-large-videos", action="store_true", default=False, help="Allow large videos to be loaded into the model."
     )
-
     group.add_argument(
         "--efficient-video-sampling-variant", type=str, default=None, help="The EVS variant. Read docstring on EVSHelper"
+    )
+    group.add_argument(
+        "--sound-target-rate",
+        type=int,
+        default=16000,
+        help="Target rate of sound clips to regularly sample from the audio as input to the model.",
     )
 
     return parser

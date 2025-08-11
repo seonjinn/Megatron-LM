@@ -1,0 +1,20 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend:
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat/valor_annotations_filtered
+      weight: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat/vast_annotations_400k
+      weight: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat/vatex_training_processed
+      weight: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat/webvid
+      weight: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat/blip_laion_cc_sbu_558k
+      weight: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat/Wavecaps
+      weight: 1
+  val:
+    path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat/valor_annotations_filtered
+    split_part: train
