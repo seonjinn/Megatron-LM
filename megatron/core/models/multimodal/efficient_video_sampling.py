@@ -295,7 +295,7 @@ class EVSVariant:
 
     @classmethod
     def from_string(cls, variant: Optional[str]):
-        if variant in [None, "None", "none", "Off", "off", False, "False", "false"]:  # QoL: (1) explicit; (2) enable override existing flag in CLI
+        if not cls._should_init(variant):
             return None
 
         method = cls._process_method(variant)
@@ -312,7 +312,11 @@ class EVSVariant:
 
     @classmethod
     def uses_special_position_ids(cls, variant: Optional[str]):
-        return variant and cls._process_position_ids_handling(variant) == "preserve"
+        return cls._should_init(variant) and cls._process_position_ids_handling(variant) == "preserve"
+
+    @classmethod
+    def _should_init(cls, variant: Optional[str]):
+        return variant not in [None, "None", "none", "Off", "off", False, "False", "false"]
 
     def __init__(self, *, variant: str, config: EVSConfig):
         self._config = config
