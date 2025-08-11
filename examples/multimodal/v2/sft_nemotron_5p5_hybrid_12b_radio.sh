@@ -9,7 +9,7 @@
 #SBATCH --nodes=64
 #SBATCH --exclusive
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=sft_nm_5p5_h_12b_cradio_vlm_v1_rc3_0720_online_tiling
+#SBATCH --job-name=sft_nm_5p5_h_12b_cradio_0805_tiling_v1341
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
@@ -36,7 +36,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="sft_nm_5p5_h_12b_cradio_vlm_v1_rc3_0720_online_tiling"
+    MODEL_NAME="sft_nm_5p5_h_12b_cradio_0805_tiling_v1341"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -51,10 +51,10 @@ TENSORBOARD_DIR="${OUTPUT}/tensorboard"
 
 TP=8
 
-CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/amalasanjayd/workspace/output/pretrain_nm_5p5_h_12b_cradio_vlm_v1_rc3_0720_online_tiling/checkpoints"
+CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/amalasanjayd/workspace/output/pretrain_nm_5p5_h_12b0804_v1340_0804/checkpoints"
 
 if [[ $USE_ONLINE_PACKING -eq 1 ]]; then
-    DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/eagle_sft_v13.30_nmh5r.yaml"
+    DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/eagle_sft_v13.41.yaml"
 else
     DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe/eagle_sft_v13.16_sft1/wds/out.yaml"
 fi
