@@ -137,8 +137,6 @@ class MegatronCheckpointSaverBase:
             margs.ckpt_step = self.args.ckpt_step
             margs.iteration = self.args.ckpt_step
         
-        margs.use_cpu_initialization = False
-
         self.margs = margs
 
     def initialize_megatron_env(self):
