@@ -1077,6 +1077,10 @@ class LLaVAModel(MegatronModule):
         )
         has_images = images is not None and images.shape[0] > 0
 
+        has_sounds = (sound_clips is not None and
+                      sound_clips.numel() > 1 and  # Not just a single element
+                      not (sound_clips.shape == torch.Size([1, 1]) and sound_clips[0,0].item() == 0))  # Not the dummy tensor
+
         insertion_nums = None
         image_tokens_retention_mask = None
 
@@ -1211,11 +1215,8 @@ class LLaVAModel(MegatronModule):
                     raise NotImplementedError  # TODO: must rearrange `masks_seqlen` as well
                 image_embeddings = self._apply_tile_tagging(image_embeddings, num_image_tiles)
 
-            torch.cuda.nvtx.range_push("gather_from_context_parallel_ranks")
             if self.context_parallel_lm > 1 and pad is not None and not self._dynamic_resolution:
                 image_embeddings = gather_from_context_parallel_ranks(image_embeddings, pad)
-
-            torch.cuda.nvtx.range_pop()
 
             # Here, `image_embeddings` and `images` represent entire batch (not cp chunk).
 
@@ -1249,6 +1250,29 @@ class LLaVAModel(MegatronModule):
                 inference_context.key_value_memory_dict["image_tokens_count"] = image_tokens_count
         else:
             image_embeddings = self.encoder_hidden_state
+
+        if use_inference_kv_cache:
+            sound_embeddings = None
+        elif self.add_encoder and not has_sounds:
+            sound_embeddings = torch.tensor([], dtype=sound_clips.dtype, device=sound_clips.device).reshape(
+                0, 0, 0
+            )
+        elif self.add_encoder and has_sounds:
+            sound_embeddings = self.sound_model(sound_clips) # [num_clips, sound_seq_len, h_sound]
+            # contiguous() required as `permute` can sparsify the tensor and this breaks pipelining
+            sound_embeddings = sound_embeddings.permute(
+                1, 0, 2
+            ).contiguous()  # [sound_seq_len, num_clips, h_sound]
+
+            # map audio model output size to language model input size.
+            sound_embeddings = self.sound_projection(
+                sound_embeddings
+            ).contiguous()  # [sound_seq_len, num_clips, h_language]
+
+            if inference_context is not None:
+                inference_context.key_value_memory_dict["sound_tokens_count"] = sound_embeddings.shape[1]
+        else:
+            sound_embeddings = self.encoder_hidden_state
 
         if not self.add_decoder:
             return image_embeddings, loss_mask
