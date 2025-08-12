@@ -119,6 +119,12 @@ class PackedTaskSample(Sample):
     # Number of samples in the packed sample
     samples_seen: int
 
+    # Sound
+    sound_clips: torch.Tensor
+    sound_length: torch.Tensor
+    sound_timestamps: torch.Tensor
+    num_sound_clips: torch.Tensor
+
 
 # Typing for the resulting batch data after encode_batch()
 @edataclass
@@ -161,6 +167,12 @@ class BatchedPackedTaskSample(Batch):
 
     # "Batched" version of number of frames used per VideoMedia / ImageMedia (1 frame for ImageMedia)
     num_frames: list[list[int]]
+
+    # Sound
+    sound_clips: torch.Tensor
+    sound_length: torch.Tensor
+    sound_timestamps: torch.Tensor
+    num_sound_clips: torch.Tensor
 
 
 class LegacyConversation(TypedDict):
@@ -226,7 +238,7 @@ class MultiModalTaskEncoder(
         self.tiling_augment_prob = tiling_augment_prob
 
         assert self.args.img_h == self.args.img_w, "img_h and img_w must be the same"
-        
+
         if self.args.match_tiling_dynamic_resolution:
             assert self.args.dynamic_resolution, "must enable --dynamic-resolution if using --match-tiling-dynamic-resolution"
             assert not self.args.use_tiling, "cannot use --use-tiling and --match-tiling-dynamic-resolution together"
@@ -601,6 +613,11 @@ class MultiModalTaskEncoder(
                 [0, sample.total_len_padded], dtype=torch.int32
             ),
             samples_seen=torch.tensor(1, dtype=torch.int32),
+            # TODO: Add sound data.
+            sound_clips=None,
+            sound_length=None,
+            sound_timestamps=None,
+            num_sound_clips=None,
         )
 
     @stateless(restore_seeds=True)
@@ -707,6 +724,11 @@ class MultiModalTaskEncoder(
             num_tiles=[n for s in samples for n in s.num_tiles],
             num_frames=[n for s in samples for n in s.num_frames],
             samples_seen=sum(s.samples_seen for s in samples),
+            # TODO: Add sound data.
+            sound_clips=None,
+            sound_length=None,
+            sound_timestamps=None,
+            num_sound_clips=None,
         )
 
     def batch(self, samples: List[PackedTaskSample]) -> BatchedPackedTaskSample:
@@ -835,6 +857,11 @@ class MultiModalTaskEncoder(
             vision_max_lengths=vision_max_lengths,
             has_pad_img=has_pad_img,
             samples_seen=sum(s.samples_seen for s in samples),
+            # TODO: Add sound data.
+            sound_clips=torch.tensor([[0]], dtype=torch.float32),
+            sound_length=torch.tensor([[0]], dtype=torch.float32),
+            sound_timestamps=torch.tensor([[0]], dtype=torch.float32),
+            num_sound_clips=torch.tensor([[0]], dtype=torch.int32),
         )
 
     def encode_batch(self, batch: BatchedPackedTaskSample) -> dict:

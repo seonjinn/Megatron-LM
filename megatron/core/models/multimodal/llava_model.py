@@ -1028,6 +1028,10 @@ class LLaVAModel(MegatronModule):
         imgs_sizes: Optional[Tuple[int, int]] = None,
         vision_packed_seq_params: Optional[PackedSeqParams] = None,
         has_pad_img: bool = False,
+        sound_clips: Optional[torch.Tensor] = None,
+        sound_length: Optional[torch.Tensor] = None,
+        sound_timestamps: Optional[torch.Tensor] = None,
+        num_sound_clips: Optional[torch.Tensor] = None,
         *,
         inference_params: Optional[BaseInferenceContext] = None,
     ) -> torch.Tensor:

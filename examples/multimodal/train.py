@@ -68,7 +68,7 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
     labels = tensor_parallel.broadcast_data(["labels"], data, torch.int64, optimize=args.optimize_broadcast)["labels"]
 
     imgs = tensor_parallel.broadcast_data(["imgs"], data, torch.float32, optimize=args.optimize_broadcast)["imgs"]
-    
+
     # Handle datasets that don't provide num_frames (for backward compatibility with image-only datasets)
     if get_tensor_model_parallel_rank() == 0 and data is not None and "num_frames" not in data:
         # For image-only datasets, each tile corresponds to 1 frame
@@ -76,10 +76,10 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
             data["num_frames"] = torch.ones_like(data["num_tiles"], dtype=torch.int32)
         else:
             data["num_frames"] = torch.tensor([], dtype=torch.int32)
-    
+
     tiles_and_frames = tensor_parallel.broadcast_data(["num_tiles", "num_frames"], data, torch.int32, optimize=args.optimize_broadcast)
     num_tiles, num_frames = tiles_and_frames["num_tiles"], tiles_and_frames["num_frames"]
-    
+
     cu_lengths = tensor_parallel.broadcast_data(["cu_lengths"], data, torch.int32, optimize=args.optimize_broadcast)["cu_lengths"]
     cu_lengths_padded = tensor_parallel.broadcast_data(["cu_lengths_padded"], data, torch.int32, optimize=args.optimize_broadcast)["cu_lengths_padded"]
     max_lengths = tensor_parallel.broadcast_data(["max_lengths"], data, torch.int32, optimize=args.optimize_broadcast)["max_lengths"]
@@ -94,6 +94,10 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
     vision_cu_lengths = tensor_parallel.broadcast_data(["vision_cu_lengths"], data, torch.int32, optimize=args.optimize_broadcast)["vision_cu_lengths"]
     vision_max_lengths = tensor_parallel.broadcast_data(["vision_max_lengths"], data, torch.int32, optimize=args.optimize_broadcast)["vision_max_lengths"]
     has_pad_img = tensor_parallel.broadcast_data(["has_pad_img"], data, torch.bool, optimize=args.optimize_broadcast)["has_pad_img"]
+
+    sound = tensor_parallel.broadcast_data(["sound_clips", "sound_length", "sound_timestamps"], data, torch.float32)
+    sound_clips, sound_length, sound_timestamps = sound["sound_clips"], sound["sound_length"], sound["sound_timestamps"]
+    num_sound_clips = tensor_parallel.broadcast_data(["num_sound_clips"], data, torch.int32)["num_sound_clips"]
 
     # No image input (text-only sample) if the dataloader returned a size 1 image.
     if imgs.shape == torch.Size([1, 1]):
@@ -179,6 +183,10 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
         imgs_sizes,
         vision_packed_seq_params,
         has_pad_img,
+        sound_clips,
+        sound_length,
+        sound_timestamps,
+        num_sound_clips,
         samples_seen,
     )
 
@@ -330,6 +338,10 @@ def forward_step(data_iterator, model: LLaVAModel):
         imgs_sizes,
         vision_packed_seq_params,
         has_pad_img,
+        sound_clips,
+        sound_length,
+        sound_timestamps,
+        num_sound_clips,
         samples_seen,
     ) = get_batch(data_iterator, model.module.module.image_token_index, model.module.module.img_seq_len)
     timers('batch-generator').stop()
@@ -347,6 +359,10 @@ def forward_step(data_iterator, model: LLaVAModel):
         imgs_sizes=imgs_sizes,
         vision_packed_seq_params=vision_packed_seq_params,
         has_pad_img=has_pad_img,
+        sound_clips=sound_clips,
+        sound_length=sound_length,
+        sound_timestamps=sound_timestamps,
+        num_sound_clips=num_sound_clips,
     )
     args = get_args()
     if args.use_loss_scaling and args.context_parallel_size <= 1:
