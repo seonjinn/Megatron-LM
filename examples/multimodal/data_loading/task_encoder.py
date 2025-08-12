@@ -11,7 +11,7 @@ import torch
 from PIL import Image
 from torchvision.transforms import ToPILImage
 
-from megatron.core.models.multimodal.llava_model import IGNORE_INDEX, IMAGE_TOKEN
+from megatron.core.models.multimodal.llava_model import IGNORE_INDEX, IMAGE_TOKEN, SOUND_TOKEN
 from megatron.core.models.vision.clip_vit_model import get_num_image_embeddings
 from megatron.energon import (
     Batch,
@@ -26,6 +26,7 @@ from megatron.energon.edataclass import edataclass
 from megatron.energon.av import AVDecoder
 from megatron.training import get_args, get_tokenizer
 
+from .audio_processing import AudioTransform
 from .conversation_sample import (
     AudioMedia,
     ConversationSample,
@@ -34,7 +35,7 @@ from .conversation_sample import (
     VideoFrameMedia,
     VideoMedia,
 )
-from .cookers.conversation import cook_conversation
+from .cookers.conversation import cook_conversation, cook_audio
 from .cookers.eagle import cook_eagle
 from .image_processing import (
     DynamicResolutionImageTilingStrategy,
@@ -199,6 +200,7 @@ class MultiModalTaskEncoder(
     cookers = [
         Cooker(cook_eagle, has_subflavors={"cook": "eagle"}),
         Cooker(cook_conversation, has_subflavors={"cook": "conversation"}),
+        Cooker(cook_audio, has_subflavors={"cook": "audio"}),
     ]
 
     def __init__(self, is_val: bool = False, tiling_augment_prob: float = 0.4):
@@ -371,6 +373,11 @@ class MultiModalTaskEncoder(
             raise ValueError(
                 f"Unknown knapsack algorithm: {self.args.packing_knapsack_algorithm}")
 
+        if getattr(self.args, "sound_model_type", None) is not None:
+            self.transform_audio = AudioTransform(self.args.sound_model_type, self.args.sound_target_rate)
+        else:
+            self.transform_audio = None
+
     @staticmethod
     def get_seq_frames_v3(
         total_duration: float,
@@ -462,25 +469,50 @@ class MultiModalTaskEncoder(
     @stateless(restore_seeds=True)
     def preencode_sample(self, sample: ConversationSample) -> PreEncodedTaskSample:
         """Encode sample."""
+
         # In-place convert VideoMedia to VideoFrameMedia (and text)
         # Some really large video files cause decoding to take a long time potentially leading to issues.
         allow_large_videos = getattr(self.args, "allow_large_videos", False)
         data_augment = sample.__subflavors__.get("data_augment", False) and not self.is_val
         tiling_augment_prob = sample.__subflavors__.get("tiling_augment_prob", self.tiling_augment_prob)
         aggregated_num_frames = []
+
+        all_sounds = []
+        all_sound_length = []
+        all_sound_timestamps = []
+
         for message in sample.conversation:
             idx = 0
             while idx < len(message.fragments):
-                if isinstance(message.fragments[idx], VideoMedia):
-                    if not allow_large_videos and message.fragments[idx].value.entry.data_size / 1e6 > 160:
-                        raise ValueError(f"Video is too large: {str(message.fragments[idx].value.entry.source_info.dataset_path) + '/' + message.fragments[idx].value.entry.fname}")
+                fragment = message.fragments[idx]
 
-                    frames, num_frames = self.video_to_frames(message.fragments[idx])
+                if isinstance(fragment, VideoMedia):
+                    if not allow_large_videos and fragment.value.entry.data_size / 1e6 > 160:
+                        raise ValueError(f"Video is too large: {str(fragment.value.entry.source_info.dataset_path) + '/' + fragment.value.entry.fname}")
+
+                    frames, num_frames = self.video_to_frames(fragment)
                     message.fragments[idx : idx + 1] = frames
                     idx += len(frames)
                     aggregated_num_frames.append(num_frames)
+                elif isinstance(fragment, AudioMedia):
+                    audio_media = fragment.value.get_audio()
+                    audio_sps = fragment.value.get_audio_samples_per_second()
+
+                    raw_audio = torch.stack(audio_media.audio_clips, dim=0)
+                    sound, sound_length, timestamps = self.transform_audio(raw_audio, audio_sps)
+
+                    # Whisper uses 30s clips. If the audio is shorter, we pad and use 1 clip. If it's longer, we use multiple clips in the batch dimension,
+                    # kinda similar to tiling in the image case.
+                    num_clips = sound.shape[0]
+                    num_sound_embeddings = num_clips * 750
+
+                    all_sounds.append(sound)
+                    all_sound_length.append(sound_length)
+                    all_sound_timestamps.append(timestamps)
+
+                    idx += 1
                 else:
-                    if isinstance(message.fragments[idx], (ImageMedia, VideoFrameMedia)):
+                    if isinstance(fragment, (ImageMedia, VideoFrameMedia)):
                         # Image or a single frame
                         aggregated_num_frames.append(1)
                     idx += 1
@@ -515,7 +547,7 @@ class MultiModalTaskEncoder(
                         "VideoMedia should have been converted to VideoFrameMedia."
                     )
                 elif isinstance(fragment, AudioMedia):
-                    raise ValueError("Audio not supported yet.")
+                    pass
 
             if self.args.tokenizer_prompt_format == "nemotron-h-5p5-reasoning" and message.sender == "assistant":
                 think_start_count = content.count("<think>")

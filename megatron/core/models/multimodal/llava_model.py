@@ -54,8 +54,10 @@ except:
 IGNORE_INDEX = -100  # ID for labels that should be ignored.
 # Image token index can be tokenizer dependent so the default value does not work in all cases.
 DEFAULT_IMAGE_TOKEN_INDEX = -200
+DEFAULT_SOUND_TOKEN_INDEX = -300
 IMAGE_TOKEN = "<image>"
 VIDEO_TOKEN = "<video>"
+SOUND_TOKEN = "<sound>"
 
 
 # Note: This is under development and may be missing features.
@@ -153,6 +155,7 @@ class LLaVAModel(MegatronModule):
         efficient_video_sampling_variant: Optional[str] = None,
         sound_model: Optional[torch.nn.Module] = None,
         sound_projection: Optional[torch.nn.Module] = None,
+        sound_token_index: int = DEFAULT_SOUND_TOKEN_INDEX,
     ) -> None:
         super().__init__(config=language_transformer_config)
         if has_config_logger_enabled(language_transformer_config):

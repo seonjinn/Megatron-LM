@@ -1,9 +1,8 @@
 # Copyright (c) 2024, NVIDIA CORPORATION.  All rights reserved.
 import torch
 import numpy as np
-import torchaudio.transforms as audioT
+import librosa
 from transformers import AutoFeatureExtractor
-from megatron.core.models.huggingface.fastconformer.feature_extraction_fastconformer import FastConformerFeatureExtractor
 
 
 class AudioTransform:
@@ -14,6 +13,7 @@ class AudioTransform:
         self._clip_duration = 30    # seconds
         self.sound_model_type = sound_model_type
         if 'parakeet' in sound_model_type.lower():
+            from megatron.core.models.huggingface.fastconformer.feature_extraction_fastconformer import FastConformerFeatureExtractor
             self.feature_extractor = FastConformerFeatureExtractor.from_pretrained(sound_model_type.split("hf://")[1])
         else:
             self.feature_extractor = AutoFeatureExtractor.from_pretrained(sound_model_type.split("hf://")[1])
@@ -28,13 +28,12 @@ class AudioTransform:
         audio = audio.to(torch.float32)
         audio = audio.mean(dim=1, keepdim=True)
         if orig_freq != self._target_freq:
-            # Create resampler transform
-            resampler = audioT.Resample(
-                orig_freq=orig_freq,
-                new_freq=self._target_freq
+            audio = librosa.resample(
+                audio.numpy(),
+                orig_sr=orig_freq,
+                target_sr=self._target_freq
             )
-            # Resample the entire batch at once
-            audio = resampler(audio)
+            audio = torch.from_numpy(audio)
 
         if 'parakeet' in self.sound_model_type:
             audio = audio.squeeze(1)

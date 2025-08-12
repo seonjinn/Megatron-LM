@@ -52,7 +52,7 @@ TENSORBOARD_DIR="${OUTPUT}/tensorboard"
 CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/output/kchumachenko_sft_llama_3p1_8b_radio_rc3_v13_16_sft1_0509/checkpoints/"
 
 DATA_TRAIN="${SOURCE}/examples/multimodal/avlm/stage1_blend.yaml"
-DATA_TRAIN="${SOURCE}/examples/multimodal/v2/data_config/sft_dataset_commercial_v13.16_online_packing.yaml"
+# DATA_TRAIN="${SOURCE}/examples/multimodal/v2/data_config/sft_dataset_commercial_v13.16_online_packing.yaml"
 # DATA_TRAIN="/lustre/fsw/portfolios/adlr/users/pfischer/data/omcat_wds_af3/af3_v1.yaml"
 # DATA_TRAIN="/lustre/fsw/portfolios/adlr/users/pfischer/data/omcat_youcook2/single_youcook.yaml"
 
@@ -171,6 +171,7 @@ OPTIONS=" \
     --use-te \
     --ckpt-format torch \
     --image-tag-type nvlm \
+    --allow-large-videos \
 "
 
 export NVTE_ALLOW_NONDETERMINISTIC_ALGO=${ALLOW_NONDETERMINISTIC}

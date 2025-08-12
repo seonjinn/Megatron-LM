@@ -1,4 +1,6 @@
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+from dataclasses import asdict
+
 from megatron.energon import CachePool, FileStore, basic_sample_keys, cooker, stateless
 
 from ..conversation_sample import (
@@ -7,6 +9,7 @@ from ..conversation_sample import (
     ImageMedia,
     VideoFrameMedia,
     VideoMedia,
+    Message,
 )
 
 
@@ -29,5 +32,72 @@ def cook_conversation(
                 pass
             else:
                 raise ValueError(f"Unknown fragment type: {type(frag)}")
+
+    return cs
+
+
+@stateless
+@cooker(need_cache=True)
+def cook_audio(
+    sample: dict,
+    cache: CachePool,
+) -> ConversationSample:
+
+    cs = ConversationSample(conversation=[], **basic_sample_keys(sample))
+
+    for turn in sample["json"]["conversations"]:
+        role = None
+        if turn["from"] == "human":
+            role = "user"
+        elif turn["from"] == "gpt":
+            role = "assistant"
+        else:
+            raise ValueError(f"Unknown role: {turn['from']}")
+
+        text = turn["value"]
+        msg = Message(sender=role, fragments=[text])
+
+        if "<video-sound>" in text or "<video>" in text or "<audio>" in text or "<image>" in text:
+            if "<video-sound>" in text:
+                val = sample["vis_video.mp4"]
+                metadata = asdict(val.get_metadata())
+
+                msg.fragments.append(VideoMedia(value=val, metadata=metadata))
+
+                val = sample["vis_sound.wav"]
+                metadata = asdict(val.get_metadata())
+                msg.fragments.append(AudioMedia(value=val, metadata=metadata))
+            elif "<video>" in text:
+                msg.fragments.append(VideoMedia(value=turn["value"]))
+
+                import os
+                if int(os.environ.get("RANK", 0)) == 0:
+                    breakpoint()
+                else:
+                    import time
+                    time.sleep(1000)
+
+            elif "<audio>" in text:
+                msg.fragments.append(AudioMedia(value=turn["value"]))
+
+                import os
+                if int(os.environ.get("RANK", 0)) == 0:
+                    breakpoint()
+                else:
+                    import time
+                    time.sleep(1000)
+
+            elif "<image>" in text:
+                msg.fragments.append(ImageMedia(value=turn["value"]))
+
+                import os
+                if int(os.environ.get("RANK", 0)) == 0:
+                    breakpoint()
+                else:
+                    import time
+                    time.sleep(1000)
+
+
+        cs.conversation.append(msg)
 
     return cs

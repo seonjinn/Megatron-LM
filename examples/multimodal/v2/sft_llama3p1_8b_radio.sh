@@ -66,7 +66,7 @@ DECODER_SEQ_LEN=16384
 if [[ $DEBUG -eq 1 ]]; then
     MBZ=1
     BZ=8
-    NW=2
+    NW=0
     AD=0.0
     HD=0.0
     LI=1
@@ -75,8 +75,8 @@ if [[ $DEBUG -eq 1 ]]; then
     NONDETERMINISTIC_ATTN=1
 
     NUM_GPU=8
-    #NUM_GPU=4
-    #export CUDA_VISIBLE_DEVICES=0,1,2,3
+    NUM_GPU=4
+    export CUDA_VISIBLE_DEVICES=0,1,2,3
 else
     MBZ=1
     BZ=128

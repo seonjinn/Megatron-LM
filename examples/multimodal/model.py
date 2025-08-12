@@ -12,7 +12,7 @@ from layer_specs import (get_layer_spec, get_layer_spec_te, get_mlp_module_spec,
 
 from megatron.core.models.gpt.heterogeneous.heterogeneous_layer_specs import get_gpt_heterogeneous_layer_spec
 from megatron.core.models.multimodal.efficient_video_sampling import EVSVariant
-from megatron.core.models.multimodal.llava_model import IMAGE_TOKEN, LLaVAModel
+from megatron.core.models.multimodal.llava_model import IMAGE_TOKEN, SOUND_TOKEN, LLaVAModel
 from megatron.core.models.vision.multimodal_projector import MultimodalProjector
 from megatron.core.models.vision.clip_vit_model import get_num_image_embeddings
 from megatron.training import get_args, get_tokenizer, print_rank_0
@@ -271,6 +271,7 @@ def model_provider(
     tile_tags = _get_tile_tags(args, tokenizer)
 
     sound_model, sound_projection = sound_model_provider(base_config, language_config.hidden_size)
+    sound_token_index = tokenizer.convert_tokens_to_ids(SOUND_TOKEN)
 
     model = LLaVAModel(
         language_transformer_config=language_config,
@@ -314,6 +315,7 @@ def model_provider(
         efficient_video_sampling_variant=args.efficient_video_sampling_variant,
         sound_model=sound_model,
         sound_projection=sound_projection,
+        sound_token_index=sound_token_index,
     )
 
     model.freeze(
