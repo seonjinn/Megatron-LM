@@ -57,6 +57,84 @@ nemotron_h_5p5_reasoning_inference_template = "{%- for message in messages %}{%-
 
 llama_nemotron_super_template = "{{- bos_token }}{%- if messages[0]['role'] == 'system' %}{%- set system_message = messages[0]['content']|trim %}{%- set messages = messages[1:] %}{%- else %}{%- set system_message = \"\" %}{%- endif %}{{- \"<|start_header_id|>system<|end_header_id|>\n\n\" }}{{- system_message }}{{- \"<|eot_id|>\" }}{%- for message in messages %}{%- if message['role'] == 'assistant' and '</think>' in message['content'] %}{%- set content = message['content'].split('</think>')[-1].lstrip() %}{%- else %}{%- set content = message['content'] %}{%- endif %}{{- '<|start_header_id|>' + message['role'] + '<|end_header_id|>\n\n' + content | trim + '<|eot_id|>' }}{%- endfor %}{%- if add_generation_prompt %}{{- '<|start_header_id|>assistant<|end_header_id|>\n\n' }}{%- endif %}"
 
+# Llama Nemotron Super 1.5 chat template
+llama_nemotron_super_1p5_template = """
+{%- set bos = "<|begin_of_text|>" -%}
+{%- set enable_thinking = true -%}
+{%- set system_start_header = "<|start_header_id|>" -%}
+{%- set system_end_header = "<|end_header_id|>\n\n" -%}
+{%- set start_header = "<|start_header_id|>" -%}
+{%- set end_header = "<|end_header_id|>\n\n" -%}
+{%- set eot = "<|eot_id|>" -%}
+{%- set system_token = "system" -%}
+{%- set user_token = "user" -%}
+{%- set assistant_token = "assistant" -%}
+{%- set tool_token = "tool" -%}
+{{- bos ~ system_start_header ~ system_token ~ system_end_header -}}
+{%- if messages[0].role == 'system' and messages[0].content != '' -%}
+    {%- set system_content = messages[0].content -%}
+    {%- if '/no_think' in system_content -%}
+        {%- set system_content = system_content.replace('/no_think', '')|trim -%}
+        {%- set enable_thinking = false -%}
+    {%- elif '/think' in system_content -%}
+        {%- set system_content = system_content.replace('/think', '')|trim -%}
+        {%- set enable_thinking = true -%}
+    {%- endif -%}
+    {{- system_content + '\n\n' -}}
+{%- endif -%}
+{%- if tools -%}
+    {{- 'You can use the following tools to assist the user if required:\n<AVAILABLE_TOOLS>[' -}}
+    {%- for tool in tools -%}
+        {{- (tool.function if tool.function is defined else tool) | tojson -}}
+        {{- ', ' if not loop.last else '' -}}
+    {%- endfor -%}
+    {{- ']</AVAILABLE_TOOLS>\n\nIf you decide to call any tool(s), use the following format:\n<TOOLCALL>[{{"name": "tool_name1", "arguments": "tool_args1"}}, {{"name": "tool_name2", "arguments": "tool_args2"}}]</TOOLCALL>\n\nResponse from tool(s) will be returned in this format:\n<TOOL_RESPONSE>[{{"response": "tool_response1"}}, {{"response": "tool_response2"}}]</TOOL_RESPONSE>\n\nBased on the results returned by the tool(s), you can call additional tools if needed, correct tool calls if any errors are found, or just respond with the answer to the user.' -}}
+{%- endif -%}
+{{- eot -}}
+{%- for message in messages -%}
+    {%- if message.role == user_token -%}
+        {{- start_header ~ user_token ~ end_header -}}{{ message.content -}}{{ eot -}}
+    {%- elif message.role == assistant_token -%}
+        {%- if '</think>' in message.content -%}
+            {%- set content = message.content.split('</think>')[-1].lstrip() -%}
+        {%- else -%}
+            {%- set content = message.content -%}
+        {%- endif -%}
+        {{- start_header ~ assistant_token ~ end_header -}}{{ content -}}
+        {%- if message.tool_calls -%}
+            {{- '<TOOLCALL>[' -}}
+            {%- for call in message.tool_calls -%}
+                {%- set fn = call.function if call.function is defined else call -%}
+                {{- '{"name": "' + fn.name + '", "arguments": ' -}}
+                {%- if fn.arguments is string -%}
+                    {{- fn.arguments -}}
+                {%- else -%}
+                    {{- fn.arguments | tojson -}}
+                {%- endif -%}
+                {{- '}' + (', ' if not loop.last else '') -}}
+            {%- endfor -%}
+            {{- ']</TOOLCALL>' -}}
+        {%- endif -%}
+        {{- eot -}}
+    {%- elif message.role == tool_token -%}
+        {%- if loop.first or (messages[loop.index0 - 1].role != tool_token) -%}
+            {{- start_header ~ tool_token ~ end_header -}}{{ '<TOOL_RESPONSE>[' -}}
+        {%- endif -%}
+        {{- message.content -}}
+        {{- ', ' if not loop.last and (messages[loop.index0 + 1].role == tool_token) else '' -}}
+        {%- if loop.last or (messages[loop.index0 + 1].role != tool_token) -%}
+            {{- ']</TOOL_RESPONSE>' -}}{{ eot -}}
+        {%- endif -%}
+    {%- endif -%}
+{%- endfor -%}
+{%- if add_generation_prompt -%}
+    {{- start_header ~ assistant_token ~ end_header -}}
+    {%- if not enable_thinking -%}
+        {{- '<think>\n\n</think>\n\n' -}}
+    {%- endif -%}
+{%- endif -%}
+"""
+
 @dataclass
 class PromptConfig:
     """Config options for different prompt formats."""
@@ -232,6 +310,14 @@ class MultimodalTokenizer(MegatronTokenizer):
                 has_bos=True,
                 has_system_role=True,
             )
+        elif prompt_format == "llama-nemotron-super-1p5":
+            self._prompt_config = PromptConfig(
+                assistant_prefix_len=4,
+                pad_token_id=tokenizer.convert_tokens_to_ids("<|finetune_right_pad_id|>"),
+                custom_chat_template=llama_nemotron_super_1p5_template,
+                has_bos=True,
+                has_system_role=True,
+            )
         else:
             raise NotImplementedError("unknown multimodal tokenizer type", prompt_format)
 
@@ -359,7 +445,7 @@ class MultimodalTokenizer(MegatronTokenizer):
             if self._prompt_config.has_bos and turn_idx > 0:
                 if self._prompt_config.custom_chat_template == llama_nemotron_template:
                     turn_tokens = turn_tokens[10:]
-                elif self._prompt_config.custom_chat_template == llama_nemotron_super_template:
+                elif self._prompt_config.custom_chat_template in (llama_nemotron_super_template, llama_nemotron_super_1p5_template):
                     # Skip BOS token (1) + empty system header (5) = 6 tokens total
                     turn_tokens = turn_tokens[6:]
                 else:
