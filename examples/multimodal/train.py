@@ -95,9 +95,10 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
     vision_max_lengths = tensor_parallel.broadcast_data(["vision_max_lengths"], data, torch.int32, optimize=args.optimize_broadcast)["vision_max_lengths"]
     has_pad_img = tensor_parallel.broadcast_data(["has_pad_img"], data, torch.bool, optimize=args.optimize_broadcast)["has_pad_img"]
 
-    sound = tensor_parallel.broadcast_data(["sound_clips", "sound_length", "sound_timestamps"], data, torch.float32)
-    sound_clips, sound_length, sound_timestamps = sound["sound_clips"], sound["sound_length"], sound["sound_timestamps"]
-    num_sound_clips = tensor_parallel.broadcast_data(["num_sound_clips"], data, torch.int32)["num_sound_clips"]
+    sound1 = tensor_parallel.broadcast_data(["sound_clips", "sound_timestamps"], data, torch.float32)
+    sound_clips, sound_timestamps = sound1["sound_clips"], sound1["sound_timestamps"]
+    sound2 = tensor_parallel.broadcast_data(["num_sound_clips", "sound_length"], data, torch.int64)
+    num_sound_clips, sound_length = sound2["num_sound_clips"], sound2["sound_length"]
 
     # No image input (text-only sample) if the dataloader returned a size 1 image.
     if imgs.shape == torch.Size([1, 1]):

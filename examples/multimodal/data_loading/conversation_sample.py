@@ -54,6 +54,18 @@ class VideoMedia(Media):
     def video_height(self) -> int:
         return self.metadata["video_height"]
 
+    @property
+    def video_duration(self) -> float:
+        return self.metadata["video_duration"]
+    
+    @property
+    def video_num_frames(self) -> int:
+        return self.metadata["video_num_frames"]
+    
+    @property
+    def video_fps(self) -> float:
+        return self.metadata["video_fps"]
+
 
 @edataclass
 class VideoFrameMedia(Media):
@@ -82,6 +94,18 @@ class AudioMedia(Media):
     value: Union[AVDecoder, torch.Tensor, Lazy[AVDecoder], str]
 
     metadata: dict[str, Union[str, int, float, bool]] | None = None
+
+    @property
+    def audio_duration(self) -> float:
+        return self.metadata["audio_duration"]
+
+    @property
+    def audio_samples_per_second(self) -> int:
+        return self.metadata["audio_sample_rate"]
+
+    @property
+    def audio_channels(self) -> int:
+        return self.metadata["audio_channels"]
 
 
 @edataclass

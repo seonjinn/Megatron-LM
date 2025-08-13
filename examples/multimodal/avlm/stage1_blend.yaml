@@ -2,11 +2,111 @@ __class__: MetadatasetV2
 __module__: megatron.energon
 splits:
   train:
-    blend:
-    - path: /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/omcat/valor_annotations_filtered
-      weight: 1
+    blend_epochized:
+    - repetitions: 1
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/docintel/final_recipe/playground/commercial_sft_jsonl/vila_v3_backup/LN_VILA_augment_caption_nmh5r
       subflavors:
-        cook: audio
+        name: LN_VILA_augment_caption_nmh5r
+        cook: conversation
+        data_augment: false
+        length: 503275
+        orig_length: 100000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/docintel/image_data/commercial_sft_data/openimages
+    - aux:
+        adlr_audio_music_YouTube8M: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/adlr_audio_music/YouTube8M
+        adlr_audio_music_unbalanced_train_segments: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/adlr_audio_music/unbalanced_train_segments
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_wds_af3/YoutubeVeCaps
+      subflavors:
+        cook: omcat_conversation
+        aux_data_prefixes:
+          YouTube8M/: adlr_audio_music_YouTube8M
+          audioset/unbalanced_train_segments/22khz/: adlr_audio_music_unbalanced_train_segments
+    - aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/adlr_audio_music/AMI_ASR
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_wds_af3/ami_asr
+      subflavors:
+        cook: omcat_conversation
+    - aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/adlr_audio_music/Music4ALL
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_wds_af3/Music4All
+      subflavors:
+        cook: omcat_conversation
+    - aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/adlrdr_audio_music/MSD_mp3s_22khz
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_wds_af3/MQDA
+      subflavors:
+        cook: omcat_conversation
+    - aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/sreyang/final_qa/CountingQA
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_wds_af3/CountingQA
+      subflavors:
+        cook: omcat_conversation
+    - aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/sreyang/final_qa/DCASE-2025
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_wds_af3/DCASE_2025
+      subflavors:
+        cook: omcat_conversation
+    - aux:
+        adlr_audio_music_Clotho_v2_dev: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/adlr_audio_music/Clotho-v2_dev
+        adlr_audio_music_CochlScene_train: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/adlr_audio_music/CochlScene_train
+        adlr_audio_music_ESC_50: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/adlr_audio_music/ESC-50
+        adlr_audio_music_FMA: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/adlr_audio_music/FMA
+        adlr_audio_music_FSD50k_dev: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/adlr_audio_music/FSD50k_dev
+        adlr_audio_music_GTZAN: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/adlr_audio_music/GTZAN
+        adlr_audio_music_MACS_TAU_urban_2019: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/adlr_audio_music/MACS_TAU_urban_2019
+        adlr_audio_music_MagnaTagATune: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/adlr_audio_music/MagnaTagATune
+        adlr_audio_music_Medley_Pitch_DB: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/adlr_audio_music/Medley-Pitch-DB
+        adlr_audio_music_MusicCaps: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/adlr_audio_music/MusicCaps
+        adlr_audio_music_UrbanSound8K: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/adlr_audio_music/UrbanSound8K
+        adlr_audio_music_Webcrawl: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/adlr_audio_music/Webcrawl
+        adlr_audio_music_YouTube8M: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/adlr_audio_music/YouTube8M
+        adlr_audio_music_mira_10s: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/adlr_audio_music/mira_10s
+        adlr_audio_music_sreyan_dump_recap_merged: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/adlr_audio_music/sreyan_dump_recap_merged
+        adlr_audio_music_unbalanced_train_segments: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/adlr_audio_music/unbalanced_train_segments
+        sreyang_bbc: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/sreyang/bbc
+        sreyang_ego: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/sreyang/ego
+        sreyang_freesound: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/sreyang/freesound
+        sreyang_vecaps: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/sreyang/vecaps
+        zkong_SoundDescs: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/zkong/SoundDescs
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_wds_af3/SpeechSoundCaps
+      subflavors:
+        cook: omcat_conversation
+        aux_data_prefixes:
+          projects/adlr_audio_music/datasets/Clotho-v2/development/: adlr_audio_music_Clotho_v2_dev
+          projects/adlr_audio_music/datasets/CochlScene/Train/: adlr_audio_music_CochlScene_train
+          projects/adlr_audio_music/datasets/ESC-50/raw_audio/: adlr_audio_music_ESC_50
+          projects/adlr_audio_music/datasets/FMA/wav_files/: adlr_audio_music_FMA
+          projects/adlr_audio_music/datasets/FSD50k/44khz/dev/: adlr_audio_music_FSD50k_dev
+          projects/adlr_audio_music/datasets/GTZAN/gtzan/data/genres/: adlr_audio_music_GTZAN
+          projects/adlr_audio_music/datasets/MACS/TAU_Urban_Acoustic_Scenes_2019/TAU-urban-acoustic-scenes-2019-development/audio/: adlr_audio_music_MACS_TAU_urban_2019
+          projects/adlr_audio_music/datasets/MagnaTagATune/16khz/: adlr_audio_music_MagnaTagATune
+          projects/adlr_audio_music/datasets/Medley-Pitch-DB/MedleyDB-Pitch/audio/: adlr_audio_music_Medley_Pitch_DB
+          projects/adlr_audio_music/datasets/MusicCaps/raw/: adlr_audio_music_MusicCaps
+          projects/adlr_audio_music/datasets/UrbanSound8K/audio/: adlr_audio_music_UrbanSound8K
+          projects/adlr_audio_music/datasets/WavText5K/Webcrawl/44100/audios/: adlr_audio_music_Webcrawl
+          projects/adlr_audio_music/datasets/YouTube8M/: adlr_audio_music_YouTube8M
+          projects/adlr_audio_music/datasets/audioset/unbalanced_train_segments/22khz/: adlr_audio_music_unbalanced_train_segments
+          projects/adlr_audio_music/datasets/mira_10s/audios/: adlr_audio_music_mira_10s
+          projects/adlr_audio_music/datasets/sreyan_dump/recap_merged/: adlr_audio_music_sreyan_dump_recap_merged
+          users/sreyang/datasets/bbc_wav/: sreyang_bbc
+          users/sreyang/datasets/freesound_wav/: sreyang_freesound
+          users/sreyang/datasets/vecaps/: sreyang_vecaps
+          users/sreyang/ego/merged/: sreyang_ego
+          users/zkong/datasets/SoundDescs/raw/audios/: zkong_SoundDescs
+    - aux:
+        adlr_audio_music_Music4ALL: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/adlr_audio_music/Music4ALL
+        adlrdr_audio_music_MSD_mp3s_22khz: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/adlrdr_audio_music/MSD_mp3s_22khz
+        sreyang_final_qa_mtg_jamendo_MusicCaptioning: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/sreyang/final_qa/mtg-jamendo-MusicCaptioning
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_wds_af3/MSD_MusicQA
+      subflavors:
+        cook: omcat_conversation
+        aux_data_prefixes:
+          fs12/portfolios/adlr/projects/adlr_audio_music/datasets/MSD/mp3s_22khz/: adlrdr_audio_music_MSD_mp3s_22khz
+          fsw/portfolios/adlr/projects/adlr_audio_music/datasets/Music4ALL/audios/: adlr_audio_music_Music4ALL
+          fsw/portfolios/adlr/users/sreyang/final_qa/foundational_data/mtg-jamendo-MusicCaptioning/sliced_audios/: sreyang_final_qa_mtg_jamendo_MusicCaptioning
   val:
-    path: /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/omcat/valor_annotations_filtered
-    split_part: train
+    path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vqa/VQAv2/stage1
+    subflavors:
+      augmentation: False

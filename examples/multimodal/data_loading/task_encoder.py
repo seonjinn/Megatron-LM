@@ -26,7 +26,7 @@ from megatron.energon.edataclass import edataclass
 from megatron.energon.av import AVDecoder
 from megatron.training import get_args, get_tokenizer
 
-from .audio_processing import AudioTransform
+from .audio_processing import AudioParams, AudioTransformStrategy, AudioTransformParakeetStrategy
 from .conversation_sample import (
     AudioMedia,
     ConversationSample,
@@ -35,7 +35,8 @@ from .conversation_sample import (
     VideoFrameMedia,
     VideoMedia,
 )
-from .cookers.conversation import cook_conversation, cook_audio
+from .cookers.conversation import cook_conversation
+from .cookers.omcat_conversation import cook_omcat_conversation
 from .cookers.eagle import cook_eagle
 from .image_processing import (
     DynamicResolutionImageTilingStrategy,
@@ -82,6 +83,7 @@ class PreEncodedTaskSample(Sample):
     tokens: torch.Tensor
     labels: torch.Tensor
     images: list[ImageTilingParams]
+    audio: list[AudioParams]
     total_len: int
     total_len_padded: int
     num_frames: list[int]
@@ -121,10 +123,10 @@ class PackedTaskSample(Sample):
     samples_seen: int
 
     # Sound
-    sound_clips: torch.Tensor
-    sound_length: torch.Tensor
-    sound_timestamps: torch.Tensor
-    num_sound_clips: torch.Tensor
+    sound_clips: list[torch.Tensor]
+    sound_length: list[int]
+    sound_timestamps: list[tuple[int, int]]
+    num_sound_clips: list[int]
 
 
 # Typing for the resulting batch data after encode_batch()
@@ -200,7 +202,7 @@ class MultiModalTaskEncoder(
     cookers = [
         Cooker(cook_eagle, has_subflavors={"cook": "eagle"}),
         Cooker(cook_conversation, has_subflavors={"cook": "conversation"}),
-        Cooker(cook_audio, has_subflavors={"cook": "audio"}),
+        Cooker(cook_omcat_conversation, has_subflavors={"cook": "omcat_conversation"}),
     ]
 
     def __init__(self, is_val: bool = False, tiling_augment_prob: float = 0.4):
@@ -374,8 +376,13 @@ class MultiModalTaskEncoder(
                 f"Unknown knapsack algorithm: {self.args.packing_knapsack_algorithm}")
 
         if getattr(self.args, "sound_model_type", None) is not None:
-            self.transform_audio = AudioTransform(self.args.sound_model_type, self.args.sound_target_rate)
+            self.sound_token_id = self.tokenizer.convert_tokens_to_ids(SOUND_TOKEN)
+            if 'parakeet' in self.args.sound_model_type.lower():
+                self.transform_audio = AudioTransformParakeetStrategy(self.args.sound_model_type, self.args.sound_target_rate, self.args.sound_embedding_size)
+            else:
+                self.transform_audio = AudioTransformStrategy(self.args.sound_model_type, self.args.sound_target_rate, self.args.sound_embedding_size)
         else:
+            self.sound_token_id = None
             self.transform_audio = None
 
     @staticmethod
@@ -477,10 +484,6 @@ class MultiModalTaskEncoder(
         tiling_augment_prob = sample.__subflavors__.get("tiling_augment_prob", self.tiling_augment_prob)
         aggregated_num_frames = []
 
-        all_sounds = []
-        all_sound_length = []
-        all_sound_timestamps = []
-
         for message in sample.conversation:
             idx = 0
             while idx < len(message.fragments):
@@ -495,21 +498,7 @@ class MultiModalTaskEncoder(
                     idx += len(frames)
                     aggregated_num_frames.append(num_frames)
                 elif isinstance(fragment, AudioMedia):
-                    audio_media = fragment.value.get_audio()
-                    audio_sps = fragment.value.get_audio_samples_per_second()
-
-                    raw_audio = torch.stack(audio_media.audio_clips, dim=0)
-                    sound, sound_length, timestamps = self.transform_audio(raw_audio, audio_sps)
-
-                    # Whisper uses 30s clips. If the audio is shorter, we pad and use 1 clip. If it's longer, we use multiple clips in the batch dimension,
-                    # kinda similar to tiling in the image case.
-                    num_clips = sound.shape[0]
-                    num_sound_embeddings = num_clips * 750
-
-                    all_sounds.append(sound)
-                    all_sound_length.append(sound_length)
-                    all_sound_timestamps.append(timestamps)
-
+                    assert fragment.audio_duration <= 900, f"Audio duration is too long: {fragment.audio_duration}sec > 15min"
                     idx += 1
                 else:
                     if isinstance(fragment, (ImageMedia, VideoFrameMedia)):
@@ -524,6 +513,7 @@ class MultiModalTaskEncoder(
         ]
 
         image_media: list[ImageMedia | VideoFrameMedia] = []
+        audio_media: list[AudioMedia] = []
 
         # Format the conversation as a list of "user" / "assistant" turns.
         for message in sample.conversation:
@@ -547,7 +537,8 @@ class MultiModalTaskEncoder(
                         "VideoMedia should have been converted to VideoFrameMedia."
                     )
                 elif isinstance(fragment, AudioMedia):
-                    pass
+                    content += SOUND_TOKEN
+                    audio_media.append(fragment)
 
             if self.args.tokenizer_prompt_format == "nemotron-h-5p5-reasoning" and message.sender == "assistant":
                 think_start_count = content.count("<think>")
@@ -594,19 +585,21 @@ class MultiModalTaskEncoder(
             tiling_augment_prob=tiling_augment_prob
         )
 
+        audio_media_params = self.transform_audio.compute_params(audio_media)
+
         input_ids, target = self._truncate_to_decoder_seq_len(
-            input_ids, target, image_media_params
+            input_ids, target, image_media_params, audio_media_params
         )
 
         # We need to ensure that there are at least some trainable tokens in the sample.
         has_trainable_tokens = self._target_has_trainable_tokens(
-            input_ids, target, image_media_params
+            input_ids, target, image_media_params, audio_media_params
         )
 
         assert has_trainable_tokens, f"Sample has no trainable tokens: {self.tokenizer.detokenize(input_ids)}"
 
         total_len, total_len_padded, input_ids, target = self._pad_for_context_parallel_and_fp8(
-            input_ids, target, image_media_params
+            input_ids, target, image_media_params, audio_media_params
         )
 
         return PreEncodedTaskSample.derive_from(
@@ -614,6 +607,7 @@ class MultiModalTaskEncoder(
             tokens=input_ids,
             labels=target,
             images=image_media_params,
+            audio=audio_media_params,
             total_len=total_len,
             total_len_padded=total_len_padded,
             num_frames=aggregated_num_frames,
@@ -630,6 +624,16 @@ class MultiModalTaskEncoder(
         for media in sample.images:
             image_tiles.extend(self.image_tiling_strategy.apply_params(media, data_augment=data_augment))
 
+        sound_clips = []
+        sound_length = []
+        sound_timestamp = []
+        num_sound_clips = []
+        for media in sample.audio:
+            sound_clips.append(self.transform_audio.apply_params(media))
+            sound_length.append(media.audio_length)
+            sound_timestamp.append(media.timestamps)
+            num_sound_clips.append(media.num_clips)
+
         # Make this a packed sample (if used without packing, it will be the same next code)
         return PackedTaskSample.derive_from(
             sample,
@@ -644,12 +648,11 @@ class MultiModalTaskEncoder(
             cu_lengths_padded=torch.tensor(
                 [0, sample.total_len_padded], dtype=torch.int32
             ),
+            sound_clips=sound_clips,
+            sound_length=sound_length,
+            sound_timestamps=sound_timestamp,
+            num_sound_clips=num_sound_clips,
             samples_seen=torch.tensor(1, dtype=torch.int32),
-            # TODO: Add sound data.
-            sound_clips=None,
-            sound_length=None,
-            sound_timestamps=None,
-            num_sound_clips=None,
         )
 
     @stateless(restore_seeds=True)
@@ -755,12 +758,11 @@ class MultiModalTaskEncoder(
             max_length=max(sample.max_length for sample in samples),
             num_tiles=[n for s in samples for n in s.num_tiles],
             num_frames=[n for s in samples for n in s.num_frames],
+            sound_clips=[sc for sample in samples for sc in sample.sound_clips],
+            sound_length=[sl for sample in samples for sl in sample.sound_length],
+            sound_timestamps=[st for sample in samples for st in sample.sound_timestamps],
+            num_sound_clips=[ns for sample in samples for ns in sample.num_sound_clips],
             samples_seen=sum(s.samples_seen for s in samples),
-            # TODO: Add sound data.
-            sound_clips=None,
-            sound_length=None,
-            sound_timestamps=None,
-            num_sound_clips=None,
         )
 
     def batch(self, samples: List[PackedTaskSample]) -> BatchedPackedTaskSample:
@@ -872,6 +874,11 @@ class MultiModalTaskEncoder(
                 new_max_length = cu_lengths_padded[0][-1] - cu_lengths[0][-2]
                 max_lengths = torch.max(max_lengths, new_max_length)
 
+        sound_clips = torch.cat([sc for sample in samples for sc in sample.sound_clips], dim=0)
+        sound_length = torch.tensor([sl for sample in samples for sl in sample.sound_length], dtype=torch.int64)
+        sound_timestamps = torch.tensor([st for sample in samples for st in sample.sound_timestamps], dtype=torch.float32)
+        num_sound_clips = torch.tensor([ns for sample in samples for ns in sample.num_sound_clips], dtype=torch.int64)
+
         return BatchedPackedTaskSample(
             __key__=[s.__key__ for s in samples],
             __restore_key__=[s.__restore_key__ for s in samples],
@@ -888,12 +895,11 @@ class MultiModalTaskEncoder(
             vision_cu_lengths=vision_cu_lengths,
             vision_max_lengths=vision_max_lengths,
             has_pad_img=has_pad_img,
+            sound_clips=sound_clips,
+            sound_length=sound_length,
+            sound_timestamps=sound_timestamps,
+            num_sound_clips=num_sound_clips,
             samples_seen=sum(s.samples_seen for s in samples),
-            # TODO: Add sound data.
-            sound_clips=torch.tensor([[0]], dtype=torch.float32),
-            sound_length=torch.tensor([[0]], dtype=torch.float32),
-            sound_timestamps=torch.tensor([[0]], dtype=torch.float32),
-            num_sound_clips=torch.tensor([[0]], dtype=torch.int32),
         )
 
     def encode_batch(self, batch: BatchedPackedTaskSample) -> dict:
@@ -911,7 +917,7 @@ class MultiModalTaskEncoder(
                 medias[media.media.value].append(media)
 
             for media, frames in medias.items():
-                media_value = media.get()
+                media_value = media.get(sample)
                 if isinstance(media_value, AVDecoder):
                     media_value.suppress_warnings = True
                     frame_clips = media_value.get_clips(
@@ -939,13 +945,16 @@ class MultiModalTaskEncoder(
                     raise ValueError(f"Unexpected media type: {type(media_value)}. Path: {str(media.entry.source_info.dataset_path) + '/' + media.entry.fname}")
         else:
             for media in sample.images:
-                media.media.value = media.media.value.get()
+                media.media.value = media.media.value.get(sample)
+        for media in sample.audio:
+            media.media.value = media.media.value.get(sample)
 
     def _target_has_trainable_tokens(
         self,
         input_ids: torch.Tensor,
         target: torch.Tensor,
         image_tiling_params: list[ImageTilingParams],
+        audio_media_params: list[AudioParams],
     ) -> bool:
         """
         Check if the target has trainable tokens.
@@ -954,6 +963,7 @@ class MultiModalTaskEncoder(
             input_ids: Input tokens.
             target: Target tokens.
             image_tiling_params: Image tiling parameters.
+            audio_media_params: Audio media parameters.
 
         Returns:
             True if the target has trainable tokens, False otherwise.
@@ -966,12 +976,21 @@ class MultiModalTaskEncoder(
         # and targets to avoid this duplication.
         expanded_target = target.clone()
         expanded_target[input_ids == self.img_token_id] = self.img_token_id
+        if self.sound_token_id is not None:
+            expanded_target[input_ids == self.sound_token_id] = self.sound_token_id
         expanded_target = self._replace_value_with_repetition(
             expanded_target,
             self.img_token_id,
             torch.tensor([media.num_embeddings for media in image_tiling_params]),
             IGNORE_INDEX,
         )
+        if self.sound_token_id is not None:
+            expanded_target = self._replace_value_with_repetition(
+                expanded_target,
+                self.sound_token_id,
+                torch.tensor([media.num_embeddings for media in audio_media_params]),
+                IGNORE_INDEX,
+            )
         loss_mask = torch.ones(expanded_target.size(), dtype=torch.float)
         loss_mask[expanded_target == self.tokenizer.pad] = 0.0  # mask paddings
         loss_mask[expanded_target == IGNORE_INDEX] = 0.0  # mask prompts
@@ -997,11 +1016,10 @@ class MultiModalTaskEncoder(
             new_token: New token to replace the `token_to_replace` with.
 
         Returns:
-            Array: New array with token_to_replace replaced by num_repetition repetitions of
-             new_token
+            Array: New array with token_to_replace replaced by num_repetition repetitions of new_token
         """
         assert torch.sum(arr == token_to_replace) == len(num_repetition), (
-            "The number of image tokens must match the length of the tile tensor."
+            "The number of tokens to replace must match the length of the tile tensor."
         )
 
         # Convert to list for easier manipulation
@@ -1024,8 +1042,9 @@ class MultiModalTaskEncoder(
         input_ids: torch.Tensor,
         target: torch.Tensor,
         image_tiling_params: list[ImageTilingParams],
+        audio_media_params: list[AudioParams],
     ) -> tuple[int, int, torch.Tensor, torch.Tensor]:
-        total_len = self._get_total_seq_length(input_ids, image_tiling_params)
+        total_len = self._get_total_seq_length(input_ids, image_tiling_params, audio_media_params)
         total_len_padded = total_len
         # With context parallel or sequence parallel, we need to pad individual sequences.
         # However, with FP8, we need to only pad the entire sequence to be a multiple of 16.
@@ -1055,15 +1074,19 @@ class MultiModalTaskEncoder(
         return total_len, total_len_padded, input_ids, target
 
     def _get_total_seq_length(
-        self, input_ids: torch.Tensor, image_tiling_params: list[ImageTilingParams]
+        self, input_ids: torch.Tensor, image_tiling_params: list[ImageTilingParams], audio_media_params: list[AudioParams]
     ):
         """Calculate expected sequence length given text tokens length and number of tiles."""
         total_num_images = len(image_tiling_params)
-        total_num_embeddings = sum(media.num_embeddings for media in image_tiling_params)
+        total_num_audio = len(audio_media_params)
+        total_num_image_embeddings = sum(media.num_embeddings for media in image_tiling_params)
+        total_num_audio_embeddings = sum(media.num_embeddings for media in audio_media_params)
         total_len = (
             len(input_ids)
-            + total_num_embeddings
+            + total_num_image_embeddings
             - total_num_images
+            + total_num_audio_embeddings
+            - total_num_audio
         )
         return total_len
 
@@ -1072,14 +1095,17 @@ class MultiModalTaskEncoder(
         input_ids: torch.Tensor,
         target: torch.Tensor,
         image_tiling_params: list[ImageTilingParams],
+        audio_media_params: list[AudioParams],
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Truncate tokens and labels if they exceed sequence length."""
         total_img_embeddings_len = sum(
             media.num_embeddings for media in image_tiling_params
         )
         total_num_images = len(image_tiling_params)
+        total_num_audio_embeddings = sum(media.num_embeddings for media in audio_media_params)
+        total_num_audio = len(audio_media_params)
         max_text_tokens = (
-            self.packing_seq_length - total_img_embeddings_len + total_num_images
+            self.packing_seq_length - total_img_embeddings_len - total_num_audio_embeddings + total_num_images + total_num_audio
         )
 
         truncated_input_ids = input_ids[:max_text_tokens]
@@ -1096,6 +1122,8 @@ class MultiModalTaskEncoder(
                 f"max_text_tokens: {max_text_tokens} \n"
                 f"total_img_embeddings_len: {total_img_embeddings_len} \n"
                 f"total_num_images: {total_num_images} \n"
+                f"total_num_audio_embeddings: {total_num_audio_embeddings} \n"
+                f"total_num_audio: {total_num_audio} \n"
             )
 
         return truncated_input_ids, truncated_target

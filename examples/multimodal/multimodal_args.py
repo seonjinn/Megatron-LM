@@ -168,5 +168,11 @@ def add_multimodal_extra_args(parser):
         default=16000,
         help="Target rate of sound clips to regularly sample from the audio as input to the model.",
     )
+    group.add_argument(
+        "--sound-embedding-size",
+        type=int,
+        default=750,
+        help="Size of the sound embedding.",
+    )
 
     return parser
