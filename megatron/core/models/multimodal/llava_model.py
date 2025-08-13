@@ -1257,7 +1257,9 @@ class LLaVAModel(MegatronModule):
         if use_inference_kv_cache:
             sound_embeddings = None
         elif self.add_encoder and not has_sounds:
-            sound_embeddings = torch.tensor([], dtype=sound_clips.dtype, device=sound_clips.device).reshape(
+            device = sound_clips.device if sound_clips is not None else "cuda"
+            dtype = sound_clips.dtype if sound_clips is not None else torch.float32
+            sound_embeddings = torch.tensor([], dtype=dtype, device=device).reshape(
                 0, 0, 0
             )
         elif self.add_encoder and has_sounds:
