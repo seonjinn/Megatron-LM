@@ -57,7 +57,7 @@ DEFAULT_IMAGE_TOKEN_INDEX = -200
 DEFAULT_SOUND_TOKEN_INDEX = -300
 IMAGE_TOKEN = "<image>"
 VIDEO_TOKEN = "<video>"
-SOUND_TOKEN = "<sound>"
+SOUND_TOKEN = "<so_embedding>"
 
 
 # Note: This is under development and may be missing features.
@@ -179,6 +179,7 @@ class LLaVAModel(MegatronModule):
 
         self.sound_model = sound_model
         self.sound_projection = sound_projection
+        self.sound_token_index = sound_token_index
 
         language_model_type = getattr(language_transformer_config, "language_model_type", "")
         self.sequence_parallel_lm = language_transformer_config.sequence_parallel
@@ -516,6 +517,7 @@ class LLaVAModel(MegatronModule):
         insertion_nums=None,
         packed_seq_params: Optional[PackedSeqParams] = None,
         vision_tokens_retention_mask: Optional[torch.Tensor] = None,
+        sound_embeddings: Optional[torch.Tensor] = None,
     ):
         """Preprocess input data before input to language model.
 
@@ -712,6 +714,15 @@ class LLaVAModel(MegatronModule):
                 final_embedding[images_mask] = (
                     image_embeddings.permute(1, 0, 2).reshape(-1, embed_dim).contiguous()
                 )
+
+            sound_mask = input_ids == self.sound_token_index
+            # Replace with sound embeddings where needed
+            if sound_mask is not False and sound_mask.any():
+                # Get the positions where sounds should be placed
+                sound_positions = torch.where(sound_mask)
+                #torch.distributed.breakpoint()
+                final_embedding[sound_positions] = sound_embeddings.permute(1, 0, 2).reshape(-1, embed_dim)
+
 
         # Create the final labels and loss mask (if this is the last language model stage).
         final_labels, final_loss_mask = None, None
@@ -1315,6 +1326,7 @@ class LLaVAModel(MegatronModule):
             insertion_nums=insertion_nums,
             packed_seq_params=packed_seq_params,
             vision_tokens_retention_mask=image_tokens_retention_mask,
+            sound_embeddings=sound_embeddings,
         )  # [combined_seq_len, b, h_language], [b, combined_seq_len], [b, combined_seq_len]
 
         if self.context_parallel_lm > 1 or self.sequence_parallel_lm:

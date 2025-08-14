@@ -71,12 +71,24 @@ class AudioTransformStrategy(_ResampleAudioTransformStrategy):
 
     def compute_params(self, media_list: list[AudioMedia]) -> list[AudioParams]:
         params_list = []
+
+        # import os
+        # if int(os.environ.get("RANK", 0)) == 0:
+        #     breakpoint()
+        # else:
+        #     import time
+        #     time.sleep(10000)
+
         for media in media_list:
             # Compute the final number of tokens
             # Will be resampled to target_freq
-            num_samples = int(media.audio_duration * self._target_freq)
+            audio = media.value.get().get_audio().audio_clips
+            num_clips = math.ceil(audio[0].shape[1] / self._clip_duration / media.audio_samples_per_second)
+
+            #num_samples = int(media.audio_duration * self._target_freq)
             clip_samples = self._clip_duration * self._target_freq
-            num_clips = math.ceil(num_samples / clip_samples)
+            #num_clips = math.ceil(num_samples / clip_samples)
+
             params_list.append(AudioParams(
                 num_embeddings=num_clips * self._embedding_size,
                 audio_length=torch.tensor([num_clips * clip_samples], dtype=torch.long),

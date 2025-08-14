@@ -513,7 +513,7 @@ class MultiModalTaskEncoder(
         ]
 
         image_media: list[ImageMedia | VideoFrameMedia] = []
-        audio_media: list[AudioMedia] = []
+        audio_media_params: list[AudioMedia] = []
 
         # Format the conversation as a list of "user" / "assistant" turns.
         for message in sample.conversation:
@@ -537,8 +537,17 @@ class MultiModalTaskEncoder(
                         "VideoMedia should have been converted to VideoFrameMedia."
                     )
                 elif isinstance(fragment, AudioMedia):
-                    content += SOUND_TOKEN
-                    audio_media.append(fragment)
+                    # import os
+                    # if int(os.environ.get("RANK", 0)) == 0:
+                    #     breakpoint()
+                    # else:
+                    #     import time
+                    #     time.sleep(10000)
+
+                    audio_params = self.transform_audio.compute_params([fragment])
+
+                    content += "<so_start>" + SOUND_TOKEN * audio_params[0].num_embeddings + "<so_end>"
+                    audio_media_params.append(audio_params[0])
 
             if self.args.tokenizer_prompt_format == "nemotron-h-5p5-reasoning" and message.sender == "assistant":
                 think_start_count = content.count("<think>")
@@ -584,8 +593,6 @@ class MultiModalTaskEncoder(
             data_augment=data_augment,
             tiling_augment_prob=tiling_augment_prob
         )
-
-        audio_media_params = self.transform_audio.compute_params(audio_media)
 
         input_ids, target = self._truncate_to_decoder_seq_len(
             input_ids, target, image_media_params, audio_media_params
@@ -874,10 +881,18 @@ class MultiModalTaskEncoder(
                 new_max_length = cu_lengths_padded[0][-1] - cu_lengths[0][-2]
                 max_lengths = torch.max(max_lengths, new_max_length)
 
-        sound_clips = torch.cat([sc for sample in samples for sc in sample.sound_clips], dim=0)
-        sound_length = torch.tensor([sl for sample in samples for sl in sample.sound_length], dtype=torch.int64)
-        sound_timestamps = torch.tensor([st for sample in samples for st in sample.sound_timestamps], dtype=torch.float32)
-        num_sound_clips = torch.tensor([ns for sample in samples for ns in sample.num_sound_clips], dtype=torch.int64)
+
+        sound_clips = torch.tensor([[0]], dtype=torch.float32)
+        sound_length = torch.tensor([[0]], dtype=torch.int64)
+        sound_timestamps = torch.tensor([[0]], dtype=torch.float32)
+        num_sound_clips = torch.tensor([[0]], dtype=torch.int64)
+
+        all_sound_clips = [sc for sample in samples for sc in sample.sound_clips]
+        if all_sound_clips:
+            sound_clips = torch.cat(all_sound_clips, dim=0)
+            sound_length = torch.tensor([sl for sample in samples for sl in sample.sound_length], dtype=torch.int64)
+            sound_timestamps = torch.tensor([st for sample in samples for st in sample.sound_timestamps], dtype=torch.float32)
+            num_sound_clips = torch.tensor([ns for sample in samples for ns in sample.num_sound_clips], dtype=torch.int64)
 
         return BatchedPackedTaskSample(
             __key__=[s.__key__ for s in samples],
@@ -947,7 +962,15 @@ class MultiModalTaskEncoder(
             for media in sample.images:
                 media.media.value = media.media.value.get(sample)
         for media in sample.audio:
-            media.media.value = media.media.value.get(sample)
+
+            # import os
+            # if int(os.environ.get("RANK", 0)) == 0:
+            #     breakpoint()
+            # else:
+            #     import time
+            #     time.sleep(10000)
+
+            media.media.value = media.media.value.get(sample)[0]
 
     def _target_has_trainable_tokens(
         self,
@@ -984,13 +1007,6 @@ class MultiModalTaskEncoder(
             torch.tensor([media.num_embeddings for media in image_tiling_params]),
             IGNORE_INDEX,
         )
-        if self.sound_token_id is not None:
-            expanded_target = self._replace_value_with_repetition(
-                expanded_target,
-                self.sound_token_id,
-                torch.tensor([media.num_embeddings for media in audio_media_params]),
-                IGNORE_INDEX,
-            )
         loss_mask = torch.ones(expanded_target.size(), dtype=torch.float)
         loss_mask[expanded_target == self.tokenizer.pad] = 0.0  # mask paddings
         loss_mask[expanded_target == IGNORE_INDEX] = 0.0  # mask prompts
@@ -1078,15 +1094,12 @@ class MultiModalTaskEncoder(
     ):
         """Calculate expected sequence length given text tokens length and number of tiles."""
         total_num_images = len(image_tiling_params)
-        total_num_audio = len(audio_media_params)
         total_num_image_embeddings = sum(media.num_embeddings for media in image_tiling_params)
-        total_num_audio_embeddings = sum(media.num_embeddings for media in audio_media_params)
+        # Audio embeddings are already expanded.
         total_len = (
             len(input_ids)
             + total_num_image_embeddings
             - total_num_images
-            + total_num_audio_embeddings
-            - total_num_audio
         )
         return total_len
 

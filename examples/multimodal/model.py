@@ -270,8 +270,7 @@ def model_provider(
 
     tile_tags = _get_tile_tags(args, tokenizer)
 
-    sound_model, sound_projection = sound_model_provider(base_config, language_config.hidden_size)
-    sound_token_index = tokenizer.convert_tokens_to_ids(SOUND_TOKEN)
+    sound_model, sound_projection, sound_token_index = sound_model_provider(base_config, language_config.hidden_size)
 
     model = LLaVAModel(
         language_transformer_config=language_config,
@@ -368,7 +367,7 @@ def sound_model_provider(base_config, language_hidden_size):
     args = get_args()
 
     if getattr(args, "sound_model_type", None) is None:
-        return None, None
+        return None, None, None
 
     sound_config = deepcopy(base_config)
     sound_config = get_sound_model_config(sound_config)
@@ -456,4 +455,7 @@ def sound_model_provider(base_config, language_hidden_size):
             partial(_load_state_dict_hook_ignore_param_names, sound_model_param_names)
         )
 
-    return sound_model, sound_projection
+    tokenizer = get_tokenizer()
+    sound_token_index = tokenizer.convert_tokens_to_ids(SOUND_TOKEN)
+
+    return sound_model, sound_projection, sound_token_index
