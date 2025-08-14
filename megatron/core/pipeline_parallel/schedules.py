@@ -641,7 +641,6 @@ def get_pp_rank_microbatches(
             num_warmup_microbatches += (num_model_chunks - 1) * microbatch_group_size_per_vp_stage
     else:
         # forward_backward_no_pipelining
-        # This path is only used for cuda graph capturing compatibility for the PP=1 case.
         num_warmup_microbatches = 0
 
     if num_warmup_microbatches >= total_num_microbatches:
