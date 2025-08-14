@@ -4,7 +4,6 @@ from dataclasses import dataclass
 import math
 import torch
 from .conversation_sample import AudioMedia
-import librosa
 from transformers import AutoFeatureExtractor
 
 
@@ -51,6 +50,7 @@ class _ResampleAudioTransformStrategy(AudioPreprocessingStrategy):
         audio = audio.to(torch.float32)
         audio = audio.mean(dim=1, keepdim=True)
         if params.media.audio_samples_per_second != self._target_freq:
+            import librosa
             audio = librosa.resample(
                 audio.numpy(),
                 orig_sr=params.media.audio_samples_per_second,
@@ -71,13 +71,6 @@ class AudioTransformStrategy(_ResampleAudioTransformStrategy):
 
     def compute_params(self, media_list: list[AudioMedia]) -> list[AudioParams]:
         params_list = []
-
-        # import os
-        # if int(os.environ.get("RANK", 0)) == 0:
-        #     breakpoint()
-        # else:
-        #     import time
-        #     time.sleep(10000)
 
         for media in media_list:
             # Compute the final number of tokens
@@ -134,6 +127,7 @@ class AudioTransformParakeetStrategy(_ResampleAudioTransformStrategy):
         self.feature_extractor = FastConformerFeatureExtractor.from_pretrained(sound_model_type.split("hf://")[1])
 
     def compute_params(self, media_list: list[AudioMedia]) -> list[AudioParams]:
+
         params_list = []
         for media in media_list:
             # Compute the final number of tokens
@@ -153,5 +147,6 @@ class AudioTransformParakeetStrategy(_ResampleAudioTransformStrategy):
 
         audio = audio.squeeze(1)
         clip_samples = self._clip_duration * 2 * self._target_freq
+
         audio = torch.nn.functional.pad(audio, (0, clip_samples - audio.shape[1]))
         return audio

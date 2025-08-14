@@ -174,5 +174,12 @@ def add_multimodal_extra_args(parser):
         default=750,
         help="Size of the sound embedding.",
     )
+    group.add_argument(
+        "--sound-clip-duration",
+        type=int,
+        default=30,
+        help="Sound model clip duration in seconds."
+    )
+
 
     return parser

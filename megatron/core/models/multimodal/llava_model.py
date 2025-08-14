@@ -720,7 +720,6 @@ class LLaVAModel(MegatronModule):
             if sound_mask is not False and sound_mask.any():
                 # Get the positions where sounds should be placed
                 sound_positions = torch.where(sound_mask)
-                #torch.distributed.breakpoint()
                 final_embedding[sound_positions] = sound_embeddings.permute(1, 0, 2).reshape(-1, embed_dim)
 
 
@@ -1274,7 +1273,10 @@ class LLaVAModel(MegatronModule):
                 0, 0, 0
             )
         elif self.add_encoder and has_sounds:
-            sound_embeddings = self.sound_model(sound_clips) # [num_clips, sound_seq_len, h_sound]
+            if "parakeet" in self.sound_model.config.sound_model_type.lower():
+                sound_embeddings = self.sound_model(sound_clips, sound_length) # [num_clips, sound_seq_len, h_sound]
+            else:
+                sound_embeddings = self.sound_model(sound_clips) # [num_clips, sound_seq_len, h_sound]
             # contiguous() required as `permute` can sparsify the tensor and this breaks pipelining
             sound_embeddings = sound_embeddings.permute(
                 1, 0, 2

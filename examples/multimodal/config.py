@@ -451,6 +451,7 @@ def get_sound_model_config(config):
             hf_config = FastConformerConfig.from_pretrained(config.sound_model_type.split("hf://")[1])
         else:
             hf_config = transformers.AutoConfig.from_pretrained(config.sound_model_type.split("hf://")[1])
+
         config.hf_config = hf_config
         if "NV-Whisper" in config.sound_model_type:
             config.hidden_size = hf_config.audio_config.d_model

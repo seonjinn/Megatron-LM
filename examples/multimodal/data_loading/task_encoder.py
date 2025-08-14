@@ -537,13 +537,6 @@ class MultiModalTaskEncoder(
                         "VideoMedia should have been converted to VideoFrameMedia."
                     )
                 elif isinstance(fragment, AudioMedia):
-                    # import os
-                    # if int(os.environ.get("RANK", 0)) == 0:
-                    #     breakpoint()
-                    # else:
-                    #     import time
-                    #     time.sleep(10000)
-
                     audio_params = self.transform_audio.compute_params([fragment])
 
                     content += "<so_start>" + SOUND_TOKEN * audio_params[0].num_embeddings + "<so_end>"
@@ -962,15 +955,10 @@ class MultiModalTaskEncoder(
             for media in sample.images:
                 media.media.value = media.media.value.get(sample)
         for media in sample.audio:
-
-            # import os
-            # if int(os.environ.get("RANK", 0)) == 0:
-            #     breakpoint()
-            # else:
-            #     import time
-            #     time.sleep(10000)
-
-            media.media.value = media.media.value.get(sample)[0]
+            val = media.media.value.get(sample)
+            if isinstance(val, tuple) or isinstance(val, list):
+                val = val[0]
+            media.media.value = val
 
     def _target_has_trainable_tokens(
         self,
