@@ -76,13 +76,11 @@ class AudioTransformStrategy(_ResampleAudioTransformStrategy):
         for media in media_list:
             # Compute the final number of tokens
             # Will be resampled to target_freq
-            audio = media.value.get().get_audio().audio_clips
-            num_clips = math.ceil(audio[0].shape[1] / self._clip_duration / media.audio_samples_per_second)
-
-            #num_samples = int(media.audio_duration * self._target_freq)
-            clip_samples = self._clip_duration * self._target_freq
-            #num_clips = math.ceil(num_samples / clip_samples)
-
+            # Reduce the audio duration by 0.1 seconds. i.e. do not use a clip that is <0.1sec.
+            num_samples = int((media.audio_duration - 0.1) * self._target_freq)
+            clip_samples = int(self._clip_duration * self._target_freq)
+            num_clips = math.ceil(num_samples / clip_samples)
+            assert num_clips > 0, f"Expected at least 1 clip, got {num_clips}"
             params_list.append(AudioParams(
                 num_embeddings=num_clips * self._embedding_size,
                 audio_length=torch.tensor([num_clips * clip_samples], dtype=torch.long),
@@ -97,18 +95,22 @@ class AudioTransformStrategy(_ResampleAudioTransformStrategy):
         audio = self._get_audio_resampled(params)
         audio_length = params.audio_length
 
-        clip_samples = self._clip_duration * self._target_freq
+        clip_samples = int(self._clip_duration * self._target_freq)
         audio = audio.squeeze(1)
         if audio.shape[1] != clip_samples:
             # Pad or batch to expected clip length.
             if audio.shape[1] < clip_samples:
+                assert params.num_clips == 1, f"Expected 1 clip, got {params.num_clips}"
                 audio = torch.nn.functional.pad(audio, (0, clip_samples - audio.shape[1]))
             else:
                 clips = list(torch.split(audio, clip_samples, dim=1))
-                clips[-1] = torch.nn.functional.pad(clips[-1], (0, clip_samples - clips[-1].shape[1]))
+                # Optionally truncate if the last clip is very short.
+                assert len(clips) in (params.num_clips, params.num_clips + 1), f"Expected at {params.num_clips}(+1) clips, got {len(clips)}"
+                clips = clips[:params.num_clips]
+                if clips[-1].shape[1] < clip_samples:
+                    clips[-1] = torch.nn.functional.pad(clips[-1], (0, clip_samples - clips[-1].shape[1]))
                 audio = torch.stack(clips)
-                audio = audio.squeeze()
-
+                audio = audio.squeeze(1)
         # How to get batching to work?
         audio_features = []
 
