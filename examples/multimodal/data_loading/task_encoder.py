@@ -36,7 +36,7 @@ from .conversation_sample import (
     VideoMedia,
 )
 from .cookers.conversation import cook_conversation
-from .cookers.omcat_conversation import cook_omcat_conversation
+from .cookers.audio_conversation import cook_audio_conversation
 from .cookers.eagle import cook_eagle
 from .image_processing import (
     DynamicResolutionImageTilingStrategy,
@@ -202,7 +202,7 @@ class MultiModalTaskEncoder(
     cookers = [
         Cooker(cook_eagle, has_subflavors={"cook": "eagle"}),
         Cooker(cook_conversation, has_subflavors={"cook": "conversation"}),
-        Cooker(cook_omcat_conversation, has_subflavors={"cook": "omcat_conversation"}),
+        Cooker(cook_audio_conversation, has_subflavors={"cook": "audio_conversation"}),
     ]
 
     def __init__(self, is_val: bool = False, tiling_augment_prob: float = 0.4):

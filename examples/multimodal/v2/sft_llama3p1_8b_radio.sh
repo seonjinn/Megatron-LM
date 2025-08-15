@@ -26,7 +26,7 @@ USE_TILING=1
 USE_PACKING=1
 USE_ONLINE_PACKING=1
 USE_DYNAMIC_RES=0
-USE_FP8=0
+USE_FP8=1
 USE_PRECISION_AWARE_OPTIMIZER=1
 USE_CP=0
 
@@ -52,11 +52,10 @@ TENSORBOARD_DIR="${OUTPUT}/tensorboard"
 
 TP=4
 
-CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/output/amala_pretrain_llama_3p1_8b_cradio_rc3_commercial_0416"
+CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/amalasanjayd/checkpoints/pretrain_llama_3p1_8b_cradio_rc3_commercial_0416"
 
 if [[ $USE_ONLINE_PACKING -eq 1 ]]; then
     DATA_TRAIN="${SOURCE}/examples/multimodal/v2/data_config/sft_dataset_commercial_v13.16_online_packing.yaml"
-    DATA_TRAIN=/lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/docintel/final_recipe/13.41-modded.yaml
 else
     DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe/eagle_sft_v13.16_sft1/wds/out.yaml"
 fi

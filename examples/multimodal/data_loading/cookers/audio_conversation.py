@@ -45,7 +45,7 @@ def convert_tag_to_objects(tag: str, raw: dict) -> list[Media]:
                     result.append(AudioMedia(value=value))
                 else:
                     raise ValueError(f"Unknown tag: {ctag}")
-    
+
     if len(result) == 0:
         raise ValueError(f"Tag {tag} not found in sample {raw['id']}: {raw}")
 
@@ -55,9 +55,9 @@ def convert_tag_to_objects(tag: str, raw: dict) -> list[Media]:
 def convert_message(data: dict, msg: dict, tags_appeared: set) -> Message:
 
     fragments = []
-    
+
     parts = re.split(tag_pattern, msg["value"])
-    
+
     # Convert the parts to message fragments
     for i, part in enumerate(parts):
         if i % 2 == 1:
@@ -70,7 +70,7 @@ def convert_message(data: dict, msg: dict, tags_appeared: set) -> Message:
             # Even indices are plain text, but skip empty strings
             if part.strip():
                 fragments.append(part)
-    
+
     if msg["from"] == "human":
         msg["from"] = "user"
     elif msg["from"] == "gpt":
@@ -89,7 +89,7 @@ _re_clean_path = re.compile(r"(?:^\./|/\.(?=/))")
 
 @stateless
 @cooker(need_cache=True)
-def cook_omcat_conversation(
+def cook_audio_conversation(
     sample: dict,
     cache: CachePool,
     media_source: FileStore | None = None,
@@ -109,20 +109,20 @@ def cook_omcat_conversation(
     conversation = []
     for msg in data["conversations"]:
         conversation.append(convert_message(data, msg, tags_appeared))
-    
+
     # Check that all data in the sample is covered by the tags
     for key, _ in data.items():
         if key not in allowed_tags:
             continue
-        
+
         if key in tags_appeared:
             # All good. This is covered
             continue
-    
+
         if key == "sound-video" and "video-sound" in tags_appeared:
             # All good. This is covered
             continue
-        
+
         raise ValueError(f"Tag {key} not covered in sample {data['id']}: {data}")
 
     cs = ConversationSample(
@@ -159,14 +159,14 @@ def cook_omcat_conversation(
                             break
                     else:
                         raise ValueError(f"No prefix for {path!r} in {cs.__subflavors__['aux_data_prefixes']} for {cs.__sources__}")
-                    
+
                 if isinstance(frag, ImageMedia):
                     frag.metadata = dict(
                         width=val.width, height=val.height, format=val.format, mode=val.mode
                     )
                 elif isinstance(frag, (VideoMedia, AudioMedia, VideoFrameMedia)):
                     frag.metadata = dataclasses.asdict(val.get_metadata())
-                    
+
                     # if isinstance(frag, ImageMedia):
                     #     assert isinstance(frag.value, Image.Image), f"ImageMedia must be an Image.Image, got {type(frag.value)}"
                     # elif isinstance(frag, VideoMedia):

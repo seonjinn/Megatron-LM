@@ -2,10 +2,8 @@
 
 # H100
 CONTAINER_IMAGE="/lustre/fsw/portfolios/llmservice/users/matthieul/docker/megatron-dev-img-05142025-pytorch-dev-te-cd37379-energon-710-mamba-fix-vlmeval.sqsh"
-# For video development:
-#CONTAINER_IMAGE="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/containers/megatron-dev-img-05142025-pytorch-dev-te-cd37379-editable-energon-mamba-fix-vlmeval.sqsh"
-# For audio development:
-CONTAINER_IMAGE="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/containers/megatron-dev-img-05142025-pytorch-dev-te-cd37379-editable-energon-mamba-fix-vlmeval3.sqsh"
+# For audio/video development:
+CONTAINER_IMAGE="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/containers/megatron-dev-img-05142025-pytorch-dev-te-cd37379-editable-energon-mamba-fix-vlmeval-av.sqsh"
 
 # Set partitions based on hostname
 if [[ $(hostname) == *"oci-iad"* ]]; then

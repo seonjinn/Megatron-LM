@@ -19,7 +19,7 @@ splits:
         adlr_audio_music_unbalanced_train_segments: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/adlr_audio_music/unbalanced_train_segments
       path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_wds_af3/YoutubeVeCaps
       subflavors:
-        cook: omcat_conversation
+        cook: audio_conversation
         aux_data_prefixes:
           YouTube8M/: adlr_audio_music_YouTube8M
           audioset/unbalanced_train_segments/22khz/: adlr_audio_music_unbalanced_train_segments
@@ -27,27 +27,27 @@ splits:
         media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/adlr_audio_music/AMI_ASR
       path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_wds_af3/ami_asr
       subflavors:
-        cook: omcat_conversation
+        cook: audio_conversation
     - aux:
         media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/adlr_audio_music/Music4ALL
       path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_wds_af3/Music4All
       subflavors:
-        cook: omcat_conversation
+        cook: audio_conversation
     - aux:
         media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/adlrdr_audio_music/MSD_mp3s_22khz
       path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_wds_af3/MQDA
       subflavors:
-        cook: omcat_conversation
+        cook: audio_conversation
     - aux:
         media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/sreyang/final_qa/CountingQA
       path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_wds_af3/CountingQA
       subflavors:
-        cook: omcat_conversation
+        cook: audio_conversation
     - aux:
         media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/sreyang/final_qa/DCASE-2025
       path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_wds_af3/DCASE_2025
       subflavors:
-        cook: omcat_conversation
+        cook: audio_conversation
     - aux:
         adlr_audio_music_Clotho_v2_dev: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/adlr_audio_music/Clotho-v2_dev
         adlr_audio_music_CochlScene_train: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/adlr_audio_music/CochlScene_train
@@ -72,7 +72,7 @@ splits:
         zkong_SoundDescs: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/zkong/SoundDescs
       path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_wds_af3/SpeechSoundCaps
       subflavors:
-        cook: omcat_conversation
+        cook: audio_conversation
         aux_data_prefixes:
           projects/adlr_audio_music/datasets/Clotho-v2/development/: adlr_audio_music_Clotho_v2_dev
           projects/adlr_audio_music/datasets/CochlScene/Train/: adlr_audio_music_CochlScene_train
@@ -101,7 +101,7 @@ splits:
         sreyang_final_qa_mtg_jamendo_MusicCaptioning: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/sreyang/final_qa/mtg-jamendo-MusicCaptioning
       path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_wds_af3/MSD_MusicQA
       subflavors:
-        cook: omcat_conversation
+        cook: audio_conversation
         aux_data_prefixes:
           fs12/portfolios/adlr/projects/adlr_audio_music/datasets/MSD/mp3s_22khz/: adlrdr_audio_music_MSD_mp3s_22khz
           fsw/portfolios/adlr/projects/adlr_audio_music/datasets/Music4ALL/audios/: adlr_audio_music_Music4ALL
