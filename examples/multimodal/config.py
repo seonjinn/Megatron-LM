@@ -473,7 +473,7 @@ def get_sound_projection_config(config, hidden_size, enable_fusions=False):
     config.bias_dropout_fusion = enable_fusions
     config.apply_rope_fusion = enable_fusions
 
-    if config.language_model_type == "llama3.1_8b":
+    if config.language_model_type in ("llama3.1_8b", "nemotron5-hybrid-9b"):
         config.ffn_hidden_size = 4096
         config.activation_func = torch.nn.functional.gelu
         config.layernorm_epsilon = 1e-5

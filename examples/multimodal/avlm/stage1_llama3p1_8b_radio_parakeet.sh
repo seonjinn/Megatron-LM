@@ -6,11 +6,11 @@
 # OCI-ORD: grizzly,polar,polar3,polar4
 # OCI-NRT: batch_block1,backfill,batch_large,batch_long
 #SBATCH -p batch_block1,batch_block3,batch_block4,backfill_block1,backfill_block2,backfill_block3,backfill_block4
-#SBATCH -t 00:30:00
+#SBATCH -t 04:00:00
 #SBATCH --mem=0
 #SBATCH --ntasks-per-node=8
 #SBATCH --dependency=singleton
-#SBATCH --nodes=4
+#SBATCH --nodes=16
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
@@ -123,7 +123,7 @@ OPTIONS=" \
     --tensor-model-parallel-size 4 \
     --language-model-type llama3.1_8b \
     --vision-model-type radio \
-    --sound-model-type hf:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/mcore_mmodal_models/NV-Whisper \
+    --sound-model-type hf://nithinraok/parakeet-tdt-0.6b-v2-hf  \
     --sound-target-rate 16000 \
     --num-frames 8 \
     --micro-batch-size ${MBZ} \
@@ -170,6 +170,8 @@ OPTIONS=" \
     --ckpt-format torch \
     --image-tag-type nvlm \
     --allow-large-videos \
+    --sound-embedding-size 751 \
+    --sound-clip-duration 60 \
 "
 
 export NVTE_ALLOW_NONDETERMINISTIC_ALGO=${ALLOW_NONDETERMINISTIC}
