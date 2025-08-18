@@ -220,6 +220,7 @@ OPTIONS=" \
     --freeze-LM \
     --freeze-ViT \
     --freeze-sound-model \
+    --allow-large-videos \
 "
 
 export NVTE_APPLY_QK_LAYER_SCALING=0

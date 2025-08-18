@@ -1273,9 +1273,14 @@ class LLaVAModel(MegatronModule):
                 0, 0, 0
             )
         elif self.add_encoder and has_sounds:
+            sound_pad = None
+
             if "parakeet" in self.sound_model.config.sound_model_type.lower():
                 sound_embeddings = self.sound_model(sound_clips, sound_length) # [num_clips, sound_seq_len, h_sound]
             else:
+                if self.context_parallel_lm > 1 and sound_clips.shape[0] > self.context_parallel_lm:
+                    sound_clips, sound_pad = split_to_context_parallel_ranks(sound_clips)
+
                 sound_embeddings = self.sound_model(sound_clips) # [num_clips, sound_seq_len, h_sound]
             # contiguous() required as `permute` can sparsify the tensor and this breaks pipelining
             sound_embeddings = sound_embeddings.permute(
@@ -1286,6 +1291,9 @@ class LLaVAModel(MegatronModule):
             sound_embeddings = self.sound_projection(
                 sound_embeddings
             ).contiguous()  # [sound_seq_len, num_clips, h_language]
+
+            if self.context_parallel_lm > 1 and sound_pad is not None:
+                sound_embeddings = gather_from_context_parallel_ranks(sound_embeddings, sound_pad)
 
             if inference_context is not None:
                 inference_context.key_value_memory_dict["sound_tokens_count"] = sound_embeddings.shape[1]
