@@ -58,9 +58,10 @@ TP=4
 CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/output/amala_sft_nm_5p5_h_9b_cradio_0805_tiling_v1341/checkpoints"
 
 DATA_TRAIN="${SOURCE}/examples/multimodal/avlm/stage1_blend.yaml"
+DATA_TRAIN="/lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_wds_af3/trintamaki.yaml"
 
 SEQ_LEN=1024
-DECODER_SEQ_LEN=16384
+DECODER_SEQ_LEN=24576
 
 if [[ $DEBUG -eq 1 ]]; then
     MBZ=1
@@ -76,15 +77,15 @@ if [[ $DEBUG -eq 1 ]]; then
     NUM_GPU=8
 else
     MBZ=1
-    BZ=128
+    BZ=1024
     NW=8
+    LI=5
     AD=0.0
     HD=0.0
-    LI=5
+    EXTRA_ARGS=""
+    ALLOW_NONDETERMINISTIC=1
     PBS=4000
 
-    EXTRA_ARGS=""
-    NONDETERMINISTIC_ATTN=1
     NUM_GPU=8
 fi
 
@@ -222,7 +223,7 @@ OPTIONS=" \
     --sound-target-rate 16000 \
     --allow-missing-sound-projection-checkpoint \
     --allow-missing-sound-model-checkpoint \
-    --sound-embedding-size 750 \
+    --sound-embedding-size 751 \
     --sound-clip-duration 60 \
     --freeze-LM \
     --freeze-ViT \

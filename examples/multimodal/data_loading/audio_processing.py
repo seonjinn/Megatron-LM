@@ -149,7 +149,7 @@ class AudioTransformParakeetStrategy(_ResampleAudioTransformStrategy):
             audio_length = num_clips * clip_samples
 
             params_list.append(AudioParams(
-                num_embeddings=self._embedding_size * num_clips * (self._clip_duration // 60) + 1,
+                num_embeddings=self._embedding_size * num_clips * (self._clip_duration // 60),
                 audio_length=torch.tensor([audio_length for _ in range(num_clips)], dtype=torch.long),
                 num_clips=num_clips,
                 timestamps=(0, int(audio_length / self._target_freq)),

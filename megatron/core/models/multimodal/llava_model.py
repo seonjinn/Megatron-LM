@@ -1287,6 +1287,7 @@ class LLaVAModel(MegatronModule):
                 sound_embeddings = self.sound_model(sound_clips, sound_length) # [num_clips, sound_seq_len, h_sound]
             else:
                 sound_embeddings = self.sound_model(sound_clips) # [num_clips, sound_seq_len, h_sound]
+
             # contiguous() required as `permute` can sparsify the tensor and this breaks pipelining
             sound_embeddings = sound_embeddings.permute(
                 1, 0, 2

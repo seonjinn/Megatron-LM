@@ -57,6 +57,7 @@ TENSORBOARD_DIR="${OUTPUT}/tensorboard"
 CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/output/kchumachenko_sft_llama_3p1_8b_radio_rc3_v13_16_sft1_0509/checkpoints/"
 
 DATA_TRAIN="${SOURCE}/examples/multimodal/avlm/stage1_blend.yaml"
+DATA_TRAIN="/lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_wds_af3/trintamaki.yaml"
 
 if [[ $DEBUG -eq 1 ]]; then
     MBZ=1
@@ -76,18 +77,18 @@ else
     MBZ=1
     BZ=1024
     NW=8
-    LI=1
+    LI=5
     AD=0.0
     HD=0.0
     EXTRA_ARGS=""
     ALLOW_NONDETERMINISTIC=1
-    PBS=128
+    PBS=4000
 
     NUM_GPU=8
 fi
 
 SEQ_LEN=1024            # Image embeddings sequence length.
-DECODER_SEQ_LEN=16384   # Language model sequence length.
+DECODER_SEQ_LEN=24576   # Language model sequence length.
 
 if [[ $USE_TILING -eq 1 ]]; then
     EXTRA_ARGS+=" --pixel-shuffle --use-tiling --max-num-tiles 12 --use-thumbnail "

@@ -53,6 +53,10 @@ from .knapsacks import (
     greedy_knapsack,
 )
 
+
+AUDIO_MAX_DURATION_SECONDS = 900
+
+
 def _clean_think(match: re.Match) -> str:
     """Helper to strip whitespace inside <think> tags during preprocessing."""
     clean_content = match.group(1).strip()
@@ -498,7 +502,7 @@ class MultiModalTaskEncoder(
                     idx += len(frames)
                     aggregated_num_frames.append(num_frames)
                 elif isinstance(fragment, AudioMedia):
-                    assert fragment.audio_duration <= 900, f"Audio duration is too long: {fragment.audio_duration}sec > 15min"
+                    assert fragment.audio_duration <= AUDIO_MAX_DURATION_SECONDS, f"Audio duration is too long: {fragment.audio_duration}sec > {AUDIO_MAX_DURATION_SECONDS}s"
                     idx += 1
                 else:
                     if isinstance(fragment, (ImageMedia, VideoFrameMedia)):
@@ -884,7 +888,12 @@ class MultiModalTaskEncoder(
         all_sound_clips = [sc for sample in samples for sc in sample.sound_clips]
         if all_sound_clips:
             sound_clips = torch.cat(all_sound_clips, dim=0)
-            sound_length = torch.tensor([sl for sample in samples for sl in sample.sound_length], dtype=torch.int64)
+            sound_lengths = []
+            for sample in samples:
+                for sound_length in sample.sound_length:
+                    for sl in sound_length:
+                        sound_lengths.append(sl)
+            sound_length = torch.tensor(sound_lengths, dtype=torch.int64)
             sound_timestamps = torch.tensor([st for sample in samples for st in sample.sound_timestamps], dtype=torch.float32)
             num_sound_clips = torch.tensor([ns for sample in samples for ns in sample.num_sound_clips], dtype=torch.int64)
 

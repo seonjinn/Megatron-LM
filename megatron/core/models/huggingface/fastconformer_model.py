@@ -27,6 +27,8 @@ class ParakeetHuggingFaceModel(HuggingFaceModule):
         self.use_nemo = config.sound_model_type.startswith("nemo://")
         if config.sound_model_type.startswith("nemo://"):
             self.feature_extractor, self.model = get_nemo_sound_model(config.sound_model_type)
+
+            assert config.recompute_granularity is None, "Nemo model does not support activation checkpointing yet"
         elif config.sound_model_type.startswith("hf://"):
             sound_model_type = config.sound_model_type.split("hf://")[1]
 
@@ -35,6 +37,9 @@ class ParakeetHuggingFaceModel(HuggingFaceModule):
 
             self.feature_extractor = FastConformerFeatureExtractor.from_pretrained(sound_model_type)
             self.model = FastConformerModel.from_pretrained(sound_model_type)
+
+            if config.recompute_granularity is not None:
+                self.model.gradient_checkpointing_enable()
         else:
             raise ValueError(f"Unknown sound model type: {config.sound_model_type}")
 
