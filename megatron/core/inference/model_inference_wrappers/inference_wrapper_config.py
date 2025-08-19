@@ -19,11 +19,11 @@ class InferenceWrapperConfig:
     """Can be torch.float or torch.half if --fp16 is used, or torch.bfloat16 if --bf16 is used"""
 
     inference_batch_times_seqlen_threshold: int
-    """if (batch-size * sequence-length) is smaller than this threshold then we will not pipeline 
+    """if (batch-size * sequence-length) is smaller than this threshold then we will not pipeline
     the batch."""
 
     padded_vocab_size: int
-    """The final padded vocab size (Padded to make it divisible by 
+    """The final padded vocab size (Padded to make it divisible by
     --make-vocab-size-divisible-by value)"""
 
     inference_max_requests: int = 8
@@ -36,13 +36,15 @@ class InferenceWrapperConfig:
     """Move residual connections to fp32. Obtained from arguments.py"""
 
     nccl_all_reduce_for_prefill: bool = False
-    """When using symmetric all reduce kernels we keep the default all reduces for nccl. 
+    """When using symmetric all reduce kernels we keep the default all reduces for nccl.
     This can be more effecient for large prefill sizes"""
 
     fp8: Optional[str] = None
     """If set, enables the use of FP8 precision through Transformer Engine. There are 2 predefined
     choices (1) 'e4m3' uniformly uses e4m3 for all FP8 tensors, (2) 'hybrid' uses e4m3 for all FP8
     activation and weight tensors and e5m2 for all FP8 output activation gradient tensors."""
+
+    moe_pad_experts_for_cuda_graph_inference: bool = False
 
     def add_attributes(self, attribute_value_pair: dict):
         """Utility to add more attributes to inference params
