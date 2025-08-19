@@ -111,11 +111,12 @@ def get_packed_seq_params(tokens, img_seq_len, padding_needed, cp_size, use_pack
     return packed_seq_params
 
 
-def split_to_context_parallel_ranks(global_t):
+def split_to_context_parallel_ranks(global_t, pad_value=0):
     """Split the tensor global_t into context parallel world size parts.
 
     Args:
         global_t: [batch, ...]
+        pad_value: Value to pad the last rank with.
 
     Returns:
         local_t: [samples_per_rank, ...]. samples_per_rank is the # of samples per CP rank.
@@ -128,16 +129,17 @@ def split_to_context_parallel_ranks(global_t):
     # Number of samples per context parallel rank, rounded up.
     samples_per_rank = (global_t.shape[0] + cp_size - 1) // cp_size
 
+    # Get the local slice
+    local_t = global_t[cp_rank * samples_per_rank : (cp_rank + 1) * samples_per_rank]
+
     # Total padding to have equal samples_per_rank across context parallel ranks.
     global_pad = samples_per_rank * cp_size - global_t.shape[0]
 
-    # Get the local slice
-    local_t = global_t[cp_rank * samples_per_rank : (cp_rank + 1) * samples_per_rank]
     # Pad the local slice to equal size if needed.
     if local_t.shape[0] < samples_per_rank:
         local_pad = samples_per_rank - local_t.shape[0]
-        zeros = torch.zeros(
-            local_pad, *local_t.shape[1:], device=local_t.device, dtype=local_t.dtype
+        zeros = torch.full(
+            (local_pad, *local_t.shape[1:]), pad_value, device=local_t.device, dtype=local_t.dtype
         )
         local_t = torch.cat([local_t, zeros], dim=0)
 

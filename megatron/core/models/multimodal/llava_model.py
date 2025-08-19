@@ -1274,13 +1274,18 @@ class LLaVAModel(MegatronModule):
             )
         elif self.add_encoder and has_sounds:
             sound_pad = None
+            is_parakeet = "parakeet" in self.sound_model.config.sound_model_type.lower()
 
-            if "parakeet" in self.sound_model.config.sound_model_type.lower():
+            if self.context_parallel_lm > 1 and sound_clips.shape[0] > self.context_parallel_lm:
+                sound_clips, sound_pad = split_to_context_parallel_ranks(sound_clips)
+                if is_parakeet:
+                    # Parakeet needs sound lengths. Minimum sound length is the hop length.
+                    sound_length, sound_pad2 = split_to_context_parallel_ranks(sound_length, pad_value=192)
+                    assert sound_pad == sound_pad2, "something went wrong with splitting to context parallel ranks"
+
+            if is_parakeet:
                 sound_embeddings = self.sound_model(sound_clips, sound_length) # [num_clips, sound_seq_len, h_sound]
             else:
-                if self.context_parallel_lm > 1 and sound_clips.shape[0] > self.context_parallel_lm:
-                    sound_clips, sound_pad = split_to_context_parallel_ranks(sound_clips)
-
                 sound_embeddings = self.sound_model(sound_clips) # [num_clips, sound_seq_len, h_sound]
             # contiguous() required as `permute` can sparsify the tensor and this breaks pipelining
             sound_embeddings = sound_embeddings.permute(
