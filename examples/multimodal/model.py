@@ -377,10 +377,6 @@ def sound_model_provider(base_config, language_hidden_size):
     sound_projection_config = get_sound_projection_config(
         sound_projection_config, language_hidden_size, enable_fusions=args.enable_fusions
     )
-    if "hf://" in sound_projection_config.sound_model_type and "NV-Whisper" in sound_projection_config.sound_model_type:
-        sound_projection_config.input_size = 1280
-    elif "hf://" in sound_projection_config.sound_model_type and "whisper" in sound_projection_config.sound_model_type:
-        sound_projection_config.input_size = 1280
 
     if args.recompute_sound:
         if sound_config.recompute_method is not None and sound_config.recompute_granularity is not None:
@@ -403,7 +399,7 @@ def sound_model_provider(base_config, language_hidden_size):
     else:
         sound_projection_layer_spec = get_mlp_module_spec(use_te=args.use_te).submodules
 
-    if sound_config.sound_model_type.startswith("hf://"):
+    if sound_config.sound_model_type.startswith("hf://") or sound_config.sound_model_type.startswith("nemo://"):
         from megatron.core.models.huggingface.module import build_hf_model
 
         sound_model = build_hf_model(
@@ -421,10 +417,7 @@ def sound_model_provider(base_config, language_hidden_size):
     sound_model.register_load_state_dict_post_hook(
         _load_state_dict_hook_ignore_extra_state
     )
-    if 'parakeet' in sound_config.sound_model_type:
-        sound_projection_input_size = 1024
-    else:
-        sound_projection_input_size = sound_projection_config.input_size
+    sound_projection_input_size = sound_config.hidden_size
 
     # Map (intermediate) sound model outputs to the language model input dimension.
     sound_projection = MultimodalProjector(

@@ -1,28 +1,50 @@
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
-from megatron.core.models.huggingface import HuggingFaceModule
-from megatron.core.models.huggingface.fastconformer.modeling_fastconformer import FastConformerModel
-from megatron.core.models.huggingface.fastconformer.feature_extraction_fastconformer import FastConformerFeatureExtractor
 import torch
+
+from megatron.core.models.huggingface import HuggingFaceModule
+
+
+# Nemo model loading is very slow so do this global thing to cache it.
+_NEMO_SOUND_MODEL_SINGLETON = None
+
+def get_nemo_sound_model(sound_model_type):
+    global _NEMO_SOUND_MODEL_SINGLETON
+    if _NEMO_SOUND_MODEL_SINGLETON is None:
+        import nemo.collections.asr as nemo_asr
+        asr_model = nemo_asr.models.ASRModel.from_pretrained(model_name=sound_model_type.split("nemo://")[1])
+        _NEMO_SOUND_MODEL_SINGLETON = (asr_model.preprocessor, asr_model.encoder)
+    return _NEMO_SOUND_MODEL_SINGLETON
+
 
 class ParakeetHuggingFaceModel(HuggingFaceModule):
     """
-    Wrapper for Parakeet based on HF FastConformer model
+    Wrapper for Parakeet based on original Nemo implementation or HF FastConformer model
     """
 
     def __init__(self, config):
         super().__init__(config)
-        # TODO(jbarker): This is a hack to load the model from a local directory.
-        # We should load from an openly available source.
-        self.feature_extractor = FastConformerFeatureExtractor.from_pretrained(config.sound_model_type.split("hf://")[1])
-        self.model = FastConformerModel.from_pretrained(config.sound_model_type.split("hf://")[1])
+
+        self.use_nemo = config.sound_model_type.startswith("nemo://")
+        if config.sound_model_type.startswith("nemo://"):
+            self.feature_extractor, self.model = get_nemo_sound_model(config.sound_model_type)
+        elif config.sound_model_type.startswith("hf://"):
+            sound_model_type = config.sound_model_type.split("hf://")[1]
+
+            from megatron.core.models.huggingface.fastconformer.modeling_fastconformer import FastConformerModel
+            from megatron.core.models.huggingface.fastconformer.feature_extraction_fastconformer import FastConformerFeatureExtractor
+
+            self.feature_extractor = FastConformerFeatureExtractor.from_pretrained(sound_model_type)
+            self.model = FastConformerModel.from_pretrained(sound_model_type)
+        else:
+            raise ValueError(f"Unknown sound model type: {config.sound_model_type}")
 
     def forward(self, *args, **kwargs):
         """Forward function"""
-        # This is the sampling rate of the input audio file, not a target sampling rate
-        # so it's correct that it's fixed for this model.
-        # device = self.
-        # model.device
-        # x = self.feature_extractor(*args, **kwargs, return_tensors="pt", sampling_rate=16000)
-        x = self.feature_extractor(*args, **kwargs, return_tensors="pt", sampling_rate=16000, return_attention_mask=True)
-        x = self.model(x.input_features.to(torch.bfloat16), x.attention_mask)
-        return x.last_hidden_state
+        if self.use_nemo:
+            features = self.feature_extractor(input_signal=args[0], length=args[1])
+            y = self.model(audio_signal=features[0], length=features[1])
+            return y[0].permute(0, 2, 1)
+        else:
+            features = self.feature_extractor(*args, **kwargs, return_tensors="pt", sampling_rate=16000, return_attention_mask=True)
+            y = self.model(features.input_features.to(torch.bfloat16), features.attention_mask)
+            return y.last_hidden_state

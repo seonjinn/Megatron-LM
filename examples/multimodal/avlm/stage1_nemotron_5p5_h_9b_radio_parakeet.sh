@@ -31,6 +31,7 @@ USE_DYNAMIC_RES=0
 USE_FP8=0
 USE_PRECISION_AWARE_OPTIMIZER=0
 USE_CP=0
+USE_NEMO=1
 
 # Remember to update model and job name if running in batch mode!!
 if [[ $BATCH -eq 0 ]]; then
@@ -125,6 +126,12 @@ if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
     EXTRA_ARGS+=" ${IMAGE_BREAK_TOKEN} --dynamic-resolution --dynamic-resolution-min-patches 1024 --conv-merging "
 fi
 
+if [[ $USE_NEMO -eq 1 ]]; then
+    SOUND_MODEL_TYPE="nemo://nvidia/parakeet-tdt-0.6b-v3"
+else
+    SOUND_MODEL_TYPE="hf://nithinraok/parakeet-tdt-0.6b-v2-hf"
+fi
+
 OPTIONS=" \
     --use-checkpoint-args \
     --disable-bias-linear \
@@ -211,11 +218,11 @@ OPTIONS=" \
     --recompute-method block \
     --recompute-num-layers 56 \
     --recompute-vision \
-    --sound-model-type hf://nithinraok/parakeet-tdt-0.6b-v2-hf  \
+    --sound-model-type ${SOUND_MODEL_TYPE}  \
     --sound-target-rate 16000 \
     --allow-missing-sound-projection-checkpoint \
     --allow-missing-sound-model-checkpoint \
-    --sound-embedding-size 751 \
+    --sound-embedding-size 750 \
     --sound-clip-duration 60 \
     --freeze-LM \
     --freeze-ViT \

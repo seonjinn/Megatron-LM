@@ -378,9 +378,9 @@ class MultiModalTaskEncoder(
         if getattr(self.args, "sound_model_type", None) is not None:
             self.sound_token_id = self.tokenizer.convert_tokens_to_ids(SOUND_TOKEN)
             if 'parakeet' in self.args.sound_model_type.lower():
-                self.transform_audio = AudioTransformParakeetStrategy(self.args.sound_model_type, self.args.sound_target_rate, self.args.sound_embedding_size)
+                self.transform_audio = AudioTransformParakeetStrategy(self.args.sound_model_type, self.args.sound_target_rate, self.args.sound_embedding_size, self.args.sound_clip_duration)
             else:
-                self.transform_audio = AudioTransformStrategy(self.args.sound_model_type, self.args.sound_target_rate, self.args.sound_embedding_size)
+                self.transform_audio = AudioTransformStrategy(self.args.sound_model_type, self.args.sound_target_rate, self.args.sound_embedding_size, self.args.sound_clip_duration)
         else:
             self.sound_token_id = None
             self.transform_audio = None
@@ -629,8 +629,9 @@ class MultiModalTaskEncoder(
         sound_timestamp = []
         num_sound_clips = []
         for media in sample.audio:
-            sound_clips.append(self.transform_audio.apply_params(media))
-            sound_length.append(media.audio_length)
+            audio, audio_length = self.transform_audio.apply_params(media)
+            sound_clips.append(audio)
+            sound_length.append(audio_length)
             sound_timestamp.append(media.timestamps)
             num_sound_clips.append(media.num_clips)
 

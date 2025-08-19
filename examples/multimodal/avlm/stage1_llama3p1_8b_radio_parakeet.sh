@@ -33,6 +33,7 @@ USE_DYNAMIC_RES=0
 USE_FP8=0
 USE_PRECISION_AWARE_OPTIMIZER=0
 USE_CP=0
+USE_NEMO=1
 
 if [[ $BATCH -eq 0 ]]; then
     DATETIME=`date +'%y-%m-%d-%H-%M-%S'`
@@ -60,7 +61,7 @@ DATA_TRAIN="${SOURCE}/examples/multimodal/avlm/stage1_blend.yaml"
 
 if [[ $DEBUG -eq 1 ]]; then
     MBZ=1
-    BZ=8
+    BZ=16
     NW=2
     LI=1
     AD=0.0
@@ -128,6 +129,12 @@ if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
     EXTRA_ARGS+=" ${IMAGE_BREAK_TOKEN} --dynamic-resolution --dynamic-resolution-min-patches 1024 --conv-merging "
 fi
 
+if [[ $USE_NEMO -eq 1 ]]; then
+    SOUND_MODEL_TYPE="nemo://nvidia/parakeet-tdt-0.6b-v3"
+else
+    SOUND_MODEL_TYPE="hf://nithinraok/parakeet-tdt-0.6b-v2-hf"
+fi
+
 OPTIONS=" \
     --disable-vision-class-token \
     --swiglu \
@@ -156,7 +163,7 @@ OPTIONS=" \
     --tensor-model-parallel-size 4 \
     --language-model-type llama3.1_8b \
     --vision-model-type radio \
-    --sound-model-type hf://nithinraok/parakeet-tdt-0.6b-v2-hf \
+    --sound-model-type ${SOUND_MODEL_TYPE} \
     --sound-target-rate 16000 \
     --num-frames 8 \
     --micro-batch-size ${MBZ} \
@@ -203,7 +210,8 @@ OPTIONS=" \
     --ckpt-format torch \
     --image-tag-type nvlm \
     --allow-large-videos \
-    --sound-embedding-size 751 \
+    --sound-embedding-size 750 \
+    --sound-clip-duration 60 \
 "
 
 export NVTE_ALLOW_NONDETERMINISTIC_ALGO=${ALLOW_NONDETERMINISTIC}

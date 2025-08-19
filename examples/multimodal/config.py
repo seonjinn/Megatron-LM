@@ -459,6 +459,11 @@ def get_sound_model_config(config):
             config.hidden_size = hf_config.d_model
         else:
             config.hidden_size = hf_config.hidden_size
+    elif config.sound_model_type.startswith("nemo://"):
+        from megatron.core.models.huggingface.fastconformer_model import get_nemo_sound_model
+
+        _, encoder = get_nemo_sound_model(config.sound_model_type)
+        config.hidden_size = encoder.d_model
     else:
         raise ValueError(f"unknown sound model type {config.sound_model_type}")
 
