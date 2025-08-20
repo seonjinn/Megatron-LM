@@ -10,11 +10,11 @@
 #SBATCH --mem=0
 #SBATCH --ntasks-per-node=8
 #SBATCH --dependency=singleton
-#SBATCH --nodes=32
+#SBATCH --nodes=8
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=stage1_nm_5p5_h_9b_cradio_parakeet_0815
+#SBATCH --job-name=stage1_nm_5p5_h_9b_cradio_parakeet_0820
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
@@ -40,7 +40,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS=" --special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box> <so_embedding> <so_start> <so_end> "
     DEBUG=1
 else
-    MODEL_NAME="stage1_nm_5p5_h_9b_cradio_parakeet_0815"
+    MODEL_NAME="stage1_nm_5p5_h_9b_cradio_parakeet_0820"
     SPECIAL_TOKENS=" --special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\> \<so_embedding\> \<so_start\> \<so_end\> "
 fi
 
@@ -83,7 +83,7 @@ else
     AD=0.0
     HD=0.0
     EXTRA_ARGS=""
-    ALLOW_NONDETERMINISTIC=1
+    NONDETERMINISTIC_ATTN=1
     PBS=4000
 
     NUM_GPU=8

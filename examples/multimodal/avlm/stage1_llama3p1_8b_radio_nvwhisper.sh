@@ -14,7 +14,7 @@
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=llama3p1-8b-radio-nvwhisper-mlp-stage1-0815
+#SBATCH --job-name=llama3p1-8b-radio-nvwhisper-mlp-stage1-0820
 
 # Please launch this script from megatron-lm root.
 
@@ -40,7 +40,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS=" --special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box> <s> <im_embedding> <im_start> <im_end> <video> <vi_embedding> <vi_start> <vi_end> <video-sound> <vis_embedding> <vis_start> <vis_end> <sound> <so_embedding> <so_start> <so_end> "
     DEBUG=1
 else
-    MODEL_NAME="mcore-llama3p1-8b-radio-nvwhisper-mlp-stage1-0815"
+    MODEL_NAME="mcore-llama3p1-8b-radio-nvwhisper-mlp-stage1-0820"
     SPECIAL_TOKENS=" --special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\> \<s\> \<im_embedding\> \<im_start\> \<im_end\> \<video\> \<vi_embedding\> \<vi_start\> \<vi_end\> \<video-sound\> \<vis_embedding\> \<vis_start\> \<vis_end\> \<sound\> \<so_embedding\> \<so_start\> \<so_end\> "
 fi
 
@@ -67,7 +67,7 @@ if [[ $DEBUG -eq 1 ]]; then
     AD=0.0
     HD=0.0
     EXTRA_ARGS=""
-    ALLOW_NONDETERMINISTIC=1
+    NONDETERMINISTIC_ATTN=1
     PBS=128
 
     #export CUDA_VISIBLE_DEVICES=0,1,2,3
@@ -81,7 +81,7 @@ else
     AD=0.0
     HD=0.0
     EXTRA_ARGS=""
-    ALLOW_NONDETERMINISTIC=1
+    NONDETERMINISTIC_ATTN=1
     PBS=4000
 
     NUM_GPU=8
@@ -206,7 +206,8 @@ OPTIONS=" \
     --allow-large-videos \
 "
 
-export NVTE_ALLOW_NONDETERMINISTIC_ALGO=${ALLOW_NONDETERMINISTIC}
+export NVTE_APPLY_QK_LAYER_SCALING=0
+export NVTE_ALLOW_NONDETERMINISTIC_ALGO=${NONDETERMINISTIC_ATTN}
 
 # Interactive or batch mode
 if [[ $BATCH -eq 0 ]]; then
