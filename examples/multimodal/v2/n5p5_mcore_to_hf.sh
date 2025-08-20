@@ -1,6 +1,7 @@
 MCORE_PATH=$1
 HF_BASE_PATH=$2
 CKPT_STEP=$3
+MODEL_TYPE=${4:-12b}
 
 mkdir -p $HF_BASE_PATH
 HF_PATH=$HF_BASE_PATH/mcore_to_hf
@@ -27,5 +28,12 @@ python examples/multimodal/tools/modify_cls_token.py $HF_PATH $FIXED_HF_PATH
 touch $HF_BASE_PATH/mcore_to_hf_info.txt
 echo "original mcore path: $MCORE_PATH at iteration $CKPT_STEP" >> $HF_BASE_PATH/mcore_to_hf_info.txt
 
-# Step 3: Copy model configs
-cp /lustre/fsw/portfolios/llmservice/users/charlwang/nvwork/250709_vlm/vision_model_config/* $FIXED_HF_PATH
+# copy the configuration based on the model type, error out if not 9b or 12b
+if [ "$MODEL_TYPE" == "9b" ]; then
+    cp /lustre/fsw/portfolios/llmservice/users/matthieul/repos_rebase/n5p5_9b_model_config/* $FIXED_HF_PATH
+elif [ "$MODEL_TYPE" == "12b" ]; then
+    cp /lustre/fsw/portfolios/llmservice/users/charlwang/nvwork/250709_vlm/vision_model_config/* $FIXED_HF_PATH
+else
+    echo "Error: MODEL_TYPE must be either '9b' or '12b', but got '$MODEL_TYPE'"
+    exit 1
+fi
