@@ -50,38 +50,59 @@ class HFCheckpointSaver:
             print(f"Exiting. If you want to ignore this, use the argument --no-checking.")
             exit(1)
 
-    def recover_lm_qkv_weight(self, qkv_weight):
-        dim = self.md.hidden_size // self.md.num_attention_heads
+    def recover_lm_qkv_weight(self, qkv_weight, target_head_dim: int = None):
+        """
+        Recover HF-style q, k, v projection weights from fused Megatron qkv weight.
+
+        Derives per-head dimension from the actual tensor shapes to avoid
+        relying on hidden_size/num_attention_heads assumptions that can be wrong
+        for hybrid models.
+        """
         tp = self.md.previous_tensor_parallel_size
-        nh = self.md.num_attention_heads // tp
-        ng = self.md.num_query_groups // tp
-        hidden_size = self.md.hidden_size
+        nh_total = self.md.num_attention_heads
+        ng_total = self.md.num_query_groups
+
+        # Validate expected total rows and infer head_dim
+        total_rows = qkv_weight.shape[0]
+        denom = nh_total + 2 * ng_total
+        assert total_rows % denom == 0, (
+            f"Unexpected qkv rows: {total_rows} not divisible by (nh + 2*ng)={denom}"
+        )
+        dim_src = total_rows // denom
+        # Target head dim (rows per head we want in HF); default to hidden_size/nh
+        dim_tgt = target_head_dim if target_head_dim is not None else (self.md.hidden_size // nh_total)
+
+        nh = nh_total // tp
+        ng = ng_total // tp
 
         params_per_tp = torch.chunk(qkv_weight, tp, dim=0)
 
         # Use lists to collect tensors, then concatenate once at the end
-        # This preserves dtype and is more efficient
         q_parts = []
         k_parts = []
         v_parts = []
 
         for t in params_per_tp:
-            # 1. Reshape back to (ng, (dim*nh//ng + 2*dim), hidden_size).
-            qkv = t.reshape(ng, dim * (nh // ng) + 2 * dim, -1)
+            # Reshape back to (ng, (dim*nh//ng + 2*dim), in_features)
+            qkv = t.reshape(ng, dim_src * (nh // ng) + 2 * dim_src, -1)
 
-            # 2. Slice out q, k, v along dim=1.
-            q_t = qkv[:, : dim * (nh // ng), :]  
-            k_t = qkv[:, dim * (nh // ng) : dim * (nh // ng) + dim, :]
-            v_t = qkv[:, dim * (nh // ng) + dim :, :]
+            # Slice out q, k, v along dim=1.
+            # Slice to target dims per group; drop any extra channels beyond dim_tgt
+            q_start = 0
+            q_end = dim_tgt * (nh // ng)
+            k_start = dim_src * (nh // ng)
+            k_end = k_start + dim_tgt
+            v_start = dim_src * (nh // ng) + dim_src
+            v_end = v_start + dim_tgt
 
-            # 3. Reshape each to match the original HF shapes.
-            q_t = q_t.reshape(ng, dim * (nh // ng), -1)
-            k_t = k_t.reshape(ng, dim, -1)
-            v_t = v_t.reshape(ng, dim, -1)
+            q_t = qkv[:, q_start:q_end, :]
+            k_t = qkv[:, k_start:k_end, :]
+            v_t = qkv[:, v_start:v_end, :]
 
-            qp = q_t.reshape(dim * (nh // ng) * ng, -1)
-            kp = k_t.reshape(dim * ng, -1)
-            vp = v_t.reshape(dim * ng, -1)
+            # Reshape each to match the original HF shapes.
+            qp = q_t.reshape(dim_tgt * (nh // ng) * ng, -1)
+            kp = k_t.reshape(dim_tgt * ng, -1)
+            vp = v_t.reshape(dim_tgt * ng, -1)
 
             q_parts.append(qp)
             k_parts.append(kp)
@@ -89,48 +110,58 @@ class HFCheckpointSaver:
 
         # Concatenate all parts at once - this preserves the original dtype
         q = torch.cat(q_parts, dim=0)
-        k = torch.cat(k_parts, dim=0)  
+        k = torch.cat(k_parts, dim=0)
         v = torch.cat(v_parts, dim=0)
+
+        # Additional sanity check: expect shapes ((dim*nh_total), in_features), ((dim*ng_total), in_features)
+        in_features = q.shape[1]
+        assert q.shape[0] == dim_tgt * nh_total and k.shape[0] == dim_tgt * ng_total and v.shape[0] == dim_tgt * ng_total, (
+            f"Recovered QKV shapes unexpected: q={q.shape}, k={k.shape}, v={v.shape}, dim_tgt={dim_tgt}, nh_total={nh_total}, ng_total={ng_total}, in_features={in_features}"
+        )
 
         return q, k, v
 
-    def recover_lm_qkv_bias(self, qkv_bias):
-        dim = self.md.hidden_size // self.md.num_attention_heads
+    def recover_lm_qkv_bias(self, qkv_bias, target_head_dim: int = None):
         tp = self.md.previous_tensor_parallel_size
-        nh = self.md.num_attention_heads // tp
-        ng = self.md.num_query_groups // tp
+        nh_total = self.md.num_attention_heads
+        ng_total = self.md.num_query_groups
+
+        total_elems = qkv_bias.shape[0]
+        denom = nh_total + 2 * ng_total
+        assert total_elems % denom == 0, (
+            f"Unexpected qkv bias length: {total_elems} not divisible by (nh + 2*ng)={denom}"
+        )
+        dim_src = total_elems // denom
+        dim_tgt = target_head_dim if target_head_dim is not None else (nh_total and (self.md.hidden_size // nh_total))
+
+        nh = nh_total // tp
+        ng = ng_total // tp
 
         bias_per_tp = torch.chunk(qkv_bias, tp, dim=0)
 
-        # Use lists to collect tensors, then concatenate once at the end
-        # This preserves dtype and is more efficient
         qb_parts = []
         kb_parts = []
         vb_parts = []
 
         for b in bias_per_tp:
-            qkvb = b.reshape(ng, dim * (nh // ng) + 2 * dim)
+            qkvb = b.reshape(ng, dim_src * (nh // ng) + 2 * dim_src)
 
-            q_b = qkvb[:, : dim * (nh // ng)]  
-            k_b = qkvb[:, dim * (nh // ng) : dim * (nh // ng) + dim]
-            v_b = qkvb[:, dim * (nh // ng) + dim :]
+            q_b = qkvb[:, : dim_tgt * (nh // ng)]
+            k_b = qkvb[:, dim_src * (nh // ng) : dim_src * (nh // ng) + dim_tgt]
+            v_b = qkvb[:, dim_src * (nh // ng) + dim_src : dim_src * (nh // ng) + dim_src + dim_tgt]
 
-            q_b = q_b.reshape(ng, dim * (nh // ng))
-            k_b = k_b.reshape(ng, dim)
-            v_b = v_b.reshape(ng, dim)
+            qb_parts.append(q_b.reshape(-1))
+            kb_parts.append(k_b.reshape(-1))
+            vb_parts.append(v_b.reshape(-1))
 
-            q_b = q_b.reshape(-1)
-            k_b = k_b.reshape(-1)
-            v_b = v_b.reshape(-1)
-
-            qb_parts.append(q_b) 
-            kb_parts.append(k_b) 
-            vb_parts.append(v_b) 
-
-        # Concatenate all parts at once - this preserves the original dtype
         qb = torch.cat(qb_parts, dim=0)
         kb = torch.cat(kb_parts, dim=0)
         vb = torch.cat(vb_parts, dim=0)
+
+        # Sanity check expected lengths
+        assert qb.numel() == dim_tgt * nh_total and kb.numel() == dim_tgt * ng_total and vb.numel() == dim_tgt * ng_total, (
+            f"Recovered QKV bias sizes unexpected: qb={qb.shape}, kb={kb.shape}, vb={vb.shape}, dim_tgt={dim_tgt}, nh_total={nh_total}, ng_total={ng_total}"
+        )
 
         return qb, kb, vb
 
@@ -159,7 +190,20 @@ class HFCheckpointSaver:
         if self.md.qkv_bias:
             qkv_bias = message["qkv bias"]
 
-        q, k, v = self.recover_lm_qkv_weight(qkv_weight)
+        # Infer head_dim from shapes; prefer dense weight input features if available
+        if "dense weight" in message and isinstance(message["dense weight"], torch.Tensor):
+            in_features = message["dense weight"].shape[1]
+            assert in_features % self.md.num_attention_heads == 0, (
+                f"dense weight in_features {in_features} not divisible by num_heads {self.md.num_attention_heads}"
+            )
+            head_dim = in_features // self.md.num_attention_heads
+        else:
+            # Fallback from qkv length
+            total_rows = qkv_weight.shape[0]
+            denom = self.md.num_attention_heads + 2 * self.md.num_query_groups
+            head_dim = total_rows // denom
+
+        q, k, v = self.recover_lm_qkv_weight(qkv_weight, target_head_dim=head_dim)
         q = q.clone().detach().contiguous()
         params_dict["q_proj_weight"] = q
         k = k.clone().detach().contiguous()
@@ -168,7 +212,7 @@ class HFCheckpointSaver:
         params_dict["v_proj_weight"] = v
 
         if self.md.qkv_bias:
-            qb, kb, vb = self.recover_lm_qkv_bias(qkv_bias)
+            qb, kb, vb = self.recover_lm_qkv_bias(qkv_bias, target_head_dim=head_dim)
             qb = qb.clone().detach().contiguous()
             params_dict["q_proj_bias"] = qb
             kb = kb.clone().detach().contiguous()
