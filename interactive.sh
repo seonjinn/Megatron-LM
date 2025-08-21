@@ -6,7 +6,7 @@ CONTAINER_IMAGE="/lustre/fsw/portfolios/llmservice/users/matthieul/docker/megatr
 CONTAINER_IMAGE="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/containers/megatron-dev-img-05142025-pytorch-dev-te-cd37379-editable-energon-mamba-fix-vlmeval-av.sqsh"
 
 # Set partitions based on hostname
-if [[ $(hostname) == *"oci-iad"* ]]; then
+if [[ $(hostname) == *"draco-oci"* ]]; then
     PARTITIONS="interactive,batch_singlenode,backfill_singlenode,backfill_block1,backfill_block3,backfill_block4,batch_block1,batch_block2,batch_block3,batch_block4"
 elif [[ $(hostname) == *"cw-dfw"* ]]; then
     PARTITIONS="interactive,batch"

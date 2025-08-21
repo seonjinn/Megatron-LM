@@ -39,7 +39,9 @@ class _ResampleAudioTransformStrategy(AudioPreprocessingStrategy):
         self._embedding_size = embedding_size
 
     def _get_audio_resampled(self, params: AudioParams) -> torch.Tensor:
-        audio = torch.stack(params.media.value.get_audio().audio_clips, dim=0)
+        val = params.media.value
+        val = [val] if isinstance(val, torch.Tensor) else val.get_audio().audio_clips
+        audio = torch.stack(val, dim=0)
 
         # Convert to float32 for processing. For stereo audio, we average the channels.
 
@@ -49,6 +51,7 @@ class _ResampleAudioTransformStrategy(AudioPreprocessingStrategy):
         # audio = audio / max_value
         audio = audio.to(torch.float32)
         audio = audio.mean(dim=1, keepdim=True)
+
         if params.media.audio_samples_per_second != self._target_freq:
             import librosa
             audio = librosa.resample(

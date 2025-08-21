@@ -531,6 +531,8 @@ class VLMForwardStep(ForwardStep):
         imgs_sizes,
         vision_cu_lengths,
         vision_max_lengths,
+        sound_clips,
+        sound_length,
         model,
         inference_context,
     ):
@@ -567,6 +569,9 @@ class VLMForwardStep(ForwardStep):
         # Checks if the current stage only has a vision encoder
         self._encoder_only = parallel_state.is_inside_encoder() and not parallel_state.is_inside_decoder()
 
+        self._sound_clips = sound_clips
+        self._sound_length = sound_length
+
     def _forward(self, tokens, position_ids, attention_mask):
         return self.model(
             self._images,
@@ -579,6 +584,8 @@ class VLMForwardStep(ForwardStep):
             runtime_gather_output=True,
             imgs_sizes=self._imgs_sizes,
             vision_packed_seq_params=self._vision_packed_seq_params,
+            sound_clips=self._sound_clips,
+            sound_length=self._sound_length,
         )
 
     def __call__(self, tokens, position_ids, attention_mask):

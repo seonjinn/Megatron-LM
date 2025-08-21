@@ -1086,7 +1086,10 @@ class LLaVAModel(MegatronModule):
 
         use_inference_kv_cache = (
             inference_context is not None
-            and "image_tokens_count" in inference_context.key_value_memory_dict
+            and (
+                "image_tokens_count" in inference_context.key_value_memory_dict
+                or "sound_tokens_count" in inference_context.key_value_memory_dict
+            )
         )
         has_images = images is not None and images.shape[0] > 0
 
