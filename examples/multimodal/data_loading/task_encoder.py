@@ -7,6 +7,8 @@ import re
 from collections import defaultdict
 from typing import List, Literal, TypedDict, Union, Tuple
 
+from .cookers.audio_conversation import cook_audio_conversation
+from .cookers.omcat_legacy_audio_conversation import cook_omcat_legacy_conversation_monolithic
 import torch
 from PIL import Image
 from torchvision.transforms import ToPILImage
@@ -207,6 +209,7 @@ class MultiModalTaskEncoder(
         Cooker(cook_eagle, has_subflavors={"cook": "eagle"}),
         Cooker(cook_conversation, has_subflavors={"cook": "conversation"}),
         Cooker(cook_audio_conversation, has_subflavors={"cook": "audio_conversation"}),
+        Cooker(cook_omcat_legacy_conversation_monolithic, has_subflavors={"cook": "omcat_legacy_conversation_monolithic"}),
     ]
 
     def __init__(self, is_val: bool = False, tiling_augment_prob: float = 0.4):
