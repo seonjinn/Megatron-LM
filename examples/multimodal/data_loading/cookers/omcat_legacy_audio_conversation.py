@@ -167,7 +167,6 @@ def cook_omcat_legacy_conversation_monolithic(
     for msg in cs.conversation:
         for frag in msg.fragments:
             if isinstance(frag, (ImageMedia, VideoMedia, AudioMedia, VideoFrameMedia)):
-                print(f"Cooking {frag.value!r} from {primary.get_path()!r} for {sample['__key__']} of {sample.keys()}")
                 val = sample[frag.value]
                 # frag.value = cache.get_lazy(primary, sample['__key__'].rsplit(".tar/", 1)[-1] + f".{frag.value}")
                 frag.value = cache.to_cache(val, sample['__key__'] + f".{frag.value}")
