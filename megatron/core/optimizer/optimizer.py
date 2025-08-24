@@ -1139,6 +1139,19 @@ class ChainedOptimizer(MegatronOptimizer):
     def sharded_state_dict(
         self, model_sharded_state_dict: ShardedStateDict, is_loading: bool = False, **kwargs
     ):
+        metadata = kwargs.get('metadata') or {}
+        # ChainedOptimizer should add its prefix to the tensor state keys only for formats
+        # leveraging internal DistOpt structure ('distrib_optim_sharding_type' is empty if
+        # not using DistOpt). For backward-compatibility we also add it if
+        # `chained_optim_avoid_prefix` is False.
+        _distopt_requires_prefix = metadata.get('distrib_optim_sharding_type') in (
+            'dp_zero_gather_scatter',
+            'dp_reshardable',
+        )
+        should_add_prefix = _distopt_requires_prefix or not metadata.get(
+            'chained_optim_avoid_prefix', False
+        )
+
         if len(self.chained_optimizers) == 1:
             return self.chained_optimizers[0].sharded_state_dict(
                 model_sharded_state_dict, is_loading, **kwargs
@@ -1299,9 +1312,8 @@ class ChainedOptimizer(MegatronOptimizer):
                     states.append(state_dict)
                     save_states = True
                 else:
+                    assert state_dict is None
                     states.append(None)
-            else:
-                states.append(None)
 
         if save_states:
             torch.save(states, filename)
