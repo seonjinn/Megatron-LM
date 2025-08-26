@@ -3,6 +3,7 @@
 import torch
 from argparse import ArgumentParser
 from collections import defaultdict
+from functools import partial
 from tqdm import tqdm
 from typing import Dict, List
 
@@ -21,7 +22,9 @@ from megatron.core.inference.text_generation_controllers.text_generation_control
 from megatron.core.transformer.module import MegatronModule
 from megatron.training import get_args, get_model as _get_model, get_tokenizer, initialize_megatron
 from megatron.training.checkpointing import load_checkpoint
-from pretrain_gpt import model_provider
+from model_provider import model_provider
+from gpt_builders import gpt_builder
+import json
 
 from .utils import (
     add_common_inference_args,
@@ -53,7 +56,10 @@ def get_model() -> MegatronModule:
     args = get_args()
 
     # Build model.
-    model = _get_model(model_provider, wrap_with_ddp=False)
+    model = _get_model(
+        partial(model_provider, gpt_builder),
+        wrap_with_ddp=False
+    )
 
     # Load checkpoint.
     assert args.load is not None

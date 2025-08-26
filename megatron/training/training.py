@@ -4,7 +4,6 @@
 
 import dataclasses
 from datetime import datetime
-import functools
 import gc
 import logging
 import math
@@ -24,6 +23,11 @@ import time
 _TRAIN_START_TIME = time.time()
 import torch
 
+try:
+    from megatron.training import rl_utils
+    has_rl_utils = True
+except ImportError:
+    has_rl_utils = False
 try:
     from megatron.post_training.algos.distillation import (
         get_tensor_shapes_adjust_fn_for_distillation,
@@ -99,7 +103,7 @@ from megatron.core.num_microbatches_calculator import (
     get_current_global_batch_size,
     get_current_running_global_batch_size,
     get_num_microbatches,
-    update_num_microbatches,
+    update_num_microbatches
 )
 
 from .async_utils import maybe_finalize_async_save
@@ -125,6 +129,7 @@ from .global_vars import (
     get_tensorboard_writer,
     get_wandb_writer,
     get_one_logger,
+    get_tokenizer,
     get_energy_monitor,
 )
 from . import one_logger_utils
@@ -927,6 +932,11 @@ def pretrain(
     one_logger = get_one_logger()
     one_logger and one_logger.log_metrics(app_metrics)
 
+    wandb_writer = get_wandb_writer()
+    if wandb_writer:
+        # Add job name to the wandb config to make it easier to run more singleton dependency jobs.
+        wandb_writer.config.update({'slurm_job_name': os.getenv("SLURM_JOB_NAME", "N/A")})
+
     if not args.skip_train:
         print_rank_0('training ...')
 
@@ -975,18 +985,19 @@ def pretrain(
 
     if args.do_valid:
         prefix = f'iteration {iteration} on validation set'
-        evaluate_and_print_results(
-            prefix,
-            forward_step_func,
-            valid_data_iterator,
-            model,
-            iteration,
-            process_non_loss_data_func,
-            config,
-            verbose=True,
-            write_to_tensorboard=not args.skip_train,
-            non_loss_data_func=non_loss_data_func,
-        )
+        if getattr(args, 'perform_rl_step', False):
+            rl_utils.evaluate_and_print_results_rl(
+                valid_data_iterator, model, optimizer,
+                iteration, write_to_tensorboard=not args.skip_train
+            )
+        else:
+            evaluate_and_print_results(
+                prefix, forward_step_func,
+                valid_data_iterator, model,
+                iteration, process_non_loss_data_func, config,
+                verbose=True, write_to_tensorboard=not args.skip_train,
+                non_loss_data_func=non_loss_data_func
+            )
 
     if args.do_test:
         prefix = f'iteration {iteration} on test set'
@@ -1690,6 +1701,11 @@ def training_log(
         'optimizer-copy-main-to-model-params',
         'optimizer',
     ]
+    # Add timers from RL loop if needed.
+    if getattr(args, 'perform_rl_step', False):
+        timers_to_log.extend(['rollout-collection', 'rollout-collection-barrier',
+                              'compute-logprobs', 'compute-ref-logprobs',
+                              'prepare-advantages'])
 
     # Calculate batch size.
     batch_size = args.micro_batch_size * args.data_parallel_size * get_num_microbatches()
@@ -1703,9 +1719,6 @@ def training_log(
     if args.pipeline_model_parallel_size > 1 and (args.freeze_LM or args.freeze_ViT or args.freeze_sound_model):
         learning_rate = reduce_max_stat_across_model_parallel_group(learning_rate)
     # Tensorboard values.
-    # Timer requires all the ranks to call.
-    if args.log_timers_to_tensorboard and (iteration % args.tensorboard_log_interval == 0):
-        timers.write(timers_to_log, writer, iteration, normalizer=total_iterations)
     if writer and (iteration % args.tensorboard_log_interval == 0):
         if wandb_writer:
             wandb_writer.log({'iteration': iteration}, iteration)  # Req. to log evals at same iter
@@ -1756,6 +1769,11 @@ def training_log(
             writer.add_scalar('params-norm vs samples', params_norm, args.consumed_train_samples)
             if wandb_writer:
                 wandb_writer.log({'params-norm': params_norm}, iteration)
+        if getattr(args, 'perform_rl_step', False):
+            grpo_collection_iteration = iteration // (args.grpo_iterations * ( ( args.grpo_samples_per_iteration )// args.global_batch_size ))
+            writer.add_scalar('grpo_collection_iteration', grpo_collection_iteration, iteration)
+            if wandb_writer:
+                wandb_writer.log({'grpo_collection_iteration': grpo_collection_iteration}, iteration)
         if args.log_memory_to_tensorboard:
             mem_stats = torch.cuda.memory_stats()
             writer.add_scalar(
@@ -1899,6 +1917,11 @@ def training_log(
         if args.log_memory_interval is not None:
             if iteration % args.log_memory_interval == 0:
                 report_memory(f'(after {iteration} iterations)')
+        # Write timers to wandb, don't reset the counts
+        if args.log_timers_to_tensorboard:
+            timers.write(timers_to_log, writer, iteration, normalizer=args.log_interval, reset=False)
+            timers.write(timers_to_log, wandb_writer, iteration, normalizer=args.log_interval, reset=False)
+        # Log timers to stdout
         timers.log(timers_to_log, normalizer=args.log_interval)
 
     return report_memory_flag
@@ -2152,6 +2175,33 @@ def train(
     """Training function: run train_step desired number of times, run validation, checkpoint."""
     args = get_args()
     timers = get_timers()
+
+    if getattr(args, 'perform_rl_step', False):
+        assert has_rl_utils, "RL cannot run without the lang_rl package"
+
+    # Additional variable initialization for RL training
+    ref_state_dict = None
+
+    # IMPORTANT FIX: For RL training, reinitialize the microbatch calculator with the correct configuration
+    if getattr(args, 'perform_rl_step', False):
+        print_rank_0("> Reinitializing microbatch calculator for GRPO training...")
+        from megatron.core.num_microbatches_calculator import (
+            destroy_num_microbatches_calculator,
+            init_num_microbatches_calculator
+        )
+        # First destroy the existing calculator
+        destroy_num_microbatches_calculator()
+        # Then initialize with the correct perform_rl_step=True context
+        init_num_microbatches_calculator(
+            args.rank,
+            args.rampup_batch_size,
+            args.global_batch_size,
+            args.micro_batch_size,
+            mpu.get_data_parallel_world_size(),
+            args.decrease_batch_size_if_needed
+        )
+        print_rank_0(f"> GRPO training: num_microbatches set to {get_num_microbatches()}")
+
     energy_monitor = get_energy_monitor()
     one_logger = get_one_logger()
 
@@ -2327,6 +2377,8 @@ def train(
         )
 
     # Run training iterations till done.
+    buffered_rollouts = None
+    ref_state_dict = None
     while not _finished_training(iteration):
         if args.profile and torch.distributed.get_rank() in args.profile_ranks:
             if args.use_pytorch_profiler:
@@ -2374,8 +2426,22 @@ def train(
             args.skipped_train_samples += batch_size
             continue
 
-        # Run training step.
         args.curr_iteration = iteration
+        # For GRPO, we keep the data for a few epochs. DeepSeekMath paper calls this number $\mu$.
+        # It is similar to a PPO epoch.
+
+        if getattr(args, 'perform_rl_step', False):
+            with torch.no_grad():
+                if not ref_state_dict:
+                    ref_state_dict = {k: (v.cpu() if v is not None else v) for k, v in model[0].state_dict().items()}
+                
+                # We collect new rollouts when we've gone over the collected data 'grpo_iterations' times.
+                if iteration % (args.grpo_iterations * ((args.grpo_samples_per_iteration) // args.global_batch_size)) == 0:
+                    buffered_rollouts = rl_utils.get_rollout_data_iterator(
+                        model, optimizer, iteration, ref_state_dict,
+                    )
+                train_data_iterator = buffered_rollouts
+
         ft_integration.on_training_step_start()
         (
             loss_dict,
@@ -2480,18 +2546,16 @@ def train(
                 gc.collect()
             prefix = f'iteration {iteration}'
             timers('eval-time', log_level=0).start(barrier=True)
-            evaluate_and_print_results(
-                prefix,
-                forward_step_func,
-                valid_data_iterator,
-                model,
-                iteration,
-                process_non_loss_data_func,
-                config,
-                verbose=False,
-                write_to_tensorboard=True,
-                non_loss_data_func=non_loss_data_func,
-            )
+            if getattr(args, 'perform_rl_step', False):
+                rl_utils.evaluate_and_print_results_rl(valid_data_iterator, model, optimizer,
+                                       iteration, write_to_tensorboard=True)
+            else:
+                evaluate_and_print_results(prefix, forward_step_func,
+                                       valid_data_iterator, model,
+                                       iteration, process_non_loss_data_func,
+                                       config, verbose=False, write_to_tensorboard=True,
+                                       non_loss_data_func=non_loss_data_func)
+
             eval_duration += timers('eval-time').elapsed()
             eval_iterations += args.eval_iters
             timers('eval-time').stop()
@@ -2811,9 +2875,10 @@ def get_train_valid_test_num_samples():
     return (train_samples, eval_iters * args.global_batch_size, test_iters * args.global_batch_size)
 
 
-def build_train_valid_test_datasets(build_train_valid_test_datasets_provider):
+def build_train_valid_test_datasets(build_train_valid_test_datasets_provider, train_valid_test_num_samples=None):
     """Build pretraining datasets."""
-    train_valid_test_num_samples = get_train_valid_test_num_samples()
+    if train_valid_test_num_samples is None:
+        train_valid_test_num_samples = get_train_valid_test_num_samples()
     print_rank_0(' > datasets target sizes (minimum size):')
     print_rank_0('    train:      {}'.format(train_valid_test_num_samples[0]))
     print_rank_0('    validation: {}'.format(train_valid_test_num_samples[1]))
@@ -2850,7 +2915,7 @@ def build_train_valid_test_data_loaders(build_train_valid_test_datasets_provider
 
         # Build datasets.
         train_ds, valid_ds, test_ds = build_train_valid_test_datasets(
-            build_train_valid_test_datasets_provider
+            build_train_valid_test_datasets_provider, (1, 1, 1) if getattr(args, 'perform_rl_step', False) else None
         )
         # Build dataloders.
         train_dataloader = build_pretraining_data_loader(train_ds, args.consumed_train_samples)
@@ -2875,6 +2940,8 @@ def build_train_valid_test_data_loaders(build_train_valid_test_datasets_provider
     args.do_train = getattr(args, "do_train", False) or flags[0].item()
     args.do_valid = getattr(args, "do_valid", False) or flags[1].item()
     args.do_test = getattr(args, "do_test", False) or flags[2].item()
+    if getattr(args, 'perform_rl_step', False):
+        args.to_test = False
 
     return train_dataloader, valid_dataloader, test_dataloader
 
