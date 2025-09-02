@@ -48,6 +48,10 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
     vision_packed_seq_params = None
     has_pad_img = None
     samples_seen = None
+    sound_clips = None
+    sound_timestamps = None
+    num_sound_clips = None
+    sound_length = None
 
     args = get_args()
 

@@ -54,7 +54,7 @@ TP=4
 CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/amalasanjayd/workspace/output/pretrain_nm_5p5_h_9b_cradio_vlm_0814_tiling/checkpoints"
 
 if [[ $USE_ONLINE_PACKING -eq 1 ]]; then
-    DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/eagle_sft_v13.44.yaml"
+    DATA_TRAIN="/lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/users/amalasanjayd/eagle_recipe/online_packing/eagle_sft_v13.47.yaml"
 else
     DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe/eagle_sft_v13.16_sft1/wds/out.yaml"
 fi

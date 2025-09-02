@@ -98,6 +98,12 @@ class ImageTaskBatchPacked(Batch):
     vision_cu_lengths: List[List[int]]
     has_pad_img: bool
 
+    # Sound
+    sound_clips: list[torch.Tensor]
+    sound_length: list[int]
+    sound_timestamps: list[tuple[int, int]]
+    num_sound_clips: list[int]
+
 
 # Based on https://github.com/hiyouga/LLaMA-Factory/blob/641d0dab08d96a93c34657742213d8994d9ed476/src/llamafactory/data/processors/processor_utils.py#L19
 # Copyright (c) 2024 LLaMA-Factory. Apache license 2.0.
@@ -975,6 +981,12 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
                     new_max_length = cu_lengths_padded[0][-1] - cu_lengths[0][-2]
                     max_lengths = torch.max(max_lengths, new_max_length)
 
+        # No sound support in this old dataloading file.
+        sound_clips = torch.tensor([[0]], dtype=torch.float32)
+        sound_length = torch.tensor([[0]], dtype=torch.int64)
+        sound_timestamps = torch.tensor([[0]], dtype=torch.float32)
+        num_sound_clips = torch.tensor([[0]], dtype=torch.int64)
+
         return ImageTaskBatchPacked(
             __key__=[s.__key__ for s in samples],
             __restore_key__=[s.__restore_key__ for s in samples],
@@ -991,6 +1003,10 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
             vision_cu_lengths=vision_cu_lengths,
             vision_max_lengths=vision_max_lengths,
             has_pad_img=has_pad_img,
+            sound_clips=sound_clips,
+            sound_length=sound_length,
+            sound_timestamps=sound_timestamps,
+            num_sound_clips=num_sound_clips,
         )
 
     def encode_batch(self, batch: ImageTaskBatchPacked) -> dict:
