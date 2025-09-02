@@ -28,7 +28,9 @@ class ParakeetHuggingFaceModel(HuggingFaceModule):
         if config.sound_model_type.startswith("nemo://"):
             self.feature_extractor, self.model = get_nemo_sound_model(config.sound_model_type)
 
-            assert config.recompute_granularity is None, "Nemo model does not support activation checkpointing yet"
+            if config.recompute_granularity is not None:
+                from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import checkpoint_wrapper
+                self.model = checkpoint_wrapper(self.model)
         elif config.sound_model_type.startswith("hf://"):
             sound_model_type = config.sound_model_type.split("hf://")[1]
 
