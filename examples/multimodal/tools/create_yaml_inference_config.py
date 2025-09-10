@@ -7,13 +7,22 @@ updates it with inference-specific parameters, and saves as a YAML config file.
 
 Usage:
     python create_yaml_inference_config.py --ckpt_path /path/to/checkpoint.pt --output_config /path/to/config.yaml
+    # Alternatively:
+    # Read from `/lustre/fsw/portfolios/llmservice/users/<username>/workspace/output/model_name/`
+    python create_yaml_inference_config.py --model_name model_name
 """
 
 import argparse
+import os
 import torch
 import yaml
 import sys
 from pathlib import Path
+
+# Add megatron to the path.
+sys.path.append(
+    os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, os.path.pardir, os.path.pardir))
+)
 
 # =============================================================================
 # INFERENCE PARAMETER OVERRIDES
@@ -24,31 +33,31 @@ INFERENCE_PARAMS = {
     # Sampling parameters
     "temperature": 1.0,              # Sampling temperature
     "top_k": 1,                      # Top-k sampling
-    
-    # Sequence length parameters  
-    "out_seq_length": 1024,          # Output sequence length (will become out-seq-length)
-    "inference_max_seq_length": 32768, # Maximum sequence length for inference
-    "max_tokens_to_oom": 32768,      # Maximum tokens before OOM
-    
+
+    # Sequence length parameters
+    "out_seq_length": 1024,             # Output sequence length (will become out-seq-length)
+    "inference_max_seq_length": 65536,  # Maximum sequence length for inference
+    "max_tokens_to_oom": 65536,         # Maximum tokens before OOM
+
     # Dropout parameters
     "attention_dropout": 0.0,        # Attention dropout for inference
     "hidden_dropout": 0.0,           # Hidden dropout for inference
-    
+
     # Batch processing
     "micro_batch_size": 1,           # Micro batch size for inference
-    
+
     # Precision settings
     "bf16": True,                    # Use bfloat16 precision
-    
+
     # Model loading settings
     "no_load_rng": True,             # Don't load RNG state
     "no_load_optim": True,           # Don't load optimizer state
-    
+
     # NOTE: eos_id will be set dynamically based on prompt format
-    
+
     # Vision/multimodal settings
     "max_num_tiles": 12,             # Maximum number of image tiles
-    
+
     # Backend settings - Note: this might conflict with the skipped parameter
     # "attention_backend": "flash",    # Use Flash Attention backend - commented out since it causes issues
     "flash_decode": True,            # Enable flash decode
@@ -62,10 +71,10 @@ INFERENCE_PARAMS = {
 def map_prompt_format_for_inference(prompt_format):
     """
     Map training prompt formats to their inference equivalents.
-    
+
     Args:
         prompt_format (str): The original prompt format from checkpoint
-        
+
     Returns:
         str: The mapped prompt format for inference
     """
@@ -74,38 +83,38 @@ def map_prompt_format_for_inference(prompt_format):
         # Add more mappings here as needed
         # "training-format": "inference-format",
     }
-    
+
     mapped_format = format_mappings.get(prompt_format, prompt_format)
-    
+
     if mapped_format != prompt_format:
         print(f"  Mapping prompt format: {prompt_format} -> {mapped_format}")
-    
+
     return mapped_format
 
 
 def get_eos_id_for_prompt_format(prompt_format):
     """
     Determine the appropriate eos_id based on the prompt format.
-    
+
     Args:
         prompt_format (str): The prompt format string
-        
+
     Returns:
         int: The appropriate eos token ID
     """
     # Common eos token IDs for different model families
-    eos_id_mappings = {        
+    eos_id_mappings = {
         # Nemotron family models
-        "nemotron5": 15,                      
-        "nemotron-h-reasoning": 11,         
-        "nemotron-h-5p5-reasoning": 12,       
-        "nemotron-h-5p5-reasoning-inference": 12, 
+        "nemotron5": 15,
+        "nemotron-h-reasoning": 11,
+        "nemotron-h-5p5-reasoning": 12,
+        "nemotron-h-5p5-reasoning-inference": 12,
     }
-    
+
     eos_id = eos_id_mappings.get(prompt_format, None)  # Default fallback
-    
+
     print(f"  Setting eos_id={eos_id} for prompt format '{prompt_format}'")
-    
+
     return eos_id
 
 
@@ -115,17 +124,17 @@ EXCLUDED_PARAMS = {
     # =================================================================
     '__class__', '__dict__', '__doc__', '__module__', '__weakref__',
     'attention_backend', 'model_type',
-    
+
     # Internal state variables
     'consumed_train_samples', 'consumed_valid_samples', 'iteration', 'rank', 'world_size',
     'skipped_train_samples', 'local_rank', 'data_parallel_size', 'iterations_to_skip',
-    
-    # Computed/derived values  
+
+    # Computed/derived values
     'padded_vocab_size', 'params_dtype', 'main_grads_dtype', 'main_params_dtype',
     'exp_avg_dtype', 'exp_avg_sq_dtype',
-    
+
     # Internal flags that shouldn't be CLI args
-    'add_position_embedding', 'align_grad_reduce', 'barrier_with_L1_time', 
+    'add_position_embedding', 'align_grad_reduce', 'barrier_with_L1_time',
     'bert_binary_head', 'bias_swiglu_fusion', 'check_for_nan_in_loss_and_grad',
     'clone_scatter_output_in_embedding', 'create_attention_mask_in_dataloader',
     'data_sharding', 'enable_gloo_process_groups', 'enable_msc', 'enable_one_logger',
@@ -137,28 +146,28 @@ EXCLUDED_PARAMS = {
     'tp_comm_overlap_rs', 'tp_comm_split_ag', 'tp_comm_split_rs',
     'transformer_pipeline_model_parallel_size', 'use_tokenizer_model_from_checkpoint_args',
     'inference_max_batch_size',
-    
+
     # Encoder-specific (usually not needed for decoder-only inference)
-    'encoder_num_layers', 'encoder_pipeline_model_parallel_size', 
+    'encoder_num_layers', 'encoder_pipeline_model_parallel_size',
     'encoder_seq_length', 'encoder_tensor_model_parallel_size',
-    
+
     # =================================================================
     # OPTIMIZER & LEARNING RATE PARAMETERS
     # =================================================================
     'adam_beta1', 'adam_beta2', 'adam_eps', 'lr', 'lr_decay_samples', 'lr_decay_style',
     'lr_warmup_init', 'lr_warmup_iters', 'lr_warmup_samples', 'lr_wsd_decay_style',
     'weight_decay', 'weight_decay_incr_style', 'start_weight_decay', 'end_weight_decay',
-    'clip_grad', 'sgd_momentum', 'optimizer', 'optimizer_cpu_offload', 
+    'clip_grad', 'sgd_momentum', 'optimizer', 'optimizer_cpu_offload',
     'optimizer_offload_fraction', 'min_lr',
-    
+
     # =================================================================
     # TRAINING DATA & BATCHING
     # =================================================================
     'global_batch_size', 'train_samples', 'train_full_dataset', 'split', 'num_workers',
     'num_dataset_builder_threads', 'dataloader_type', 'sample_rate', 'mask_prob',
-    'short_seq_prob', 'classes_fraction', 'data_per_class_fraction', 
+    'short_seq_prob', 'classes_fraction', 'data_per_class_fraction',
     'data_parallel_random_init', 'data_parallel_sharding_strategy',
-    
+
     # =================================================================
     # CHECKPOINTING & SAVING
     # =================================================================
@@ -166,7 +175,7 @@ EXCLUDED_PARAMS = {
     'ckpt_fully_parallel_save', 'ckpt_fully_parallel_save_deprecated',
     'ckpt_assume_constant_structure', 'pretrained_checkpoint', 'finetune',
     'sft', 'sft_tokenizer_prompt_format',
-    
+
     # =================================================================
     # LOGGING & MONITORING
     # =================================================================
@@ -176,14 +185,14 @@ EXCLUDED_PARAMS = {
     'log_world_size_to_tensorboard', 'tensorboard_log_interval', 'tensorboard_queue_size',
     'wandb_exp_name', 'wandb_project', 'wandb_save_dir', 'one_logger_async',
     'one_logger_project',
-    
+
     # =================================================================
     # TRAINING INFRASTRUCTURE
     # =================================================================
     'eval_interval', 'eval_iters', 'skip_train', 'test_mode', 'exit_duration_in_mins',
     'exit_signal_handler', 'manual_gc', 'manual_gc_interval', 'profile', 'profile_ranks',
     'profile_step_end', 'profile_step_start', 'record_memory_history', 'memory_snapshot_path',
-    
+
     # =================================================================
     # TRAINING-SPECIFIC OPTIMIZATIONS
     # =================================================================
@@ -193,7 +202,7 @@ EXCLUDED_PARAMS = {
     'loss_scale_window', 'initial_loss_scale', 'min_loss_scale', 'hysteresis',
     'align_param_gather', 'ddp_average_in_collective', 'ddp_pad_buckets_for_high_nccl_busbw',
     'defer_embedding_wgrad_compute', 'delay_wgrad_compute', 'wgrad_deferral_limit',
-    
+
     # =================================================================
     # VISION TRAINING SPECIFIC
     # =================================================================
@@ -202,7 +211,7 @@ EXCLUDED_PARAMS = {
     'dino_local_crops_number', 'dino_local_img_size', 'dino_norm_last_layer',
     'dino_teacher_temp', 'dino_warmup_teacher_temp', 'dino_warmup_teacher_temp_epochs',
     'freeze_LM', 'freeze_ViT', 'mask_type', 'mask_factor',
-    
+
     # =================================================================
     # SYSTEM/INFRASTRUCTURE (mostly training-related)
     # =================================================================
@@ -214,7 +223,7 @@ EXCLUDED_PARAMS = {
     'inprocess_progress_watchdog_interval', 'inprocess_restart', 'inprocess_soft_timeout',
     'inprocess_termination_grace_time', 'error_injection_rate', 'error_injection_type',
     'rerun_mode', 'adlr_autoresume', 'adlr_autoresume_interval',
-    
+
     # =================================================================
     # BIENCODER/RETRIEVAL (usually not needed for standard inference)
     # =================================================================
@@ -223,7 +232,7 @@ EXCLUDED_PARAMS = {
     'retro_add_retriever', 'retro_attention_gate', 'retro_encoder_attention_dropout',
     'retro_encoder_hidden_dropout', 'retro_encoder_layers', 'retro_num_neighbors',
     'retro_num_retrieved_chunks', 'indexer_batch_size', 'indexer_log_interval',
-    
+
     # =================================================================
     # MOE TRAINING SPECIFIC
     # =================================================================
@@ -233,7 +242,7 @@ EXCLUDED_PARAMS = {
     'moe_router_enable_expert_bias', 'moe_router_force_load_balancing',
     'moe_router_padding_for_fp8', 'moe_shared_expert_overlap', 'moe_token_drop_policy',
     'moe_upcycling_granularity', 'moe_use_upcycling',
-    
+
     # =================================================================
     # MISCELLANEOUS TRAINING/UNUSED
     # =================================================================
@@ -267,8 +276,9 @@ EXCLUDED_PARAMS = {
     # =================================================================
     # OTHER TRAINING/UNUSED
     # =================================================================
-    'use_cpu_initialization', 'recompute_vision',
-
+    'use_cpu_initialization', 'recompute_vision', "do_train", "do_valid",
+    "do_test", "async_tensor_model_parallel_allreduce", "bias_dropout_fusion",
+    "curr_iteration", "num_floating_point_operations_so_far",
 }
 
 # Some args need to be renamed:
@@ -280,38 +290,38 @@ RENAME_PARAMS = {
 def load_checkpoint_args(ckpt_path):
     """
     Load checkpoint and extract the args namespace.
-    
+
     Args:
         ckpt_path (str): Path to the checkpoint file
-        
+
     Returns:
         argparse.Namespace: The args namespace from the checkpoint
     """
     print(f"Loading checkpoint from: {ckpt_path}")
-    
+
     try:
         ckpt = torch.load(ckpt_path, map_location='cpu', weights_only=False)
     except Exception as e:
         print(f"Error loading checkpoint: {e}")
         sys.exit(1)
-    
+
     if 'args' not in ckpt:
         print("Error: Checkpoint does not contain 'args' key")
         sys.exit(1)
-    
+
     args_namespace = ckpt['args']
     print(f"Successfully loaded args namespace with {len(vars(args_namespace))} parameters")
-    
+
     return args_namespace
 
 
 def namespace_to_dict(namespace):
     """
     Convert argparse.Namespace to dictionary, handling nested objects.
-    
+
     Args:
         namespace: argparse.Namespace object
-        
+
     Returns:
         dict: Dictionary representation of the namespace
     """
@@ -319,7 +329,7 @@ def namespace_to_dict(namespace):
         # Prevent infinite recursion
         if depth > max_depth:
             return str(value)
-            
+
         if value is None:
             return None
         elif isinstance(value, (str, int, float, bool)):
@@ -364,13 +374,13 @@ def namespace_to_dict(namespace):
                     return value
             except:
                 return str(value)
-    
+
     result = {}
     for key, value in vars(namespace).items():
         if key in EXCLUDED_PARAMS:
             print(f"  Skipping complex parameter: {key}")
             continue
-            
+
         try:
             if convert_value(value) is not None:
                 converted_value = convert_value(value)
@@ -387,17 +397,17 @@ def namespace_to_dict(namespace):
             except:
                 print(f"  Skipping parameter '{key}' - cannot serialize to YAML")
                 continue
-    
+
     return result
 
 
 def convert_param_name_for_yaml(param_name):
     """
     Convert parameter name from Python format (underscores) to YAML/CLI format (dashes).
-    
+
     Args:
         param_name (str): Parameter name with underscores
-        
+
     Returns:
         str: Parameter name with dashes for YAML/CLI compatibility
     """
@@ -410,7 +420,7 @@ def convert_param_name_for_yaml(param_name):
 def save_yaml_config(config_dict, output_path, inference_params_keys):
     """
     Save configuration dictionary as YAML file with inference params at the top.
-    
+
     Args:
         config_dict (dict): Configuration to save
         output_path (str): Output YAML file path
@@ -418,15 +428,15 @@ def save_yaml_config(config_dict, output_path, inference_params_keys):
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    
+
     # Clean and convert parameter names for YAML
     clean_config = {}
-    
+
     for key, value in config_dict.items():
         try:
             # Convert parameter name to YAML format (underscores to dashes)
             yaml_key = convert_param_name_for_yaml(key)
-            
+
             # Test if this key-value pair can be serialized
             yaml.dump({yaml_key: value}, stream=None)
             clean_config[yaml_key] = value
@@ -440,40 +450,40 @@ def save_yaml_config(config_dict, output_path, inference_params_keys):
             except:
                 print(f"  Cannot serialize '{key}' even as string, skipping")
                 continue
-    
+
     # Convert inference parameter keys to YAML format
     yaml_inference_keys = [convert_param_name_for_yaml(k) for k in inference_params_keys]
-    
+
     # Create ordered config with inference params first
     ordered_config = {}
-    
+
     # Add inference parameters first (in the order they were defined)
     print("\nInference parameters (at top of YAML):")
     for param_key in yaml_inference_keys:
         if param_key in clean_config:
             ordered_config[param_key] = clean_config[param_key]
             print(f"  {param_key}: {clean_config[param_key]}")
-    
+
     # Add all other parameters (sorted alphabetically)
     print(f"\nOther parameters from checkpoint: {len(clean_config) - len(ordered_config)} params")
     for key in sorted(clean_config.keys()):
         if key not in yaml_inference_keys:
             ordered_config[key] = clean_config[key]
-    
+
     try:
         with open(output_path, 'w') as f:
             # Write inference parameters section
             f.write("# ===== Inference Parameters =====\n")
             inference_config = {k: v for k, v in ordered_config.items() if k in yaml_inference_keys}
             yaml.dump(inference_config, f, default_flow_style=False, indent=2, sort_keys=False, allow_unicode=True)
-            
+
             # Write separator
             f.write("\n# ===== Checkpoint Parameters =====\n")
-            
+
             # Write checkpoint parameters
             checkpoint_config = {k: v for k, v in ordered_config.items() if k not in yaml_inference_keys}
             yaml.dump(checkpoint_config, f, default_flow_style=False, indent=2, sort_keys=True, allow_unicode=True)
-            
+
         print(f"Successfully saved configuration to: {output_path}")
         print(f"Final config contains {len(clean_config)} parameters")
         print(f"  - Inference parameters: {len(inference_config)}")
@@ -486,38 +496,48 @@ def save_yaml_config(config_dict, output_path, inference_params_keys):
 def update_inference_params(config_dict, inference_params):
     """
     Update configuration dictionary with inference parameters.
-    
+
     Args:
         config_dict (dict): Configuration dictionary from checkpoint
         inference_params (dict): Inference parameters to override
-        
+
     Returns:
         dict: Updated configuration dictionary
     """
     print("Updating configuration with inference parameters:")
-    
+
     updated_config = config_dict.copy()
-    
+
     # Handle prompt format mapping
     if 'tokenizer_prompt_format' in updated_config:
         original_format = updated_config['tokenizer_prompt_format']
         mapped_format = map_prompt_format_for_inference(original_format)
         updated_config['tokenizer_prompt_format'] = mapped_format
-        
+
         # Determine eos_id based on the mapped prompt format
         eos_id = get_eos_id_for_prompt_format(mapped_format)
         if eos_id is not None:
             updated_config['eos_id'] = eos_id
-    
+
     for key, value in inference_params.items():
         if key in updated_config:
             old_value = updated_config[key]
             print(f"  Overriding {key}: {old_value} -> {value}")
         else:
             print(f"  Adding {key}: {value}")
-        
+
         updated_config[key] = value
-    
+
+    # Not used in inference.
+    if "sequence_parallel" in updated_config:
+        updated_config["sequence_parallel"] = False
+
+    if "context_parallel_size" in updated_config:
+        updated_config["context_parallel_size"] = 1
+
+    updated_config["pipeline_model_parallel_size"] = 1
+    updated_config["tensor_model_parallel_size"] = 1
+
     return updated_config
 
 
@@ -527,60 +547,77 @@ def main():
         description="Create YAML inference configuration from Megatron checkpoint",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
-    
+
+    parser.add_argument(
+        "--model_name",
+        type=str,
+        required=False,
+        help="Name of the model"
+    )
+
     parser.add_argument(
         "--ckpt_path",
         type=str,
-        required=True,
+        required=False,
         help="Path to the Megatron checkpoint file (.pt)"
     )
-    
+
     parser.add_argument(
-        "--output_config", 
+        "--output_config",
         type=str,
-        required=True,
+        required=False,
         help="Output path for the YAML configuration file"
     )
-    
+
     parser.add_argument(
         "--show_params",
         action="store_true",
         help="Show all parameters that will be included in the config"
     )
-    
+
     args = parser.parse_args()
-    
+
+    if args.model_name is not None:
+        user = os.environ["SLURM_JOB_USER"]
+        path = f"/lustre/fsw/portfolios/llmservice/users/{user}/workspace/output/{args.model_name}"
+        some_iter = int(open(f"{path}/checkpoints/latest_checkpointed_iteration.txt").read().strip())
+        args.ckpt_path = f"{path}/checkpoints/iter_{some_iter:07d}/mp_rank_00/model_optim_rng.pt"
+        args.output_config = f"{path}/config.yaml"
+
+    assert args.ckpt_path is not None, "Checkpoint path is required"
+    assert args.output_config is not None, "Output config path is required"
+
     # Validate input file exists
     if not Path(args.ckpt_path).exists():
         print(f"Error: Checkpoint file does not exist: {args.ckpt_path}")
         sys.exit(1)
-    
+
     print("=" * 60)
     print("Creating YAML Inference Configuration")
     print("=" * 60)
-    
+
     # Step 1: Load checkpoint args
     checkpoint_args = load_checkpoint_args(args.ckpt_path)
-    
+
     # Step 2: Convert namespace to dictionary
     print("\nConverting args namespace to dictionary...")
     config_dict = namespace_to_dict(checkpoint_args)
-    
+
     # Step 3: Update with inference parameters
     print(f"\nUpdating with {len(INFERENCE_PARAMS)} inference parameters...")
     final_config = update_inference_params(config_dict, INFERENCE_PARAMS)
-    
+
     # Step 4: Show parameters if requested
     if args.show_params:
         print(f"\nFinal configuration contains {len(final_config)} parameters:")
         for key in sorted(final_config.keys()):
             print(f"  {key}: {final_config[key]}")
-    
+
     # Step 5: Save YAML configuration with inference params at top
     print(f"\nSaving configuration to: {args.output_config}")
     inference_keys = list(INFERENCE_PARAMS.keys()) + ['tokenizer_prompt_format', 'eos_id']
     save_yaml_config(final_config, args.output_config, inference_keys)
-    
+
     print("\n" + "=" * 60)
     print("Configuration creation completed successfully!")
     print("=" * 60)
