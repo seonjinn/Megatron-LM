@@ -57,7 +57,7 @@ TP=4
 
 CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/output/amala_sft_nm_5p5_h_9b_cradio_0805_tiling_v1341/checkpoints"
 
-DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/arushig/vlm2/megatron-lm/examples/multimodal/avlm/commercial_stage2.yaml"
+DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/megatron-lm/commercial_stage2.yaml"
 
 SEQ_LEN=1024
 DECODER_SEQ_LEN=24576
