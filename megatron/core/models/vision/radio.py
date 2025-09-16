@@ -126,6 +126,8 @@ class RADIOViTModel(VisionModule):
         self.dynamic_resolution = dynamic_resolution
 
         # Using non-TE version so we can force gather_output
+        orig_sequence_parallel = transformer_config.sequence_parallel
+        transformer_config.sequence_parallel = False
         self.embedder = ColumnParallelLinear(
             input_size=3 * self.patch_dim * self.patch_dim,
             output_size=self.visual_hidden_size,
@@ -135,6 +137,7 @@ class RADIOViTModel(VisionModule):
             disable_grad_reduce=True,
             init_method=lambda tensor: torch.nn.init.normal_(tensor, mean=0.0, std=1.0),
         )
+        transformer_config.sequence_parallel = orig_sequence_parallel
 
         self.model_type = ModelType.encoder_or_decoder
 

@@ -77,7 +77,7 @@ if [[ $DEBUG -eq 1 ]]; then
 else
     MBZ=1
     BZ=128
-    NW=8
+    NW=4
     AD=0.0
     HD=0.0
     LI=5

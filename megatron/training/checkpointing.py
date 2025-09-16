@@ -702,8 +702,10 @@ def maybe_save_dataloader_state(train_iterator, iteration, dataloader_save_path)
     dp_rank = mpu.get_data_parallel_rank()
     print(f"saving dataloader checkpoint at iteration {iteration} to {dataloader_save_path}")
     train_dataloader_state_dict = train_iterator.iterable.save_state()
+    # Don't save dataloader checkpoint for expert parallel ranks.
     data_state_save_path = get_checkpoint_name(
         dataloader_save_path, iteration,
+        expert_parallel=False,
         basename=f'train_dataloader_dprank{dp_rank:03d}.pt'
     )
 
@@ -1475,6 +1477,9 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load', 
             module.load_state_dict(state_dict, strict=strict)
         except Exception as e:
             if strict:
+                if torch.distributed.get_rank() == 0:
+                    print("failed:", e)
+                exit(1)
                 # Fallback support for backward compatibility breaking changes in TransformerEngine
                 load_return = module.load_state_dict(state_dict, strict=False)
                 print(f"load_return: {load_return}")

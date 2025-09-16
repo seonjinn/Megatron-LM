@@ -150,7 +150,8 @@ def train_valid_test_dataloaders_provider(train_val_test_num_samples, task_encod
                 # max_cache_size_gbytes=8,
                 method="raw",
             ),
-            watchdog_initial_timeout_seconds=180 + (args.packing_buffer_size or 0) * 0.0075,
+            watchdog_timeout_seconds=5*60,
+            watchdog_initial_timeout_seconds=5*60 + (args.packing_buffer_size or 0) * 0.0075,
         )
     else:
         train_dataloader = get_savable_loader(train_ds, worker_config=worker_config)
@@ -161,6 +162,7 @@ def train_valid_test_dataloaders_provider(train_val_test_num_samples, task_encod
             data_save_name = get_checkpoint_name(
                 args.dataloader_save,
                 args.iteration,
+                expert_parallel=False,
                 pipeline_rank=0,    # Only the first pipeline parallel rank stores the dataloader checkpoint.
                 basename=f"train_dataloader_dprank{dp_rank:03d}.pt",
             )

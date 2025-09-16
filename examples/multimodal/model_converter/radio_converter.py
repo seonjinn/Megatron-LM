@@ -7,15 +7,15 @@ import torch
 def convert_radio_h(output_path, tensor_parallel_size, use_te, version):
     device = "cuda"
 
-    version = version if version is not None else 'radio_v2.5-h'
+    version = version if version is not None else 'c-radio_v2-vlm-h'
     model = torch.hub.load('NVlabs/RADIO', 'radio_model', version=version, progress=True)
 
     state_dict = model.state_dict()
     new_state_dicts = [{"model": dict()} for _ in range(tensor_parallel_size)]
 
     # Indices from mapping pytorch multihead attention to megatron.
-    kv_channels = 80 
-    hidden_dim = 1280 
+    kv_channels = 80
+    hidden_dim = 1280
     num_heads = 16
     indices = []
     for i in range(num_heads):
@@ -122,7 +122,7 @@ def convert_radio_h(output_path, tensor_parallel_size, use_te, version):
         output_path_tp = os.path.join(output_dir_tp, "model_optim_rng.pt")
         torch.save(new_state_dicts[i], output_path_tp)
     with open(os.path.join(output_path, "latest_checkpointed_iteration.txt"), "w") as f:
-        f.write("1") 
+        f.write("1")
 
 def convert_radio_g(output_path, tensor_parallel_size, use_te, version):
     device = "cuda"
@@ -216,18 +216,18 @@ def convert_radio_g(output_path, tensor_parallel_size, use_te, version):
                 if use_te:
                     new_name = f"{base}.self_attention.linear_qkv.layer_norm_bias"
                 new_names.append(new_name)
-            elif "mlp.w12.weight" in name: 
+            elif "mlp.w12.weight" in name:
                 new_names.append(f"{base}.mlp.linear_fc1.weight")
                 new_tensors[0] = new_tensors[0][mlp_indices]
                 chunk_dim = 0
-            elif "mlp.w12.bias" in name: 
+            elif "mlp.w12.bias" in name:
                 new_names.append(f"{base}.mlp.linear_fc1.bias")
                 new_tensors[0] = new_tensors[0][mlp_indices]
                 chunk_dim = 0
-            elif "mlp.w3.weight" in name: 
+            elif "mlp.w3.weight" in name:
                 new_names.append(f"{base}.mlp.linear_fc2.weight")
                 chunk_dim = 1
-            elif "mlp.w3.bias" in name: 
+            elif "mlp.w3.bias" in name:
                 new_names.append(f"{base}.mlp.linear_fc2.bias")
             elif "norm2.weight" in name:
                 new_name = f"{base}.pre_mlp_layernorm.weight"
@@ -273,11 +273,11 @@ def convert_radio_g(output_path, tensor_parallel_size, use_te, version):
         output_path_tp = os.path.join(output_dir_tp, "model_optim_rng.pt")
         torch.save(new_state_dicts[i], output_path_tp)
         with open(os.path.join(output_path, "latest_checkpointed_iteration.txt"), "w") as f:
-            f.write("1") 
+            f.write("1")
 
 
 def convert(output_path, tensor_parallel_size, use_te, model_type, version):
-    if model_type == "radio_v2.5-h":
+    if model_type in ("radio_v2.5-h", "c-radio_v2-vlm-h"):
         convert_radio_h(output_path, tensor_parallel_size, use_te, version)
     elif model_type == "radio_v2.5-g":
         convert_radio_g(output_path, tensor_parallel_size, use_te, version)
@@ -304,7 +304,7 @@ python radio_converter.py --output /some/output/folder --tensor-parallel-size 4
         "--tensor-parallel-size", type=int, default=1, help="model tensor parallel size"
     )
     parser.add_argument("--use-te", action="store_true", help="Use Transformer Engine")
-    parser.add_argument("--model-type", required=True, type=str, choices=['radio_v2.5-h', 'radio_v2.5-g'], help="Type of radio to load for conversion")
+    parser.add_argument("--model-type", required=True, type=str, choices=['radio_v2.5-h', 'radio_v2.5-g', 'c-radio_v2-vlm-h'], help="Type of radio to load for conversion")
     parser.add_argument("--version", type=str, default=None, help="Version to pass to torch.hub.load. Can be a local path or a version RADIO on torch hub. By default use the version from the model type.")
 
     args = parser.parse_args()

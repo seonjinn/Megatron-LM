@@ -10,6 +10,9 @@ from config import get_language_model_config, get_vision_model_config, get_visio
 from layer_specs import (get_layer_spec, get_layer_spec_te, get_mlp_module_spec, get_norm_mlp_module_spec_te,
                          get_mamba_layer_spec_te)
 
+from megatron.core.models.gpt.gpt_layer_specs import (
+    get_gpt_decoder_block_spec,
+)
 from megatron.core.models.gpt.heterogeneous.heterogeneous_layer_specs import get_gpt_heterogeneous_layer_spec
 from megatron.core.models.multimodal.efficient_video_sampling import EVSVariant
 from megatron.core.models.multimodal.llava_model import IMAGE_TOKEN, SOUND_TOKEN, LLaVAModel
@@ -18,6 +21,7 @@ from megatron.core.models.vision.clip_vit_model import get_num_image_embeddings
 from megatron.training import get_args, get_tokenizer, print_rank_0
 from megatron.training.arguments import core_transformer_config_from_args
 from megatron.core.utils import log_single_rank
+from megatron.core.transformer.spec_utils import import_module
 
 
 def model_provider(
@@ -115,36 +119,7 @@ def model_provider(
     base_config.sound_model_type = getattr(args, "sound_model_type", None)
     base_config.calculate_per_token_loss = True
 
-    language_config = deepcopy(base_config)
-    language_config = get_language_model_config(
-        language_config, args.enable_fusions,
-        apply_rope_fusion=not EVSVariant.uses_special_position_ids(args.efficient_video_sampling_variant)
-    )
-
-    if language_model_type.startswith("hf://"):
-        assert args.tensor_model_parallel_size == 1, "Huggingface models do not support --tensor-model-parallel-size > 1"
-        assert args.pipeline_model_parallel_size < 2, "Huggingface models do not support --pipeline-model-parallel-size > 1"
-        assert not args.sequence_parallel, "Huggingface models do not support --sequence-parallel"
-        assert args.context_parallel_size < 2, "Huggingface models do not support --context-parallel-size > 1"
-
-    if language_model_type.startswith("hf://"):
-        language_transformer_layer_spec = None
-    elif args.heterogeneous_layers_config_path is not None:
-        language_transformer_layer_spec = get_gpt_heterogeneous_layer_spec(language_config, use_te)
-    elif use_te:
-        # Padding mask needed for SP/CP.
-        padding = args.context_parallel_size > 1 and args.sequence_parallel
-        if args.language_model_type.startswith('nemotron5-hybrid'):
-            language_transformer_layer_spec = get_mamba_layer_spec_te(padding=padding)
-        else:
-            language_transformer_layer_spec = get_layer_spec_te(
-                is_vit=False, padding=padding
-            )  # TENorm detects LayerNorm/RMS automatically.
-    else:
-        language_transformer_layer_spec = get_layer_spec(
-            is_vit=False, normalization=language_config.normalization
-        )
-
+    language_config, language_transformer_layer_spec = get_language_config_and_spec(base_config)
 
     if args.heterogeneous_layers_config_path is not None:
         without_hetero = get_args()
@@ -158,6 +133,7 @@ def model_provider(
         vision_config.num_layers_in_last_pipeline_stage = None
     else:
         vision_config = deepcopy(base_config)
+
     vision_config = get_vision_model_config(
         vision_config, enable_fusions=args.enable_fusions
     )
@@ -252,11 +228,7 @@ def model_provider(
         vision_config.recompute_method = None
         vision_config.recompute_num_layers = None
 
-    vision_projection_config.recompute_granularity = None
-    vision_projection_config.recompute_method = None
-    vision_projection_config.recompute_num_layers = None
-
-    # TODO: Vision model and projection do not use SP/CP yet.
+    # TODO: Vision model and projection do not use CP or TP comm overlap yet.
     vision_config.sequence_parallel = False
     vision_config.context_parallel_size = 1
     vision_config.tp_comm_overlap = False
@@ -264,6 +236,15 @@ def model_provider(
     vision_projection_config.sequence_parallel = False
     vision_projection_config.context_parallel_size = 1
     vision_projection_config.tp_comm_overlap = False
+
+    # Toggle --recompute* for the vision projection layer.
+    if args.recompute_vision_projection:
+        vision_projection_config.recompute_granularity = "full"
+    else:
+        vision_projection_config.recompute_granularity = None
+        vision_projection_config.recompute_method = None
+        vision_projection_config.recompute_num_layers = None
+
 
     tokenizer = get_tokenizer()
     image_token_index = tokenizer.convert_tokens_to_ids(IMAGE_TOKEN)
@@ -273,7 +254,8 @@ def model_provider(
     if args.image_break_token is not None:
         assert args.image_break_token in args.special_tokens, f"IMAGE_BREAK_TOKEN='{args.image_break_token}' needs to be added to the --special-tokens list."
 
-    tile_tags = _get_tile_tags(args, tokenizer)
+    # Not used anymore.
+    tile_tags = None
 
     sound_model, sound_projection, sound_token_index = sound_model_provider(base_config, language_config.hidden_size)
 
@@ -333,39 +315,53 @@ def model_provider(
     return model
 
 
-def _get_tile_tags(args, tokenizer):
-    """Tile tags are used in NVLM to surround image tiles with text tags."""
-    if not args.use_tile_tags:
-        return None
+def get_language_config_and_spec(base_config):
+    """Get the language config and spec."""
+    args = get_args()
 
-    # We expect the tokenized length of the tags is same.
-    if args.max_num_tiles < 10:
-        thumbnail_tag_text = "<tile_global_thumbnail>"
-        if args.tokenizer_prompt_format == "nvlm-yi-34b":
-            thumbnail_tag_text = "<tile_global>"
+    use_te = args.use_te
 
-        if args.tokenizer_prompt_format.startswith("nemotron"):
-            tile_tags_text = [f"<tile_{i:02d}>" for i in range(1, args.max_num_tiles + 1)] + [thumbnail_tag_text]
+    language_config = deepcopy(base_config)
+    language_config = get_language_model_config(
+        language_config, args.enable_fusions,
+        apply_rope_fusion=not EVSVariant.uses_special_position_ids(args.efficient_video_sampling_variant)
+    )
+    language_model_type = language_config.language_model_type
+
+    if language_model_type.startswith("hf://"):
+        assert args.tensor_model_parallel_size == 1, "Huggingface models do not support --tensor-model-parallel-size > 1"
+        assert args.pipeline_model_parallel_size < 2, "Huggingface models do not support --pipeline-model-parallel-size > 1"
+        assert not args.sequence_parallel, "Huggingface models do not support --sequence-parallel"
+        assert args.context_parallel_size < 2, "Huggingface models do not support --context-parallel-size > 1"
+
+    if language_model_type.startswith("hf://"):
+        language_transformer_layer_spec = None
+    elif args.heterogeneous_layers_config_path is not None:
+        language_transformer_layer_spec = get_gpt_heterogeneous_layer_spec(language_config, use_te)
+    elif use_te:
+        vp_stage = None
+        if args.num_experts:
+            if args.spec is not None:
+                language_transformer_layer_spec = import_module(args.spec)
+            else:
+                language_transformer_layer_spec = get_gpt_decoder_block_spec(
+                    language_config, use_transformer_engine=use_te, normalization=args.normalization, qk_l2_norm=args.qk_l2_norm, vp_stage=vp_stage
+                )
         else:
-            tile_tags_text = [f"<tile_{i}>" for i in range(1, args.max_num_tiles + 1)] + [thumbnail_tag_text]
-    elif args.max_num_tiles <= 12:
-        thumbnail_tag_text = "<tile_global_thumbnail0>"
-        if args.tokenizer_prompt_format == "nvlm-yi-34b":
-            thumbnail_tag_text = "<tile_global0>"
-        elif args.tokenizer_prompt_format.startswith("nemotron") or args.tokenizer_prompt_format == "llama3p1":
-            thumbnail_tag_text = "<tile_global_thumbnail>"
-        tile_tags_text = [f"<tile_{i:02d}>" for i in range(1, args.max_num_tiles + 1)] + [thumbnail_tag_text]
+            # Padding mask needed for SP/CP.
+            padding = args.context_parallel_size > 1 and args.sequence_parallel
+            if args.language_model_type.startswith('nemotron5-hybrid'):
+                language_transformer_layer_spec = get_mamba_layer_spec_te(padding=padding)
+            else:
+                language_transformer_layer_spec = get_layer_spec_te(
+                    is_vit=False, padding=padding
+                )  # TENorm detects LayerNorm/RMS automatically.
     else:
-        raise ValueError("We only support max_num_tiles <= 12 when using nvlm image_tag_type")
+        language_transformer_layer_spec = get_layer_spec(
+            is_vit=False, normalization=language_config.normalization
+        )
 
-    start_idx = 0
-    if tokenizer._prompt_config.has_bos:
-        start_idx = 1
-
-    # Convert to tokens [num_tiles, tile_seq_len].
-    tile_tags = [tokenizer.tokenize(t)[start_idx:] for t in tile_tags_text]
-
-    return tile_tags
+    return language_config, language_transformer_layer_spec
 
 
 def sound_model_provider(base_config, language_hidden_size):

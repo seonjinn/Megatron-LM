@@ -280,6 +280,7 @@ class DistributedDataParallel(_BaseDataParallel):
             # Allocate the grad buffers and map the grads.
             buffers = []
             for (param_dtype, grad_dtype), params in param_and_grad_dtype_to_params.items():
+                bucket_size = max(self.bucket_size, 1e6 * data_parallel_group.size()) if self.bucket_size is not None else None
                 buffers.append(
                     _ParamAndGradBuffer(
                         self.ddp_config,
@@ -287,7 +288,7 @@ class DistributedDataParallel(_BaseDataParallel):
                         grad_dtype,
                         params,
                         data_parallel_group,
-                        max(self.bucket_size, 1e6 * data_parallel_group.size()),
+                        bucket_size,
                         param_to_name,
                         gradient_scaling_factor,
                         param_and_grad_dtype_to_indices[(param_dtype, grad_dtype)],

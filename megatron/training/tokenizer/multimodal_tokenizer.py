@@ -177,9 +177,13 @@ class MultimodalTokenizer(MegatronTokenizer):
             image_tag_type (str): Image tag to apply, if any. For example <img><image></img>.
         """
         num_added_tokens = tokenizer.add_tokens(special_tokens, special_tokens=True)
-        assert num_added_tokens == len(
-            special_tokens
-        ), f"failed to add {len(special_tokens)} special tokens; only added {num_added_tokens}"
+        if prompt_format == "nemotron6-moe":
+            # Special tokens already added in the tokenizer.
+            assert num_added_tokens == 0
+        else:
+            assert num_added_tokens == len(
+                special_tokens
+            ), f"failed to add {len(special_tokens)} special tokens; only added {num_added_tokens}"
         self._vocab_size = len(tokenizer)
 
         self._tokenizer = tokenizer
@@ -319,6 +323,14 @@ class MultimodalTokenizer(MegatronTokenizer):
                 has_bos=True,
                 has_system_role=True,
             )
+        elif prompt_format == "nemotron6-moe":
+            self._prompt_config = PromptConfig(
+                assistant_prefix_len=4,
+                pad_token_id=tokenizer.convert_tokens_to_ids("<unk>"),
+                custom_chat_template=None,
+                has_bos=False,
+                has_system_role=True,
+            )
         else:
             raise NotImplementedError("unknown multimodal tokenizer type", prompt_format)
 
@@ -430,6 +442,40 @@ class MultimodalTokenizer(MegatronTokenizer):
                     target[idx[i]:idx[i]+self._prompt_config.assistant_prefix_len] = IGNORE_INDEX
 
             return tokens, target
+        elif self._prompt_format in ("nemotron6-moe"):
+            # Mask everything.
+            target = np.full_like(tokens, IGNORE_INDEX)
+            assistant_idx = np.where(tokens == 1503)[0]
+            end_idx = np.where(tokens == 23836)[0]
+
+            # Unmask the assistant turn.
+            for i in assistant_idx:
+                # Check for possible mismatches.
+                is_assistant = (tokens[i-5:i+2] == np.array([1124, 1329, 18993, 1124, 1062, 1503, 19464])).all()
+                if not is_assistant:
+                    continue
+
+                lb = i
+
+                ub = None
+                for j in end_idx:
+                    if j < lb:
+                        continue
+
+                    # Check for possible mismatches.
+                    is_end = (tokens[j-2:j+2] == np.array([1124, 1329, 23836, 1124])).all()
+                    if not is_end:
+                        continue
+
+                    ub = j
+                    break
+
+                if ub is None:
+                    raise RuntimeError(f"end index not found {conversation}")
+
+                target[lb+3:ub+3] = tokens[lb+3:ub+3]
+
+            return tokens, target
 
         # Mask system and user tokens in the target.
         idx = 0
@@ -464,9 +510,17 @@ class MultimodalTokenizer(MegatronTokenizer):
                 if self._prompt_config.assistant_prefix_len > 0:
                     target[idx : idx + self._prompt_config.assistant_prefix_len] = IGNORE_INDEX
 
-            assert np.allclose(
-                tokens[idx : idx + turn_len], turn_tokens
-            ), f"expected turn tokens to match tokens in conversation {conversation}"
+            try:
+                assert np.allclose(
+                    tokens[idx : idx + turn_len], turn_tokens
+                ), f"expected turn tokens to match tokens in conversation {conversation}"
+            except:
+                import os
+                if int(os.environ.get("RANK", 0)) == 0:
+                    breakpoint()
+                else:
+                    import time
+                    time.sleep(10000)
 
             idx += turn_len
 

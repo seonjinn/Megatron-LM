@@ -365,11 +365,19 @@ class MultiModalTaskEncoder(
 
         # We tentatively extract the first message if it's a system prompt and use this rather than
         # the default. After this, we expect no system prompt in the conversation.
+        #import os
+        #if int(os.environ.get("RANK", 0)) == 0:
+        #    breakpoint()
+        #else:
+        #    import time
+        #    time.sleep(10000)
+
         has_system_message = sample.conversation[0].sender == "system"
-        # system_prompt ="Answer the questions."
-        system_prompt = ""
+        system_prompt = "Answer the questions."
         if has_system_message:
             system_prompt = sample.conversation[0].fragments[0]
+            if system_prompt == "":
+                system_prompt = "Answer the questions."
             sample.conversation = sample.conversation[1:]
 
         legacy_conversation: list[LegacyConversation] = [
@@ -673,6 +681,8 @@ class MultiModalTaskEncoder(
                 self.args.context_parallel_size,
                 self.args.tensor_model_parallel_size,
                 self.args.sequence_parallel,
+                self.args.tp_comm_overlap,
+                self.args.decoder_seq_length,
                 fp8_enabled=has_fp8,
             )
             if padding_needed > 0:
@@ -754,6 +764,8 @@ class MultiModalTaskEncoder(
                 self.args.context_parallel_size,
                 self.args.tensor_model_parallel_size,
                 self.args.sequence_parallel,
+                self.args.tp_comm_overlap,
+                self.args.decoder_seq_length,
                 fp8_enabled=has_fp8,
             )
             if padding_needed > 0:
@@ -953,6 +965,8 @@ class MultiModalTaskEncoder(
                 self.args.context_parallel_size,
                 self.args.tensor_model_parallel_size,
                 self.args.sequence_parallel,
+                self.args.tp_comm_overlap,
+                self.args.decoder_seq_length,
                 fp8_enabled=False,
             )
             padding1 = torch.ones(padding_needed) * self.tokenizer.pad

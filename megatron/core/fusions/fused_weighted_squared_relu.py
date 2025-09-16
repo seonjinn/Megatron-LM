@@ -11,7 +11,7 @@ from megatron.core.utils import nvtx_decorator
 
 @jit_fuser
 def _squared_relu(x: torch.Tensor) -> torch.Tensor:
-    """Squared ReLU activation: \(\max(0, x))^2."""
+    """Squared ReLU activation: (max(0, x))^2."""
     return torch.pow(F.relu(x), 2)
 
 

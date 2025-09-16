@@ -10,10 +10,21 @@
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=pretrain_nm_5p5_h_9b_cradio_vlm_0814_tiling
+#SBATCH --job-name=pretrain_moe_0930
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
+
+export UB_TIMEOUT=720
+export CUDA_DEVICE_MAX_CONNECTIONS=1
+export NVTE_FWD_LAYERNORM_SM_MARGIN=16
+export NVTE_BWD_LAYERNORM_SM_MARGIN=16
+export NCCL_P2P_NET_CHUNKSIZE=2097152
+export NCCL_DEBUG=WARN
+export TORCHINDUCTOR_WORKER_START=fork
+export TRITON_CACHE_DIR=${TRITON_CACHE_DIR:-"/tmp/triton_cache_\${SLURM_NODEID}"}
+
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 USER=$SLURM_JOB_USER
 
@@ -22,16 +33,19 @@ which srun
 BATCH=$((1-$?))
 
 DEBUG=0
+USE_TILING=1
+USE_DYNAMIC_RES=0
+USE_FP8=0
 
 
 # Remember to update model and job name if running in batch mode!!
 if [[ $BATCH -eq 0 ]]; then
     DATETIME=`date +'%y-%m-%d-%H-%M-%S'`
-    MODEL_NAME="interactive_pretrain_nemotron_5p5_hybrid_12b_cradio_${DATETIME}"
+    MODEL_NAME="interactive_pretrain_moe_${DATETIME}"
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="pretrain_nm_5p5_h_9b_cradio_vlm_0814_tiling"
+    MODEL_NAME="pretrain_moe_0930"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -44,10 +58,10 @@ FINETUNE_DIR=${OUTPUT}/checkpoints
 LOGS_DIR="${OUTPUT}/logs"
 TENSORBOARD_DIR="${OUTPUT}/tensorboard"
 
-TP=4
-CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/amalasanjayd/checkpoints/nemotron_5p5_9b_v2/vlm"
-# TP=4
-# CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/mcore_mmodal_models/n5p5_12b_sft_0718_cradio_vlm_v1_rc3_tp4"
+TP=2
+EP=32
+CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/nemotron6-moe-c-radio_v2-vlm-h-tp2/"
+#CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/nemotron6-moe-prefix/"
 
 DATA_TRAIN="${SOURCE}/examples/multimodal/v2/data_config/pretrain_dataset_commercial.yaml"
 
@@ -59,12 +73,9 @@ if [[ $DEBUG -eq 1 ]]; then
     HD=0.0
     LI=1
 
-    EXTRA_ARGS="--deterministic-mode --use-cpu-initialization"
     EXTRA_ARGS=""
 
     NUM_GPU=8
-
-    SAVE_INTERVAL=10
 else
     MBZ=1
     BZ=1024
@@ -74,20 +85,16 @@ else
     LI=5
     EXTRA_ARGS=""
     NUM_GPU=8
-
-    SAVE_INTERVAL=5000
 fi
 
-SEQ_LEN=1024
+SEQ_LEN=256
 DECODER_SEQ_LEN=16384
 
-USE_TILING=1
 if [[ $USE_TILING -eq 1 ]]; then
     EXTRA_ARGS+=" --pixel-shuffle --use-tiling --max-num-tiles 12 --use-thumbnail"
     SEQ_LEN=256
 fi
 
-USE_FP8=1
 if [[ $USE_FP8 -eq 1 ]]; then
     # Recipe 1: More accurate but not the fastest.
     EXTRA_ARGS+=" --fp8-recipe blockwise --fp8-format e4m3 --first-last-layers-bf16 --num-layers-at-start-in-bf16 1 --num-layers-at-end-in-bf16 1"
@@ -97,7 +104,6 @@ if [[ $USE_FP8 -eq 1 ]]; then
     EXTRA_ARGS+=" --use-vision-backbone-fp8-arch "
 fi
 
-USE_DYNAMIC_RES=0
 if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
     SEQ_LEN=12288
 
@@ -111,93 +117,124 @@ if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
     EXTRA_ARGS+=" ${IMAGE_BREAK_TOKEN} --dynamic-resolution --dynamic-resolution-min-patches 1024 --conv-merging --allow-missing-conv-merge-checkpoint"
 fi
 
-# --tokenizer-model /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/mcore_mmodal_models/models--nvidia--Nemotron-H-8B-Base-8K/snapshots/281935db305672111f043428fe4982969876613c/ \
 
 OPTIONS=" \
     --use-checkpoint-args \
-    --disable-bias-linear \
-    --tokenizer-type MultimodalTokenizer \
-    --tokenizer-model /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/9b_tokenizer \
-    --tokenizer-prompt-format nemotron-h-5p5-reasoning \
-    --make-vocab-size-divisible-by 16512 \
     --transformer-impl transformer_engine \
-    --normalization RMSNorm \
-    --group-query-attention \
-    --num-query-groups 8 \
-    --no-masked-softmax-fusion \
-    --attention-softmax-in-fp32 \
-    --attention-dropout ${AD} \
-    --hidden-dropout ${HD} \
-    --untie-embeddings-and-output-weights \
-    --position-embedding-type none \
-    --hybrid-override-pattern M-M-M-MM-M-M-M*-M-M-M*-M-M-M-M*-M-M-M-M*-M-MM-M-M-M-M-M- \
-    --spec megatron.core.models.mamba.mamba_layer_specs mamba_stack_spec \
-    --squared-relu \
-    --norm-epsilon 1e-05 \
-    --tensor-model-parallel-size ${TP} \
-    --pipeline-model-parallel-size 1 \
-    --num-layers 56 \
-    --hidden-size 4480 \
-    --ffn-hidden-size 15680 \
-    --kv-channels 128 \
-    --num-attention-heads 40 \
-    --use-distributed-optimizer \
     --use-te \
-    --num-workers ${NW} \
-    --exit-duration-in-mins 230 \
-    --seq-length ${SEQ_LEN} \
-    --decoder-seq-length ${DECODER_SEQ_LEN} \
-    --max-position-embeddings ${DECODER_SEQ_LEN} \
-    --train-full-dataset \
-    --lr-warmup-samples 102400 \
-    --micro-batch-size ${MBZ} \
-    --global-batch-size ${BZ} \
-    --lr 2e-4 \
-    --min-lr 0.0 \
-    --lr-decay-style cosine \
-    --log-interval ${LI} \
-    --eval-iters 0 \
-    --eval-interval 100000 \
     --data-path ${DATA_TRAIN} \
-    --prompt-path ${SOURCE}/examples/multimodal/manual_prompts.json \
-    --save-interval ${SAVE_INTERVAL} \
-    --save ${FINETUNE_DIR} \
-    --load ${FINETUNE_DIR} \
-    --dataloader-save ${FINETUNE_DIR}/dataloader \
-    --pretrained-checkpoint ${CHECKPOINT_DIR} \
-    --split 100,0,0 \
-    --clip-grad 1.0 \
-    --weight-decay 1e-2 \
-    --adam-beta1 0.9 \
-    --adam-beta2 0.999 \
-    --init-method-std 0.02 \
-    --bf16 \
-    --eod-mask-loss \
     --freeze-ViT \
     --freeze-LM \
     --patch-dim 16 \
     --img-h 512 \
     --img-w 512 \
     --dataloader-type external \
-    --tensorboard-dir ${TENSORBOARD_DIR} \
-    --language-model-type nemotron5-hybrid-9b \
+    --language-model-type nemotron6-moe \
     ${EXTRA_ARGS} \
-    --distributed-timeout-minutes 60 \
     --allow-missing-vision-projection-checkpoint \
     --vision-model-type radio \
     --use-loss-scaling \
     ${SPECIAL_TOKENS} \
-    --ckpt-format torch \
-    --image-tag-type internvl \
     --disable-vision-class-token \
     --eos-id 15 \
+    --eod-mask-loss \
+    --image-tag-type internvl \
+    --moe-token-dispatcher-type alltoall \
+    --moe-shared-expert-overlap \
+    --enable-experimental \
+    --moe-permute-fusion \
+    --use-fused-weighted-squared-relu \
+    --moe-router-score-function sigmoid \
+    --moe-grouped-gemm \
+    --num-experts 128 \
+    --moe-router-topk 6 \
+    --moe-aux-loss-coeff 1e-4 \
+    --moe-router-topk-scaling-factor 2.5 \
+    --moe-router-enable-expert-bias \
+    --moe-router-dtype fp32 \
+    --moe-router-load-balancing-type seq_aux_loss \
+    --moe-shared-expert-intermediate-size 3712 \
     --attention-backend flash \
-    --use-vision-backbone-fp8-arch \
     --is-hybrid-model \
-    --mamba-head-dim 80 \
-    --mamba-num-heads 128 \
-    --mamba-state-dim 128 \
+    --mamba-num-heads 64 \
+    --mamba-head-dim 64 \
+    --hybrid-override-pattern MEMEM*EMEMEM*EMEMEM*EMEMEM*EMEMEM*EMEMEMEM*EMEMEMEME \
+    --spec megatron.core.models.mamba.mamba_layer_specs mamba_stack_spec \
+    --tiktoken-pattern v2 \
+    --distributed-timeout-minutes 20 \
+    --use-mcore-models \
+    --untie-embeddings-and-output-weights \
+    --disable-bias-linear \
+    --init-method-std 0.02 \
+    --position-embedding-type none \
+    --squared-relu \
+    --num-layers 52 \
+    --hidden-size 2688 \
+    --num-attention-heads 32 \
+    --group-query-attention \
+    --num-query-groups 2 \
+    --ffn-hidden-size 1856 \
+    --kv-channels 128 \
+    --normalization RMSNorm \
+    --attention-dropout ${AD} \
+    --hidden-dropout ${HD} \
+    --exit-duration-in-mins 230 \
+    --tensor-model-parallel-size ${TP} \
+    --expert-model-parallel-size ${EP} \
+    --expert-tensor-parallel-size 1 \
+    --pipeline-model-parallel-size 1 \
+    --seq-length ${SEQ_LEN} \
+    --decoder-seq-length ${DECODER_SEQ_LEN} \
+    --max-position-embeddings ${DECODER_SEQ_LEN} \
+    --micro-batch-size ${MBZ} \
+    --global-batch-size ${BZ} \
+    --train-full-dataset \
+    --lr-warmup-samples 102400 \
+    --lr 2e-4 \
+    --min-lr 0.0 \
+    --weight-decay 0.01 \
+    --clip-grad 1.0 \
+    --lr-decay-style cosine \
+    --log-interval ${LI} \
+    --eval-iters 0 \
+    --eval-interval 99999999999 \
+    --tokenizer-type MultimodalTokenizer \
+    --tokenizer-model /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/nemotron6-moe-tokenizer/ \
+    --tokenizer-prompt-format nemotron6-moe \
+    --pretrained-checkpoint ${CHECKPOINT_DIR} \
+    --load ${FINETUNE_DIR} \
+    --save ${FINETUNE_DIR} \
+    --dataloader-save ${FINETUNE_DIR}/dataloader \
+    --save-interval 2000 \
+    --ckpt-format torch \
+    --log-progress  \
+    --timing-log-option minmax \
+    --log-params-norm \
+    --log-num-zeros-in-grad \
+    --log-throughput \
+    --logging-level 20 \
+    --log-memory-interval 500 \
+    --bf16 \
+    --adam-beta1 0.9 \
+    --adam-beta2 0.999 \
+    --use-distributed-optimizer \
+    --ddp-num-buckets 8 \
+    --ddp-pad-buckets-for-high-nccl-busbw \
+    --overlap-grad-reduce \
+    --overlap-param-gather \
+    --manual-gc \
+    --num-workers ${NW} \
+    --tensorboard-dir ${TENSORBOARD_DIR} \
+    --sequence-parallel \
 "
+
+#     --moe-token-dispatcher-type flex \
+#    --moe-enable-deepep \
+#     --tp-comm-overlap \
+# --decoder-tp-comm-overlap \
+#     --disable-gloo-process-groups \
+# --tp-comm-overlap \
+# --sequence-parallel \
 
 export NVTE_APPLY_QK_LAYER_SCALING=0
 export NVTE_ALLOW_NONDETERMINISTIC_ALGO=1
@@ -211,7 +248,7 @@ else
     DATETIME=`date +'date_%y-%m-%d_time_%H-%M-%S'`
 
     srun -l --verbose \
-    --container-image /lustre/fsw/portfolios/llmservice/users/amalasanjayd/containers/megatron-lm/megatron-dev-0806.sqsh \
+    --container-image /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/containers/nm6_hybrid_moe_yash_07_17_vlm.sqsh \
     --container-mounts "/lustre" \
     --output=${LOGS_DIR}/%x_%j_$DATETIME.log \
     sh -c "echo ${run_cmd}; ${run_cmd}"

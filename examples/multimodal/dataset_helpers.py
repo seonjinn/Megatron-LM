@@ -168,8 +168,10 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
         self.args = get_args()
 
         self.tokenizer = get_tokenizer()
-        with open(self.args.prompt_path, "r") as f:
-            self.manual_prompts = json.load(f)
+        self.manual_prompts = {}
+        if self.args.prompt_path:
+            with open(self.args.prompt_path, "r") as f:
+                self.manual_prompts = json.load(f)
         self.dataloader_seq_length = self.args.dataloader_seq_length  # Always return samples of this length.
         self.packing_seq_length = self.args.packing_seq_length     # Packing sequence length, if packing is enabled.
         self.is_packing_enabled = self.args.packing_buffer_size is not None and self.args.packing_buffer_size > 0
@@ -592,7 +594,8 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
         # Here we don't pad for FP8 because only the final sequence needs to be padded. That is done in batch().
         has_cp = self.args.context_parallel_size > 1
         if has_cp or self.args.sequence_parallel:
-            padding_needed = get_padding(total_len, self.args.context_parallel_size, self.args.tensor_model_parallel_size, self.args.sequence_parallel, fp8_enabled=False)
+            padding_needed = get_padding(total_len, self.args.context_parallel_size, self.args.tensor_model_parallel_size, self.args.sequence_parallel,
+                                         self.args.tp_comm_overlap, self.args.decoder_seq_length, fp8_enabled=False)
             padding_input = np.ones(padding_needed) * self.tokenizer.pad
             padding_labels = np.ones(padding_needed) * IGNORE_INDEX
             input_ids = np.concatenate([input_ids, padding_input])
@@ -929,7 +932,8 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
             img_seq_len = 0
             for img in imgs:
                 img_seq_len += (img.shape[1] // self.args.patch_dim) * (img.shape[2] // self.args.patch_dim)
-            padding_needed = get_padding(img_seq_len, self.args.context_parallel_size, self.args.tensor_model_parallel_size, self.args.sequence_parallel, fp8_enabled=has_fp8)
+            padding_needed = get_padding(img_seq_len, self.args.context_parallel_size, self.args.tensor_model_parallel_size, self.args.sequence_parallel,
+                                         self.args.tp_comm_overlap, self.args.decoder_seq_length, fp8_enabled=has_fp8)
             if padding_needed > 0:
                 pad_img = torch.zeros([3, self.args.patch_dim, padding_needed * self.args.patch_dim])
                 imgs.append(pad_img)
@@ -970,6 +974,8 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
                 self.args.context_parallel_size,
                 self.args.tensor_model_parallel_size,
                 self.args.sequence_parallel,
+                self.args.tp_comm_overlap,
+                self.args.decoder_seq_length,
                 fp8_enabled=has_fp8,
             )
             if padding_needed > 0:

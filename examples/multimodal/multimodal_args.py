@@ -81,7 +81,8 @@ def add_multimodal_extra_args(parser):
         type=str,
         choices=["mistral", "llama3", "chatml", "nvlm-yi-34b", "qwen2p0", "qwen2p5", "llama3p1", "nemotron5",
                  "nemotron5-aligned", "llama_nemotron_8b", "nemotron-h-reasoning", "nemotron-h-5p5-reasoning",
-                 "nemotron-h-5p5-reasoning-inference", "llama-nemotron-super", "llama-nemotron-super-1p5"],
+                 "nemotron-h-5p5-reasoning-inference", "llama-nemotron-super", "llama-nemotron-super-1p5",
+                 "nemotron6-moe"],
         required=True,
         help="Prompt format to use with the tokenizer.",
     )
@@ -177,6 +178,9 @@ def add_multimodal_extra_args(parser):
         choices=['uniform', 'block'], help="Method to recompute in the vision model.",
     )
     group.add_argument(
+        "--recompute-vision-projection", action="store_true", default=False, help="Enable activation checkpointing in the vision projection layer."
+    )
+    group.add_argument(
         "--allow-large-videos", action="store_true", default=False, help="Allow large videos to be loaded into the model."
     )
     group.add_argument(
@@ -202,6 +206,9 @@ def add_multimodal_extra_args(parser):
     )
     group.add_argument(
         "--use-new-dataloader-path", action="store_true", default=False, help="Use the new dataloader path."
+    )
+    group.add_argument(
+        "--decoder-tp-comm-overlap", action="store_true", default=False, help="Enable tensor parallel communication overlap in the decoder."
     )
 
 

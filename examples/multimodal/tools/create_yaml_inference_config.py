@@ -543,6 +543,7 @@ def update_inference_params(config_dict, inference_params):
     updated_config.pop("allow_missing_sound_projection_checkpoint", None)
     updated_config.pop("allow_missing_sound_model_checkpoint", None)
     updated_config.pop("allow_missing_conv_merge_checkpoint", None)
+    updated_config.pop("masked_softmax_fusion", None)
 
     # Not used in inference.
     updated_config.pop("tensorboard-dir", None)
@@ -590,7 +591,12 @@ def main():
         user = os.environ["SLURM_JOB_USER"]
         path = f"/lustre/fsw/portfolios/llmservice/users/{user}/workspace/output/{args.model_name}"
         some_iter = int(open(f"{path}/checkpoints/latest_checkpointed_iteration.txt").read().strip())
-        args.ckpt_path = f"{path}/checkpoints/iter_{some_iter:07d}/mp_rank_00/model_optim_rng.pt"
+        ckpt_path = f"{path}/checkpoints/iter_{some_iter:07d}/mp_rank_00/model_optim_rng.pt"
+        ckpt_path2 = f"{path}/checkpoints/iter_{some_iter:07d}/mp_rank_00_000/model_optim_rng.pt"
+        # Check MOE if it's MoE.
+        if not os.path.exists(ckpt_path) and os.path.exists(ckpt_path2):
+            ckpt_path = ckpt_path2
+        args.ckpt_path = ckpt_path
         args.output_config = f"{path}/config.yaml"
 
     assert args.ckpt_path is not None, "Checkpoint path is required"

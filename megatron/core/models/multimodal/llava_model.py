@@ -187,7 +187,7 @@ class LLaVAModel(MegatronModule):
         self.context_parallel_lm = language_transformer_config.context_parallel_size
         if self.sequence_parallel_lm or self.context_parallel_lm > 1:
             # TODO: maybe need a better check for when using heterogeneous layer config
-            if not language_model_type.startswith('nemotron5-hybrid') and not isinstance(language_transformer_config, HeterogeneousTransformerConfig):
+            if not language_model_type.startswith('nemotron5-hybrid') and not language_model_type.startswith('nemotron6-moe') and not isinstance(language_transformer_config, HeterogeneousTransformerConfig):
                 attn_module = language_transformer_layer_spec.submodules.self_attention
                 assert (
                     attn_module.submodules.core_attention == TEDotProductAttention and HAVE_TE
@@ -326,6 +326,13 @@ class LLaVAModel(MegatronModule):
                 self.vision_projection.register_load_state_dict_post_hook(
                     partial(_load_state_dict_hook_ignore_param_names, vision_projection_param_names)
                 )
+                vision_model_param_names = [
+                    f"vision_model.{name}"
+                    for name in self.vision_model.state_dict().keys()
+                ]
+                self.vision_model.register_load_state_dict_post_hook(
+                    partial(_load_state_dict_hook_ignore_param_names, vision_model_param_names)
+                )
 
             self.vision_projection.register_load_state_dict_post_hook(
                 _load_state_dict_hook_ignore_extra_state
@@ -359,7 +366,7 @@ class LLaVAModel(MegatronModule):
                     language_transformer_config, language_transformer_config.language_model_type
                 )
                 self.language_model = build_hf_model(language_transformer_config)
-            elif language_model_type.startswith('nemotron5-hybrid'):
+            elif language_model_type.startswith('nemotron5-hybrid') or language_model_type.startswith('nemotron6-moe'):
                 self.language_model = MambaModel(
                     config=language_transformer_config,
                     mamba_stack_spec=language_transformer_layer_spec,
@@ -376,6 +383,7 @@ class LLaVAModel(MegatronModule):
                     rotary_base=language_rotary_base,
                     fp16_lm_cross_entropy=fp16_lm_cross_entropy,
                     scatter_embedding_sequence_parallel=False,
+                    share_embeddings_and_output_weights=share_embeddings_and_output_weights,
                 )
             else:
                 self.language_model = GPTModel(
@@ -392,6 +400,7 @@ class LLaVAModel(MegatronModule):
                     rope_scaling=language_rope_scaling,
                     rope_scaling_factor=language_rope_scaling_factor,
                     scatter_embedding_sequence_parallel=False,
+                    share_embeddings_and_output_weights=share_embeddings_and_output_weights,
                 )
 
                 self.share_embeddings_and_output_weights = (
@@ -892,7 +901,8 @@ class LLaVAModel(MegatronModule):
             if self.post_process and new_labels is not None:
                 batch["new_labels"] = new_labels
                 batch["new_loss_mask"] = new_loss_mask
-                batch["loss_weight"] = loss_weight
+                if loss_weight is not None:
+                    batch["loss_weight"] = loss_weight
             # Distribute sequence across CP ranks
             if packed_seq_params is None or packed_seq_params.qkv_format == 'sbhd':
                 from megatron.training.utils import get_batch_on_this_cp_rank
@@ -921,7 +931,9 @@ class LLaVAModel(MegatronModule):
                     position_ids = position_ids.transpose(1, 0).contiguous()  # [B,S/CP] -> [S/CP,B]
             if self.post_process and new_labels is not None:
                 new_labels = batch["new_labels"]
-                new_loss_mask = batch["new_loss_mask"] * batch["loss_weight"]
+                new_loss_mask = batch["new_loss_mask"]
+                if "loss_weight" in batch:
+                    new_loss_mask = new_loss_mask * batch["loss_weight"]
 
         if self.sequence_parallel_lm and self.pre_process:
             combined_embeddings = tensor_parallel.scatter_to_sequence_parallel_region(
@@ -1348,11 +1360,17 @@ class LLaVAModel(MegatronModule):
             sound_embeddings=sound_embeddings,
         )  # [combined_seq_len, b, h_language], [b, combined_seq_len], [b, combined_seq_len]
 
+        loss_weight = None
         if self.context_parallel_lm > 1 or self.sequence_parallel_lm:
-            acc_lengths = packed_seq_params.cu_seqlens_q_padded
-            num_samples = len(acc_lengths) - 1
-            loss_weight = pre_calc_loss_weight(num_samples, acc_lengths, new_labels[0])
-            loss_weight = loss_weight.unsqueeze(0)
+            if new_labels is not None:
+                acc_lengths = (
+                    packed_seq_params.cu_seqlens_q_padded
+                    if packed_seq_params is not None
+                    else [0, combined_embeddings.shape[0]]
+                )
+                num_samples = len(acc_lengths) - 1
+                loss_weight = pre_calc_loss_weight(num_samples, acc_lengths, new_labels[0])
+                loss_weight = loss_weight.unsqueeze(0)
 
             combined_embeddings, new_labels, new_loss_mask, position_ids, packed_seq_params = (
                 self._process_embedding_token_parallel(

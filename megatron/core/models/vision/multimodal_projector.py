@@ -1,12 +1,16 @@
 # Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
 from contextlib import nullcontext
 
+import torch
+
+from megatron.core import tensor_parallel, parallel_state
 from megatron.core.transformer.mlp import MLP, MLPSubmodules
 from megatron.core.transformer.module import MegatronModule
 from megatron.core.transformer.spec_utils import build_module
 from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.utils import make_viewless_tensor
 from megatron.core.fp8_utils import get_fp8_context
+from transformer_engine.pytorch.distributed import checkpoint as te_checkpoint
 
 
 class MultimodalProjector(MegatronModule):
@@ -54,6 +58,26 @@ class MultimodalProjector(MegatronModule):
             else:
                 raise Exception(f"Unsupported multimodal projection type {self.projector_type}")
 
+    def _checkpointed_forward(self, hidden_states: torch.Tensor):
+        """Forward method with activation checkpointing."""
+        forward_func = self.encoder.forward
+
+        use_te = False
+        if use_te:
+            return te_checkpoint(
+                forward_func,
+                self.config.distribute_saved_activations,
+                tensor_parallel.random.get_cuda_rng_tracker,
+                parallel_state.get_tensor_model_parallel_group(),
+                hidden_states,
+            )
+        else:
+            return tensor_parallel.checkpoint(
+                forward_func,
+                self.config.distribute_saved_activations,
+                hidden_states,
+            )
+
     def forward(self, hidden_states):
         """Run multimodal projector.
 
@@ -65,8 +89,10 @@ class MultimodalProjector(MegatronModule):
         """
         fp8_context = get_fp8_context(self.config) if self.config.fp8 else nullcontext()
         with fp8_context:
-            # Run encoder.
-            encoder_output, encoder_output_bias = self.encoder(hidden_states)
+            if self.config.recompute_granularity == 'full' and self.training:
+                encoder_output, encoder_output_bias = self._checkpointed_forward(hidden_states)
+            else:
+                encoder_output, encoder_output_bias = self.encoder(hidden_states)
 
             if encoder_output_bias is not None:
                 encoder_output = encoder_output + encoder_output_bias
