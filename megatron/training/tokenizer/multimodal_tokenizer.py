@@ -294,7 +294,6 @@ class MultimodalTokenizer(MegatronTokenizer):
                 has_bos=False,
                 has_system_role=True,
                 force_system_message=force_system_message,
-                system_default={"role": "system", "content": ""}
             )
         elif prompt_format == "nemotron-h-5p5-reasoning-inference":
             self._prompt_config = PromptConfig(
