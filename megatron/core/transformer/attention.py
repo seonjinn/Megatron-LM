@@ -161,7 +161,7 @@ class Attention(MegatronModule, ABC):
         self.key_hidden_size = self.hidden_size_per_attention_head
         self.val_hidden_size = self.hidden_size_per_attention_head
 
-        if self.config.num_query_groups < world_size:
+        if self.config.num_query_groups < world_size == 0:
             tmp_config = copy.deepcopy(self.config)
             tmp_config.num_query_groups = world_size
         else:
@@ -967,7 +967,7 @@ class SelfAttention(Attention):
         # Attention heads [sq, b, h] --> [sq, b, ng * (np/ng + 2) * hn)]
         mixed_qkv, _ = self.linear_qkv(hidden_states)
 
-        if self.config.num_query_groups < self.world_size:
+        if self.config.num_query_groups < self.world_size == 0:
             mixed_qkv = all_gather_last_dim_from_tensor_parallel_region(mixed_qkv)
             idx = get_tensor_model_parallel_rank() // (self.world_size // self.config.num_query_groups)
             size = mixed_qkv.size()[-1] // self.config.num_query_groups
@@ -1007,7 +1007,7 @@ class SelfAttention(Attention):
         # [sq, b, ng, np/ng * hn] -> [sq, b, np, hn]
         query = query.reshape(query.size(0), query.size(1), -1, self.hidden_size_per_attention_head)
 
-        if self.config.num_query_groups < self.world_size:
+        if self.config.num_query_groups < self.world_size == 0:
             idx = get_tensor_model_parallel_rank() % (self.world_size // self.config.num_query_groups)
             size = self.num_attention_heads_per_partition // (self.world_size // self.config.num_query_groups)
             query = query[:, :, idx * size:(idx + 1) * size, :]
