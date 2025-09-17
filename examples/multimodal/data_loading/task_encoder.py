@@ -491,6 +491,18 @@ class MultiModalTaskEncoder(
         tiling_augment_prob = sample.__subflavors__.get("tiling_augment_prob", self.tiling_augment_prob)
         aggregated_num_frames = []
 
+        # We tentatively extract the first message if it's a system prompt and use this rather than
+        # the default. After this, we expect no system prompt in the conversation.
+        has_system_message = sample.conversation[0].sender == "system"
+        # system_prompt ="Answer the questions."
+        system_prompt = ""
+        if has_system_message:
+            system_prompt = sample.conversation[0].fragments[0]
+            sample.conversation = sample.conversation[1:]
+
+        legacy_conversation: list[LegacyConversation] = [
+            {"role": "system", "content": system_prompt}]
+
         for message in sample.conversation:
             idx = 0
             while idx < len(message.fragments):
@@ -512,12 +524,6 @@ class MultiModalTaskEncoder(
                         # Image or a single frame
                         aggregated_num_frames.append(1)
                     idx += 1
-
-        legacy_conversation: list[LegacyConversation] = [
-            {"role": "system", "content": "Answer the questions."},
-            # TODO: Orginal eagle repro
-            # {"role": "system", "content": "You are an AI assistant whose name is Eagle-Next."},
-        ]
 
         image_media: list[ImageMedia | VideoFrameMedia] = []
         audio_media_params: list[AudioMedia] = []
