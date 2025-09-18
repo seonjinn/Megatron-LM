@@ -144,7 +144,8 @@ class AudioTransformParakeetStrategy(_ResampleAudioTransformStrategy):
         for media in media_list:
             # Compute the final number of tokens
             # Will be resampled to target_freq
-            audio = media.value.get().get_audio().audio_clips
+            val = media.value
+            audio = [val] if isinstance(val, torch.Tensor) else val.get_audio().audio_clips
             num_clips = math.ceil(audio[0].shape[1] / self._clip_duration / media.audio_samples_per_second)
             if not self.use_nemo:
                 # HF implementation is restricted to 60s clips.

@@ -538,6 +538,15 @@ def update_inference_params(config_dict, inference_params):
     updated_config["pipeline_model_parallel_size"] = 1
     updated_config["tensor_model_parallel_size"] = 1
 
+    # Not allowed in inference.
+    updated_config.pop("allow_missing_vision_projection_checkpoint", None)
+    updated_config.pop("allow_missing_sound_projection_checkpoint", None)
+    updated_config.pop("allow_missing_sound_model_checkpoint", None)
+    updated_config.pop("allow_missing_conv_merge_checkpoint", None)
+
+    # Not used in inference.
+    updated_config.pop("tensorboard-dir", None)
+
     return updated_config
 
 
