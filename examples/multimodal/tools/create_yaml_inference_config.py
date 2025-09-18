@@ -182,7 +182,7 @@ EXCLUDED_PARAMS = {
     'log_interval', 'log_energy', 'log_memory_to_tensorboard', 'log_num_zeros_in_grad',
     'log_params_norm', 'log_progress', 'log_straggler', 'log_throughput',
     'log_timers_to_tensorboard', 'log_validation_ppl_to_tensorboard',
-    'log_world_size_to_tensorboard', 'tensorboard_log_interval', 'tensorboard_queue_size',
+    'log_world_size_to_tensorboard', 'tensorboard_dir', 'tensorboard_log_interval', 'tensorboard_queue_size',
     'wandb_exp_name', 'wandb_project', 'wandb_save_dir', 'one_logger_async',
     'one_logger_project',
 

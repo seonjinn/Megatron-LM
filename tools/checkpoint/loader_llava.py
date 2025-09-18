@@ -92,6 +92,11 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
         margs.allow_missing_conv_merge_checkpoint = getattr(checkpoint_args, "allow_missing_conv_merge_checkpoint", False)
         margs.enable_fusions = getattr(checkpoint_args, "enable_fusions", False)
         margs.efficient_video_sampling_variant = getattr(checkpoint_args, "efficient_video_sampling_variant", None)
+        # Sound/audio specific
+        margs.allow_missing_sound_projection_checkpoint = getattr(checkpoint_args, "allow_missing_sound_projection_checkpoint", False)
+        margs.allow_missing_sound_model_checkpoint = getattr(checkpoint_args, "allow_missing_sound_model_checkpoint", False)
+        margs.recompute_sound = getattr(checkpoint_args, "recompute_sound", False)
+        margs.sound_model_type = getattr(checkpoint_args, "sound_model_type", None)
         margs.context_parallel_size = 1
         margs.use_cpu_initialization = False
 
@@ -121,7 +126,13 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
 
         try:
             from megatron.training.arguments import core_transformer_config_from_args
-            from examples.multimodal.config import get_language_model_config, get_vision_model_config, get_vision_projection_config
+            from examples.multimodal.config import (
+                get_language_model_config,
+                get_vision_model_config,
+                get_vision_projection_config,
+                get_sound_model_config,
+                get_sound_projection_config,
+            )
         except ModuleNotFoundError:
             print("Unable to import Megatron, please specify the path to Megatron using --megatron-path. Exiting.")
             queue.put("exit")
@@ -141,6 +152,17 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
         vision_projection_config = get_vision_projection_config(
             vision_projection_config, self.margs.hidden_size
         )
+
+        # Build sound configs to extract metadata if sound is enabled
+        if getattr(self.margs, 'sound_model_type', None) is not None:
+            sound_config = deepcopy(base_config)
+            sound_config.sound_model_type = self.margs.sound_model_type
+            sound_config = get_sound_model_config(sound_config)
+
+            sound_projection_config = deepcopy(base_config)
+            sound_projection_config = get_sound_projection_config(
+                sound_projection_config, self.margs.hidden_size
+            )
 
         md.num_query_groups = self.margs.num_query_groups
         md.kv_channels = self.margs.kv_channels
@@ -164,6 +186,10 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
         md.vision_qkv_bias = vision_config.add_qkv_bias
         md.padded_vocab_size = self.margs.padded_vocab_size
         md.conv_merging = self.margs.conv_merging
+        # Sound metadata (if present)
+        md.sound_model_type = getattr(self.margs, 'sound_model_type', None)
+        if getattr(self.margs, 'sound_model_type', None) is not None:
+            md.sound_projection_linear_bias = sound_projection_config.add_bias_linear
         if hasattr(vision_config, 'normalization'):
             md.vision_norm_has_bias = vision_config.normalization == "LayerNorm"
         else:
@@ -330,6 +356,64 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
 
         self.queue_put("vision projection", message)
 
+    def send_sound_projection_over_queue(self):
+        """Send sound projection parameters over the queue if available."""
+        # Check if model has sound_projection
+        if not hasattr(self.all_models[0][0][0], 'sound_projection') or self.all_models[0][0][0].sound_projection is None:
+            return
+        encoder_tp_size = self.md.previous_encoder_tensor_parallel_size
+        message = {
+            "sound projection l0 weight": torch.cat([self.all_models[0][0][tp_rank].sound_projection.encoder.linear_fc1.weight.data for tp_rank in range(encoder_tp_size)], dim=0),
+            "sound projection l1 weight": torch.cat([self.all_models[0][0][tp_rank].sound_projection.encoder.linear_fc2.weight.data for tp_rank in range(encoder_tp_size)], dim=1),
+        }
+        # Optional norm
+        try:
+            message["sound projection norm weight"] = self.all_models[0][0][0].sound_projection.encoder.linear_fc1.layer_norm_weight.data
+        except Exception:
+            pass
+        try:
+            message["sound projection norm bias"] = self.all_models[0][0][0].sound_projection.encoder.linear_fc1.layer_norm_bias.data
+        except Exception:
+            pass
+        if getattr(self.md, 'sound_projection_linear_bias', False):
+            message["sound projection l0 bias"] = torch.cat([self.all_models[0][0][tp_rank].sound_projection.encoder.linear_fc1.bias.data for tp_rank in range(encoder_tp_size)], dim=0)
+            message["sound projection l1 bias"] = self.all_models[0][0][0].sound_projection.encoder.linear_fc2.bias.data
+
+        self.queue_put("sound projection", message)
+
+    def send_sound_model_over_queue(self):
+        """
+        Send the sound_model weights if present. We transmit two flat dicts for
+        feature_extractor and model submodules to avoid huge single messages.
+        """
+        if getattr(self.md, 'sound_model_type', None) is None:
+            return
+        model0 = self.all_models[0][0][0]
+        if not hasattr(model0, 'sound_model') or model0.sound_model is None:
+            return
+
+        # Parakeet wrapper has .feature_extractor and .model as submodules
+        fe_sd = {}
+        mdl_sd = {}
+        try:
+            fe_sd = {f"sound_model.feature_extractor.{k}": v.detach().cpu() for k, v in model0.sound_model.feature_extractor.state_dict().items()}
+        except Exception:
+            pass
+        try:
+            mdl_sd = {f"sound_model.model.{k}": v.detach().cpu() for k, v in model0.sound_model.model.state_dict().items()}
+        except Exception:
+            pass
+
+        # Merge and send in chunks to avoid message size limits
+        combined_items = list({**fe_sd, **mdl_sd}.items())
+        chunk_size = 2048
+        num_chunks = (len(combined_items) + chunk_size - 1) // chunk_size
+        self.queue_put("sound model start", {"chunks": num_chunks})
+        for idx in range(num_chunks):
+            chunk = combined_items[idx*chunk_size:(idx+1)*chunk_size]
+            self.queue_put(f"sound model chunk {idx}", dict(chunk))
+        self.queue_put("sound model end", {})
+
     def send_model_over_queue(self):
         self.send_metadata_over_queue()
 
@@ -360,6 +444,8 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
         self.send_vision_backbone_over_queue(schema_vision_backbone)
 
         self.send_vision_projection_over_queue()
+        self.send_sound_projection_over_queue()
+        self.send_sound_model_over_queue()
 
         schema = get_model_schema(
             self.md.model_type,

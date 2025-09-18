@@ -175,6 +175,11 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
         margs.enable_fusions = getattr(self.md.checkpoint_args, "enable_fusions", False)
         margs.context_parallel_size = 1
         margs.efficient_video_sampling_variant = getattr(self.md.checkpoint_args, "efficient_video_sampling_variant", None)
+        # Sound/audio specific args
+        margs.allow_missing_sound_projection_checkpoint = getattr(self.md.checkpoint_args, "allow_missing_sound_projection_checkpoint", False)
+        margs.allow_missing_sound_model_checkpoint = getattr(self.md.checkpoint_args, "allow_missing_sound_model_checkpoint", False)
+        margs.recompute_sound = getattr(self.md.checkpoint_args, "recompute_sound", False)
+        margs.sound_model_type = getattr(self.md.checkpoint_args, "sound_model_type", None)
 
         return margs
 
@@ -426,6 +431,12 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
 
         self.receive_vision_projection()
 
+        # Receive sound projection if present
+        self.receive_sound_projection()
+
+        # Receive sound model if present
+        self.receive_sound_model()
+
         schema = get_model_schema(
             self.md.model_type,
             self.margs.transformer_impl,
@@ -434,6 +445,93 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
             prefix="language_model."
         )
         self.receive_lm(schema, prefix="language_model")
+
+    def receive_sound_model(self):
+        """Receive the sound_model weights and load into HF Parakeet wrapper if present."""
+        if getattr(self.md, 'sound_model_type', None) is None:
+            return
+        # We expect a start message with number of chunks
+        try:
+            start_msg = self.queue_get("sound model start")
+        except Exception:
+            return
+
+        total_chunks = start_msg.get("chunks", 0)
+        merged = {}
+        for idx in range(total_chunks):
+            chunk_msg = self.queue_get(f"sound model chunk {idx}")
+            merged.update(chunk_msg)
+        # Consume end sentinel
+        _ = self.queue_get("sound model end")
+
+        # Load weights if sound_model exists
+        model = self.get_local_model(0, 0, 0)
+        if not hasattr(model, 'sound_model') or model.sound_model is None:
+            return
+
+        # Split back to feature_extractor and model namespaces
+        fe_prefix = "sound_model.feature_extractor."
+        mdl_prefix = "sound_model.model."
+        fe_state = {k[len(fe_prefix):]: v for k, v in merged.items() if k.startswith(fe_prefix)}
+        mdl_state = {k[len(mdl_prefix):]: v for k, v in merged.items() if k.startswith(mdl_prefix)}
+
+        # Copy into modules; move tensors to current device, preserve original dtypes
+        device = next(model.parameters()).device
+        # feature_extractor may be absent for some models; guard each
+        if hasattr(model.sound_model, 'feature_extractor') and model.sound_model.feature_extractor is not None and len(fe_state) > 0:
+            fe_state = {k: (t.to(device=device) if hasattr(t, 'to') else t) for k, t in fe_state.items()}
+            model.sound_model.feature_extractor.load_state_dict(fe_state, strict=False)
+        if hasattr(model.sound_model, 'model') and model.sound_model.model is not None and len(mdl_state) > 0:
+            mdl_state = {k: (t.to(device=device) if hasattr(t, 'to') else t) for k, t in mdl_state.items()}
+            model.sound_model.model.load_state_dict(mdl_state, strict=False)
+
+    def receive_sound_projection(self):
+        """Receive sound projection parameters if the model has sound_projection."""
+        # If no sound model/projection expected, return quietly
+        if getattr(self.md, 'sound_model_type', None) is None:
+            return
+        try:
+            projection_msg = self.queue_get("sound projection")
+        except Exception:
+            # If nothing was sent, skip
+            return
+
+        sound_projection_l0_weight = chunk_weight(
+            projection_msg.pop("sound projection l0 weight"), "column", self.args.target_tensor_parallel_size
+        )
+        sound_projection_l1_weight = chunk_weight(
+            projection_msg.pop("sound projection l1 weight"), "row", self.args.target_tensor_parallel_size
+        )
+
+        has_norm_weight = False
+        if "sound projection norm weight" in projection_msg:
+            sound_projection_norm_weight = projection_msg.pop("sound projection norm weight")
+            has_norm_weight = True
+        has_norm_bias = False
+        if "sound projection norm bias" in projection_msg:
+            sound_projection_norm_bias = projection_msg.pop("sound projection norm bias")
+            has_norm_bias = True
+
+        if getattr(self.md, 'sound_projection_linear_bias', False):
+            sound_projection_l0_bias = chunk_bias(
+                projection_msg.pop("sound projection l0 bias"), "column", self.args.target_tensor_parallel_size
+            )
+            sound_projection_l1_bias = projection_msg.pop("sound projection l1 bias")
+
+        for tp_rank in range(self.args.target_tensor_parallel_size):
+            # The sound projection is on the PP / EP 0 like vision
+            model = self.get_local_model(0, 0, tp_rank)
+            if not hasattr(model, 'sound_projection') or model.sound_projection is None:
+                continue
+            model.sound_projection.encoder.linear_fc1.weight.data.copy_(sound_projection_l0_weight[tp_rank])
+            model.sound_projection.encoder.linear_fc2.weight.data.copy_(sound_projection_l1_weight[tp_rank])
+            if has_norm_weight:
+                model.sound_projection.encoder.linear_fc1.layer_norm_weight.data.copy_(sound_projection_norm_weight)
+            if has_norm_bias:
+                model.sound_projection.encoder.linear_fc1.layer_norm_bias.data.copy_(sound_projection_norm_bias)
+            if getattr(self.md, 'sound_projection_linear_bias', False):
+                model.sound_projection.encoder.linear_fc1.bias.data.copy_(sound_projection_l0_bias[tp_rank])
+                model.sound_projection.encoder.linear_fc2.bias.data.copy_(sound_projection_l1_bias)
 
 def save_checkpoint(queue, args):
     """
