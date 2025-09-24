@@ -405,8 +405,10 @@ def forward_step(
             outputs = loss_func(output_tensor)
             if len(outputs) == 3:
                 output_tensor, num_tokens, loss_reduced = outputs
-                if not config.calculate_per_token_loss and not do_not_average_loss:
-                    output_tensor /= num_tokens
+                if not config.calculate_per_token_loss:
+                    # Protect against division by zero when all tokens are masked
+                    #   in a microbatch.
+                    output_tensor /= torch.clamp(num_tokens, min=1)
                     output_tensor /= num_microbatches
             else:
                 # preserve legacy loss averaging behavior (ie, over the number of microbatches)
