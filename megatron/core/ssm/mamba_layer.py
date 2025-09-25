@@ -15,6 +15,7 @@ from megatron.core import parallel_state, tensor_parallel
 from megatron.core.dist_checkpointing.mapping import ShardedStateDict
 from megatron.core.dist_checkpointing.utils import apply_prefix_mapping
 from megatron.core.inference.contexts import BaseInferenceContext
+from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.process_groups_config import ModelCommProcessGroups
 from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.transformer.cuda_graphs import CudaGraphManager, is_graph_capturing
@@ -156,7 +157,11 @@ class MambaLayer(MegatronModule):
             hidden_states = hidden_states.to(dtype=self.config.params_dtype)
             hidden_states = self.norm(hidden_states)
 
-            mixer_out_with_bias = self.mixer(hidden_states, inference_context=inference_context, packed_seq_params=packed_seq_params)
+            mixer_out_with_bias = self.mixer(
+                hidden_states,
+                inference_context=inference_context,
+                packed_seq_params=packed_seq_params
+            )
 
             with self.bias_dropout_add_exec_handler():
                 hidden_states = self.mamba_bda(

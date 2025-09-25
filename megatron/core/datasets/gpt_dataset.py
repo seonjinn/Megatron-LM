@@ -61,6 +61,7 @@ class GPTDatasetConfig(BlendedMegatronDatasetConfig):
 
     defer_npy_index_mmap: bool = False
     """Option to defer the mmap of the dataset indexes until the first access. Requires all the dataset caches to be built."""
+    context_parallel_size: int = 1
 
     def __post_init__(self) -> None:
         """Do asserts and set fields post init"""

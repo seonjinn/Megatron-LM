@@ -19,6 +19,7 @@ import torch.nn.functional as F
 from megatron.core.dist_checkpointing import ShardedTensor
 from megatron.core.dist_checkpointing.mapping import ReplicaId, ShardedTensorFactory
 from megatron.core.inference.contexts import BaseInferenceContext
+from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.process_groups_config import ModelCommProcessGroups
 from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.process_groups_config import ModelCommProcessGroups
@@ -412,8 +413,10 @@ class MambaMixer(MegatronModule):
             cu_seqlens = packed_seq_params.cu_seqlens_q_padded
         else:
             cu_seqlens = packed_seq_params.cu_seqlens_q
-        total_tokens_tensor = torch.tensor([total_tokens]).type_as(cu_seqlens)
-        cu_seqlens_with_max = torch.cat([cu_seqlens, total_tokens_tensor]).type_as(cu_seqlens)
+        total_tokens_tensor = torch.tensor(
+            [total_tokens], dtype=cu_seqlens.dtype, device=cu_seqlens.device
+        )
+        cu_seqlens_with_max = torch.cat([cu_seqlens, total_tokens_tensor])
         # Example: [0, 5, 7, 11, 16] -> [5, 2, 4, 5]
         seq_lengths = cu_seqlens_with_max[1:] - cu_seqlens_with_max[:-1]
         # Example: [5, 2, 4, 5] -> [0, 0, 0, 0, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3]
@@ -830,7 +833,7 @@ class MambaMixer(MegatronModule):
                 # Add TP sharding for Conv1d
                 module_sd = module.state_dict(prefix="", keep_vars=True)
                 module_sharded_sd = make_sharded_tensors_for_checkpoint(
-                    module_sd, f"{prefix}{name}.", {f"weight": 0, f"bias": 0}, sharded_offsets
+                    module_sd, f'{prefix}{name}.', {'weight': 0, 'bias': 0}, sharded_offsets
                 )
 
             else:

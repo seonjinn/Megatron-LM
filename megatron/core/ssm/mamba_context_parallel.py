@@ -27,6 +27,16 @@ except ImportError:
     # TE isn’t installed or the torch wrapper is missing
     tex = None
 
+try:
+    # Register the TE CUDA kernels
+    import transformer_engine  # pylint: disable=unused-import
+
+    # Alias the PyTorch wrapper so we can call tex.* APIs
+    import transformer_engine_torch as tex
+except ImportError:
+    # TE isn’t installed or the torch wrapper is missing
+    tex = None
+
 
 class MambaContextParallel:
     """
@@ -398,6 +408,10 @@ def _undo_attention_load_balancing(
             "Please update Transformer Engine to >= 1.10 to use "
             "Context Parallel with THD format data"
         )
+        if packed_seq_params.cu_seqlens_q_padded is not None:
+            cu_seqlens = packed_seq_params.cu_seqlens_q_padded
+        else:
+            cu_seqlens = packed_seq_params.cu_seqlens_q
         total_tokens = input_.size(0)
         assert total_tokens % cp_size == 0
         seqlen_per_rank = total_tokens // cp_size
@@ -405,9 +419,7 @@ def _undo_attention_load_balancing(
         for cp_rank in range(cp_size):
             start = cp_rank * seqlen_per_rank
             end = start + seqlen_per_rank
-            index = tex.thd_get_partitioned_indices(
-                packed_seq_params.cu_seqlens_q_padded, total_tokens, cp_size, cp_rank
-            )
+            index = tex.thd_get_partitioned_indices(cu_seqlens, total_tokens, cp_size, cp_rank)
             output[index] = input_[start:end]
         return output
 
@@ -434,6 +446,10 @@ def _redo_attention_load_balancing(
             "Please update Transformer Engine to >= 1.10 to use "
             "Context Parallel with THD format data"
         )
+        if packed_seq_params.cu_seqlens_q_padded is not None:
+            cu_seqlens = packed_seq_params.cu_seqlens_q_padded
+        else:
+            cu_seqlens = packed_seq_params.cu_seqlens_q
         total_tokens = input_.size(0)
         assert total_tokens % cp_size == 0
         seqlen_per_rank = total_tokens // cp_size
@@ -442,6 +458,6 @@ def _redo_attention_load_balancing(
             start = cp_rank * seqlen_per_rank
             end = start + seqlen_per_rank
             index[start:end] = tex.thd_get_partitioned_indices(
-                packed_seq_params.cu_seqlens_q_padded, total_tokens, cp_size, cp_rank
+                cu_seqlens, total_tokens, cp_size, cp_rank
             )
         return input_.index_select(0, index)

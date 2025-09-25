@@ -323,8 +323,7 @@ class MambaModel(LanguageModule):
             )
             rotary_pos_emb = self.rotary_pos_emb(
                 rotary_seq_len,
-                packed_seq=packed_seq_params is not None
-                and packed_seq_params.qkv_format == 'thd',
+                packed_seq=packed_seq_params is not None and packed_seq_params.qkv_format == 'thd',
             )
 
         # Wrap decoder_input to allow the decoder (MambaBlock) to delete the
