@@ -23,7 +23,7 @@ USER=$SLURM_JOB_USER
 which srun
 BATCH=$((1-$?))
 
-DEBUG=0
+DEBUG=1
 USE_TILING=1
 USE_PACKING=0
 USE_ONLINE_PACKING=1
@@ -35,7 +35,7 @@ USE_PRECISION_AWARE_OPTIMIZER=1
 SEQ_LEN=256     # Vision encoder per image.
 DECODER_SEQ_LEN=131072
 VIDEO_MAX_NUM_FRAMES=128     # Values > 0 enable video max num frames.
-USE_CP=1
+USE_CP=0
 
 # Remember to update model and job name if running in batch mode!!
 if [[ $BATCH -eq 0 ]]; then
@@ -48,7 +48,7 @@ else
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
-WORKSPACE="/lustre/fsw/portfolios/llmservice/users/${USER}/workspace"
+WORKSPACE="/lustre/fsw/portfolios/coreai/users/chcui/exp/nano_v2_vl_workspace"
 SOURCE=`pwd`
 OUTPUT_BASE="${WORKSPACE}/output"
 OUTPUT="${OUTPUT_BASE}/${MODEL_NAME}"
@@ -63,20 +63,21 @@ mkdir -p "${FINETUNE_DIR}" "${LOGS_DIR}" "${TENSORBOARD_DIR}"
 # Snapshot the source code into the OUTPUT directory on first run, and always run from the snapshot thereafter
 CODE_SNAPSHOT_DIR="${OUTPUT}/code_snapshot"
 CODE_DIR="${SOURCE}"
-if [[ ! -d "${CODE_SNAPSHOT_DIR}" ]]; then
-    echo "[info] Creating code snapshot at ${CODE_SNAPSHOT_DIR} from ${SOURCE}"
-    rsync -a --delete \
-        --exclude "__pycache__" \
-        --exclude "*.pyc" \
-        "${SOURCE}/" "${CODE_SNAPSHOT_DIR}/"
-fi
-CODE_DIR="${CODE_SNAPSHOT_DIR}"
+# if [[ ! -d "${CODE_SNAPSHOT_DIR}" ]]; then
+#     echo "[info] Creating code snapshot at ${CODE_SNAPSHOT_DIR} from ${SOURCE}"
+#     rsync -a --delete \
+#         --exclude "__pycache__" \
+#         --exclude "*.pyc" \
+#         "${SOURCE}/" "${CODE_SNAPSHOT_DIR}/"
+# fi
+# CODE_DIR="${CODE_SNAPSHOT_DIR}"
 
-DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/merged_13p47_lc_video_v1_v2_1.0_videoMult_1.0.yaml"
+DATA_TRAIN="/lustre/fs1/portfolios/coreai/users/chcui/nrt_copies/nano_v2_vl_toy/merged_13p47_lc_video_v1_v2_1.0_videoMult_1.0_just1.yaml"
+# DATA_TRAIN="/lustre/fs1/portfolios/coreai/users/ykarnati/datasets/llava/wds"
 
 if [[ $DEBUG -eq 1 ]]; then
     MBZ=1
-    BZ=1
+    BZ=2
     NW=0
     AD=0.0
     HD=0.0
@@ -84,7 +85,7 @@ if [[ $DEBUG -eq 1 ]]; then
 
     NONDETERMINISTIC_ATTN=1
     # CUDA_VISIBLE_DEVICES=0,1,2,3
-    NUM_GPU=8
+    NUM_GPU=1
     PACKING_BUFFER_SIZE=100
 else
     MBZ=1
@@ -103,8 +104,8 @@ fi
 # - Updated proper checkpoint from Amala.
 # - Proper TP=4 checkpoint for debugging.
 if [[ $DEBUG -eq 1 ]]; then
-    TP=2
-    DECODER_SEQ_LEN=16384
+    TP=1
+    DECODER_SEQ_LEN=4096
 else
     TP=8
     CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/amalasanjayd/workspace/output/pretrain_nm_5p5_h_12b0804_v1340_0804/checkpoints"
@@ -161,7 +162,7 @@ OPTIONS=" \
     --use-checkpoint-args \
     --disable-bias-linear \
     --tokenizer-type MultimodalTokenizer \
-    --tokenizer-model /lustre/fsw/portfolios/llmservice/users/amalasanjayd/checkpoints/nano-v2-sft-lr5e-6-128k-nollama-thinkfix-ep2/checkpoints/nano-v2-sft-lr5e-6-128k-nollama-thinkfix-ep2/iter_0006000/ \
+    --tokenizer-model /lustre/fs1/portfolios/coreai/users/chcui/nrt_copies/iter_0006000 \
     --make-vocab-size-divisible-by 16512 \
     --transformer-impl transformer_engine \
     --normalization RMSNorm \
