@@ -709,10 +709,12 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
     ) -> list[ImageTilingParams]:
         params = []
         for media in media_list:
+            current_num_tokens_available = num_tokens_available
             if isinstance(media, ImageMedia):
                 orig_width, orig_height = media.width, media.height
             elif isinstance(media, VideoFrameMedia):
                 orig_width, orig_height = media.video_width, media.video_height
+                current_num_tokens_available = 1024
             else:
                 raise ValueError(f"Unsupported media type: {type(media)}")
 
@@ -720,12 +722,12 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
             closest_patch_width = round(orig_width / self._patch_size + 0.5)
             patches = closest_patch_height * closest_patch_width
 
-            factor = min(math.sqrt(num_tokens_available / patches), self._factor_max)
+            factor = min(math.sqrt(current_num_tokens_available / patches), self._factor_max)
             target_patch_height = math.floor(factor * closest_patch_height)
             target_patch_width = math.floor(factor * closest_patch_width)
 
-            # We only consider self._min_num_patches if it is greater than num_tokens_available.
-            if num_tokens_available > self._min_num_patches and target_patch_height * target_patch_width < self._min_num_patches:
+            # We only consider self._min_num_patches if it is greater than current_num_tokens_available.
+            if current_num_tokens_available > self._min_num_patches and target_patch_height * target_patch_width < self._min_num_patches:
                 up_factor = math.sqrt(
                     self._min_num_patches / (target_patch_height * target_patch_width)
                 )
@@ -742,15 +744,15 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
                     new_patch_height = math.ceil(up_factor * target_patch_height)
                     new_patch_width = math.ceil(up_factor * target_patch_width)
 
-                    if new_patch_height * new_patch_width > num_tokens_available:
+                    if new_patch_height * new_patch_width > current_num_tokens_available:
                         # If only one side can be min_side, make as big as possible at native aspect ratio while staying below max_patches
                         if (
-                            max(num_tokens_available // new_patch_width, 1)
+                            max(current_num_tokens_available // new_patch_width, 1)
                             * self._patch_size
                             < self._min_side
                         ):
                             up_factor = math.sqrt(
-                                num_tokens_available
+                                current_num_tokens_available
                                 / (target_patch_height * target_patch_width)
                             )
                             target_patch_height = math.floor(
@@ -761,7 +763,7 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
                             )
                         target_patch_width = new_patch_width
                         target_patch_height = max(
-                            num_tokens_available // new_patch_width, 1
+                            current_num_tokens_available // new_patch_width, 1
                         )
                     else:
                         target_patch_height = new_patch_height
@@ -773,15 +775,15 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
                     new_patch_height = math.ceil(up_factor * target_patch_height)
                     new_patch_width = math.ceil(up_factor * target_patch_width)
 
-                    if new_patch_height * new_patch_width > num_tokens_available:
+                    if new_patch_height * new_patch_width > current_num_tokens_available:
                         # If only one side can be min_side, make as big as possible at native aspect ratio while staying below max_patches
                         if (
-                            max(num_tokens_available // new_patch_height, 1)
+                            max(current_num_tokens_available // new_patch_height, 1)
                             * self._patch_size
                             < self._min_side
                         ):
                             up_factor = math.sqrt(
-                                num_tokens_available
+                                current_num_tokens_available
                                 / (target_patch_height * target_patch_width)
                             )
                             target_patch_height = math.floor(
@@ -793,7 +795,7 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
                         else:
                             target_patch_height = new_patch_height
                             target_patch_width = max(
-                                num_tokens_available // new_patch_height, 1
+                                current_num_tokens_available // new_patch_height, 1
                             )
                     else:
                         target_patch_height = new_patch_height
@@ -804,19 +806,19 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
                 if target_patch_height % 2 != 0:
                     if (
                         target_patch_height + 1
-                    ) * target_patch_width <= num_tokens_available:
+                    ) * target_patch_width <= current_num_tokens_available:
                         target_patch_height += 1
                     else:
                         target_patch_height -= 1
                 if target_patch_width % 2 != 0:
                     if (
                         target_patch_height * (target_patch_width + 1)
-                        <= num_tokens_available
+                        <= current_num_tokens_available
                     ):
                         target_patch_width += 1
                     else:
                         target_patch_width -= 1
-            assert target_patch_height * target_patch_width <= num_tokens_available, f"num_tokens_available {num_tokens_available} patches {patches} math.sqrt(num_tokens_available / patches) {math.sqrt(num_tokens_available / patches)} self._factor_max {self._factor_max} self._min_num_patches {self._min_num_patches}"
+            assert target_patch_height * target_patch_width <= current_num_tokens_available, f"current_num_tokens_available {current_num_tokens_available} patches {patches} math.sqrt(current_num_tokens_available / patches) {math.sqrt(current_num_tokens_available / patches)} self._factor_max {self._factor_max} self._min_num_patches {self._min_num_patches}"
 
             # Calculate embeddings for the main dynamic resolution image
             num_embeddings = self._get_num_embeddings(
