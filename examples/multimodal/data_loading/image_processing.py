@@ -870,26 +870,34 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
             )
             return x
 
-        imgs = [rearrange_img(img) for img in images]
+        if len(images) > 0:
+            imgs = [rearrange_img(img) for img in images]
 
-        current_length = 0
-        max_length = 0
-        vision_cu_lengths = [0]
-        for img in imgs:
-            if max_length < img.shape[0]:
-                max_length = img.shape[0]
-            current_length += img.shape[0]
-            vision_cu_lengths.append(current_length)
+            current_length = 0
+            max_length = 0
+            vision_cu_lengths = [0]
+            for img in imgs:
+                if max_length < img.shape[0]:
+                    max_length = img.shape[0]
+                current_length += img.shape[0]
+                vision_cu_lengths.append(current_length)
 
-        vision_cu_lengths = torch.tensor(vision_cu_lengths, dtype=torch.int32)
-        vision_max_lengths = torch.tensor(max_length, dtype=torch.int32)
+            vision_cu_lengths = torch.tensor(vision_cu_lengths, dtype=torch.int32)
+            vision_max_lengths = torch.tensor(max_length, dtype=torch.int32)
 
-        return (
-            torch.cat(imgs, dim=0).unsqueeze(0),
-            imgs_sizes,
-            vision_cu_lengths,
-            vision_max_lengths,
-        )
+            return (
+                torch.cat(imgs, dim=0).unsqueeze(0),
+                imgs_sizes,
+                vision_cu_lengths,
+                vision_max_lengths,
+            )
+        else:
+            return (
+                torch.tensor([[0]], dtype=torch.float32),
+                torch.tensor([[0,0]], dtype=torch.int32),
+                None,
+                None,
+            )
 
     def __str__(self):
         return f"DynamicResolutionImageTransform(vision_model_type={self._vision_model_type}, min_num_patches={self._min_num_patches}, patch_size={self._patch_size}, pixel_shuffle={self._pixel_shuffle}, conv_merging={self._conv_merging}, use_thumbnail={self._use_thumbnail}, thumbnail_size={self._thumbnail_size}, thumbnail_area_threshold={self._thumbnail_area_threshold})"
@@ -1140,26 +1148,34 @@ class MatchTilingDynamicResolutionStrategy(ImageTilingStrategy):
             )
             return x
 
-        imgs = [rearrange_img(img) for img in images]
+        if len(images) > 0:
+            imgs = [rearrange_img(img) for img in images]
 
-        current_length = 0
-        max_length = 0
-        vision_cu_lengths = [0]
-        for img in imgs:
-            if max_length < img.shape[0]:
-                max_length = img.shape[0]
-            current_length += img.shape[0]
-            vision_cu_lengths.append(current_length)
+            current_length = 0
+            max_length = 0
+            vision_cu_lengths = [0]
+            for img in imgs:
+                if max_length < img.shape[0]:
+                    max_length = img.shape[0]
+                current_length += img.shape[0]
+                vision_cu_lengths.append(current_length)
 
-        vision_cu_lengths = torch.tensor(vision_cu_lengths, dtype=torch.int32)
-        vision_max_lengths = torch.tensor(max_length, dtype=torch.int32)
+            vision_cu_lengths = torch.tensor(vision_cu_lengths, dtype=torch.int32)
+            vision_max_lengths = torch.tensor(max_length, dtype=torch.int32)
 
-        return (
-            torch.cat(imgs, dim=0).unsqueeze(0),
-            imgs_sizes,
-            vision_cu_lengths,
-            vision_max_lengths,
-        )
+            return (
+                torch.cat(imgs, dim=0).unsqueeze(0),
+                imgs_sizes,
+                vision_cu_lengths,
+                vision_max_lengths,
+            )
+        else:
+            return (
+                torch.tensor([[0]], dtype=torch.float32),
+                torch.tensor([[0,0]], dtype=torch.int32),
+                None,
+                None,
+            )
 
     def __str__(self):
         return f"MatchTilingDynamicResolutionStrategy(vision_model_type={self._vision_model_type}, tile_size={self._tile_size}, use_thumbnail={self._use_thumbnail}, min_num_tiles={self._min_num_tiles}, max_num_tiles={self._max_num_tiles}, patch_size={self._patch_size}, pixel_shuffle={self._pixel_shuffle}, conv_merging={self._conv_merging}, enable_tile_degradation={self._enable_tile_degradation}, video_frame_strategy={self._video_frame_strategy})"
