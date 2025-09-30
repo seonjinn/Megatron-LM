@@ -9,6 +9,7 @@ from typing import List, Optional
 
 import torch
 
+from megatron.core.transformer.cuda_graphs import is_graph_capturing
 from megatron.core.enums import Fp8Recipe
 from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.utils import get_te_version, is_te_min_version
@@ -510,7 +511,10 @@ if HAVE_TE:
 
             if not is_init:
                 fp8_context = transformer_engine.pytorch.fp8_autocast(
-                    enabled=True, fp8_recipe=fp8_recipe, fp8_group=fp8_group
+                    enabled=True, 
+                    fp8_recipe=fp8_recipe, 
+                    fp8_group=fp8_group,
+                    _graph=is_graph_capturing()
                 )
             else:
                 import inspect
