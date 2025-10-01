@@ -1173,12 +1173,34 @@ def get_optimizer_param_scheduler(optimizer):
     """Build the learning rate scheduler."""
     args = get_args()
 
+
+    train_iters = args.train_iters
+    train_samples = args.train_samples
+    # Calculate training range factor for learning rate scheduler adjustment
+    start_step_offset = 0
+    range_start = getattr(args, 'lr_data_range_start', 0)
+    range_end = getattr(args, 'lr_data_range_end', 100)
+    if range_start != 0 or range_end != 100:
+        # Adjust learning rate scheduler steps based on training range
+
+        iter_scale_factor = 100.0 / (range_end - range_start)
+
+        # Calculate start step offset for the learning rate scheduler
+        if args.train_iters:
+            train_iters = int(args.train_iters * iter_scale_factor)
+            start_step_offset = int((range_end - range_start) / 100 * train_iters * args.global_batch_size)
+            print_rank_0(f"Adjusted LR scheduler steps: train_iters={train_iters} start_step_offset={start_step_offset}")
+        elif args.train_samples:
+            train_samples = int(args.train_samples * iter_scale_factor)
+            start_step_offset = int((range_end - range_start) / 100 * train_samples)
+            print_rank_0(f"Adjusted LR scheduler steps: train_samples={train_samples} start_step_offset={start_step_offset}")
+
     # Iteration-based training.
-    if args.train_iters:
+    if train_iters:
         if args.lr_decay_iters is None:
-            args.lr_decay_iters = args.train_iters
+            args.lr_decay_iters = train_iters
         lr_decay_steps = args.lr_decay_iters * args.global_batch_size
-        wd_incr_steps = args.train_iters * args.global_batch_size
+        wd_incr_steps = train_iters * args.global_batch_size
         wsd_decay_steps = None
         if args.lr_wsd_decay_iters is not None:
             wsd_decay_steps = args.lr_wsd_decay_iters * args.global_batch_size
@@ -1187,15 +1209,15 @@ def get_optimizer_param_scheduler(optimizer):
         else:
             lr_warmup_steps = args.lr_warmup_iters * args.global_batch_size
     # Sample-based training.
-    elif args.train_samples:
+    elif train_samples:
         # We need to set training iters for later use. Technically
         # we need to adjust the training samples too (due to last
         # batch being incomplete) but we leave it as is for now.
         update_train_iters(args)
         if args.lr_decay_samples is None:
-            args.lr_decay_samples = args.train_samples
+            args.lr_decay_samples = train_samples
         lr_decay_steps = args.lr_decay_samples
-        wd_incr_steps = args.train_samples
+        wd_incr_steps = train_samples
         wsd_decay_steps = args.lr_wsd_decay_samples
         if args.lr_warmup_fraction is not None:
             lr_warmup_steps = args.lr_warmup_fraction * lr_decay_steps
@@ -1220,6 +1242,7 @@ def get_optimizer_param_scheduler(optimizer):
         override_opt_param_scheduler=args.override_opt_param_scheduler,
         wsd_decay_steps=wsd_decay_steps,
         lr_wsd_decay_style=args.lr_wsd_decay_style,
+        start_step_offset=start_step_offset,
     )
 
     return opt_param_scheduler

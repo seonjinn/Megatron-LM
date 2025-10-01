@@ -1111,6 +1111,18 @@ def validate_args(args, defaults={}):
     if args.external_cuda_graph:
         assert args.te_rng_tracker, "--te-rng-tracker must be enabled when using CUDA Graphs."
 
+    # Training range validation
+    if hasattr(args, 'lr_data_range_start') and hasattr(args, 'lr_data_range_end'):
+        range_start = getattr(args, 'lr_data_range_start', 0)
+        range_end = getattr(args, 'lr_data_range_end', 100)
+        assert 0 <= range_start <= 100, f"lr_data_range_start must be between 0 and 100, got {range_start}"
+        assert 0 <= range_end <= 100, f"lr_data_range_end must be between 0 and 100, got {range_end}"
+        assert range_start < range_end, f"lr_data_range_start ({range_start}) must be less than lr_data_range_end ({range_end})"
+        if range_start != 0 or range_end != 100:
+            range_factor = 100.0 / (range_end - range_start)
+            if args.rank == 0:
+                print(f"Training range: {range_start}%-{range_end}%, range factor: {range_factor:.3f}", flush=True)
+
     # Print arguments.
     _print_args("arguments", args)
 

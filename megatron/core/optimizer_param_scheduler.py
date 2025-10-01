@@ -33,6 +33,8 @@ class OptimizerParamScheduler:
         wsd_decay_steps (int, optional): number of weight decay decay steps
         lr_wsd_decay_style (str, optional): decay style for learning rate during weight decay decay
             steps
+        start_step_offset (int, optional): initial step value when calculating learning rate
+            and weight decay. Useful for training range functionality.
 
     """
 
@@ -53,6 +55,7 @@ class OptimizerParamScheduler:
         override_opt_param_scheduler: Optional[bool] = False,
         wsd_decay_steps: Optional[int] = None,
         lr_wsd_decay_style: Optional[str] = None,
+        start_step_offset: Optional[int] = 0,
     ) -> None:
 
         # Class values.
@@ -90,6 +93,9 @@ class OptimizerParamScheduler:
             assert not self.use_checkpoint_opt_param_scheduler, (
                 'both override and ' 'use-checkpoint are set.'
             )
+
+        # Initialize num_steps to the start offset
+        self.num_steps = start_step_offset or 0
 
         # Set the learning rate
         self.step(0)
