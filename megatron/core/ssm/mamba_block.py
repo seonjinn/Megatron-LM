@@ -5,7 +5,6 @@
 # This source code is licensed under the Apache license found in the
 # LICENSE file in the root directory of this source tree.
 
-import math
 from contextlib import nullcontext
 from dataclasses import dataclass
 from functools import partial
@@ -24,7 +23,6 @@ from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.process_groups_config import ModelCommProcessGroups
 from megatron.core.ssm.mamba_hybrid_layer_allocation import Symbols as LayerSymbols
 from megatron.core.ssm.mamba_hybrid_layer_allocation import allocate_layers
-from megatron.core.tensor_parallel import get_cuda_rng_tracker
 from megatron.core.transformer import TransformerConfig
 from megatron.core.transformer.identity_op import IdentityOp
 from megatron.core.transformer.module import MegatronModule
@@ -165,6 +163,15 @@ class MambaStack(MegatronModule):
                 config=self.config,
                 hidden_size=self.config.hidden_size,
                 eps=self.config.layernorm_epsilon,
+            )
+
+        if self.config.perform_initialization:
+            self.apply(
+                partial(
+                    _init_weights,
+                    n_layer=self.config.num_layers,
+                    initializer_range=self.config.init_method_std,
+                )
             )
 
     def _select_layers_for_pipeline_parallel(self, layer_type_list):
