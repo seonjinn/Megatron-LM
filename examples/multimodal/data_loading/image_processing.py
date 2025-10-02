@@ -1179,3 +1179,171 @@ class MatchTilingDynamicResolutionStrategy(ImageTilingStrategy):
 
     def __str__(self):
         return f"MatchTilingDynamicResolutionStrategy(vision_model_type={self._vision_model_type}, tile_size={self._tile_size}, use_thumbnail={self._use_thumbnail}, min_num_tiles={self._min_num_tiles}, max_num_tiles={self._max_num_tiles}, patch_size={self._patch_size}, pixel_shuffle={self._pixel_shuffle}, conv_merging={self._conv_merging}, enable_tile_degradation={self._enable_tile_degradation}, video_frame_strategy={self._video_frame_strategy})"
+
+
+def create_image_tiling_strategy(args):
+    """
+    Create an image tiling strategy based on the provided arguments.
+    
+    This function encapsulates the logic for creating the appropriate image tiling strategy
+    based on the training/evaluation configuration. It can be used by both training (task_encoder)
+    and evaluation code outside of data_loading/.
+    
+    Args:
+        args: Arguments object with the following relevant attributes:
+            - img_h, img_w: Image height and width
+            - patch_dim: Patch dimension
+            - vision_model_type: Vision model type (e.g., 'radio', 'clip', 'siglip')
+            - disable_vision_class_token: Whether to disable vision class token
+            - pixel_shuffle: Whether to use pixel shuffle
+            - use_tile_tags: Whether to use tile tags
+            - max_num_tiles: Maximum number of tiles
+            - tokenizer_prompt_format: Tokenizer prompt format
+            - image_break_token: Image break token (optional)
+            - conv_merging: Whether to use convolution merging
+            - dynamic_resolution: Whether to use dynamic resolution
+            - match_tiling_dynamic_resolution: Whether to match tiling with dynamic resolution
+            - use_area_weighted_aspect_ratio: Whether to use area-weighted aspect ratio
+            - use_thumbnail: Whether to use thumbnail
+            - dynamic_resolution_min_patches: Minimum number of patches for dynamic resolution
+            - dynamic_resolution_min_side: Minimum side length for dynamic resolution (optional)
+            - thumbnail_area_threshold: Thumbnail area threshold (optional)
+            - use_tiling: Whether to use tiling
+    
+    Returns:
+        ImageTilingStrategy: The created image tiling strategy
+    """
+    from megatron.core.models.vision.clip_vit_model import get_num_image_embeddings
+    
+    assert args.img_h == args.img_w, "img_h and img_w must be the same"
+    
+    match_tiling_dynamic_resolution = args.match_tiling_dynamic_resolution
+    dynamic_resolution = args.dynamic_resolution
+    use_tiling = args.use_tiling
+    use_area_weighted_aspect_ratio = args.use_area_weighted_aspect_ratio
+    
+    if match_tiling_dynamic_resolution:
+        assert dynamic_resolution, "must enable --dynamic-resolution if using --match-tiling-dynamic-resolution"
+        assert not use_tiling, "cannot use --use-tiling and --match-tiling-dynamic-resolution together"
+    
+    if dynamic_resolution:
+        if match_tiling_dynamic_resolution:
+            num_image_embeddings_per_tile = get_num_image_embeddings(
+                img_h=args.img_h,
+                img_w=args.img_w,
+                patch_dim=args.patch_dim,
+                vision_model_type=args.vision_model_type,
+                disable_vision_class_token=args.disable_vision_class_token,
+                class_token_len=1,
+                pixel_shuffle=args.pixel_shuffle,
+                use_tile_tags=args.use_tile_tags,
+                max_num_tiles=args.max_num_tiles,
+                tokenizer_type=args.tokenizer_prompt_format,
+                use_image_break_token=args.image_break_token is not None,
+                conv_merging=args.conv_merging,
+            )
+            image_tiling_strategy = MatchTilingDynamicResolutionStrategy(
+                vision_model_type=args.vision_model_type,
+                tile_size=args.img_h,
+                use_thumbnail=args.use_thumbnail,
+                min_num_tiles=1,
+                max_num_tiles=args.max_num_tiles,
+                embeddings_per_tile=num_image_embeddings_per_tile,
+                patch_size=args.patch_dim,
+                get_num_embeddings=lambda width, height: get_num_image_embeddings(
+                    img_h=height,
+                    img_w=width,
+                    patch_dim=args.patch_dim,
+                    vision_model_type=args.vision_model_type,
+                    disable_vision_class_token=args.disable_vision_class_token,
+                    class_token_len=1,
+                    pixel_shuffle=args.pixel_shuffle,
+                    use_tile_tags=args.use_tile_tags,
+                    max_num_tiles=args.max_num_tiles,
+                    tokenizer_type=args.tokenizer_prompt_format,
+                    use_image_break_token=args.image_break_token is not None,
+                    conv_merging=args.conv_merging,
+                ),
+                find_closest_aspect_ratio_fn=(
+                    find_closest_area_weighted_aspect_ratio
+                    if use_area_weighted_aspect_ratio
+                    else find_closest_aspect_ratio
+                ),
+                pixel_shuffle=args.pixel_shuffle,
+                conv_merging=args.conv_merging,
+            )
+        else:
+            image_tiling_strategy = DynamicResolutionImageTilingStrategy(
+                vision_model_type=args.vision_model_type,
+                min_num_patches=args.dynamic_resolution_min_patches,
+                patch_size=args.patch_dim,
+                get_num_embeddings=lambda width, height: get_num_image_embeddings(
+                    img_h=height,
+                    img_w=width,
+                    patch_dim=args.patch_dim,
+                    vision_model_type=args.vision_model_type,
+                    disable_vision_class_token=args.disable_vision_class_token,
+                    class_token_len=1,
+                    pixel_shuffle=args.pixel_shuffle,
+                    use_tile_tags=args.use_tile_tags,
+                    max_num_tiles=args.max_num_tiles,
+                    tokenizer_type=args.tokenizer_prompt_format,
+                    use_image_break_token=args.image_break_token is not None,
+                    conv_merging=args.conv_merging,
+                ),
+                pixel_shuffle=args.pixel_shuffle,
+                min_side=args.dynamic_resolution_min_side,
+                conv_merging=args.conv_merging,
+                use_thumbnail=args.use_thumbnail,
+                thumbnail_size=args.img_h,
+                thumbnail_area_threshold=args.thumbnail_area_threshold,
+            )
+    else:
+        num_image_embeddings_per_tile = get_num_image_embeddings(
+            img_h=args.img_h,
+            img_w=args.img_w,
+            patch_dim=args.patch_dim,
+            vision_model_type=args.vision_model_type,
+            disable_vision_class_token=args.disable_vision_class_token,
+            class_token_len=1,
+            pixel_shuffle=args.pixel_shuffle,
+            use_tile_tags=args.use_tile_tags,
+            max_num_tiles=args.max_num_tiles,
+            tokenizer_type=args.tokenizer_prompt_format,
+            use_image_break_token=args.image_break_token is not None,
+            conv_merging=args.conv_merging,
+        )
+        if use_tiling:
+            image_strategy = ImageTilingStrategyV1(
+                vision_model_type=args.vision_model_type,
+                tile_size=args.img_h,
+                use_thumbnail=args.use_thumbnail,
+                min_num_tiles=1,
+                max_num_tiles=args.max_num_tiles,
+                embeddings_per_tile=num_image_embeddings_per_tile,
+                find_closest_aspect_ratio_fn=(
+                    find_closest_area_weighted_aspect_ratio
+                    if use_area_weighted_aspect_ratio
+                    else find_closest_aspect_ratio
+                ),
+            )
+        else:
+            image_strategy = NoTilingStrategy(
+                vision_model_type=args.vision_model_type,
+                embeddings_per_image=num_image_embeddings_per_tile,
+                target_width=args.img_w,
+                target_height=args.img_h,
+            )
+        image_tiling_strategy = TileDegradationStrategy(
+            image_strategy=image_strategy,
+            video_frame_strategy=NoTilingStrategy(
+                vision_model_type=args.vision_model_type,
+                embeddings_per_image=num_image_embeddings_per_tile,
+                target_width=args.img_w,
+                target_height=args.img_h,
+            ),
+            embeddings_per_tile=num_image_embeddings_per_tile,
+            max_num_tiles=args.max_num_tiles,
+        )
+    
+    return image_tiling_strategy
