@@ -135,7 +135,7 @@ class ImageTilingStrategy(ABC):
 
     @abstractmethod
     def compute_params(
-        self, media_list: list[ImageMedia | VideoFrameMedia], num_tokens_available: int, **kwargs
+        self, media_list: list[ImageMedia | VideoFrameMedia], num_tokens_available: int, max_num_tiles: int | None = None, **kwargs
     ) -> list[ImageTilingParams]:
         """
         Compute the transformation parameters and the number of tokens to use for the media.
@@ -143,6 +143,7 @@ class ImageTilingStrategy(ABC):
         Args:
             media_list: List of media to transform
             num_tokens_available: Number of tokens available for all media
+            max_num_tiles: Maximum number of tiles allowed (optional, defaults to instance's max_num_tiles if not provided)
 
         Returns:
             list of transformation parameters with the media
@@ -305,6 +306,7 @@ class NoTilingStrategy(_FixedSizeStrategy):
         self,
         media_list: list[ImageMedia | VideoFrameMedia],
         num_tokens_available: Optional[int] = None,
+        max_num_tiles: int | None = None,
         **kwargs,
     ) -> list[ImageTilingParams]:
         return [
@@ -422,16 +424,22 @@ class ImageTilingStrategyV1(_FixedSizeStrategy):
         self,
         media_list: list[ImageMedia | VideoFrameMedia],
         num_tokens_available: Optional[int] = None,
+        max_num_tiles: int | None = None,
         data_augment: bool = False,
         tiling_augment_prob: float = 0.4,
         **kwargs,
     ) -> list[ImageTilingParamsV1]:
-        max_num_tiles = min(
-            num_tokens_available // self._embeddings_per_image, self._max_num_tiles
+        # Use provided max_num_tiles or fall back to instance's max_num_tiles
+        # Clamp to self._max_num_tiles since target_ratios are only pre-computed up to that value
+        effective_max_num_tiles = max_num_tiles if max_num_tiles is not None else self._max_num_tiles
+        effective_max_num_tiles = min(effective_max_num_tiles, self._max_num_tiles)
+        
+        max_num_tiles_to_use = min(
+            num_tokens_available // self._embeddings_per_image, effective_max_num_tiles
         )
 
         # calculate the existing image aspect ratio
-        target_ratios = self.target_ratios[max_num_tiles]
+        target_ratios = self.target_ratios[max_num_tiles_to_use]
 
         params = []
         for media in media_list:
@@ -542,9 +550,12 @@ class TileDegradationStrategy(ImageTilingStrategy):
         self,
         media_list: list[ImageMedia | VideoFrameMedia],
         num_tokens_available: int | None = None,
+        max_num_tiles: int | None = None,
         **kwargs,
     ) -> list[ImageTilingParams]:
-        max_num_tiles = self._max_num_tiles
+        # Use provided max_num_tiles or fall back to instance's max_num_tiles
+        effective_max_num_tiles = max_num_tiles if max_num_tiles is not None else self._max_num_tiles
+        max_num_tiles_to_use = effective_max_num_tiles
         degradation_map = self._tile_degradation_map
 
         while True:
@@ -553,22 +564,22 @@ class TileDegradationStrategy(ImageTilingStrategy):
             for media in media_list:
                 if isinstance(media, ImageMedia):
                     media_params = self._image_strategy.compute_params(
-                        [media], max_num_tiles * self._embeddings_per_tile, **kwargs
+                        [media], max_num_tiles_to_use * self._embeddings_per_tile, max_num_tiles_to_use, **kwargs
                     )[0]
                 elif isinstance(media, VideoFrameMedia):
-                    max_num_tiles = 1
+                    max_num_tiles_to_use = 1
                     media_params = self._video_frame_strategy.compute_params(
-                        [media], max_num_tiles * self._embeddings_per_tile, **kwargs
+                        [media], max_num_tiles_to_use * self._embeddings_per_tile, max_num_tiles_to_use, **kwargs
                     )[0]
                 else:
                     raise ValueError(f"Unsupported media type: {type(media)}")
                 img_num_tiles.append(media_params.num_tiles)
                 params.append(media_params)
-            if max_num_tiles == 1 or num_tokens_available is None:
+            if max_num_tiles_to_use == 1 or num_tokens_available is None:
                 break
             if sum(img_num_tiles) * self._embeddings_per_tile > num_tokens_available:
-                if max_num_tiles in degradation_map:
-                    max_num_tiles = degradation_map[max_num_tiles]
+                if max_num_tiles_to_use in degradation_map:
+                    max_num_tiles_to_use = degradation_map[max_num_tiles_to_use]
                 else:
                     # End of degradation
                     break
@@ -705,6 +716,7 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
         self,
         media_list: list[ImageMedia | VideoFrameMedia],
         num_tokens_available: int | None = None,
+        max_num_tiles: int | None = None,
         **kwargs,
     ) -> list[ImageTilingParams]:
         params = []
@@ -1041,10 +1053,15 @@ class MatchTilingDynamicResolutionStrategy(ImageTilingStrategy):
         self,
         media_list: list[ImageMedia | VideoFrameMedia],
         num_tokens_available: int | None = None,
+        max_num_tiles: int | None = None,
         **kwargs,
     ) -> list[MatchTilingDynamicResolutionParams]:
         # Implement tile degradation logic similar to TileDegradationStrategy
-        max_num_tiles = self._max_num_tiles
+        # Use provided max_num_tiles or fall back to instance's max_num_tiles
+        # Clamp to self._max_num_tiles since target_ratios are only pre-computed up to that value
+        effective_max_num_tiles = max_num_tiles if max_num_tiles is not None else self._max_num_tiles
+        effective_max_num_tiles = min(effective_max_num_tiles, self._max_num_tiles)
+        max_num_tiles_to_use = effective_max_num_tiles
         degradation_map = self._tile_degradation_map
         
         while True:
@@ -1058,7 +1075,7 @@ class MatchTilingDynamicResolutionStrategy(ImageTilingStrategy):
                     aspect_ratio = img_size[0] / img_size[1]
                     
                     # Find the closest aspect ratio to the target
-                    target_ratios = self.target_ratios[max_num_tiles]
+                    target_ratios = self.target_ratios[max_num_tiles_to_use]
                     tiling = self._find_closest_aspect_ratio_fn(
                         aspect_ratio, target_ratios, img_size[0], img_size[1], self._tile_size
                     )
@@ -1102,20 +1119,20 @@ class MatchTilingDynamicResolutionStrategy(ImageTilingStrategy):
             # Check if we need to degrade (only if degradation is enabled)
             if not self._enable_tile_degradation:
                 break
-            if max_num_tiles == 1 or num_tokens_available is None:
+            if max_num_tiles_to_use == 1 or num_tokens_available is None:
                 break
             if total_embeddings_needed > num_tokens_available:
-                if max_num_tiles in degradation_map:
-                    max_num_tiles = degradation_map[max_num_tiles]
-                    # Recalculate target ratios for the new max_num_tiles
-                    if max_num_tiles not in self.target_ratios:
-                        self.target_ratios[max_num_tiles] = sorted(
+                if max_num_tiles_to_use in degradation_map:
+                    max_num_tiles_to_use = degradation_map[max_num_tiles_to_use]
+                    # Recalculate target ratios for the new max_num_tiles_to_use
+                    if max_num_tiles_to_use not in self.target_ratios:
+                        self.target_ratios[max_num_tiles_to_use] = sorted(
                             set(
                                 (x, y)
-                                for n in range(self._min_num_tiles, max_num_tiles + 1)
+                                for n in range(self._min_num_tiles, max_num_tiles_to_use + 1)
                                 for x in range(1, n + 1)
                                 for y in range(1, n + 1)
-                                if x * y <= max_num_tiles and x * y >= self._min_num_tiles
+                                if x * y <= max_num_tiles_to_use and x * y >= self._min_num_tiles
                             ),
                             key=lambda x: x[0] * x[1],
                         )
