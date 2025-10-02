@@ -769,7 +769,7 @@ def get_prompt_and_generated(prompt_and_generation, prompt_format):
         prompt = splitted[0]
         generated = splitted[1]
         generated = generated.split("<|im_end|>")[0]
-    elif prompt_format in ("nvlm-yi-34b", "qwen2p0", "qwen2p5"):
+    elif prompt_format in ("nvlm-yi-34b", "qwen2p0", "qwen2p5", "nemotron6-moe"):
         splitted = prompt_and_generation.split("<|im_start|>assistant\n")
         prompt = splitted[0]
         generated = splitted[1]
