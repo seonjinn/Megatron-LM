@@ -6,6 +6,7 @@ import random
 import re
 from collections import defaultdict
 from typing import List, Literal, TypedDict, Union, Tuple
+import numpy as np
 
 from .cookers.audio_conversation import cook_audio_conversation
 from .cookers.omcat_legacy_audio_conversation import cook_omcat_legacy_conversation_monolithic
@@ -590,6 +591,10 @@ class MultiModalTaskEncoder(
         assert sum(len(s) for s in packed_samples) == len(samples), (
             "knapsack discarded some samples"
         )
+        # Print the 5% - 50% - 95% percentiles of the lengths
+        print(f"[pid={os.getpid()}] 5% percentile of lengths: {np.percentile(lengths, 5)}")
+        print(f"[pid={os.getpid()}] 50% percentile of lengths: {np.percentile(lengths, 50)}")
+        print(f"[pid={os.getpid()}] 95% percentile of lengths: {np.percentile(lengths, 95)}")
 
         return packed_samples
 
