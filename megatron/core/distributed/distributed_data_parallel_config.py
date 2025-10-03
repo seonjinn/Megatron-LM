@@ -61,6 +61,8 @@ class DistributedDataParallelConfig:
     """If true, reuse the grad buffer for param AG when using mxfp8 recipe. Should be 
        set to True only when fp8_recipe is mxfp8 and fp8_param_gather is True."""
 
+    use_megatron_fsdp: bool = False
+
     use_custom_fsdp: bool = False
     """If true, use the FSDP code path for DDP."""
 
