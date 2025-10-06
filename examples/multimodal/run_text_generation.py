@@ -213,6 +213,12 @@ def generate_samples(model, config: EvaluationConfig, print_output):
         conv_merging=args.conv_merging,
     )
 
+    tokenizer_kwargs = dict()
+    if config.enable_thinking:
+        tokenizer_kwargs["chat_template_kwargs"] = {
+            "enable_thinking": config.enable_thinking,
+        }
+
     if args.use_mcore_inference:
         inference_wrapper_config = InferenceWrapperConfig(
             hidden_size=args.hidden_size,
@@ -317,6 +323,7 @@ def generate_samples(model, config: EvaluationConfig, print_output):
                     random_seed=args.seed,
                     detokenize_segments=False,
                     data_parallel=True,
+                    tokenizer_kwargs=tokenizer_kwargs,
             )
 
             for generation in resp_sentences:
@@ -420,7 +427,8 @@ def generate_samples(model, config: EvaluationConfig, print_output):
                 )
             else:
                 generate_and_post_process(
-                    model, inference_context, forward_step=forward_step, detokenize_segments=False, data_parallel=True
+                    model, inference_context, forward_step=forward_step, detokenize_segments=False, data_parallel=True,
+                    tokenizer_kwargs=tokenizer_kwargs,
                 )
 
             idx += 1

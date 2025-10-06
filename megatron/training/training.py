@@ -1540,7 +1540,8 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
     update_successful = logical_and_across_model_parallel_group(update_successful)
     # grad_norm and num_zeros_in_grad will be None on ranks without trainable params,
     # so we must gather across mp ranks
-    grad_norm = reduce_max_stat_across_model_parallel_group(grad_norm)
+    if args.pipeline_model_parallel_size > 1 and (args.freeze_LM or args.freeze_ViT or args.freeze_sound_model):
+        grad_norm = reduce_max_stat_across_model_parallel_group(grad_norm)
     if args.log_num_zeros_in_grad:
         num_zeros_in_grad = reduce_max_stat_across_model_parallel_group(num_zeros_in_grad)
 
@@ -1698,7 +1699,8 @@ def training_log(
     total_iterations = total_loss_dict[advanced_iters_key] + total_loss_dict[skipped_iters_key]
 
     # learning rate will be None on ranks without trainable params, so we must gather across mp ranks
-    learning_rate = reduce_max_stat_across_model_parallel_group(learning_rate)
+    if args.pipeline_model_parallel_size > 1 and (args.freeze_LM or args.freeze_ViT or args.freeze_sound_model):
+        learning_rate = reduce_max_stat_across_model_parallel_group(learning_rate)
     # Tensorboard values.
     # Timer requires all the ranks to call.
     if args.log_timers_to_tensorboard and (iteration % args.tensorboard_log_interval == 0):

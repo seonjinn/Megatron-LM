@@ -61,6 +61,14 @@ TP=2
 EP=4
 CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/output/pretrain_moe_small_0928/checkpoints"
 
+# New tokenizer.
+TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--NVIDIA-Nemotron-Nano-31B-A3-v3/snapshots/22c64afb03eb7c27c5d1fa30042b68a1eed53f33/"
+TOKENIZER_PROMPT_FORMAT="nemotron6-moe"
+
+# Old tokenizer.
+#TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/nemotron6-moe-tokenizer/"
+#TOKENIZER_PROMPT_FORMAT="nemotron6-moe-old"
+
 DATA_TRAIN="/lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/users/amalasanjayd/eagle_recipe/online_packing/eagle_sft_v13.51.yaml"
 
 if [[ $DEBUG -eq 1 ]]; then
@@ -137,7 +145,6 @@ OPTIONS=" \
     --use-loss-scaling \
     ${SPECIAL_TOKENS} \
     --disable-vision-class-token \
-    --eos-id 15 \
     --prompt-path ${SOURCE}/examples/multimodal/manual_prompts.json \
     --moe-token-dispatcher-type flex \
     --moe-enable-deepep \
@@ -205,8 +212,8 @@ OPTIONS=" \
     --eval-iters 0 \
     --eval-interval 99999999999 \
     --tokenizer-type MultimodalTokenizer \
-    --tokenizer-model /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/nemotron6-moe-tokenizer \
-    --tokenizer-prompt-format nemotron6-moe \
+    --tokenizer-model ${TOKENIZER_MODEL} \
+    --tokenizer-prompt-format ${TOKENIZER_PROMPT_FORMAT} \
     --load ${FINETUNE_DIR} \
     --save ${FINETUNE_DIR} \
     --dataloader-save ${FINETUNE_DIR}/dataloader \

@@ -63,6 +63,14 @@ CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/meg
 CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/output/pretrain_moe_small_0928/checkpoints"
 #CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/nemotron6-moe-prefix/"
 
+# New tokenizer.
+TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--NVIDIA-Nemotron-Nano-31B-A3-v3/snapshots/1ec9e9c5597db38926449c98482d891218e58b05/"
+TOKENIZER_PROMPT_FORMAT="nemotron6-moe"
+
+# Old tokenizer.
+#TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/nemotron6-moe-tokenizer/"
+#TOKENIZER_PROMPT_FORMAT="nemotron6-moe-old"
+
 DATA_TRAIN="${SOURCE}/examples/multimodal/v2/data_config/pretrain_dataset_commercial.yaml"
 
 if [[ $DEBUG -eq 1 ]]; then
@@ -136,7 +144,6 @@ OPTIONS=" \
     --use-loss-scaling \
     ${SPECIAL_TOKENS} \
     --disable-vision-class-token \
-    --eos-id 15 \
     --moe-token-dispatcher-type alltoall \
     --moe-shared-expert-overlap \
     --enable-experimental \
@@ -202,8 +209,8 @@ OPTIONS=" \
     --eval-iters 0 \
     --eval-interval 99999999999 \
     --tokenizer-type MultimodalTokenizer \
-    --tokenizer-model /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/nemotron6-moe-tokenizer/ \
-    --tokenizer-prompt-format nemotron6-moe \
+    --tokenizer-model ${TOKENIZER_MODEL} \
+    --tokenizer-prompt-format ${TOKENIZER_PROMPT_FORMAT} \
     --pretrained-checkpoint ${CHECKPOINT_DIR} \
     --load ${FINETUNE_DIR} \
     --save ${FINETUNE_DIR} \

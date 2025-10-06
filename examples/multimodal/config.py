@@ -8,7 +8,7 @@ from megatron.core.activations import fast_gelu, quick_gelu, squared_relu
 
 def get_language_model_config(config, enable_fusions=False, apply_rope_fusion=None):
     config.bias_activation_fusion = enable_fusions
-    config.bias_dropout_fusion = False
+    config.bias_dropout_fusion = enable_fusions
     config.apply_rope_fusion = enable_fusions
     if apply_rope_fusion is not None:
         config.apply_rope_fusion = apply_rope_fusion
@@ -216,6 +216,7 @@ def get_language_model_config(config, enable_fusions=False, apply_rope_fusion=No
         config.ffn_hidden_size = 28672
     elif config.language_model_type == "nemotron6-moe":
         config.bias_activation_fusion = False
+        config.bias_dropout_fusion = False
     else:
         raise ValueError(f"unknown language model type {config.language_model_type}")
 
@@ -224,8 +225,11 @@ def get_language_model_config(config, enable_fusions=False, apply_rope_fusion=No
 
 def get_vision_model_config(config, enable_fusions=False):
     config.bias_activation_fusion = False   # Radio uses an incompatible activation func.
-    config.bias_dropout_fusion = False
+    config.bias_dropout_fusion = enable_fusions
     config.apply_rope_fusion = enable_fusions
+
+    if config.language_model_type == "nemotron6-moe":
+        config.bias_dropout_fusion = False
 
     if config.vision_model_type == "clip":
         config.num_layers = 24
@@ -371,7 +375,7 @@ def get_vision_projection_config(config, hidden_size, enable_fusions=False):
     config.hidden_size = hidden_size  # Used as the vision projection output size, i.e., the input to the language model.
 
     config.bias_activation_fusion = enable_fusions
-    config.bias_dropout_fusion = False
+    config.bias_dropout_fusion = enable_fusions
     config.apply_rope_fusion = enable_fusions
 
     if config.language_model_type == "llama3_8b":
@@ -419,7 +423,9 @@ def get_vision_projection_config(config, hidden_size, enable_fusions=False):
         config.activation_func = squared_relu
         config.bias_activation_fusion = False
     elif config.language_model_type == "nemotron6-moe":
+        config.ffn_hidden_size = 16384
         config.bias_activation_fusion = False
+        config.bias_dropout_fusion = False
     elif config.language_model_type == "llama3.2_1b":
         config.ffn_hidden_size = 2048
         config.activation_func = torch.nn.functional.gelu
@@ -479,7 +485,7 @@ def get_sound_projection_config(config, hidden_size, enable_fusions=False):
     config.hidden_size = hidden_size  # Used as the vision projection output size, i.e., the input to the language model.
 
     config.bias_activation_fusion = enable_fusions
-    config.bias_dropout_fusion = False
+    config.bias_dropout_fusion = enable_fusions
     config.apply_rope_fusion = enable_fusions
 
     if config.language_model_type in ("llama3.1_8b", "nemotron5-hybrid-9b"):
@@ -488,6 +494,9 @@ def get_sound_projection_config(config, hidden_size, enable_fusions=False):
         config.layernorm_epsilon = 1e-5
         config.add_bias_linear = True
         config.normalization = "LayerNorm"
+    elif config.language_model_type == "nemotron6-moe":
+        config.bias_dropout_fusion = False
+        config.bias_activation_fusion = False
     else:
         raise ValueError(f"unknown language model type {config.language_model_type}")
 
@@ -515,3 +524,6 @@ class EvaluationConfig:
     num_partitions: int = 0
     partition_id: int = 0
     num_samples_per_partition: int = 0
+
+    # Tokenizer kwargs
+    enable_thinking: bool = False

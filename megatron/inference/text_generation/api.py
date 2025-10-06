@@ -35,7 +35,8 @@ def generate_and_post_process(model,
                               random_seed=-1,
                               detokenize_segments=True,
                               data_parallel=False,
-                              return_topk_logprobs=0):
+                              return_topk_logprobs=0,
+                              tokenizer_kwargs: dict = None):
     """Run inference and post-process outputs, i.e., detokenize,
     move to cpu and convert to list.
 
@@ -65,7 +66,8 @@ def generate_and_post_process(model,
         stop_on_eol=stop_on_eol,
         prevent_newline_after_colon=prevent_newline_after_colon,
         random_seed=random_seed,
-        data_parallel=data_parallel)
+        data_parallel=data_parallel,
+        tokenizer_kwargs=tokenizer_kwargs)
 
     # Only post-process on first stage.
     if mpu.is_pipeline_first_stage():
@@ -104,7 +106,8 @@ def generate(model,
              stop_on_eol=False,
              prevent_newline_after_colon=False,
              random_seed=-1,
-             data_parallel=False):
+             data_parallel=False,
+             tokenizer_kwargs: dict = None):
     """Given prompts and input parameters, run inference.
 
     Args:
@@ -152,7 +155,7 @@ def generate(model,
 
     context_tokens_tensor, context_length_tensor = tokenize_prompts(
         prompts=prompts, tokens_to_generate=tokens_to_generate, add_BOS=add_BOS,
-        data_parallel=data_parallel)
+        data_parallel=data_parallel, tokenizer_kwargs=tokenizer_kwargs)
 
     if tokens_to_generate == 0:
         return score_and_return_on_first_stage(

@@ -2,7 +2,7 @@
 
 #SBATCH -A llmservice_fm_vision
 #SBATCH -p batch_block1,batch_large,batch_long
-#SBATCH -t 04:00:00
+#SBATCH -t 00:40:00
 #SBATCH --mem=0
 #SBATCH --ntasks-per-node=8
 #SBATCH --dependency=singleton
@@ -10,7 +10,7 @@
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=sft_moe_1014
+#SBATCH --job-name=sft_300k_moe_1013
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
@@ -37,16 +37,16 @@ DEBUG=0
 USE_TILING=1
 USE_DYNAMIC_RES=0
 USE_FP8=0
-
+USE_CP=1
 
 # Remember to update model and job name if running in batch mode!!
 if [[ $BATCH -eq 0 ]]; then
     DATETIME=`date +'%y-%m-%d-%H-%M-%S'`
-    MODEL_NAME="interactive_sft_moe_${DATETIME}"
+    MODEL_NAME="interactive_sft_300k_moe_${DATETIME}"
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="sft_moe_1014"
+    MODEL_NAME="sft_300k_moe_1013"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -61,7 +61,7 @@ TENSORBOARD_DIR="${OUTPUT}/tensorboard"
 
 TP=2
 EP=32
-CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/output/pretrain_moe_1013/checkpoints"
+CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/output/sft_moe_1004/checkpoints"
 
 # New tokenizer.
 TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--NVIDIA-Nemotron-Nano-31B-A3-v3/snapshots/1ec9e9c5597db38926449c98482d891218e58b05/"
@@ -71,7 +71,7 @@ TOKENIZER_PROMPT_FORMAT="nemotron6-moe"
 #TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/nemotron6-moe-tokenizer/"
 #TOKENIZER_PROMPT_FORMAT="nemotron6-moe-old"
 
-DATA_TRAIN="/lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/users/amalasanjayd/eagle_recipe/online_packing/eagle_sft_v13.51.yaml"
+DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/megatron-lm5/DST_PATH4/ruler.yaml"
 
 if [[ $DEBUG -eq 1 ]]; then
     MBZ=1
@@ -96,7 +96,8 @@ else
 fi
 
 SEQ_LEN=256
-DECODER_SEQ_LEN=16384
+DECODER_SEQ_LEN=311296
+VIDEO_MAX_NUM_FRAMES=128     # Values > 0 enable video max num frames.
 
 if [[ $USE_TILING -eq 1 ]]; then
     EXTRA_ARGS+=" --pixel-shuffle --use-tiling --max-num-tiles 12 --use-thumbnail"
@@ -125,13 +126,18 @@ if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
     EXTRA_ARGS+=" ${IMAGE_BREAK_TOKEN} --dynamic-resolution --dynamic-resolution-min-patches 1024 --conv-merging --allow-missing-conv-merge-checkpoint"
 fi
 
+if [[ $USE_CP -eq 1 ]]; then
+    EXTRA_ARGS+=" --context-parallel-size 8 --sequence-parallel "
+fi
 
-EXTRA_ARGS+=" --packing-buffer-size 3247 --packing-seq-length ${DECODER_SEQ_LEN} --packing-knapsack-algorithm balanced_greedy_knapsack "
+EXTRA_ARGS+=" --packing-buffer-size 100 --packing-seq-length ${DECODER_SEQ_LEN} --packing-knapsack-algorithm balanced_greedy_knapsack "
 # LM (Mamba block) recompute
 EXTRA_ARGS+=" --recompute-granularity selective --recompute-modules core_attn mlp layernorm moe_act moe "
 # core_attn moe_act layernorm mlp moe
 # Vision (GPT block) recompute
 EXTRA_ARGS+=" --recompute-vision --recompute-method-vision block --recompute-granularity-vision full --recompute-vision-num-layers 32 "
+
+EXTRA_ARGS+=" --video-min-num-frames 8 --video-max-num-frames ${VIDEO_MAX_NUM_FRAMES} "
 
 OPTIONS=" \
     --use-checkpoint-args \
@@ -225,23 +231,8 @@ OPTIONS=" \
     --num-workers ${NW} \
     --tensorboard-dir ${TENSORBOARD_DIR} \
     --sequence-parallel \
+    --allow-large-videos \
 "
-
-# --ddp-pad-buckets-for-high-nccl-busbw \
-#--manual-gc \
-
-#     --tp-comm-overlap \
-# --decoder-tp-comm-overlap \
-
-#     --moe-token-dispatcher-type flex \
-#   --moe-enable-deepep \
-
-#     --overlap-grad-reduce \
-#   --overlap-param-gather \
-#     --disable-gloo-process-groups \
-# --tp-comm-overlap \
-# --sequence-parallel \
-#     --pretrained-checkpoint ${CHECKPOINT_DIR} \
 
 export NVTE_APPLY_QK_LAYER_SCALING=0
 export NVTE_ALLOW_NONDETERMINISTIC_ALGO=1

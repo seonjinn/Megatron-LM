@@ -1477,12 +1477,10 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load', 
             module.load_state_dict(state_dict, strict=strict)
         except Exception as e:
             if strict:
-                if torch.distributed.get_rank() == 0:
-                    print("failed:", e)
-                exit(1)
                 # Fallback support for backward compatibility breaking changes in TransformerEngine
                 load_return = module.load_state_dict(state_dict, strict=False)
                 print(f"load_return: {load_return}")
+                raise e
     # Model.
     strict = False if args.retro_add_retriever else strict
     if not skip_load_to_model_and_opt:
@@ -1535,7 +1533,7 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load', 
                          'Specify --no-load-optim or --finetune to prevent '
                          'attempting to load the optimizer state, '
                          'exiting ...'.format(checkpoint_name))
-            # raise e
+            raise e
     else:
         if (args.fp16 or args.bf16) and optimizer is not None:
             if args.load_main_params_from_ckpt:
@@ -1584,7 +1582,7 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load', 
                          'Specify --no-load-rng or --finetune to prevent '
                          'attempting to load the rng state, '
                          'exiting ...'.format(checkpoint_name))
-            # sys.exit()
+            sys.exit()
 
     # Some utilities want to load a checkpoint without distributed being initialized
     if torch.distributed.is_initialized():

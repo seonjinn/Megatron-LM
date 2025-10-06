@@ -10,7 +10,7 @@
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=pretrain_moe_0930
+#SBATCH --job-name=pretrain_moe_1013
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
@@ -45,7 +45,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="pretrain_moe_0930"
+    MODEL_NAME="pretrain_moe_1013"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -60,10 +60,28 @@ TENSORBOARD_DIR="${OUTPUT}/tensorboard"
 
 TP=2
 EP=32
-CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/nemotron6-moe-c-radio_v2-vlm-h-tp2/"
-#CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/nemotron6-moe-prefix/"
 
-DATA_TRAIN="${SOURCE}/examples/multimodal/v2/data_config/pretrain_dataset_commercial.yaml"
+# New checkpoint, patched special tokens.
+#CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/nemotron6-moe-1003-patched-c-radio_v2-vlm-h-tp2/"
+
+# New checkpoint, patched special tokens 2.
+CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/nemotron6-moe-1003-patched-new-c-radio_v2-vlm-h-tp2/"
+
+# New checkpoint, unpatched special tokens.
+#CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/nemotron6-moe-1003-c-radio_v2-vlm-h-tp2/"
+
+# Old checkpoint, unpatched special tokens.
+#CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/nemotron6-moe-c-radio_v2-vlm-h-tp2/"
+
+# New tokenizer.
+TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--NVIDIA-Nemotron-Nano-31B-A3-v3/snapshots/1ec9e9c5597db38926449c98482d891218e58b05/"
+TOKENIZER_PROMPT_FORMAT="nemotron6-moe"
+
+# Old tokenizer.
+#TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/nemotron6-moe-tokenizer/"
+#TOKENIZER_PROMPT_FORMAT="nemotron6-moe-old"
+
+DATA_TRAIN="${SOURCE}/examples/multimodal/v2/data_config/pretrain_dataset_commercial_sft_extended.yaml"
 
 if [[ $DEBUG -eq 1 ]]; then
     MBZ=1
@@ -78,7 +96,7 @@ if [[ $DEBUG -eq 1 ]]; then
     NUM_GPU=8
 else
     MBZ=1
-    BZ=1024
+    BZ=512
     NW=8
     AD=0.0
     HD=0.0
@@ -136,7 +154,6 @@ OPTIONS=" \
     --use-loss-scaling \
     ${SPECIAL_TOKENS} \
     --disable-vision-class-token \
-    --eos-id 15 \
     --eod-mask-loss \
     --image-tag-type internvl \
     --moe-token-dispatcher-type alltoall \
@@ -148,7 +165,7 @@ OPTIONS=" \
     --moe-grouped-gemm \
     --num-experts 128 \
     --moe-router-topk 6 \
-    --moe-aux-loss-coeff 1e-4 \
+    --moe-aux-loss-coeff 1e-6 \
     --moe-router-topk-scaling-factor 2.5 \
     --moe-router-enable-expert-bias \
     --moe-router-dtype fp32 \
@@ -189,9 +206,9 @@ OPTIONS=" \
     --micro-batch-size ${MBZ} \
     --global-batch-size ${BZ} \
     --train-full-dataset \
-    --lr-warmup-samples 102400 \
-    --lr 2e-4 \
-    --min-lr 0.0 \
+    --lr-warmup-fraction 0.1 \
+    --lr 1e-3 \
+    --min-lr 1e-5 \
     --weight-decay 0.01 \
     --clip-grad 1.0 \
     --lr-decay-style cosine \
@@ -199,8 +216,8 @@ OPTIONS=" \
     --eval-iters 0 \
     --eval-interval 99999999999 \
     --tokenizer-type MultimodalTokenizer \
-    --tokenizer-model /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/nemotron6-moe-tokenizer/ \
-    --tokenizer-prompt-format nemotron6-moe \
+    --tokenizer-model ${TOKENIZER_MODEL} \
+    --tokenizer-prompt-format ${TOKENIZER_PROMPT_FORMAT} \
     --pretrained-checkpoint ${CHECKPOINT_DIR} \
     --load ${FINETUNE_DIR} \
     --save ${FINETUNE_DIR} \
@@ -248,7 +265,7 @@ else
     DATETIME=`date +'date_%y-%m-%d_time_%H-%M-%S'`
 
     srun -l --verbose \
-    --container-image /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/containers/nm6_hybrid_moe_yash_07_17_vlm.sqsh \
+    --container-image /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/containers/pytorch25.06-moe-avlm.sqsh \
     --container-mounts "/lustre" \
     --output=${LOGS_DIR}/%x_%j_$DATETIME.log \
     sh -c "echo ${run_cmd}; ${run_cmd}"

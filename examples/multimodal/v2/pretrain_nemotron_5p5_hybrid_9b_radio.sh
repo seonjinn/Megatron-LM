@@ -117,7 +117,7 @@ OPTIONS=" \
     --use-checkpoint-args \
     --disable-bias-linear \
     --tokenizer-type MultimodalTokenizer \
-    --tokenizer-model /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/9b_tokenizer \
+    --tokenizer-model /lustre/fsw/portfolios/llmservice/users/ksapra/checkpoints/prunedmodel/first_9b_sft_pruned_v0 \
     --tokenizer-prompt-format nemotron-h-5p5-reasoning \
     --make-vocab-size-divisible-by 16512 \
     --transformer-impl transformer_engine \

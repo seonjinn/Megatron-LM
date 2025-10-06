@@ -365,23 +365,19 @@ class MultiModalTaskEncoder(
 
         # We tentatively extract the first message if it's a system prompt and use this rather than
         # the default. After this, we expect no system prompt in the conversation.
-        #import os
-        #if int(os.environ.get("RANK", 0)) == 0:
-        #    breakpoint()
-        #else:
-        #    import time
-        #    time.sleep(10000)
 
         has_system_message = sample.conversation[0].sender == "system"
-        system_prompt = "Answer the questions."
+        system_prompt = ""
         if has_system_message:
             system_prompt = sample.conversation[0].fragments[0]
-            if system_prompt == "":
-                system_prompt = "Answer the questions."
             sample.conversation = sample.conversation[1:]
 
+        if system_prompt == "" and self.args.tokenizer_prompt_format == "nemotron6-moe":
+            system_prompt = "Answer the questions."
+
         legacy_conversation: list[LegacyConversation] = [
-            {"role": "system", "content": system_prompt}]
+            {"role": "system", "content": system_prompt}
+        ]
 
         for message in sample.conversation:
             idx = 0
@@ -435,12 +431,15 @@ class MultiModalTaskEncoder(
                     content += "<so_start>" + SOUND_TOKEN * audio_params[0].num_embeddings + "<so_end>"
                     audio_media_params.append(audio_params[0])
 
-            if self.args.tokenizer_prompt_format == "nemotron-h-5p5-reasoning" and message.sender == "assistant":
+            prompt_format = self.args.tokenizer_prompt_format
+
+            if prompt_format in ("nemotron-h-5p5-reasoning", "nemotron6-moe") and message.sender == "assistant":
                 think_start_count = content.count("<think>")
                 think_end_count = content.count("</think>")
                 if think_start_count == 0 and think_end_count == 0:
                     # Add think tags in non-reasoning mode, if missing
-                    content = "<think></think>\n\n" + content.strip()
+                    think = "<think></think>" if prompt_format == "nemotron6-moe" else "<think></think>\n\n"
+                    content = think + content.strip()
                 else:
                     # There should be exactly one of each, otherwise it's invalid
                     assert think_start_count == 1 and think_end_count == 1, (
@@ -457,8 +456,9 @@ class MultiModalTaskEncoder(
                     # Clean up content inside <think> tags and strip surrounding whitespace
                     content = re.sub(r"<think>(.*?)</think>", _clean_think, content, re.DOTALL)
 
-                    # Ensure </think> is always followed by 2 newlines and no other whitespace
-                    content = re.sub(r'</think>\s*', '</think>\n\n', content)
+                    # Ensure </think> is always followed by N newlines and no other whitespace
+                    replacement = "</think>\n" if prompt_format == "nemotron6-moe" else "</think>\n\n"
+                    content = re.sub(r'</think>\s*', replacement, content)
 
             legacy_conversation.append({"role": message.sender, "content": content})
 

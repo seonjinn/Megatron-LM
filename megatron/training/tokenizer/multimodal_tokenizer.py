@@ -325,7 +325,7 @@ class MultimodalTokenizer(MegatronTokenizer):
             )
         elif prompt_format == "nemotron6-moe":
             self._prompt_config = PromptConfig(
-                assistant_prefix_len=4,
+                assistant_prefix_len=None, # Not used.
                 pad_token_id=tokenizer.convert_tokens_to_ids("<unk>"),
                 custom_chat_template=None,
                 has_bos=False,
@@ -352,13 +352,13 @@ class MultimodalTokenizer(MegatronTokenizer):
 
         return text
 
-    def tokenize(self, text: Union[str, List[Dict]]):
+    def tokenize(self, text: Union[str, List[Dict]], **kwargs):
         """Tokenize conversation or string input."""
         if isinstance(text, list):
             # This code path is used by the inference code currently.
-            return self.tokenize_conversation(text, False, True).tolist()
+            return self.tokenize_conversation(text, return_target=False, add_generation_prompt=True, **kwargs).tolist()
 
-        return self._encode(text)
+        return self._encode(text, **kwargs)
 
     def _encode(self, text: str):
         """Tokenize text input."""
@@ -366,7 +366,8 @@ class MultimodalTokenizer(MegatronTokenizer):
         return self._tokenizer.encode(text)
 
     def tokenize_conversation(
-        self, conversation: List[Dict], return_target: bool, add_generation_prompt: bool
+        self, conversation: List[Dict], return_target: bool, add_generation_prompt: bool,
+        **kwargs
     ):
         """Convert a conversation to tokens.
 
@@ -406,6 +407,7 @@ class MultimodalTokenizer(MegatronTokenizer):
             return_assistant_token_mask=False,
             return_tensors="np",
             chat_template=self._prompt_config.custom_chat_template,
+            **kwargs,
         )[0]
 
         if not return_target:
@@ -444,36 +446,29 @@ class MultimodalTokenizer(MegatronTokenizer):
             return tokens, target
         elif self._prompt_format in ("nemotron6-moe"):
             # Mask everything.
+
             target = np.full_like(tokens, IGNORE_INDEX)
             assistant_idx = np.where(tokens == 1503)[0]
-            end_idx = np.where(tokens == 23836)[0]
+            end_idx = np.where(tokens == 11)[0]
 
             # Unmask the assistant turn.
             for i in assistant_idx:
                 # Check for possible mismatches.
-                is_assistant = (tokens[i-5:i+2] == np.array([1124, 1329, 18993, 1124, 1062, 1503, 19464])).all()
+                is_assistant = (tokens[i-1:i+2] == np.array([10, 1503, 19464])).all()
                 if not is_assistant:
                     continue
 
+                assert tokens[i+2] == 1010, "expected newline lb"
+
                 lb = i
 
-                ub = None
-                for j in end_idx:
-                    if j < lb:
-                        continue
+                valid = end_idx[end_idx > lb]
 
-                    # Check for possible mismatches.
-                    is_end = (tokens[j-2:j+2] == np.array([1124, 1329, 23836, 1124])).all()
-                    if not is_end:
-                        continue
+                ub = valid[0]
 
-                    ub = j
-                    break
+                assert tokens[ub+1] == 1010, "expected newline ub"
 
-                if ub is None:
-                    raise RuntimeError(f"end index not found {conversation}")
-
-                target[lb+3:ub+3] = tokens[lb+3:ub+3]
+                target[lb+3:ub+1] = tokens[lb+3:ub+1]
 
             return tokens, target
 
@@ -484,7 +479,8 @@ class MultimodalTokenizer(MegatronTokenizer):
                 raise ValueError(f"empty turn in conversation: {conversation}. Skipping.")
 
             turn_tokens = self._tokenizer.apply_chat_template(
-                [turn], tokenize=True, chat_template=self._prompt_config.custom_chat_template
+                [turn], tokenize=True, chat_template=self._prompt_config.custom_chat_template,
+                **kwargs,
             )
 
             # There should be only one BOS at the very beginning.
@@ -510,17 +506,9 @@ class MultimodalTokenizer(MegatronTokenizer):
                 if self._prompt_config.assistant_prefix_len > 0:
                     target[idx : idx + self._prompt_config.assistant_prefix_len] = IGNORE_INDEX
 
-            try:
-                assert np.allclose(
-                    tokens[idx : idx + turn_len], turn_tokens
-                ), f"expected turn tokens to match tokens in conversation {conversation}"
-            except:
-                import os
-                if int(os.environ.get("RANK", 0)) == 0:
-                    breakpoint()
-                else:
-                    import time
-                    time.sleep(10000)
+            assert np.allclose(
+                tokens[idx : idx + turn_len], turn_tokens
+            ), f"expected turn tokens to match tokens in conversation {conversation}"
 
             idx += turn_len
 

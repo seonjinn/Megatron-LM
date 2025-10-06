@@ -10,7 +10,7 @@
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=sft_moe_1014
+#SBATCH --job-name=sft_video_moe_small_0917
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
@@ -22,8 +22,6 @@ export NVTE_BWD_LAYERNORM_SM_MARGIN=16
 export NCCL_P2P_NET_CHUNKSIZE=2097152
 export NCCL_DEBUG=WARN
 export TORCHINDUCTOR_WORKER_START=fork
-#export TORCH_NCCL_AVOID_RECORD_STREAMS=0
-export TRITON_CACHE_DIR=${TRITON_CACHE_DIR:-"/tmp/triton_cache_\${SLURM_NODEID}"}
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
@@ -37,16 +35,17 @@ DEBUG=0
 USE_TILING=1
 USE_DYNAMIC_RES=0
 USE_FP8=0
+USE_CP=1
 
 
 # Remember to update model and job name if running in batch mode!!
 if [[ $BATCH -eq 0 ]]; then
     DATETIME=`date +'%y-%m-%d-%H-%M-%S'`
-    MODEL_NAME="interactive_sft_moe_${DATETIME}"
+    MODEL_NAME="interactive_sft_video_moe_small_${DATETIME}"
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="sft_moe_1014"
+    MODEL_NAME="sft_video_moe_small_0924"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -60,22 +59,22 @@ LOGS_DIR="${OUTPUT}/logs"
 TENSORBOARD_DIR="${OUTPUT}/tensorboard"
 
 TP=2
-EP=32
-CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/output/pretrain_moe_1013/checkpoints"
+EP=4
+CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/output/pretrain_moe_small_0928/checkpoints"
 
 # New tokenizer.
-TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--NVIDIA-Nemotron-Nano-31B-A3-v3/snapshots/1ec9e9c5597db38926449c98482d891218e58b05/"
+TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--NVIDIA-Nemotron-Nano-31B-A3-v3/snapshots/22c64afb03eb7c27c5d1fa30042b68a1eed53f33/"
 TOKENIZER_PROMPT_FORMAT="nemotron6-moe"
 
 # Old tokenizer.
 #TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/nemotron6-moe-tokenizer/"
 #TOKENIZER_PROMPT_FORMAT="nemotron6-moe-old"
 
-DATA_TRAIN="/lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/users/amalasanjayd/eagle_recipe/online_packing/eagle_sft_v13.51.yaml"
+DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/25pct.13.51.25pct.txt.multi.img.video.yaml"
 
 if [[ $DEBUG -eq 1 ]]; then
     MBZ=1
-    BZ=8
+    BZ=4
     NW=0
     AD=0.0
     HD=0.0
@@ -86,8 +85,8 @@ if [[ $DEBUG -eq 1 ]]; then
     NUM_GPU=8
 else
     MBZ=1
-    BZ=128
-    NW=4
+    BZ=256
+    NW=8
     AD=0.0
     HD=0.0
     LI=5
@@ -96,7 +95,8 @@ else
 fi
 
 SEQ_LEN=256
-DECODER_SEQ_LEN=16384
+DECODER_SEQ_LEN=49152
+VIDEO_MAX_NUM_FRAMES=128     # Values > 0 enable video max num frames.
 
 if [[ $USE_TILING -eq 1 ]]; then
     EXTRA_ARGS+=" --pixel-shuffle --use-tiling --max-num-tiles 12 --use-thumbnail"
@@ -125,13 +125,18 @@ if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
     EXTRA_ARGS+=" ${IMAGE_BREAK_TOKEN} --dynamic-resolution --dynamic-resolution-min-patches 1024 --conv-merging --allow-missing-conv-merge-checkpoint"
 fi
 
+if [[ $USE_CP -eq 1 ]]; then
+    EXTRA_ARGS+=" --context-parallel-size 2 --sequence-parallel "
+fi
 
-EXTRA_ARGS+=" --packing-buffer-size 3247 --packing-seq-length ${DECODER_SEQ_LEN} --packing-knapsack-algorithm balanced_greedy_knapsack "
+EXTRA_ARGS+=" --packing-buffer-size 128 --packing-seq-length ${DECODER_SEQ_LEN} --packing-knapsack-algorithm balanced_greedy_knapsack "
 # LM (Mamba block) recompute
-EXTRA_ARGS+=" --recompute-granularity selective --recompute-modules core_attn mlp layernorm moe_act moe "
-# core_attn moe_act layernorm mlp moe
+#EXTRA_ARGS+=" --recompute-granularity full --recompute-method block --recompute-num-layers 52 "
+EXTRA_ARGS+=" --recompute-granularity selective --recompute-modules core_attn moe_act layernorm mlp moe "
 # Vision (GPT block) recompute
 EXTRA_ARGS+=" --recompute-vision --recompute-method-vision block --recompute-granularity-vision full --recompute-vision-num-layers 32 "
+
+EXTRA_ARGS+=" --video-min-num-frames 8 --video-max-num-frames ${VIDEO_MAX_NUM_FRAMES} "
 
 OPTIONS=" \
     --use-checkpoint-args \
@@ -149,37 +154,39 @@ OPTIONS=" \
     ${SPECIAL_TOKENS} \
     --disable-vision-class-token \
     --prompt-path ${SOURCE}/examples/multimodal/manual_prompts.json \
-    --eod-mask-loss \
-    --image-tag-type internvl \
-    --moe-token-dispatcher-type alltoall \
+    --moe-token-dispatcher-type flex \
+    --moe-enable-deepep \
     --moe-shared-expert-overlap \
     --enable-experimental \
     --moe-permute-fusion \
     --use-fused-weighted-squared-relu \
+    --cross-entropy-loss-fusion \
+    --cross-entropy-fusion-impl native \
     --moe-router-score-function sigmoid \
     --moe-grouped-gemm \
     --num-experts 128 \
     --moe-router-topk 6 \
-    --moe-aux-loss-coeff 1e-6 \
+    --moe-aux-loss-coeff 1e-4 \
     --moe-router-topk-scaling-factor 2.5 \
     --moe-router-enable-expert-bias \
     --moe-router-dtype fp32 \
     --moe-router-load-balancing-type seq_aux_loss \
     --moe-shared-expert-intermediate-size 3712 \
+    --attention-backend flash \
     --is-hybrid-model \
     --mamba-num-heads 64 \
     --mamba-head-dim 64 \
-    --hybrid-override-pattern MEMEM*EMEMEM*EMEMEM*EMEMEM*EMEMEM*EMEMEMEM*EMEMEMEME \
+    --hybrid-override-pattern MEM*EMEM*EMEM*EMEM*EMEME \
     --spec megatron.core.models.mamba.mamba_layer_specs mamba_stack_spec \
     --tiktoken-pattern v2 \
     --distributed-timeout-minutes 20 \
     --use-mcore-models \
     --untie-embeddings-and-output-weights \
     --disable-bias-linear \
-    --init-method-std 0.014 \
+    --init-method-std 0.0173 \
     --position-embedding-type none \
     --squared-relu \
-    --num-layers 52 \
+    --num-layers 24 \
     --hidden-size 2688 \
     --num-attention-heads 32 \
     --group-query-attention \
@@ -201,43 +208,49 @@ OPTIONS=" \
     --global-batch-size ${BZ} \
     --train-full-dataset \
     --lr-warmup-fraction 0.1 \
-    --lr 4e-5 \
-    --min-lr 0.0 \
-    --lr-decay-style cosine \
+    --lr-wsd-decay-samples 10000 \
+    --lr-wsd-decay-style minus_sqrt \
+    --override-opt_param-scheduler \
+    --lr 2e-4 \
+    --min-lr 2e-6 \
     --weight-decay 0.05 \
     --clip-grad 1.0 \
+    --lr-decay-style WSD \
     --log-interval ${LI} \
     --eval-iters 0 \
     --eval-interval 99999999999 \
     --tokenizer-type MultimodalTokenizer \
     --tokenizer-model ${TOKENIZER_MODEL} \
     --tokenizer-prompt-format ${TOKENIZER_PROMPT_FORMAT} \
-    --pretrained-checkpoint ${CHECKPOINT_DIR} \
     --load ${FINETUNE_DIR} \
     --save ${FINETUNE_DIR} \
     --dataloader-save ${FINETUNE_DIR}/dataloader \
-    --save-interval 5000 \
+    --save-interval 2000 \
     --ckpt-format torch \
+    --log-progress  \
+    --timing-log-option minmax \
+    --log-params-norm \
+    --log-num-zeros-in-grad \
+    --log-throughput \
+    --logging-level 20 \
+    --log-memory-interval 500 \
     --bf16 \
     --adam-beta1 0.9 \
-    --adam-beta2 0.999 \
+    --adam-beta2 0.95 \
     --use-distributed-optimizer \
+    --ddp-num-buckets 8 \
+    --ddp-pad-buckets-for-high-nccl-busbw \
+    --manual-gc \
     --num-workers ${NW} \
     --tensorboard-dir ${TENSORBOARD_DIR} \
     --sequence-parallel \
+    --allow-large-videos \
 "
 
-# --ddp-pad-buckets-for-high-nccl-busbw \
-#--manual-gc \
+# --overlap-param-gather \
+# --overlap-grad-reduce \
+# --pretrained-checkpoint ${CHECKPOINT_DIR} \
 
-#     --tp-comm-overlap \
-# --decoder-tp-comm-overlap \
-
-#     --moe-token-dispatcher-type flex \
-#   --moe-enable-deepep \
-
-#     --overlap-grad-reduce \
-#   --overlap-param-gather \
 #     --disable-gloo-process-groups \
 # --tp-comm-overlap \
 # --sequence-parallel \
@@ -255,7 +268,7 @@ else
     DATETIME=`date +'date_%y-%m-%d_time_%H-%M-%S'`
 
     srun -l --verbose \
-    --container-image /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/containers/pytorch25.06-moe-avlm.sqsh \
+    --container-image /lustre/fsw/portfolios/llmservice/users/amalasanjayd/containers/megatron-lm/megatron-dev-0806.sqsh \
     --container-mounts "/lustre" \
     --output=${LOGS_DIR}/%x_%j_$DATETIME.log \
     sh -c "echo ${run_cmd}; ${run_cmd}"

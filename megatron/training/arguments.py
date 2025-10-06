@@ -581,7 +581,7 @@ def validate_args(args, defaults={}):
 
                 assert num_layers % args.transformer_pipeline_model_parallel_size == 0, \
                     'Number of layers should be divisible by the pipeline-model-parallel size'
-    
+
     if args.virtual_pipeline_model_parallel_size is not None:
         if args.overlap_p2p_comm:
             assert args.pipeline_model_parallel_size > 1, \
@@ -3057,6 +3057,6 @@ def _add_kitchen_quantization_arguments(parser: argparse.ArgumentParser):
 def _add_sft_args(parser):
     group = parser.add_argument_group(title='sft')
     group.add_argument('--sft', action="store_true", help='Megatron SFT training')
-    group.add_argument('--sft-tokenizer-prompt-format', type=str, default="nemotron-h-aligned", 
+    group.add_argument('--sft-tokenizer-prompt-format', type=str, default="nemotron-h-aligned",
                        help='SFT prompt format.')
     return parser

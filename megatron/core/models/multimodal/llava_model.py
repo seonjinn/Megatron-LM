@@ -326,13 +326,6 @@ class LLaVAModel(MegatronModule):
                 self.vision_projection.register_load_state_dict_post_hook(
                     partial(_load_state_dict_hook_ignore_param_names, vision_projection_param_names)
                 )
-                vision_model_param_names = [
-                    f"vision_model.{name}"
-                    for name in self.vision_model.state_dict().keys()
-                ]
-                self.vision_model.register_load_state_dict_post_hook(
-                    partial(_load_state_dict_hook_ignore_param_names, vision_model_param_names)
-                )
 
             self.vision_projection.register_load_state_dict_post_hook(
                 _load_state_dict_hook_ignore_extra_state
@@ -1360,8 +1353,8 @@ class LLaVAModel(MegatronModule):
             sound_embeddings=sound_embeddings,
         )  # [combined_seq_len, b, h_language], [b, combined_seq_len], [b, combined_seq_len]
 
-        loss_weight = None
         if self.context_parallel_lm > 1 or self.sequence_parallel_lm:
+            loss_weight = None
             if new_labels is not None:
                 acc_lengths = (
                     packed_seq_params.cu_seqlens_q_padded
