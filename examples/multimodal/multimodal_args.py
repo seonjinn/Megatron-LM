@@ -200,6 +200,9 @@ def add_multimodal_extra_args(parser):
         default=30,
         help="Sound model clip duration in seconds."
     )
+    group.add_argument(
+        "--use-new-dataloader-path", action="store_true", default=False, help="Use the new dataloader path."
+    )
 
 
     return parser

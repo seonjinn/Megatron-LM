@@ -26,16 +26,21 @@ from megatron.training import get_args
 from megatron.training.checkpointing import get_checkpoint_name
 
 
+def use_new_dataloader_path():
+    args = get_args()
+    return args.packing_buffer_size is not None or getattr(args, "use_new_dataloader_path", False)
+
+
 def datasets_provider(task_encoder,worker_config=None):
     """Create multimodal train, validation and test datasets."""
     args = get_args()
 
-    if args.packing_buffer_size is None:
-        train_task_encoder = TaskEncoder()
-        val_task_encoder = TaskEncoder()
-    else:
+    if use_new_dataloader_path():
         train_task_encoder = MultiModalTaskEncoder()
         val_task_encoder = MultiModalTaskEncoder(is_val=True)
+    else:
+        train_task_encoder = TaskEncoder()
+        val_task_encoder = TaskEncoder()
 
     dname = args.data_path[0] if type(args.data_path) is list else args.data_path
     train_dataset = get_train_dataset(
@@ -137,9 +142,7 @@ def train_valid_test_dataloaders_provider(train_val_test_num_samples, task_encod
     )
     train_ds, valid_ds1, test_ds = datasets_provider(task_encoder, worker_config)
 
-    if args.packing_buffer_size is None:
-        train_dataloader = get_savable_loader(train_ds, worker_config=worker_config)
-    else:
+    if use_new_dataloader_path():
         train_dataloader = get_savable_loader(
             train_ds,
             cache_pool=FileStoreCachePool(
@@ -149,6 +152,8 @@ def train_valid_test_dataloaders_provider(train_val_test_num_samples, task_encod
             ),
             watchdog_initial_timeout_seconds=180 + (args.packing_buffer_size or 0) * 0.0075,
         )
+    else:
+        train_dataloader = get_savable_loader(train_ds, worker_config=worker_config)
 
     if args.load is not None:
         if getattr(args, "dataloader_save", None):
@@ -171,18 +176,18 @@ def train_valid_test_dataloaders_provider(train_val_test_num_samples, task_encod
 
     valid_dataloader = None
     if valid_ds1 is not None:
-        if args.packing_buffer_size is None:
-            valid_dataloader = [
-                EnergonDataloader(get_loader(valid_ds, worker_config=worker_config))
-                for valid_ds in valid_ds1
-            ]
-        else:
+        if use_new_dataloader_path():
             valid_dataloader = [
                 EnergonDataloader(get_loader(
                     valid_ds,
                     cache_pool=FileStoreCachePool(method="raw"),
                     watchdog_initial_timeout_seconds=180 + (args.packing_buffer_size or 0) * 0.0075,
                 ))
+                for valid_ds in valid_ds1
+            ]
+        else:
+            valid_dataloader = [
+                EnergonDataloader(get_loader(valid_ds, worker_config=worker_config))
                 for valid_ds in valid_ds1
             ]
 

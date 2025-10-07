@@ -1000,8 +1000,9 @@ class MultiModalTaskEncoder(
         total_num_images = len(image_tiling_params)
         total_num_audio_embeddings = sum(media.num_embeddings for media in audio_media_params)
         total_num_audio = len(audio_media_params)
+        packing_seq_length = self.args.packing_seq_length if self.args.packing_seq_length > 0 else self.args.decoder_seq_length
         max_text_tokens = (
-            self.packing_seq_length - total_img_embeddings_len - total_num_audio_embeddings + total_num_images + total_num_audio
+            packing_seq_length - total_img_embeddings_len - total_num_audio_embeddings + total_num_images + total_num_audio
         )
 
         truncated_input_ids = input_ids[:max_text_tokens]

@@ -10,7 +10,7 @@
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=pretrain_nm_5p5_h_12b0804_0930
+#SBATCH --job-name=pretrain_nm_5p5_h_12b_1007
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
@@ -31,7 +31,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="pretrain_nm_5p5_h_12b0804_0930"
+    MODEL_NAME="pretrain_nm_5p5_h_12b_1007"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -49,7 +49,7 @@ CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/amalasanjayd/checkpoints
 # TP=4
 # CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/mcore_mmodal_models/n5p5_12b_sft_0718_cradio_vlm_v1_rc3_tp4"
 
-DATA_TRAIN="${SOURCE}/examples/multimodal/v2/data_config/pretrain_dataset_commercial.yaml"
+DATA_TRAIN="${SOURCE}/examples/multimodal/v2/data_config/pretrain_dataset_commercial_sft_extended.yaml"
 
 if [[ $DEBUG -eq 1 ]]; then
     MBZ=1
@@ -64,7 +64,7 @@ if [[ $DEBUG -eq 1 ]]; then
 
     NUM_GPU=8
 
-    SAVE_INTERVAL=10
+    SAVE_INTERVAL=10000
 else
     MBZ=1
     BZ=1024
@@ -149,7 +149,7 @@ OPTIONS=" \
     --decoder-seq-length ${DECODER_SEQ_LEN} \
     --max-position-embeddings ${DECODER_SEQ_LEN} \
     --train-full-dataset \
-    --lr-warmup-samples 102400 \
+    --lr-warmup-fraction 0.1 \
     --micro-batch-size ${MBZ} \
     --global-batch-size ${BZ} \
     --lr 2e-4 \
