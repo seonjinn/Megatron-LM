@@ -144,6 +144,10 @@ class CoreMoETESchema(CoreSchema):
             **{f"mlp_fc1_weight.{expert_idx}" : f"mlp.experts.local_experts.{expert_idx}.linear_fc1.weight" for expert_idx in range(num_local_experts) },
             **{f"mlp_fc2_weight.{expert_idx}" : f"mlp.experts.local_experts.{expert_idx}.linear_fc2.weight" for expert_idx in range(num_local_experts) },
 
+            # Shared experts (not EP-split): treat like normal linear layers
+            "mlp_shared_fc1_weight" : "mlp.shared_experts.linear_fc1.weight",
+            "mlp_shared_fc2_weight" : "mlp.shared_experts.linear_fc2.weight",
+
         } | extra_layer_schema, prefix=prefix)
 
 
@@ -218,6 +222,22 @@ class CoreHybridTESchema(CoreHybridBaseSchema):
         } | extra_layer_schema, prefix=prefix)
 
 
+class CoreHybridMoETESchema(CoreHybridTESchema):
+    def __init__(self, model_type, num_experts, expert_model_parallel_size, prefix, extra_layer_schema):
+        num_local_experts = num_experts // expert_model_parallel_size
+        super().__init__(model_type, extra_layer_schema={
+            "pre_mlp_norm_weight" : "pre_mlp_layernorm.weight",
+            "pre_mlp_norm_bias" : "pre_mlp_layernorm.bias",
+            "router_weight" : "mlp.router.weight",
+            "router_bias" : "mlp.router.expert_bias",
+            **{f"mlp_fc1_weight.{expert_idx}" : f"mlp.experts.linear_fc1.weight{expert_idx}" for expert_idx in range(num_local_experts) },
+            **{f"mlp_fc2_weight.{expert_idx}" : f"mlp.experts.linear_fc2.weight{expert_idx}" for expert_idx in range(num_local_experts) },
+
+            # Shared experts (not EP-split): treat like normal linear layers
+            "mlp_shared_fc1_weight" : "mlp.shared_experts.linear_fc1.weight",
+            "mlp_shared_fc2_weight" : "mlp.shared_experts.linear_fc2.weight",
+        } | extra_layer_schema, prefix=prefix)
+
 def get_model_schema(
     model_type: T.Literal["GPT", "BERT", "hybrid"],
     transformer_impl: T.Literal["transformer_engine", "local"],
@@ -230,6 +250,8 @@ def get_model_schema(
         # Only support TE setter for MOE
         assert transformer_impl == "transformer_engine"
         assert isinstance(expert_model_parallel_size, int)
+        if model_type == "hybrid":
+            return CoreHybridMoETESchema(model_type, num_experts, expert_model_parallel_size, prefix, extra_layer_schema)
         return CoreMoETESchema(model_type, num_experts, expert_model_parallel_size, prefix, extra_layer_schema)
     if model_type == "hybrid":
         return CoreHybridTESchema(model_type, prefix, extra_layer_schema)

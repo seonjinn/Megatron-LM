@@ -169,6 +169,7 @@ class MegatronCheckpointSaverBase:
 
         # fake initializing distributed
         mpu.set_tensor_model_parallel_world_size(self.args.target_tensor_parallel_size)
+        mpu.set_expert_tensor_parallel_world_size(self.args.target_expert_tensor_parallel_size)
         mpu.set_pipeline_model_parallel_world_size(self.args.target_pipeline_parallel_size)
         mpu.set_expert_model_parallel_world_size(self.args.target_expert_parallel_size)
         mpu.set_tensor_model_parallel_rank(0)
@@ -178,6 +179,9 @@ class MegatronCheckpointSaverBase:
         # For backward compatibility during local parallel states refactoring
         fake_tp_group = _ConverterFakeProcessGroup(size=self.args.target_tensor_parallel_size)
         fake_ep_group = _ConverterFakeProcessGroup(size=self.args.target_expert_parallel_size)
+        fake_ep_tp_group = _ConverterFakeProcessGroup(size=self.args.target_expert_tensor_parallel_size)
+        fake_ep_tp_model_group = _ConverterFakeProcessGroup(size=self.args.target_expert_tensor_parallel_size * self.args.target_expert_parallel_size)
+        fake_ep_tp_model_pp_group = _ConverterFakeProcessGroup(size=self.args.target_expert_tensor_parallel_size * self.args.target_expert_parallel_size * self.args.target_pipeline_parallel_size)
         fake_pp_group = _ConverterFakeProcessGroup(size=self.margs.pipeline_model_parallel_size)
         fake_cp_group = _ConverterFakeProcessGroup(size=self.margs.context_parallel_size)
         mpu._TENSOR_MODEL_PARALLEL_GROUP = fake_tp_group
@@ -185,8 +189,15 @@ class MegatronCheckpointSaverBase:
         mpu._PIPELINE_MODEL_PARALLEL_GROUP = fake_pp_group
         mpu._CONTEXT_PARALLEL_GROUP = fake_cp_group
 
+        # Ensure MoE dispatchers see valid expert-tensor and combined groups
+        mpu._EXPERT_TENSOR_PARALLEL_GROUP = fake_ep_tp_group
+        mpu._EXPERT_TENSOR_AND_MODEL_PARALLEL_GROUP = fake_ep_tp_model_group
+        mpu._EXPERT_TENSOR_MODEL_PIPELINE_PARALLEL_GROUP = fake_ep_tp_model_pp_group
+
         #TODO: does this mess anything else up? need some value here for hybrid
         get_cuda_rng_tracker().add('model-parallel-rng', self.margs.seed)
+        # Ensure expert-parallel RNG tracker exists for MoE components
+        get_cuda_rng_tracker().add('expert-parallel-rng', self.margs.seed + 1024)
 
         fused_kernels.load(self.margs)
         
@@ -629,6 +640,90 @@ class MegatronCheckpointSaverBase:
                     model = self.get_local_model(pp_rank, ep_rank, tp_rank)
                     schema.set_layer(model, layer_id, params_dict)
 
+    def _receive_moe_layer(self, msg, schema, pp_rank, layer_id):
+        """
+        Receive and process MoE MLP layer parameters from the queue message.
+        Treat shared experts as normal linear layers (no EP split).
+        """
+        # MoE MLP processing: weights are 3D with expert dimension leading
+        post_norm_weight = msg.pop("post norm weight")
+        pre_mlp_norm_weight = msg.pop("pre mlp norm weight")
+        if self.md.norm_has_bias:
+            post_norm_bias = msg.pop("post norm bias")
+            pre_mlp_norm_bias = msg.pop("pre mlp norm bias")
+
+        router_weight = msg.pop("router weight")
+        router_bias = msg.pop("router bias")
+
+        # fc1
+        if self.md.swiglu:
+            mlp_l0_weight_W = msg.pop("mlp l0 weight W")  # [E, out/2, in]
+            mlp_l0_weight_V = msg.pop("mlp l0 weight V")  # [E, out/2, in]
+            mlp_l0_weight = torch.cat((mlp_l0_weight_W, mlp_l0_weight_V), dim=1)
+        else:
+            mlp_l0_weight = msg.pop("mlp l0 weight")      # [E, out, in]
+
+        # fc2
+        mlp_l1_weight = msg.pop("mlp l1 weight")          # [E, out, in]
+
+        # Chunk by EP/ETP
+        # fc1 is column-parallel, fc2 is row-parallel
+        fc1_split = chunk_weight(mlp_l0_weight, "column", self.args.target_expert_tensor_parallel_size, self.args.target_expert_parallel_size)
+        fc2_split = chunk_weight(mlp_l1_weight, "row", self.args.target_expert_tensor_parallel_size, self.args.target_expert_parallel_size)
+
+        # Handle shared experts if provided: treat like standard linear layers (not EP-split)
+        shared_l0 = msg.pop("shared mlp l0 weight")
+        shared_l1 = msg.pop("shared mlp l1 weight")
+        shared_l0_chunks = chunk_weight(shared_l0, "column", self.args.target_tensor_parallel_size)
+        shared_l1_chunks = chunk_weight(shared_l1, "row", self.args.target_tensor_parallel_size)
+
+        # Save them to the model: iterate target EP and TP
+        for ep_rank in range(self.args.target_expert_parallel_size):
+            for etp_rank in range(self.args.target_expert_tensor_parallel_size):
+                tp_rank = (ep_rank * self.args.target_expert_tensor_parallel_size + etp_rank) % self.args.target_tensor_parallel_size
+
+                # local experts for this ep rank
+                local_fc1 = fc1_split[ep_rank][etp_rank]      # [local_E, out, in]
+                local_fc2 = fc2_split[ep_rank][etp_rank]      # [local_E, out, in]
+
+                params_dict = {
+                    "mlp_norm_weight" : post_norm_weight,
+                    "pre_mlp_norm_weight": pre_mlp_norm_weight,
+                    "router_weight": router_weight,
+                    # router_bias handled out-of-band to preserve fp32
+                }
+
+                # Set per-local-expert weights
+                num_local_experts = local_fc1.shape[0]
+                for expert_idx in range(num_local_experts):
+                    params_dict.update({
+                        f"mlp_fc1_weight.{expert_idx}": local_fc1[expert_idx],
+                        f"mlp_fc2_weight.{expert_idx}": local_fc2[expert_idx],
+                    })
+
+                # Split shared layers across TP like normal linear layers
+                params_dict.update({
+                    "mlp_shared_fc1_weight": shared_l0_chunks[tp_rank],
+                    "mlp_shared_fc2_weight": shared_l1_chunks[tp_rank],
+                })
+
+                if self.md.norm_has_bias:
+                    params_dict.update({
+                        "mlp_norm_bias": post_norm_bias,
+                        "pre_mlp_norm_bias": pre_mlp_norm_bias,
+                    })
+                # Set norms and optional bias
+                model = self.get_local_model(pp_rank, ep_rank, tp_rank)
+                schema.set_layer(model, layer_id, params_dict)
+
+                # Ensure router expert_bias is stored in fp32 to avoid quantization on save
+                layer_ref = schema._get_layers(model)[layer_id]
+                rb_param = getattr(getattr(getattr(layer_ref, 'mlp'), 'router'), 'expert_bias', None)
+                if isinstance(rb_param, torch.Tensor):
+                    if rb_param.dtype != torch.float32:
+                        rb_param.data = rb_param.data.to(torch.float32)
+                    rb_param.data.copy_(router_bias.to(torch.float32))
+
     def _pad_weight(self, orig_word_embed, true_vocab_size):
         """
         Helper method to pad weight tensors for vocabulary size alignment.
@@ -831,6 +926,8 @@ class MegatronCheckpointSaverBase:
                         self._receive_attention_layer(msg, schema, pp_rank, layer_id)
                     elif layer_type == LayerSymbols.MLP:
                         self._receive_mlp_layer(msg, schema, pp_rank, layer_id)
+                    elif layer_type == LayerSymbols.MOE:
+                        self._receive_moe_layer(msg, schema, pp_rank, layer_id)
 
                     total_layer_num = total_layer_num + 1
                     self.check_message(msg)

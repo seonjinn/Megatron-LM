@@ -215,7 +215,7 @@ def model_provider(
 
     # Toggle --recompute* for the vision and language model separately.
     if args.recompute_vision:
-        recompute_vision_num_layers = args.recompute_vision_num_layers if args.recompute_vision_num_layers > 0 else vision_config.num_layers
+        recompute_vision_num_layers = args.recompute_vision_num_layers if getattr(args, "recompute_vision_num_layers", 0) > 0 else vision_config.num_layers
         vision_config.recompute_num_layers = recompute_vision_num_layers
 
         if getattr(args, "recompute_granularity_vision", None) is not None:
@@ -238,7 +238,7 @@ def model_provider(
     vision_projection_config.tp_comm_overlap = False
 
     # Toggle --recompute* for the vision projection layer.
-    if args.recompute_vision_projection:
+    if getattr(args, "recompute_vision_projection", False):
         vision_projection_config.recompute_granularity = "full"
     else:
         vision_projection_config.recompute_granularity = None

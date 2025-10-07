@@ -24,6 +24,8 @@ def add_arguments(parser):
                        'in the input checkpoint if provided by the loader, otherwise to 1')
     group.add_argument('--target-expert-parallel-size', type=int, default=1,
                        help='Target expert model parallel size, default to 1')
+    group.add_argument('--target-expert-tensor-parallel-size', type=int, default=1,
+                       help='Target expert tensor model parallel size, default to 1')
     group.add_argument('--make-vocab-size-divisible-by', type=int, default=None,
                        help='Value to make vocab size divisible by. Will pad embedding table if necessary')
     group.add_argument('--saver-transformer-impl', default='transformer_engine',

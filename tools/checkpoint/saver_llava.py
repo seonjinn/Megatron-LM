@@ -41,6 +41,8 @@ def add_arguments(parser):
                        help='Which Transformer implementation to use.')
     group.add_argument('--target-expert-parallel-size', type=int, default=1,
                        help='Target expert model parallel size, default to 1')
+    group.add_argument('--target-expert-tensor-parallel-size', type=int, default=1,
+                       help='Target expert tensor model parallel size, default to 1')
 
 
 class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
@@ -205,6 +207,7 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
 
     def receive_vision_backbone(self, schema):
 
+        print(schema)
         # ViT Embeddings.
         #-----------
         # The ViT embeddings are put on the PP / EP / TP 0
@@ -422,8 +425,8 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
         schema_vision_backbone = get_model_schema(
             "GPT",
             self.margs.transformer_impl,
-            self.margs.num_experts,
-            self.margs.expert_model_parallel_size,
+            None, # No MoE vision encoder
+            None, # No MoE vision encoder
             prefix="vision_model.",
             extra_layer_schema=extra_layer_schema,
         )

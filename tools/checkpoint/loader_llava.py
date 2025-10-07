@@ -98,7 +98,7 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
         margs.recompute_sound = getattr(checkpoint_args, "recompute_sound", False)
         margs.sound_model_type = getattr(checkpoint_args, "sound_model_type", None)
         margs.context_parallel_size = 1
-        margs.use_cpu_initialization = False
+        # margs.use_cpu_initialization = False
 
         return margs
 
@@ -212,26 +212,26 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
 
         message = {}
         if self.md.vision_model_type in ("internvit", "siglip"):
-            message["conv1 weight"] = self.all_models[0][0][0].vision_model.conv1.weight.data
+            message["conv1 weight"] = self.get_local_model().vision_model.conv1.weight.data
             if self.md.vision_model_type in ("internvit", "siglip"):
-                message["conv1 bias"] = self.all_models[0][0][0].vision_model.conv1.bias.data
-            message["position embeddings"] = self.all_models[0][0][0].vision_model.position_embeddings.weight.data
+                message["conv1 bias"] = self.get_local_model().vision_model.conv1.bias.data
+            message["position embeddings"] = self.get_local_model().vision_model.position_embeddings.weight.data
 
         if self.md.vision_model_type == "radio-g":
-            message["mask token"] = self.all_models[0][0][0].vision_model.mask_token.data
+            message["mask token"] = self.get_local_model().vision_model.mask_token.data
 
         if self.md.vision_model_type in ("radio", "radio-g", "cradio-g"):
-            message["embedder weight"] = torch.cat([self.all_models[0][0][tp_rank].vision_model.embedder.weight.data for tp_rank in range(encoder_tp_size)], dim=0)
+            message["embedder weight"] = torch.cat([self.get_local_model(tp_rank=tp_rank).vision_model.embedder.weight.data for tp_rank in range(encoder_tp_size)], dim=0)
             if self.md.vision_model_type == "radio-g":
-                message["embedder bias"] = torch.cat([self.all_models[0][0][tp_rank].vision_model.embedder.bias.data for tp_rank in range(encoder_tp_size)], dim=0)
-            message["position embeddings"] = self.all_models[0][0][0].vision_model.position_embeddings.data
+                message["embedder bias"] = torch.cat([self.get_local_model(tp_rank=tp_rank).vision_model.embedder.bias.data for tp_rank in range(encoder_tp_size)], dim=0)
+            message["position embeddings"] = self.get_local_model().vision_model.position_embeddings.data
 
         if self.md.vision_model_type in ("siglip", "radio-g"):
-            message["ln post weight"] = self.all_models[0][0][0].vision_model.ln_post.weight.data
-            message["ln post bias"] = self.all_models[0][0][0].vision_model.ln_post.bias.data
+            message["ln post weight"] = self.get_local_model().vision_model.ln_post.weight.data
+            message["ln post bias"] = self.get_local_model().vision_model.ln_post.bias.data
 
         if self.md.vision_model_type in ("internvit", "radio", "radio-g", "cradio-g"):
-            message["class token"] = self.all_models[0][0][0].vision_model.class_token.data
+            message["class token"] = self.get_local_model().vision_model.class_token.data
 
         self.queue_put("vit embeddings", message)
 
@@ -243,7 +243,10 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
         for vp_rank in range(vp_size):
             mpu.set_virtual_pipeline_model_parallel_rank(vp_rank)
             # ViT will only ever be on first pp rank
-            models = self.all_models[0][vp_rank]
+            # Loop with get_local_model to handle MoE expert-tensor parallelism
+            models = []
+            for tp_rank in range(encoder_tp_size):
+                models.append(self.get_local_model(vp_rank=vp_rank, tp_rank=tp_rank))
             for layer_num in range(schema.get_num_layers(models[0])):
                 message = {}
 
@@ -328,56 +331,56 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
     def send_vision_projection_over_queue(self):
         encoder_tp_size = self.md.previous_encoder_tensor_parallel_size
         message = {
-            "vision projection l0 weight": torch.cat([self.all_models[0][0][tp_rank].vision_projection.encoder.linear_fc1.weight.data for tp_rank in range(encoder_tp_size)], dim=0),
-            "vision projection l1 weight": torch.cat([self.all_models[0][0][tp_rank].vision_projection.encoder.linear_fc2.weight.data for tp_rank in range(encoder_tp_size)], dim=1),
+            "vision projection l0 weight": torch.cat([self.get_local_model(tp_rank=tp_rank).vision_projection.encoder.linear_fc1.weight.data for tp_rank in range(encoder_tp_size)], dim=0),
+            "vision projection l1 weight": torch.cat([self.get_local_model(tp_rank=tp_rank).vision_projection.encoder.linear_fc2.weight.data for tp_rank in range(encoder_tp_size)], dim=1),
         }
         # Check for this explicitly, since don't have any gurantees based on our model types
         # if hasattr(self.all_models[0][0][0].vision_projection.encoder.linear_fc1.layer_norm_weight, "data"):
         try:
-            message["vision projection norm weight"] = self.all_models[0][0][0].vision_projection.encoder.linear_fc1.layer_norm_weight.data
+            message["vision projection norm weight"] = self.get_local_model().vision_projection.encoder.linear_fc1.layer_norm_weight.data
         except:
             pass
         try:
         # if hasattr(self.all_models[0][0][0].vision_projection.encoder.linear_fc1.layer_norm_bias, "data"):
-            message["vision projection norm bias"] = self.all_models[0][0][0].vision_projection.encoder.linear_fc1.layer_norm_bias.data
+            message["vision projection norm bias"] = self.get_local_model().vision_projection.encoder.linear_fc1.layer_norm_bias.data
         except:
             pass
         if self.md.vision_projection_linear_bias:
-            message["vision projection l0 bias"] = torch.cat([self.all_models[0][0][tp_rank].vision_projection.encoder.linear_fc1.bias.data for tp_rank in range(encoder_tp_size)], dim=0)
-            message["vision projection l1 bias"] = self.all_models[0][0][0].vision_projection.encoder.linear_fc2.bias.data
+            message["vision projection l0 bias"] = torch.cat([self.get_local_model(tp_rank=tp_rank).vision_projection.encoder.linear_fc1.bias.data for tp_rank in range(encoder_tp_size)], dim=0)
+            message["vision projection l1 bias"] = self.get_local_model().vision_projection.encoder.linear_fc2.bias.data
 
         if self.md.conv_merging:
-            message["conv merge l0 weight"] = torch.cat([self.all_models[0][0][tp_rank].conv_merge.mlp.linear_fc1.weight.data for tp_rank in range(encoder_tp_size)], dim=0)
-            message["conv merge l1 weight"] = torch.cat([self.all_models[0][0][tp_rank].conv_merge.mlp.linear_fc2.weight.data for tp_rank in range(encoder_tp_size)], dim=1)
+            message["conv merge l0 weight"] = torch.cat([self.get_local_model(tp_rank=tp_rank).conv_merge.mlp.linear_fc1.weight.data for tp_rank in range(encoder_tp_size)], dim=0)
+            message["conv merge l1 weight"] = torch.cat([self.get_local_model(tp_rank=tp_rank).conv_merge.mlp.linear_fc2.weight.data for tp_rank in range(encoder_tp_size)], dim=1)
 
             if self.md.vision_projection_linear_bias:
-                message["conv merge l0 bias"] = torch.cat([self.all_models[0][0][tp_rank].conv_merge.mlp.linear_fc1.bias.data for tp_rank in range(encoder_tp_size)], dim=0)
-                message["conv merge l1 bias"] = self.all_models[0][0][0].conv_merge.mlp.linear_fc2.bias.data
+                message["conv merge l0 bias"] = torch.cat([self.get_local_model(tp_rank=tp_rank).conv_merge.mlp.linear_fc1.bias.data for tp_rank in range(encoder_tp_size)], dim=0)
+                message["conv merge l1 bias"] = self.get_local_model().conv_merge.mlp.linear_fc2.bias.data
 
         self.queue_put("vision projection", message)
 
     def send_sound_projection_over_queue(self):
         """Send sound projection parameters over the queue if available."""
         # Check if model has sound_projection
-        if not hasattr(self.all_models[0][0][0], 'sound_projection') or self.all_models[0][0][0].sound_projection is None:
+        if not hasattr(self.get_local_model(), 'sound_projection') or self.get_local_model().sound_projection is None:
             return
         encoder_tp_size = self.md.previous_encoder_tensor_parallel_size
         message = {
-            "sound projection l0 weight": torch.cat([self.all_models[0][0][tp_rank].sound_projection.encoder.linear_fc1.weight.data for tp_rank in range(encoder_tp_size)], dim=0),
-            "sound projection l1 weight": torch.cat([self.all_models[0][0][tp_rank].sound_projection.encoder.linear_fc2.weight.data for tp_rank in range(encoder_tp_size)], dim=1),
+            "sound projection l0 weight": torch.cat([self.get_local_model(tp_rank=tp_rank).sound_projection.encoder.linear_fc1.weight.data for tp_rank in range(encoder_tp_size)], dim=0),
+            "sound projection l1 weight": torch.cat([self.get_local_model(tp_rank=tp_rank).sound_projection.encoder.linear_fc2.weight.data for tp_rank in range(encoder_tp_size)], dim=1),
         }
         # Optional norm
         try:
-            message["sound projection norm weight"] = self.all_models[0][0][0].sound_projection.encoder.linear_fc1.layer_norm_weight.data
+            message["sound projection norm weight"] = self.get_local_model().sound_projection.encoder.linear_fc1.layer_norm_weight.data
         except Exception:
             pass
         try:
-            message["sound projection norm bias"] = self.all_models[0][0][0].sound_projection.encoder.linear_fc1.layer_norm_bias.data
+            message["sound projection norm bias"] = self.get_local_model().sound_projection.encoder.linear_fc1.layer_norm_bias.data
         except Exception:
             pass
         if getattr(self.md, 'sound_projection_linear_bias', False):
-            message["sound projection l0 bias"] = torch.cat([self.all_models[0][0][tp_rank].sound_projection.encoder.linear_fc1.bias.data for tp_rank in range(encoder_tp_size)], dim=0)
-            message["sound projection l1 bias"] = self.all_models[0][0][0].sound_projection.encoder.linear_fc2.bias.data
+            message["sound projection l0 bias"] = torch.cat([self.get_local_model(tp_rank=tp_rank).sound_projection.encoder.linear_fc1.bias.data for tp_rank in range(encoder_tp_size)], dim=0)
+            message["sound projection l1 bias"] = self.get_local_model().sound_projection.encoder.linear_fc2.bias.data
 
         self.queue_put("sound projection", message)
 
@@ -388,7 +391,7 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
         """
         if getattr(self.md, 'sound_model_type', None) is None:
             return
-        model0 = self.all_models[0][0][0]
+        model0 = self.get_local_model()
         if not hasattr(model0, 'sound_model') or model0.sound_model is None:
             return
 
@@ -436,8 +439,8 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
         schema_vision_backbone = get_model_schema(
             "GPT",
             self.margs.transformer_impl,
-            self.margs.num_experts,
-            self.margs.expert_model_parallel_size,
+            None, # No MoE vision encoder
+            None, # No MoE vision encoder
             prefix="vision_model.",
             extra_layer_schema=extra_layer_schema,
         )

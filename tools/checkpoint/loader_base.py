@@ -29,6 +29,41 @@ class MegatronCheckpointLoaderBase:
         self.consumed_train_samples = None
         self.consumed_valid_samples = None
 
+
+    def get_local_model(self, pp_rank=None, vp_rank=None, ep_rank=None, tp_rank=None):
+        """
+        Method used to get the local model for a certain (pp,ep,tp).
+        If a value is None, will use retrieve a model without any consideration of that parallelism.
+        Defaults to returning pp_rank=0, vp_rank=0, tp_rank=0 and a working ep_rank.
+        """
+        assert self.all_models is not None, "all_models is not set"
+        if pp_rank is None:
+            pp_rank = 0
+        if vp_rank is None:
+            vp_rank = 0
+        if tp_rank is None:
+            tp_rank = 0
+        if ep_rank is None:
+            ep_rank = 0
+            # If MoE, holding all the other values static, find ep_rank where we can get a model with weights for relevant parallelism.
+            # Deals with scenarios where etp=1 in MoE for example.
+            is_moe = getattr(self.margs, 'num_experts', None) is not None and self.margs.num_experts > 0 and self.args.model_type == "hybrid"
+            if is_moe:
+                ep_rank = tp_rank // self.margs.expert_tensor_parallel_size
+                tp_rank = tp_rank % self.margs.expert_tensor_parallel_size
+
+        return self.all_models[pp_rank][vp_rank][ep_rank][tp_rank]
+        
+
+    def get_assembled_tensor_parallel_models(self, pp_rank=0, vp_rank=0):
+        """
+        Loop with get_local_model to handle MoE expert-tensor parallelism
+        """
+        assembled_models_tp = []
+        for tp_rank in range(self.margs.tensor_model_parallel_size):
+            assembled_models_tp.append(self.get_local_model(pp_rank=pp_rank, vp_rank=vp_rank, tp_rank=tp_rank))
+        return assembled_models_tp
+
     def _maybe_parse_additional_megatron_args(self, margs, checkpoint_args):
         """
         Method used to optionally add arguments from the checkpoint to the main args.
@@ -67,6 +102,11 @@ class MegatronCheckpointLoaderBase:
         # Copy data types from checkpoint
         margs.fp16 = checkpoint_args.fp16
         margs.bf16 = checkpoint_args.bf16
+
+        # Ensure expert tensor parallel size reflects checkpoint value when present
+        if hasattr(checkpoint_args, 'expert_tensor_parallel_size') and \
+           getattr(checkpoint_args, 'expert_tensor_parallel_size') is not None:
+            margs.expert_tensor_parallel_size = checkpoint_args.expert_tensor_parallel_size
 
         # Expert parallelism requires sequence parallelism
         if margs.expert_model_parallel_size > 1:
@@ -151,6 +191,7 @@ class MegatronCheckpointLoaderBase:
 
         set_global_variables(self.margs, build_tokenizer=self.build_tokenizer)
         mpu.set_tensor_model_parallel_world_size(self.margs.tensor_model_parallel_size)
+        mpu.set_expert_tensor_parallel_world_size(self.margs.expert_tensor_parallel_size)
         mpu.set_pipeline_model_parallel_world_size(self.margs.pipeline_model_parallel_size)
         mpu.set_virtual_pipeline_model_parallel_world_size(self.margs.virtual_pipeline_model_parallel_size)
         mpu.set_expert_model_parallel_world_size(self.margs.expert_model_parallel_size)
@@ -158,6 +199,9 @@ class MegatronCheckpointLoaderBase:
         # For backward compatibility during local parallel states refactoring
         fake_tp_group = _ConverterFakeProcessGroup(size=self.margs.tensor_model_parallel_size)
         fake_ep_group = _ConverterFakeProcessGroup(size=self.margs.expert_model_parallel_size)
+        fake_ep_tp_group = _ConverterFakeProcessGroup(size=self.margs.expert_tensor_parallel_size)
+        fake_ep_tp_model_group = _ConverterFakeProcessGroup(size=self.margs.expert_tensor_parallel_size * self.margs.expert_model_parallel_size)
+        fake_ep_tp_model_pp_group = _ConverterFakeProcessGroup(size=self.margs.expert_tensor_parallel_size * self.margs.expert_model_parallel_size * self.margs.pipeline_model_parallel_size)
         fake_pp_group = _ConverterFakeProcessGroup(size=self.margs.pipeline_model_parallel_size)
         fake_cp_group = _ConverterFakeProcessGroup(size=self.margs.context_parallel_size)
         mpu._TENSOR_MODEL_PARALLEL_GROUP = fake_tp_group
@@ -165,7 +209,14 @@ class MegatronCheckpointLoaderBase:
         mpu._PIPELINE_MODEL_PARALLEL_GROUP = fake_pp_group
         mpu._CONTEXT_PARALLEL_GROUP = fake_cp_group
 
+        # Ensure MoE dispatchers see valid expert-tensor and combined groups
+        mpu._EXPERT_TENSOR_PARALLEL_GROUP = fake_ep_tp_group
+        mpu._EXPERT_TENSOR_AND_MODEL_PARALLEL_GROUP = fake_ep_tp_model_group
+        mpu._EXPERT_TENSOR_MODEL_PIPELINE_PARALLEL_GROUP = fake_ep_tp_model_pp_group
+
         get_cuda_rng_tracker().add('model-parallel-rng', self.margs.seed)
+        # Ensure expert-parallel RNG tracker exists for MoE components
+        get_cuda_rng_tracker().add('expert-parallel-rng', self.margs.seed + 1024)
 
         fused_kernels.load(self.margs)
 
@@ -204,50 +255,73 @@ class MegatronCheckpointLoaderBase:
         consumed_valid_samples = None
         tp_size = self.margs.tensor_model_parallel_size
         pp_size = self.margs.pipeline_model_parallel_size
+        ep_size = self.margs.expert_model_parallel_size or 1
+        etp_size = self.margs.expert_tensor_parallel_size or 1
+        is_moe = getattr(self.margs, 'num_experts', None) is not None and self.margs.num_experts > 0 and self.args.model_type == "hybrid"
         vp_size = self.margs.virtual_pipeline_model_parallel_size or 1
 
-        all_models = []  # all_models[pp_rank][vp_rank] = [list of models across TP ranks]
+        # all_models[pp][vp][ep] -> list across TP
+        all_models = []
 
-        def get_models_for_pipeline_stage(count, dtype):
-            local_models_for_stage = [[] for _ in range(vp_size)]
-            for tp_rank in range(count):
-                fake_tp_group = mpu.get_tensor_model_parallel_group()
-                fake_tp_group.set_rank(tp_rank)
-                mpu.set_tensor_model_parallel_rank(tp_rank)
-                model_list = []
+        def get_models_for_pipeline_stage(tp_count, ep_count, dtype):
+            # [vp][ep] each contains list across TP
+            local_models_for_stage = [[[] for _ in range(ep_count)] for _ in range(vp_size)]
 
-                for i in range(vp_size):
-                    mpu.set_virtual_pipeline_model_parallel_rank(i)
-                    pre_process = mpu.is_pipeline_first_stage()
-                    post_process = mpu.is_pipeline_last_stage()
-                    this_model = model_provider(pre_process=pre_process,
-                                                post_process=post_process).to(dtype)
-                    model_list.append(this_model)
+            for ep_rank in range(ep_count):
+                # Set EP rank in fake group and parallel state
+                if is_moe:
+                    fake_ep_group = mpu.get_expert_model_parallel_group()
+                    if hasattr(fake_ep_group, 'set_rank'):
+                        fake_ep_group.set_rank(ep_rank)
+                    try:
+                        mpu.set_expert_model_parallel_rank(ep_rank)
+                    except Exception:
+                        pass
 
-                # Each time we load, we set counters to 0, pass None for optimizer/ LR
-                self.margs.consumed_train_samples = 0
-                self.margs.skipped_train_samples = 0
-                self.margs.consumed_valid_samples = 0
-                self.margs.exit_on_missing_checkpoint = True
-                load_checkpoint(model_list, None, None)
+                for tp_rank in range(tp_count):
+                    # TODO: check correctness, maybe not correct when tp > etp?
+                    if is_moe:
+                        diff_tp_rank = tp_rank - ((ep_rank * etp_size) % tp_size)
+                        if diff_tp_rank >= etp_size or diff_tp_rank < 0:
+                            continue;
+                    fake_tp_group = mpu.get_tensor_model_parallel_group()
+                    if hasattr(fake_tp_group, 'set_rank'):
+                        fake_tp_group.set_rank(tp_rank)
+                    mpu.set_tensor_model_parallel_rank(tp_rank)
 
-                # Validate that train/valid samples match across ranks
-                nonlocal consumed_train_samples, consumed_valid_samples
-                if consumed_train_samples is not None:
-                    assert self.margs.consumed_train_samples == consumed_train_samples
-                else:
-                    consumed_train_samples = self.margs.consumed_train_samples
+                    model_list = []
+                    for i in range(vp_size):
+                        mpu.set_virtual_pipeline_model_parallel_rank(i)
+                        pre_process = mpu.is_pipeline_first_stage()
+                        post_process = mpu.is_pipeline_last_stage()
+                        this_model = model_provider(pre_process=pre_process,
+                                                    post_process=post_process).to(dtype)
+                        model_list.append(this_model)
 
-                if consumed_valid_samples is not None:
-                    assert self.margs.consumed_valid_samples == consumed_valid_samples
-                else:
-                    consumed_valid_samples = self.margs.consumed_valid_samples
+                    # Reset counters and load this shard
+                    self.margs.consumed_train_samples = 0
+                    self.margs.skipped_train_samples = 0
+                    self.margs.consumed_valid_samples = 0
+                    self.margs.exit_on_missing_checkpoint = True
+                    load_checkpoint(model_list, None, None)
 
-                for vp_rank in range(vp_size):
-                    local_models_for_stage[vp_rank].append(model_list[vp_rank])
+                    # Validate that train/valid samples match across ranks
+                    nonlocal consumed_train_samples, consumed_valid_samples
+                    if consumed_train_samples is not None:
+                        assert self.margs.consumed_train_samples == consumed_train_samples
+                    else:
+                        consumed_train_samples = self.margs.consumed_train_samples
 
-                # Print memory usage
-                print_memory_usage("loader", tp_rank, count)
+                    if consumed_valid_samples is not None:
+                        assert self.margs.consumed_valid_samples == consumed_valid_samples
+                    else:
+                        consumed_valid_samples = self.margs.consumed_valid_samples
+
+                    for vp_rank in range(vp_size):
+                        local_models_for_stage[vp_rank][ep_rank].append(model_list[vp_rank])
+
+                    # Print memory usage (use combined count to reflect TP progress)
+                    print_memory_usage("loader", tp_rank, tp_count)
 
             return local_models_for_stage
 
@@ -255,7 +329,7 @@ class MegatronCheckpointLoaderBase:
         mpu.set_virtual_pipeline_model_parallel_rank(0)
         for pp_rank in range(pp_size):
             mpu.set_pipeline_model_parallel_rank(pp_rank)
-            all_models.append(get_models_for_pipeline_stage(tp_size, dtype))
+            all_models.append(get_models_for_pipeline_stage(tp_size, ep_size, dtype))
 
         return all_models, consumed_train_samples, consumed_valid_samples
     
@@ -353,6 +427,86 @@ class MegatronCheckpointLoaderBase:
 
         return message
 
+    def _send_moe_layer(self, models_by_ep, layer_idx, schema):
+        """
+        MoE version: aggregate experts across EP ranks and TP shards into a single message.
+        models_by_ep: List[List[Module]] shaped [ep_size][tp_size]
+        """
+        ep_size = self.margs.expert_model_parallel_size or 1
+        tp_size = self.margs.tensor_model_parallel_size
+        etp_size = self.margs.expert_tensor_parallel_size or 1
+
+        # Non-parallel params from any reference model
+        ref_layer = schema.get_layer(models_by_ep[0][0], layer_idx)
+        message = {
+            "pre mlp norm weight": ref_layer["pre_mlp_norm_weight"],
+            "post norm weight": ref_layer["mlp_norm_weight"],
+        }
+        if self.md.norm_has_bias:
+            message["post norm bias"] = ref_layer["mlp_norm_bias"]
+            message["pre mlp norm bias"] = ref_layer["pre_mlp_norm_bias"]
+
+        message["router weight"] = ref_layer["router_weight"]
+        message["router bias"] = ref_layer["router_bias"]
+
+        # Assemble shared experts across TP
+        shared_l0_tp = []
+        shared_l1_tp = []
+        assembled_models_tp = self.get_assembled_tensor_parallel_models(pp_rank=0, vp_rank=0)
+        for tp_rank in range(tp_size):
+            layer_p = schema.get_layer(assembled_models_tp[tp_rank], layer_idx)
+            shared_l0_tp.append(layer_p["mlp_shared_fc1_weight"])  # column-parallel combine
+            shared_l1_tp.append(layer_p["mlp_shared_fc2_weight"])  # row-parallel combine
+        message["shared mlp l0 weight"] = torch.cat(shared_l0_tp, dim=0)
+        message["shared mlp l1 weight"] = torch.cat(shared_l1_tp, dim=1)
+
+        # Build per-EP, TP-merged expert weights
+        num_local_experts = self.margs.num_experts // (self.margs.expert_model_parallel_size or 1)
+
+        fc1_ep_concat = []  # list of [local_E, out, in] merged across TP per EP
+        fc2_ep_concat = []
+        for ep_rank in range(ep_size):
+            # Gather TP shards for this EP
+            fc1_tp = []
+            fc2_tp = []
+            for etp_rank in range(etp_size):
+                layer_p = schema.get_layer(models_by_ep[ep_rank][etp_rank], layer_idx)
+                # Stack local experts leading dimension
+                fc1_stack = torch.stack([
+                    layer_p[f"mlp_fc1_weight.{expert_idx}"] for expert_idx in range(num_local_experts)
+                ], dim=0)
+                fc2_stack = torch.stack([
+                    layer_p[f"mlp_fc2_weight.{expert_idx}"] for expert_idx in range(num_local_experts)
+                ], dim=0)
+                fc1_tp.append(fc1_stack)
+                fc2_tp.append(fc2_stack)
+
+            # Combine across TP: fc1 column-parallel -> concat dim=1; fc2 row-parallel -> concat dim=2
+            if self.md.swiglu:
+                fc1_W = [torch.chunk(t, 2, dim=1)[0] for t in fc1_tp]
+                fc1_V = [torch.chunk(t, 2, dim=1)[1] for t in fc1_tp]
+                fc1_merged = torch.cat([torch.cat(fc1_W, dim=1), torch.cat(fc1_V, dim=1)], dim=1)
+            else:
+                fc1_merged = torch.cat(fc1_tp, dim=1)
+            fc2_merged = torch.cat(fc2_tp, dim=2)
+
+            fc1_ep_concat.append(fc1_merged)
+            fc2_ep_concat.append(fc2_merged)
+
+        # Concatenate experts across EP ranks along expert dimension (dim=0)
+        fc1_all = torch.cat(fc1_ep_concat, dim=0)
+        fc2_all = torch.cat(fc2_ep_concat, dim=0)
+
+        if self.md.swiglu:
+            # Split back into W/V for transport if needed by saver
+            message["mlp l0 weight W"] = torch.chunk(fc1_all, 2, dim=1)[0]
+            message["mlp l0 weight V"] = torch.chunk(fc1_all, 2, dim=1)[1]
+        else:
+            message["mlp l0 weight"] = fc1_all
+        message["mlp l1 weight"] = fc2_all
+
+        return message
+
     def _send_mamba_layer(self, models, layer_idx, schema):
         """
         Extract Mamba layer parameters and return message dictionary.
@@ -415,9 +569,9 @@ class MegatronCheckpointLoaderBase:
         pp_size = self.margs.pipeline_model_parallel_size
         vp_size = self.margs.virtual_pipeline_model_parallel_size or 1
 
-        # all_models[pp_rank][vp_rank] is a list across TP ranks
-        # We'll start with pipeline=0, vp=0 for embeddings/final norm
-        first_pipeline_models = self.all_models[0][0]
+        # We'll start with pipeline=0, vp=0, ep=0 for embeddings/final norm
+        # Loop with get_local_model to handle MoE expert-tensor parallelism
+        first_pipeline_models = self.get_assembled_tensor_parallel_models(pp_rank=0, vp_rank=0)
 
         # 1) Embeddings
         embeddings = [schema.get("embeddings", m) for m in first_pipeline_models]
@@ -445,8 +599,8 @@ class MegatronCheckpointLoaderBase:
             total_layer_num = 0
             for vp_rank in range(vp_size):
                 for pp_rank in range(pp_size):
-                    models = self.all_models[pp_rank][vp_rank]
-                    num_layers = schema.get_num_layers(models[0])
+                    models = self.get_assembled_tensor_parallel_models(pp_rank=pp_rank, vp_rank=vp_rank)
+                    num_layers = schema.get_num_layers(self.all_models[pp_rank][vp_rank][0][0])
                     for layer_idx in range(num_layers):
                         layer_type = layer_type_list[layer_idx]
                         
@@ -456,6 +610,8 @@ class MegatronCheckpointLoaderBase:
                             message = self._send_attention_layer(models, layer_idx, schema)
                         elif layer_type == LayerSymbols.MLP:
                             message = self._send_mlp_layer(models, layer_idx, schema)
+                        elif layer_type == LayerSymbols.MOE:
+                            message = self._send_moe_layer(self.all_models[pp_rank][vp_rank], layer_idx, schema)
 
                         self.queue_put(f"transformer layer {total_layer_num}", message)
                         total_layer_num += 1
@@ -463,7 +619,8 @@ class MegatronCheckpointLoaderBase:
             total_layer_num = 0
             for vp_rank in range(vp_size):
                 for pp_rank in range(pp_size):
-                    models = self.all_models[pp_rank][vp_rank]
+                    # Non-hybrid path: use ep=0 models across TP
+                    models = self.all_models[pp_rank][vp_rank][0]
                     num_layers = schema.get_num_layers(models[0])
                     for layer_idx in range(num_layers):
                         # Combine attention and MLP layer parameters
