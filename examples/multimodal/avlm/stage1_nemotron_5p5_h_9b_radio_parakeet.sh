@@ -5,16 +5,16 @@
 # OCI-IAD: batch_block1,batch_block3,batch_block4,backfill_block1,backfill_block2,backfill_block3,backfill_block4
 # OCI-ORD: grizzly,polar,polar3,polar4
 # OCI-NRT: batch_block1,backfill,batch_large,batch_long
-#SBATCH -p batch_block1,batch_block3,batch_block4,backfill_block1,backfill_block2,backfill_block3,backfill_block4
+#SBATCH -p batch_block1,backfill,batch_large,batch_long
 #SBATCH -t 04:00:00
 #SBATCH --mem=0
 #SBATCH --ntasks-per-node=8
 #SBATCH --dependency=singleton
-#SBATCH --nodes=8
+#SBATCH --nodes=16
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=stage1_nm_5p5_h_9b_cradio_parakeet_0820
+#SBATCH --job-name=stage1_nm_5p5_h_9b_cradio_parakeet_1015
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
@@ -40,7 +40,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS=" --special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box> <so_embedding> <so_start> <so_end> "
     DEBUG=1
 else
-    MODEL_NAME="stage1_nm_5p5_h_9b_cradio_parakeet_0820"
+    MODEL_NAME="stage1_nm_5p5_h_9b_cradio_parakeet_1015"
     SPECIAL_TOKENS=" --special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\> \<so_embedding\> \<so_start\> \<so_end\> "
 fi
 
@@ -55,30 +55,30 @@ TENSORBOARD_DIR="${OUTPUT}/tensorboard"
 
 TP=4
 
-CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/output/amala_sft_nm_5p5_h_9b_cradio_0805_tiling_v1341/checkpoints"
+CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/output/sft_nm_5p5_h_9b_cradio_video_1018/checkpoints"
 
-DATA_TRAIN="${SOURCE}/examples/multimodal/avlm/stage1_blend.yaml"
-DATA_TRAIN="/lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_wds_af3/trintamaki.yaml"
+DATA_TRAIN="${SOURCE}/examples/multimodal/avlm/stage1_commercial_asr.yaml"
 
 SEQ_LEN=1024
-DECODER_SEQ_LEN=24576
+DECODER_SEQ_LEN=40960 #32768
 
 if [[ $DEBUG -eq 1 ]]; then
     MBZ=1
-    BZ=1
-    NW=0
+    BZ=8
+    NW=2
     AD=0.0
     HD=0.0
     LI=1
-    PBS=128
+    PBS=4000
 
     NONDETERMINISTIC_ATTN=1
 
-    CUDA_VISIBLE_DEVICES=0,1,2,3
-    NUM_GPU=4
+    #CUDA_VISIBLE_DEVICES=0,1,2,3
+    #NUM_GPU=4
+    NUM_GPU=8
 else
     MBZ=1
-    BZ=1024
+    BZ=256
     NW=8
     LI=5
     AD=0.0
@@ -187,10 +187,10 @@ OPTIONS=" \
     --dataloader-save ${FINETUNE_DIR}/dataloader \
     --split 100,0,0 \
     --clip-grad 1.0 \
-    --weight-decay 0.05 \
+    --weight-decay 1e-2 \
     --adam-beta1 0.9 \
     --adam-beta2 0.999 \
-    --init-method-std 0.014 \
+    --init-method-std 0.02 \
     --bf16 \
     --eod-mask-loss \
     --patch-dim 16 \
@@ -216,16 +216,12 @@ OPTIONS=" \
     --mamba-num-heads 128 \
     --mamba-state-dim 128 \
     --use-loss-scaling \
-    --recompute-granularity full \
-    --recompute-method block \
-    --recompute-num-layers 56 \
-    --recompute-vision \
     --sound-model-type ${SOUND_MODEL_TYPE}  \
     --sound-target-rate 16000 \
     --allow-missing-sound-projection-checkpoint \
     --allow-missing-sound-model-checkpoint \
-    --sound-embedding-size 751 \
-    --sound-clip-duration 60 \
+    --sound-embedding-size 376 \
+    --sound-clip-duration 30 \
     --freeze-LM \
     --freeze-ViT \
     --freeze-sound-model \
@@ -244,7 +240,7 @@ else
     DATETIME=`date +'date_%y-%m-%d_time_%H-%M-%S'`
 
     srun -l --verbose \
-    --container-image /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/containers/megatron-dev-img-05142025-pytorch-dev-te-cd37379-editable-energon-mamba-fix-vlmeval-av.sqsh \
+    --container-image /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/containers/pytorch25.06-moe-avlm-editable-energon.sqsh \
     --container-mounts "/lustre" \
     --output=${LOGS_DIR}/%x_%j_$DATETIME.log \
     sh -c "${run_cmd}"

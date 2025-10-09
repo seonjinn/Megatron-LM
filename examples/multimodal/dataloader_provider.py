@@ -183,7 +183,8 @@ def train_valid_test_dataloaders_provider(train_val_test_num_samples, task_encod
                 EnergonDataloader(get_loader(
                     valid_ds,
                     cache_pool=FileStoreCachePool(method="raw"),
-                    watchdog_initial_timeout_seconds=180 + (args.packing_buffer_size or 0) * 0.0075,
+                    watchdog_initial_timeout_seconds=5*60 + (args.packing_buffer_size or 0) * 0.0075,
+                    watchdog_timeout_seconds=5*60,
                 ))
                 for valid_ds in valid_ds1
             ]

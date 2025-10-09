@@ -495,8 +495,15 @@ def get_sound_projection_config(config, hidden_size, enable_fusions=False):
         config.add_bias_linear = True
         config.normalization = "LayerNorm"
     elif config.language_model_type == "nemotron6-moe":
+        config.ffn_hidden_size = 16384
         config.bias_dropout_fusion = False
         config.bias_activation_fusion = False
+    elif config.language_model_type == "llama_nemotron_8b":
+        config.ffn_hidden_size = 14336
+        config.activation_func = torch.nn.functional.gelu
+        config.layernorm_epsilon = 1e-5
+        config.add_bias_linear = True
+        config.normalization = "LayerNorm"
     else:
         raise ValueError(f"unknown language model type {config.language_model_type}")
 

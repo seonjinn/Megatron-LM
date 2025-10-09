@@ -307,9 +307,9 @@ def model_provider(
     model.freeze(
         freeze_language_model=args.freeze_LM,
         freeze_vision_model=args.freeze_ViT,
-        freeze_vision_projection=False,
+        freeze_vision_projection=getattr(args, "freeze_vision_projection", False),
         freeze_sound_model=getattr(args, "freeze_sound_model", False),
-        freeze_sound_projection=False,
+        freeze_sound_projection=getattr(args, "freeze_sound_projection", False),
     )
 
     return model

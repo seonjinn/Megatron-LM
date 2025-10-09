@@ -133,7 +133,7 @@ class AudioTransformParakeetStrategy(_ResampleAudioTransformStrategy):
         if sound_model_type.startswith("hf://"):
             assert clip_duration == 60, "Only 60 second clips are supported in HF Parakeet."
         elif sound_model_type.startswith("nemo://"):
-            assert clip_duration % 60 == 0, "Only clip durations that are multiples of 60 seconds are supported in Nemo Parakeet."
+            assert clip_duration % 30 == 0, "Only clip durations that are multiples of 30 seconds are supported in Nemo Parakeet."
         self._clip_duration = clip_duration    # seconds
         self.sound_model_type = sound_model_type
         assert 'parakeet' in sound_model_type.lower(), "Parakeet is the only supported model type for now."
@@ -155,7 +155,7 @@ class AudioTransformParakeetStrategy(_ResampleAudioTransformStrategy):
             audio_length = num_clips * clip_samples
 
             params_list.append(AudioParams(
-                num_embeddings=self._embedding_size * num_clips * (self._clip_duration // 60),
+                num_embeddings=self._embedding_size * num_clips,
                 audio_length=torch.tensor([audio_length for _ in range(num_clips)], dtype=torch.long),
                 num_clips=num_clips,
                 timestamps=(0, int(audio_length / self._target_freq)),

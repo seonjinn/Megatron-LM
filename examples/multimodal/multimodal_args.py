@@ -210,6 +210,11 @@ def add_multimodal_extra_args(parser):
     group.add_argument(
         "--decoder-tp-comm-overlap", action="store_true", default=False, help="Enable tensor parallel communication overlap in the decoder."
     )
-
+    group.add_argument(
+        "--freeze-vision-projection", action="store_true", default=False, help="Freeze the vision projection module."
+    )
+    group.add_argument(
+        "--freeze-sound-projection", action="store_true", default=False, help="Freeze the sound projection module."
+    )
 
     return parser

@@ -5,19 +5,21 @@
 # OCI-IAD: batch_block1,batch_block3,batch_block4,backfill_block1,backfill_block2,backfill_block3,backfill_block4
 # OCI-ORD: grizzly,polar,polar3,polar4
 # OCI-NRT: batch_block1,backfill,batch_large,batch_long
-#SBATCH -p batch_block1,batch_block3,batch_block4,backfill_block1,backfill_block2,backfill_block3,backfill_block4
+#SBATCH -p batch_block1,backfill,batch_large,batch_long
 #SBATCH -t 04:00:00
 #SBATCH --mem=0
 #SBATCH --ntasks-per-node=8
 #SBATCH --dependency=singleton
-#SBATCH --nodes=8
+#SBATCH --nodes=16
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=stage2_nm_5p5_h_9b_cradio_parakeet_0820
+#SBATCH --job-name=stage2_nm_5p5_h_9b_cradio_parakeet_1016
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
+
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 USER=$SLURM_JOB_USER
 
@@ -40,7 +42,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS=" --special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box> <so_embedding> <so_start> <so_end> "
     DEBUG=1
 else
-    MODEL_NAME="stage2_nm_5p5_h_9b_cradio_parakeet_0820"
+    MODEL_NAME="stage2_nm_5p5_h_9b_cradio_parakeet_1016"
     SPECIAL_TOKENS=" --special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\> \<so_embedding\> \<so_start\> \<so_end\> "
 fi
 
@@ -55,9 +57,9 @@ TENSORBOARD_DIR="${OUTPUT}/tensorboard"
 
 TP=4
 
-CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/output/amala_sft_nm_5p5_h_9b_cradio_0805_tiling_v1341/checkpoints"
+CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/output/stage1_nm_5p5_h_9b_cradio_parakeet_1015/checkpoints"
 
-DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/megatron-lm/commercial_stage2.yaml"
+DATA_TRAIN="${SOURCE}/examples/multimodal/avlm/stage2_commercial_asr.yaml"
 
 SEQ_LEN=1024
 DECODER_SEQ_LEN=24576
@@ -76,7 +78,7 @@ if [[ $DEBUG -eq 1 ]]; then
     NUM_GPU=8
 else
     MBZ=1
-    BZ=1024
+    BZ=128
     NW=8
     LI=5
     AD=0.0
@@ -132,7 +134,7 @@ else
     SOUND_MODEL_TYPE="hf://nithinraok/parakeet-tdt-0.6b-v2-hf"
 fi
 
-EXTRA_ARGS+=" --recompute-granularity full --recompute-method block --recompute-num-layers 62 --recompute-vision --recompute-sound "
+EXTRA_ARGS+=" --recompute-granularity full --recompute-method block --recompute-num-layers 1 --recompute-vision --recompute-sound "
 
 OPTIONS=" \
     --use-checkpoint-args \
@@ -215,18 +217,14 @@ OPTIONS=" \
     --mamba-head-dim 80 \
     --mamba-num-heads 128 \
     --mamba-state-dim 128 \
-    --use-loss-scaling \
-    --recompute-granularity full \
-    --recompute-method block \
-    --recompute-num-layers 56 \
-    --recompute-vision \
     --sound-model-type ${SOUND_MODEL_TYPE}  \
     --sound-target-rate 16000 \
     --allow-missing-sound-projection-checkpoint \
     --allow-missing-sound-model-checkpoint \
-    --sound-embedding-size 751 \
-    --sound-clip-duration 60 \
+    --sound-embedding-size 376 \
+    --sound-clip-duration 30 \
     --allow-large-videos \
+    --freeze-ViT \
 "
 
 export NVTE_APPLY_QK_LAYER_SCALING=0
@@ -241,7 +239,7 @@ else
     DATETIME=`date +'date_%y-%m-%d_time_%H-%M-%S'`
 
     srun -l --verbose \
-    --container-image /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/containers/megatron-dev-img-05142025-pytorch-dev-te-cd37379-editable-energon-mamba-fix-vlmeval-av.sqsh \
+    --container-image /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/containers/pytorch25.06-moe-avlm-editable-energon.sqsh \
     --container-mounts "/lustre" \
     --output=${LOGS_DIR}/%x_%j_$DATETIME.log \
     sh -c "${run_cmd}"

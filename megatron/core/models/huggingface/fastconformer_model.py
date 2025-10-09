@@ -28,6 +28,10 @@ class ParakeetHuggingFaceModel(HuggingFaceModule):
         if config.sound_model_type.startswith("nemo://"):
             self.feature_extractor, self.model = get_nemo_sound_model(config.sound_model_type)
 
+            for module in self.model.modules():
+                if module.__class__.__name__.lower() == "dropout":
+                    module.p = config.hidden_dropout
+
             if config.recompute_granularity is not None:
                 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import checkpoint_wrapper
                 self.model = checkpoint_wrapper(self.model)

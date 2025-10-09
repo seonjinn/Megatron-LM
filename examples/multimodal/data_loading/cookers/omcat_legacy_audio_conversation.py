@@ -19,7 +19,7 @@ from ..conversation_sample import (
 allowed_tags = ["image", "video", "sound", "video-sound"]
 
 additional_tags = {
-    'image': ['png','jpeg','jpg'],
+    'image': ['png', 'jpeg', 'jpg', 'img'],
     'video': ['mp4'],
     'sound': ['wav', 'flac', "mp3"],
 }
