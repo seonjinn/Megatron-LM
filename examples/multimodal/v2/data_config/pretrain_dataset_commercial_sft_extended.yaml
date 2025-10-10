@@ -8,7 +8,7 @@ splits:
         subflavors:
           has_image: True
       - weight: 1.
-        path: /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/megatron-lm/data_scripts/pretrain_eagle_sft_v13.52_no_text_reasoning
+        path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/commercial/pretrain_eagle_sft_v13.52_no_text_reasoning
         subflavors:
           has_image: True
   val:

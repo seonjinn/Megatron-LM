@@ -33,7 +33,12 @@ def load_data(root_path, pretrain_path, subsample_rate):
 
             if subsample_rate is not None:
                 random.shuffle(lines)
-                lines = lines[:int(len(lines) * subsample_rate)]
+
+                rate2 = subsample_rate * v["repeat_time"]
+                if rate2 > 1:
+                    raise ValueError(f"Subsample rate * repeat time is too high: {rate2}")
+
+                lines = lines[:int(len(lines) * rate2)]
                 print(f'subsampled to {len(lines)} samples')
 
             valid_lines = []
@@ -69,8 +74,7 @@ def load_data(root_path, pretrain_path, subsample_rate):
                 valid_lines.append(json.dumps(sample))
 
             random.shuffle(valid_lines)
-            cur_length = int(v['repeat_time'] * len(valid_lines))
-            all_data.extend(valid_lines[:cur_length])
+            all_data.extend(valid_lines)
 
     print('max multi image: ', max_multi_images)
     print('total length: ', len(all_data))
@@ -87,10 +91,12 @@ def build_wds(output_dir, items):
         for line in cur_lines:
             try:
                 sample = json.loads(line)
+                sample["source"] = sample["source"].replace(".", "-")
+                json_sample = json.dumps(sample)
                 wds_sample = {
                     # '__key__': str(i) + '_' + str(sample.get('id', i)).replace('.', '-'),
-                    '__key__': sample["source"] + '_' + str(successful_samples),
-                    'json': json.dumps(sample)
+                    '__key__': sample["source"] + f'_{pid}_' + str(successful_samples),
+                    'json': json_sample,
                 }
 
                 if 'image' in sample and sample['image'] is not None:
@@ -106,7 +112,7 @@ def build_wds(output_dir, items):
                 shard_writer.write(wds_sample)
                 successful_samples += 1
             except Exception as e:
-                print('writing error. exception:', e, '. images: ', sample['image'])
+                print('writing error. exception:', e, '. sample: ', json_sample)
                 failed_samples += 1
 
     return successful_samples, failed_samples

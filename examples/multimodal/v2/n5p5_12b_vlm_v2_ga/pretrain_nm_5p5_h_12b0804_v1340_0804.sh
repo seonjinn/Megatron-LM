@@ -49,7 +49,12 @@ CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/amalasanjayd/checkpoints
 # TP=4
 # CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/mcore_mmodal_models/n5p5_12b_sft_0718_cradio_vlm_v1_rc3_tp4"
 
+# Run data_scripts/convert.py to produce the pretrain dataset.
+# Pretrain dataset #2 (5% SFT data). GA model was trained with this dataset.
+# Remove commit 774ca92cb425241b6460335db2471c4a9290b9e2 to reproduce this dataset.
 DATA_TRAIN="${SOURCE}/examples/multimodal/v2/data_config/pretrain_dataset_commercial_sft_extended.yaml"
+# Pretrain dataset #2 with fixes (account for repetitions and remove raw[json] errors).
+# DATA_TRAIN="${SOURCE}/examples/multimodal/v2/data_config/pretrain_dataset_commercial_sft_extended2.yaml"
 
 if [[ $DEBUG -eq 1 ]]; then
     MBZ=1
