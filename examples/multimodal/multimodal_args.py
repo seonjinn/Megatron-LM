@@ -169,6 +169,14 @@ def add_multimodal_extra_args(parser):
         "--recompute-vision-num-layers", type=int, default=0, help="Number of layers to recompute in the vision model."
     )
     group.add_argument(
+        "--recompute-granularity-vision", type=str, default=None, help="Granularity to recompute in the vision model.",
+        choices=["full", "selective"],
+    )
+    group.add_argument(
+        "--recompute-method-vision", type=str, default=None,
+        choices=['uniform', 'block'], help="Method to recompute in the vision model.",
+    )
+    group.add_argument(
         "--allow-large-videos", action="store_true", default=False, help="Allow large videos to be loaded into the model."
     )
     group.add_argument(

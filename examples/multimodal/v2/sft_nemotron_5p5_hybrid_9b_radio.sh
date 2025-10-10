@@ -130,7 +130,13 @@ if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
     EXTRA_ARGS+=" ${IMAGE_BREAK_TOKEN} --dynamic-resolution --dynamic-resolution-min-patches 1024 --conv-merging "
 fi
 
-#EXTRA_ARGS+=" --recompute-granularity full --recompute-method block --recompute-num-layers 12 --recompute-vision "
+EXTRA_ARGS+=" --recompute-granularity full --recompute-method block --recompute-num-layers 56 --recompute-vision "
+
+# LM (Mamba block) recompute
+# EXTRA_ARGS+=" --recompute-granularity selective --recompute-modules core_attn mlp layernorm "
+# Vision (GPT block) recompute
+# EXTRA_ARGS+=" --recompute-vision --recompute-method-vision block --recompute-granularity-vision full --recompute-vision-num-layers 32 "
+
 
 OPTIONS=" \
     --use-checkpoint-args \
@@ -214,10 +220,6 @@ OPTIONS=" \
     --mamba-num-heads 128 \
     --mamba-state-dim 128 \
     --use-loss-scaling \
-    --recompute-granularity full \
-    --recompute-method block \
-    --recompute-num-layers 56 \
-    --recompute-vision \
 "
 
 export NVTE_APPLY_QK_LAYER_SCALING=0
