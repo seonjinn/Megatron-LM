@@ -86,6 +86,7 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
 
         return margs
     def build_sys_argv(self):
+        print(f"self.md.num_experts: {self.md.num_experts}")
         my_argv = ['script.py',
                     '--use-checkpoint-args',
                     '--use-mp-args-from-checkpoint-args', # need this since we're loading torch ckpts
@@ -145,6 +146,7 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
         margs.language_model_type = self.md.checkpoint_args.language_model_type
         margs.vision_model_type = self.md.checkpoint_args.vision_model_type
         margs.tokenizer_prompt_format = getattr(self.md.checkpoint_args, "tokenizer_prompt_format", "dummy")
+        margs.tokenizer_model = getattr(self.md.checkpoint_args, "tokenizer_model", None)
         margs.disable_vision_class_token = getattr(self.md.checkpoint_args, "disable_vision_class_token", False)
         margs.use_tiling = getattr(self.md.checkpoint_args, "use_tiling", False)
         margs.pixel_shuffle = getattr(self.md.checkpoint_args, "pixel_shuffle", False)
@@ -154,7 +156,7 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
         margs.img_h = getattr(self.md.checkpoint_args, "img_h", 448)
         margs.img_w = getattr(self.md.checkpoint_args, "img_w", 448)
         margs.patch_dim = getattr(self.md.checkpoint_args, "patch_dim", 16)
-        margs.decoder_seq_length = getattr(self.md.checkpoint_args, "decoder_seq_length", 4096)
+        margs.decoder_seq_length = getattr(self.md.checkpoint_args, "decoder_seq_length", 16384)
         margs.special_tokens = getattr(self.md.checkpoint_args, "special_tokens", "")
         margs.image_tag_type = getattr(self.md.checkpoint_args, "image_tag_type", "")
         margs.allow_missing_vision_projection_checkpoint = getattr(self.md.checkpoint_args, "allow_missing_vision_projection_checkpoint", False)
@@ -166,6 +168,7 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
         margs.num_frames = getattr(self.md.checkpoint_args, "num_frames", 8)
         margs.recompute_vision = getattr(self.md.checkpoint_args, "recompute_vision", False)
         margs.padded_vocab_size = self.md.padded_vocab_size
+        margs.vocab_size = self.md.vocab_size
         margs.use_vision_backbone_fp8_arch = getattr(self.md.checkpoint_args, "use_vision_backbone_fp8_arch", False)
         margs.dynamic_resolution = getattr(self.md.checkpoint_args, "dynamic_resolution", False)
         margs.image_break_token = getattr(self.md.checkpoint_args, "image_break_token", None)
@@ -207,7 +210,6 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
 
     def receive_vision_backbone(self, schema):
 
-        print(schema)
         # ViT Embeddings.
         #-----------
         # The ViT embeddings are put on the PP / EP / TP 0

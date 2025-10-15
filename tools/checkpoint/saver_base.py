@@ -646,10 +646,8 @@ class MegatronCheckpointSaverBase:
         Treat shared experts as normal linear layers (no EP split).
         """
         # MoE MLP processing: weights are 3D with expert dimension leading
-        post_norm_weight = msg.pop("post norm weight")
         pre_mlp_norm_weight = msg.pop("pre mlp norm weight")
         if self.md.norm_has_bias:
-            post_norm_bias = msg.pop("post norm bias")
             pre_mlp_norm_bias = msg.pop("pre mlp norm bias")
 
         router_weight = msg.pop("router weight")
@@ -687,7 +685,6 @@ class MegatronCheckpointSaverBase:
                 local_fc2 = fc2_split[ep_rank][etp_rank]      # [local_E, out, in]
 
                 params_dict = {
-                    "mlp_norm_weight" : post_norm_weight,
                     "pre_mlp_norm_weight": pre_mlp_norm_weight,
                     "router_weight": router_weight,
                     # router_bias handled out-of-band to preserve fp32
@@ -709,7 +706,6 @@ class MegatronCheckpointSaverBase:
 
                 if self.md.norm_has_bias:
                     params_dict.update({
-                        "mlp_norm_bias": post_norm_bias,
                         "pre_mlp_norm_bias": pre_mlp_norm_bias,
                     })
                 # Set norms and optional bias
