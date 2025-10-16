@@ -259,7 +259,6 @@ EXCLUDED_PARAMS = {
     # =================================================================
     # MOE TRAINING/UNUSED
     # =================================================================
-    'expert_model_parallel_size', 'expert_tensor_parallel_size',
     'moe_extended_tp', 'moe_grouped_gemm', 'moe_layer_freq',
     'moe_router_load_balancing_type', 'moe_router_pre_softmax',
     'moe_router_score_function', 'moe_router_topk',
@@ -535,8 +534,15 @@ def update_inference_params(config_dict, inference_params):
     if "context_parallel_size" in updated_config:
         updated_config["context_parallel_size"] = 1
 
+    # For MoE models, keep TP size the same as the checkpoint.
+    tp_size = 1
+    if updated_config["num_experts"] is not None and updated_config["num_experts"] > 1:
+        tp_size = updated_config["tensor_model_parallel_size"]
+
     updated_config["pipeline_model_parallel_size"] = 1
-    updated_config["tensor_model_parallel_size"] = 1
+    updated_config["tensor_model_parallel_size"] = tp_size
+    updated_config["expert_model_parallel_size"] = 1
+    updated_config["expert_tensor_parallel_size"] = 1
 
     # Not allowed in inference.
     updated_config.pop("allow_missing_vision_projection_checkpoint", None)
@@ -593,7 +599,7 @@ def main():
         some_iter = int(open(f"{path}/checkpoints/latest_checkpointed_iteration.txt").read().strip())
         ckpt_path = f"{path}/checkpoints/iter_{some_iter:07d}/mp_rank_00/model_optim_rng.pt"
         ckpt_path2 = f"{path}/checkpoints/iter_{some_iter:07d}/mp_rank_00_000/model_optim_rng.pt"
-        # Check MOE if it's MoE.
+        # Check if it's MoE.
         if not os.path.exists(ckpt_path) and os.path.exists(ckpt_path2):
             ckpt_path = ckpt_path2
         args.ckpt_path = ckpt_path
