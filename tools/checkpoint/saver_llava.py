@@ -85,15 +85,18 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
                     setattr(margs, arg, value)
 
         return margs
+
     def build_sys_argv(self):
-        print(f"self.md.num_experts: {self.md.num_experts}")
+        num_experts = getattr(self.md, "num_experts", 0)
+        num_experts = 0 if num_experts is None else num_experts
+        num_experts = str(num_experts)
         my_argv = ['script.py',
                     '--use-checkpoint-args',
                     '--use-mp-args-from-checkpoint-args', # need this since we're loading torch ckpts
                     '--num-layers', str(self.md.num_layers),
                     '--hidden-size', str(self.md.hidden_size),
                     '--seq-length', str(self.md.seq_length),
-                    '--num-experts', str(getattr(self.md, "num_experts", 0)),
+                    '--num-experts', num_experts,
                     '--num-attention-heads', str(self.md.num_attention_heads),
                     '--max-position-embeddings', str(self.md.max_position_embeddings),
                     '--tokenizer-type', str(self.md.tokenizer_type),
