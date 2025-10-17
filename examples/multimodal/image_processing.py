@@ -165,7 +165,7 @@ class ImageTransform:
         self._match_tiling_dynamic_resolution = match_tiling_dynamic_resolution
         self._thumbnail_area_threshold = thumbnail_area_threshold
 
-    def __call__(self, img, img_h, img_w, use_tiling=False, max_num_tiles=1, use_thumbnail=False, augment=False, find_closest_aspect_ratio_fn=find_closest_aspect_ratio):
+    def __call__(self, img, img_h, img_w, use_tiling=False, max_num_tiles=1, use_thumbnail=False, augment=False, find_closest_aspect_ratio_fn=find_closest_aspect_ratio, is_video=False):
         assert not augment, "Image augmentation not implemented."
         if use_tiling:
             assert img_h == img_w, "dynamic tiling expects equal tile height and width"
@@ -221,7 +221,7 @@ class ImageTransform:
                 T.ToTensor(),
                 T.Normalize(mean=pixel_mean, std=pixel_std),
             ])
-            processed_img = dynamic_res_preprocess(img, min_patches=self._min_num_patches, max_patches=self._max_num_patches, res_step=self._res_step, pixel_shuffle=self._pixel_shuffle, min_side=self._min_side, conv_merging=self._conv_merging)
+            processed_img = dynamic_res_preprocess(img, min_patches=self._min_num_patches, max_patches=self._max_num_patches, res_step=self._res_step, pixel_shuffle=self._pixel_shuffle, min_side=self._min_side, conv_merging=self._conv_merging, is_video=is_video)
             processed_images = [processed_img]
             
             # Add thumbnail if enabled and image area is below threshold
@@ -287,7 +287,7 @@ def dynamic_preprocess(
     return processed_images
 
 
-def dynamic_res_preprocess(image, min_patches=1, max_patches=128, res_step=16, factor_max=1., pixel_shuffle=False, min_side=None, conv_merging=False):
+def dynamic_res_preprocess(image, min_patches=1, max_patches=128, res_step=16, factor_max=1., pixel_shuffle=False, min_side=None, conv_merging=False, is_video=False):
     """Preprocess an image with dynamic resolution for vision transformers.
     
     This function resizes an image to optimize the number of patches while respecting
@@ -393,6 +393,14 @@ def dynamic_res_preprocess(image, min_patches=1, max_patches=128, res_step=16, f
             else:
                 target_patch_width -= 1
     assert target_patch_height * target_patch_width <= max_patches
+
+    #TEMP: hacky way to process video same as in training
+    if is_video:
+        # max_patches = 1024
+        # min_patches = 512
+        target_patch_width = 32
+        target_patch_height = 32
+        
 
     # resize the image
     resized_img = image.resize((target_patch_width * res_step, target_patch_height * res_step))

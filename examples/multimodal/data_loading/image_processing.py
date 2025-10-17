@@ -726,7 +726,6 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
                 orig_width, orig_height = media.width, media.height
             elif isinstance(media, VideoFrameMedia):
                 orig_width, orig_height = media.video_width, media.video_height
-                current_num_tokens_available = 1024
             else:
                 raise ValueError(f"Unsupported media type: {type(media)}")
 
@@ -831,6 +830,11 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
                     else:
                         target_patch_width -= 1
             assert target_patch_height * target_patch_width <= current_num_tokens_available, f"current_num_tokens_available {current_num_tokens_available} patches {patches} math.sqrt(current_num_tokens_available / patches) {math.sqrt(current_num_tokens_available / patches)} self._factor_max {self._factor_max} self._min_num_patches {self._min_num_patches}"
+
+            #TEMP: hack for video
+            if isinstance(media, VideoFrameMedia):
+                target_patch_width = 32
+                target_patch_height = 32
 
             # Calculate embeddings for the main dynamic resolution image
             num_embeddings = self._get_num_embeddings(
