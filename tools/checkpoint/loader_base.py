@@ -440,10 +440,8 @@ class MegatronCheckpointLoaderBase:
         ref_layer = schema.get_layer(models_by_ep[0][0], layer_idx)
         message = {
             "pre mlp norm weight": ref_layer["pre_mlp_norm_weight"],
-            "post norm weight": ref_layer["mlp_norm_weight"],
         }
         if self.md.norm_has_bias:
-            message["post norm bias"] = ref_layer["mlp_norm_bias"]
             message["pre mlp norm bias"] = ref_layer["pre_mlp_norm_bias"]
 
         message["router weight"] = ref_layer["router_weight"]
@@ -731,6 +729,7 @@ class MegatronCheckpointLoaderBase:
         md.seq_length = self.margs.seq_length
         md.num_attention_heads = self.margs.num_attention_heads
         md.num_query_groups = self.margs.num_query_groups
+        md.num_experts = self.margs.num_experts
         md.max_position_embeddings = self.margs.max_position_embeddings
         md.tokenizer_type = self.margs.tokenizer_type
         md.iteration = self.margs.iteration
@@ -744,6 +743,7 @@ class MegatronCheckpointLoaderBase:
         md.swiglu = self.margs.swiglu
         md.previous_tensor_parallel_size = self.margs.tensor_model_parallel_size
         md.previous_pipeline_parallel_size = self.margs.pipeline_model_parallel_size
+        md.vocab_size = true_vocab_size
         md.true_vocab_size = true_vocab_size
         md.make_vocab_size_divisible_by = self.margs.make_vocab_size_divisible_by
         md.checkpoint_args = self.checkpoint_args
