@@ -1582,7 +1582,7 @@ def _load_state_dict_hook_ignore_extra_state(
     for name, keys in incompatible_keys._asdict().items():
         for key in keys[::-1]:
             if "extra_state" in key:
-                logging.getLogger(__name__).warning(
+                logging.getLogger(__name__).debug(
                     f"_extra_state key {key} being removed from {name}"
                 )
                 keys.remove(key)
