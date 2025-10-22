@@ -1178,6 +1178,9 @@ def validate_args(args, defaults={}):
             + f"The supported position embedding types are rope and none."
         )
 
+    if args.cpu_offloading_num_layers > 0:
+        args.cpu_offloading = True
+
     # CUDA Graphs
     if args.external_cuda_graph:
         assert args.te_rng_tracker, "--te-rng-tracker must be enabled when using CUDA Graphs."
@@ -1987,7 +1990,9 @@ def _add_training_args(parser):
                        '"mlp": recompute the dense MLP layer.'
                        '"moe": recompute the MoE layer.'
                        '"moe_act", "layernorm", and "mla_up_proj" use output-discarding checkpointing, '
-                       '"core_attn", "mlp", and "moe" uses normal checkpointing.')
+                       '"core_attn", "mlp", "moe", and "shared_experts" use normal checkpointing.')
+    group.add_argument('--cpu-offloading-num-layers', type=int, default=0,
+                       help='The number of Transformer layers to offload to CPU.')
     group.add_argument('--no-clone-scatter-output-in-embedding', action='store_false',
                        help='If not set, clone the output of the scatter in embedding layer to GC original tensor.',
                        dest='clone_scatter_output_in_embedding')
