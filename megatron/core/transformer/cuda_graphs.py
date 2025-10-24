@@ -40,6 +40,8 @@ except:
 
 _IS_GRAPH_CAPTURING = False
 
+Cudagraph_VPP_Stage = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -345,6 +347,7 @@ class _CudaGraphRunner(torch.nn.Module):
         func, 
         params_to_calculate_wgrads,
         need_backward,
+        num_warmup_steps,
     ):
         """Creates a _CudaGraphRunner, which holds a single pair of fwd and bwd cudagraphs, which
         are not created until this runner records its graph creation into
@@ -369,7 +372,7 @@ class _CudaGraphRunner(torch.nn.Module):
         self.fp8_enabled = False
         self.fp4_enabled = False
         self.deallocate_pipeline_outputs = False
-        self.num_warmup_steps = 2
+        self.num_warmup_steps = num_warmup_steps
 
         # Decide whether to reuse the input and output buffer, and if so,
         # whether this layer is the first layer (which needs an input buffer)
@@ -434,7 +437,6 @@ class _CudaGraphRunner(torch.nn.Module):
             self.fp8_enabled = self.base_module.config.fp8 is not None
             self.fp4_enabled = self.base_module.config.fp4 is not None
             self.deallocate_pipeline_outputs = self.base_module.config.deallocate_pipeline_outputs
-            self.num_warmup_steps = self.base_module.config.cuda_graph_warmup_steps
 
             if self.fp8_enabled:
                 self.fp8_recipe = FP8GlobalStateManager.get_fp8_recipe()
@@ -910,6 +912,7 @@ class CudaGraphManager(torch.nn.Module):
         function_name = None,
         params_to_calculate_wgrads = None,
         need_backward = True,
+        num_warmup_steps = 1,
     ):
         super().__init__()
         """Creates a CudaGraphManager to manage CUDA graphs for a Megatron module.
@@ -939,6 +942,7 @@ class CudaGraphManager(torch.nn.Module):
         self.func = func
         self.params_to_calculate_wgrads = params_to_calculate_wgrads
         self.need_backward = need_backward
+        self.num_warmup_steps = num_warmup_steps
 
         # need to delay the import here to avoid a circular import
         global HAVE_TE_GRAPHS
@@ -1021,8 +1025,7 @@ class CudaGraphManager(torch.nn.Module):
                 fwd_mempool = CudaGraphManager.global_mempool
                 bwd_mempool = CudaGraphManager.global_mempool
             else:
-                vpp_rank = parallel_state.get_virtual_pipeline_model_parallel_rank()
-                vpp_rank = 0 if vpp_rank is None else vpp_rank
+                vpp_rank = 0 if Cudagraph_VPP_Stage is None else Cudagraph_VPP_Stage
                 fwd_mempool = CudaGraphManager.fwd_mempools[vpp_rank][len(self.cudagraph_runners)]
                 bwd_mempool = CudaGraphManager.bwd_mempool
 
@@ -1047,6 +1050,7 @@ class CudaGraphManager(torch.nn.Module):
                 self.func, 
                 self.params_to_calculate_wgrads,
                 self.need_backward,
+                self.num_warmup_steps,
             )
             self.cudagraph_runners.append(runner)
             return runner
@@ -1065,6 +1069,7 @@ class CudaGraphManager(torch.nn.Module):
                     self.func, 
                     self.params_to_calculate_wgrads,
                     self.need_backward,
+                    self.num_warmup_steps,
                 )
                 self.cudagraph_runners.append(runner)
 
