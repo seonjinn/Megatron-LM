@@ -47,7 +47,7 @@ WANDB_PROJECT="Nano-V2-SFT"
 NAME="nano-v2-sft-stage1-multilingual-lr5e-6-128k-seqpacked-0711"
 
 export HF_HOME="/lustre/fsw/portfolios/llmservice/users/ameyasunilm/hf_cache"
-export WANDB_API_KEY="fc9eb03df9400c4953caa40fc59b2ffa7724dd82"
+export WANDB_API_KEY="${WANDB_API_KEY:-}"
 export WANDB_RESUME="allow"
 export WANDB_RUN_ID=${NAME}
 
