@@ -423,7 +423,7 @@ def get_vision_projection_config(config, hidden_size, enable_fusions=False):
         config.activation_func = squared_relu
         config.bias_activation_fusion = False
     elif config.language_model_type == "nemotron6-moe":
-        config.ffn_hidden_size = 16384
+        config.ffn_hidden_size = 20480
         config.bias_activation_fusion = False
         config.bias_dropout_fusion = False
     elif config.language_model_type == "llama3.2_1b":

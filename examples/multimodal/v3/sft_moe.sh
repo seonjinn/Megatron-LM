@@ -225,6 +225,7 @@ OPTIONS=" \
     --num-workers ${NW} \
     --tensorboard-dir ${TENSORBOARD_DIR} \
     --sequence-parallel \
+    --allow-large-videos \
 "
 
 # --ddp-pad-buckets-for-high-nccl-busbw \

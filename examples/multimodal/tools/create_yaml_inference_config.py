@@ -535,12 +535,8 @@ def update_inference_params(config_dict, inference_params):
         updated_config["context_parallel_size"] = 1
 
     # For MoE models, keep TP size the same as the checkpoint.
-    tp_size = 1
-    if updated_config["num_experts"] is not None and updated_config["num_experts"] > 1:
-        tp_size = updated_config["tensor_model_parallel_size"]
-
     updated_config["pipeline_model_parallel_size"] = 1
-    updated_config["tensor_model_parallel_size"] = tp_size
+    updated_config["tensor_model_parallel_size"] = 1
     updated_config["expert_model_parallel_size"] = 1
     updated_config["expert_tensor_parallel_size"] = 1
 

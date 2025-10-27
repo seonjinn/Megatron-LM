@@ -10,7 +10,7 @@
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=pretrain_moe_1013
+#SBATCH --job-name=pretrain_moe_1024
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
@@ -45,7 +45,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="pretrain_moe_1013"
+    MODEL_NAME="pretrain_moe_1024"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -65,7 +65,7 @@ EP=32
 #CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/nemotron6-moe-1003-patched-c-radio_v2-vlm-h-tp2/"
 
 # New checkpoint, patched special tokens 2.
-CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/nemotron6-moe-1003-patched-new-c-radio_v2-vlm-h-tp2/"
+CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/nemotron6-moe-1020-c-radio_v2-vlm-h-tp2/"
 
 # New checkpoint, unpatched special tokens.
 #CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/nemotron6-moe-1003-c-radio_v2-vlm-h-tp2/"
@@ -74,7 +74,11 @@ CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/nem
 #CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/nemotron6-moe-c-radio_v2-vlm-h-tp2/"
 
 # New tokenizer.
-TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--NVIDIA-Nemotron-Nano-31B-A3-v3/snapshots/1ec9e9c5597db38926449c98482d891218e58b05/"
+#TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--NVIDIA-Nemotron-Nano-31B-A3-v3/snapshots/1ec9e9c5597db38926449c98482d891218e58b05/"
+#TOKENIZER_PROMPT_FORMAT="nemotron6-moe"
+
+# New tokenizer 10/20.
+TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--Nemotron-Nano-3-30B-A3.5B-dev-1016/snapshots/bb271274159f07461e919379311e32802e5ec36b/"
 TOKENIZER_PROMPT_FORMAT="nemotron6-moe"
 
 # Old tokenizer.
