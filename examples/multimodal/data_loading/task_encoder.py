@@ -9,6 +9,10 @@ from typing import List, Literal, TypedDict, Union, Tuple
 import numpy as np
 
 from .cookers.audio_conversation import cook_audio_conversation
+from .cookers.granary import (
+    cook_granary_english_webdataset,
+    cook_granary_english_jsonl,
+)
 from .cookers.omcat_legacy_audio_conversation import cook_omcat_legacy_conversation_monolithic
 import torch
 from PIL import Image
@@ -204,6 +208,8 @@ class MultiModalTaskEncoder(
         Cooker(cook_eagle, has_subflavors={"cook": "eagle"}),
         Cooker(cook_conversation, has_subflavors={"cook": "conversation"}),
         Cooker(cook_audio_conversation, has_subflavors={"cook": "audio_conversation"}),
+        Cooker(cook_granary_english_webdataset, has_subflavors={"cook": "granary_english_webdataset"}),
+        Cooker(cook_granary_english_jsonl, has_subflavors={"cook": "granary_english_jsonl"}),
         Cooker(cook_omcat_legacy_conversation_monolithic, has_subflavors={"cook": "omcat_legacy_conversation_monolithic"}),
     ]
 
