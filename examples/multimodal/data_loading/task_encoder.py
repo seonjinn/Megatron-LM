@@ -42,7 +42,11 @@ from .conversation_sample import (
     VideoFrameMedia,
     VideoMedia,
 )
-from .cookers.conversation import cook_conversation
+from .cookers.conversation import (
+    cook_conversation,
+    cook_general_conversations_webdataset,
+    cook_general_conversations_jsonl,
+)
 from .cookers.audio_conversation import cook_audio_conversation
 from .cookers.eagle import cook_eagle
 from .image_processing import (
@@ -211,6 +215,8 @@ class MultiModalTaskEncoder(
         Cooker(cook_granary_english_webdataset, has_subflavors={"cook": "granary_english_webdataset"}),
         Cooker(cook_granary_english_jsonl, has_subflavors={"cook": "granary_english_jsonl"}),
         Cooker(cook_omcat_legacy_conversation_monolithic, has_subflavors={"cook": "omcat_legacy_conversation_monolithic"}),
+        Cooker(cook_general_conversations_webdataset, has_subflavors={"cook": "general_conversations_webdataset"}),
+        Cooker(cook_general_conversations_jsonl, has_subflavors={"cook": "general_conversations_jsonl"}),
     ]
 
     def __init__(self, is_val: bool = False, tiling_augment_prob: float = 0.4):
