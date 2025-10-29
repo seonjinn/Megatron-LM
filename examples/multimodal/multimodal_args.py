@@ -216,5 +216,16 @@ def add_multimodal_extra_args(parser):
     group.add_argument(
         "--freeze-sound-projection", action="store_true", default=False, help="Freeze the sound projection module."
     )
-
+    group.add_argument(
+        "--relax-sender-check", action="store_true", default=False, help="Relax the sender check in the dataloader to allow other role than user and assistant."
+    )
+    group.add_argument(
+        "--relax-thinking-trace-check", action="store_true", default=False, help="Relax the checks in the dataloader which ensure the thinking trace is well formatted."
+    )
+    group.add_argument(
+        "--allow-cross-sample-attention", action="store_true", default=False, help="Allow cross sample attention when using sample packing."
+    )
+    group.add_argument(
+        "--only-keep-samples-with-img", action="store_true", default=False, help="Discard samples that do not have an image."
+    )
     return parser

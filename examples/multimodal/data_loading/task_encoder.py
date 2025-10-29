@@ -418,9 +418,10 @@ class MultiModalTaskEncoder(
 
         # Format the conversation as a list of "user" / "assistant" turns.
         for message in sample.conversation:
-            assert message.sender in ["user", "assistant"], (
-                f"unexpected sender {message.sender} in {sample.conversation}"
-            )
+            if not self.args.relax_sender_check:
+                assert message.sender in ["user", "assistant"], (
+                    f"unexpected sender {message.sender} in {sample.conversation}"
+                )
 
             content = ""
             for fragment in message.fragments:
@@ -442,10 +443,13 @@ class MultiModalTaskEncoder(
 
                     content += "<so_start>" + SOUND_TOKEN * audio_params[0].num_embeddings + "<so_end>"
                     audio_media_params.append(audio_params[0])
+            
+            if self.args.only_keep_samples_with_img and len(image_media) == 0:
+                raise ValueError(f"Sample has no image: {sample.__key__}")
 
             prompt_format = self.args.tokenizer_prompt_format
 
-            if prompt_format in ("nemotron-h-5p5-reasoning", "nemotron6-moe") and message.sender == "assistant":
+            if prompt_format in ("nemotron-h-5p5-reasoning", "nemotron6-moe") and message.sender == "assistant" and not self.args.relax_thinking_trace_check:
                 think_start_count = content.count("<think>")
                 think_end_count = content.count("</think>")
                 if think_start_count == 0 and think_end_count == 0:
@@ -616,6 +620,11 @@ class MultiModalTaskEncoder(
         print(f"[pid={os.getpid()}] 50% percentile of lengths: {np.percentile(lengths, 50)}")
         print(f"[pid={os.getpid()}] 95% percentile of lengths: {np.percentile(lengths, 95)}")
 
+        trainable_tokens = [len([int(token) for token in sample.labels if token != IGNORE_INDEX]) for sample in samples]
+        print(f"[pid={os.getpid()}] 5% percentile of trainable tokens: {np.percentile(trainable_tokens, 5)}")
+        print(f"[pid={os.getpid()}] 50% percentile of trainable tokens: {np.percentile(trainable_tokens, 50)}")
+        print(f"[pid={os.getpid()}] 95% percentile of trainable tokens: {np.percentile(trainable_tokens, 95)}")
+
         return packed_samples
 
     @stateless
@@ -654,6 +663,13 @@ class MultiModalTaskEncoder(
             isinstance(img, torch.Tensor) for sample in samples for img in sample.imgs
         ), f"All images must be tensors: {[type(img) for sample in samples for img in sample.imgs]}"
 
+        if self.args.allow_cross_sample_attention:
+            cu_lengths = [0, cu_lengths[-1]]
+            cu_lengths_padded = [0, cu_lengths_padded[-1]]
+            max_length = sum(sample.max_length for sample in samples)
+        else:
+            max_length = max(sample.max_length for sample in samples)
+
         return PackedTaskSample(
             __key__=[k for s in samples for k in s.__key__],
             __restore_key__=(),  # Will be set by energon based on `samples`
@@ -665,7 +681,7 @@ class MultiModalTaskEncoder(
             imgs=[img for sample in samples for img in sample.imgs],
             cu_lengths=torch.tensor(cu_lengths, dtype=torch.int32),
             cu_lengths_padded=torch.tensor(cu_lengths_padded, dtype=torch.int32),
-            max_length=max(sample.max_length for sample in samples),
+            max_length=max_length,
             num_tiles=[n for s in samples for n in s.num_tiles],
             num_frames=[n for s in samples for n in s.num_frames],
             sound_clips=[sc for sample in samples for sc in sample.sound_clips],
