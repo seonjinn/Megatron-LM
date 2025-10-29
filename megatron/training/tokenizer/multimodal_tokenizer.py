@@ -437,11 +437,28 @@ class MultimodalTokenizer(MegatronTokenizer):
 
             for i in range(1, len(idx)):
                 if i % 2 == 0:
-                    # user message. Do not mask <SPECIAL_11> because it is also reused for termination the previous assistant.
-                    target[idx[i]+1:idx[i+1]] = IGNORE_INDEX
+                    # user message. Mask the entire user message including <SPECIAL_11>.
+                    target[idx[i]:idx[i+1]] = IGNORE_INDEX
                 else:
                     # assistant message. Mask `<SPECIAL_11>Assistant\n`.
                     target[idx[i]:idx[i]+self._prompt_config.assistant_prefix_len] = IGNORE_INDEX
+
+            # Also mask any <SPECIAL_10> (system) tokens that appear in the middle of the conversation
+            idx_system = np.where(tokens == 10)[0]
+            if len(idx_system) > 0:
+                # Find all special tokens (10, 11, 12) to determine boundaries
+                all_special_positions = np.sort(np.concatenate([
+                    np.where(tokens == 10)[0],
+                    np.where(tokens == 11)[0],
+                    np.where(tokens == 12)[0]
+                ]))
+                
+                # For each system token, mask until the next special token
+                for sys_pos in idx_system[1:]:  # Skip the first system message (already masked above)
+                    # Find the next special token position
+                    next_special = all_special_positions[all_special_positions > sys_pos]
+                    if len(next_special) > 0:
+                        target[sys_pos:next_special[0]] = IGNORE_INDEX
 
             return tokens, target
         elif self._prompt_format in ("nemotron6-moe"):
