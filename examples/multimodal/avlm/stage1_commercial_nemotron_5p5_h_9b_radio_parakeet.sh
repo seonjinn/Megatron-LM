@@ -175,7 +175,7 @@ TENSORBOARD_DIR=${WORKSPACE}/tensorboard/${MODEL_NAME}
 
 CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/output/amala_sft_nm_5p5_h_9b_cradio_0805_tiling_v1341/checkpoints"
 
-DATA_TRAIN="${SOURCE}/examples/multimodal/avlm/stage1_commercial_asr_blend.yaml"
+DATA_TRAIN="${SOURCE}/examples/multimodal/avlm/data_config/stage1_commercial_asr_blend.yaml"
 
 
 OPTIONS=" \

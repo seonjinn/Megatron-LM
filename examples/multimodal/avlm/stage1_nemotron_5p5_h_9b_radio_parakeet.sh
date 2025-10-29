@@ -57,7 +57,7 @@ TP=4
 
 CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/output/sft_nm_5p5_h_9b_cradio_video_1018/checkpoints"
 
-DATA_TRAIN="${SOURCE}/examples/multimodal/avlm/stage1_commercial_asr.yaml"
+DATA_TRAIN="${SOURCE}/examples/multimodal/avlm/data_config/stage1_commercial_asr_blend_nrt.yaml"
 
 SEQ_LEN=1024
 DECODER_SEQ_LEN=40960 #32768

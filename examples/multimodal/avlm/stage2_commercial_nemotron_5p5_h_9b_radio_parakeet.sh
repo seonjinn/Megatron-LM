@@ -172,7 +172,7 @@ TENSORBOARD_DIR=${WORKSPACE}/tensorboard/${MODEL_NAME}
 
 CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/ehosseiniasl/avlm_halfduplex/mcore_results/draco-mcore-nm_5p5_h_9b-cradio-parakeet-nemo-stage2-alm-nodes16-seq16384-bz2048-tp4-vlm2-branch-1009/checkpoints"
 
-DATA_TRAIN="${SOURCE}/examples/multimodal/avlm/stage2_commercial_alm_blend.yaml"
+DATA_TRAIN="${SOURCE}/examples/multimodal/avlm/data_config/stage2_commercial_alm_blend.yaml"
 
 
 OPTIONS=" \
