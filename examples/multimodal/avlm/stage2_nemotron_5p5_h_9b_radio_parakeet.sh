@@ -62,7 +62,7 @@ CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/out
 DATA_TRAIN="${SOURCE}/examples/multimodal/avlm/data_config/stage2_commercial_alm_blend_nrt.yaml"
 
 SEQ_LEN=1024
-DECODER_SEQ_LEN=24576
+DECODER_SEQ_LEN=16384
 
 if [[ $DEBUG -eq 1 ]]; then
     MBZ=1
@@ -78,7 +78,7 @@ if [[ $DEBUG -eq 1 ]]; then
     NUM_GPU=8
 else
     MBZ=1
-    BZ=128
+    BZ=2048
     NW=8
     LI=5
     AD=0.0
@@ -129,7 +129,8 @@ if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
 fi
 
 if [[ $USE_NEMO -eq 1 ]]; then
-    SOUND_MODEL_TYPE="nemo://nvidia/parakeet-tdt-0.6b-v3"
+    # SOUND_MODEL_TYPE="nemo://nvidia/parakeet-tdt-0.6b-v3"
+    SOUND_MODEL_TYPE="nemo://nvidia/parakeet-tdt-0.6b-v2"
 else
     SOUND_MODEL_TYPE="hf://nithinraok/parakeet-tdt-0.6b-v2-hf"
 fi
@@ -221,8 +222,8 @@ OPTIONS=" \
     --sound-target-rate 16000 \
     --allow-missing-sound-projection-checkpoint \
     --allow-missing-sound-model-checkpoint \
-    --sound-embedding-size 376 \
-    --sound-clip-duration 30 \
+    --sound-embedding-size 751 \
+    --sound-clip-duration 60 \
     --allow-large-videos \
     --freeze-ViT \
 "

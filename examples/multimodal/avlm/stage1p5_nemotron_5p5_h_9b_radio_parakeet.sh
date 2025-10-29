@@ -14,7 +14,7 @@
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=stage1_nm_5p5_h_9b_cradio_parakeet_1015
+#SBATCH --job-name=stage1p5_nm_5p5_h_9b_cradio_parakeet_1015
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
@@ -36,11 +36,11 @@ USE_NEMO=1
 # Remember to update model and job name if running in batch mode!!
 if [[ $BATCH -eq 0 ]]; then
     DATETIME=`date +'%y-%m-%d-%H-%M-%S'`
-    MODEL_NAME="interactive_stage1_nm_5p5_h_9b_cradio_parakeet_${DATETIME}"
+    MODEL_NAME="interactive_stage1p5_nm_5p5_h_9b_cradio_parakeet_${DATETIME}"
     SPECIAL_TOKENS=" --special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box> <so_embedding> <so_start> <so_end> "
     DEBUG=1
 else
-    MODEL_NAME="stage1_nm_5p5_h_9b_cradio_parakeet_1015"
+    MODEL_NAME="stage1p5_nm_5p5_h_9b_cradio_parakeet_1015"
     SPECIAL_TOKENS=" --special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\> \<so_embedding\> \<so_start\> \<so_end\> "
 fi
 
@@ -57,10 +57,10 @@ TP=4
 
 CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/output/sft_nm_5p5_h_9b_cradio_video_1018/checkpoints"
 
-DATA_TRAIN="${SOURCE}/examples/multimodal/avlm/data_config/stage1_commercial_asr_blend_nrt.yaml"
+DATA_TRAIN="${SOURCE}/examples/multimodal/avlm/data_config/stage1p5_commercial_alm_blend_nrt.yaml"
 
 SEQ_LEN=1024
-DECODER_SEQ_LEN=24576
+DECODER_SEQ_LEN=16384
 
 if [[ $DEBUG -eq 1 ]]; then
     MBZ=1
@@ -134,6 +134,8 @@ if [[ $USE_NEMO -eq 1 ]]; then
 else
     SOUND_MODEL_TYPE="hf://nithinraok/parakeet-tdt-0.6b-v2-hf"
 fi
+
+EXTRA_ARGS+=" --recompute-granularity full --recompute-method block --recompute-num-layers 56 --recompute-vision "
 
 OPTIONS=" \
     --use-checkpoint-args \
@@ -225,7 +227,6 @@ OPTIONS=" \
     --sound-clip-duration 60 \
     --freeze-LM \
     --freeze-ViT \
-    --freeze-sound-model \
     --allow-large-videos \
 "
 
