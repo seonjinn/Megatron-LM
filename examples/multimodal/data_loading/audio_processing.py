@@ -193,7 +193,7 @@ class AudioTransformParakeetStrategy(_ResampleAudioTransformStrategy):
             audio = torch.nn.functional.pad(audio, (0, clip_samples - audio.shape[1]))
 
         # Parakeet requires a minimum of hop length audio length.
-        min_audio_length = 192
+        min_audio_length = 1600 # 0.1sec atleast for parakeet input
         for i in range(len(audio_length)):
             audio_length[i] = max(audio_length[i], min_audio_length)
 

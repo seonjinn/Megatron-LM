@@ -1288,7 +1288,7 @@ class LLaVAModel(MegatronModule):
                 sound_clips, sound_pad = split_to_context_parallel_ranks(sound_clips)
                 if is_parakeet:
                     # Parakeet needs sound lengths. Minimum sound length is the hop length.
-                    sound_length, sound_pad2 = split_to_context_parallel_ranks(sound_length, pad_value=192)
+                    sound_length, sound_pad2 = split_to_context_parallel_ranks(sound_length, pad_value=1600)
                     assert sound_pad == sound_pad2, "something went wrong with splitting to context parallel ranks"
 
             if is_parakeet:
