@@ -675,50 +675,60 @@ class MegatronCheckpointSaverBase:
         shared_l0_chunks = chunk_weight(shared_l0, "column", self.args.target_tensor_parallel_size)
         shared_l1_chunks = chunk_weight(shared_l1, "row", self.args.target_tensor_parallel_size)
 
-        # Save them to the model: iterate target EP and TP
+        # Save them to the model: iterate target EP and ETP; decide TP targets per case.
         for ep_rank in range(self.args.target_expert_parallel_size):
             for etp_rank in range(self.args.target_expert_tensor_parallel_size):
-                tp_rank = (ep_rank * self.args.target_expert_tensor_parallel_size + etp_rank) % self.args.target_tensor_parallel_size
-
-                # local experts for this ep rank
+                # Local experts for this EP/ETP shard
                 local_fc1 = fc1_split[ep_rank][etp_rank]      # [local_E, out, in]
                 local_fc2 = fc2_split[ep_rank][etp_rank]      # [local_E, out, in]
 
-                params_dict = {
-                    "pre_mlp_norm_weight": pre_mlp_norm_weight,
-                    "router_weight": router_weight,
-                    # router_bias handled out-of-band to preserve fp32
-                }
+                # TODO: is this correct in all cases
+                # Determine which TP ranks to write to:
+                # - Replicate experts across all TP shards when EP=1 and ETP=1 (experts are not TP-sharded)
+                # - Otherwise, use deterministic mapping to a single TP rank
+                if self.args.target_expert_parallel_size == 1 and self.args.target_expert_tensor_parallel_size == 1:
+                    tp_targets = range(self.args.target_tensor_parallel_size)
+                else:
+                    mapped_tp = (ep_rank * self.args.target_expert_tensor_parallel_size + etp_rank) % self.args.target_tensor_parallel_size
+                    tp_targets = [mapped_tp]
 
-                # Set per-local-expert weights
-                num_local_experts = local_fc1.shape[0]
-                for expert_idx in range(num_local_experts):
+                for tp_rank in tp_targets:
+                    params_dict = {
+                        "pre_mlp_norm_weight": pre_mlp_norm_weight,
+                        "router_weight": router_weight,
+                        # router_bias handled out-of-band to preserve fp32
+                    }
+
+                    # Set per-local-expert weights
+                    num_local_experts = local_fc1.shape[0]
+                    for expert_idx in range(num_local_experts):
+                        params_dict.update({
+                            f"mlp_fc1_weight.{expert_idx}": local_fc1[expert_idx],
+                            f"mlp_fc2_weight.{expert_idx}": local_fc2[expert_idx],
+                        })
+
+                    # Split shared layers across TP like normal linear layers
                     params_dict.update({
-                        f"mlp_fc1_weight.{expert_idx}": local_fc1[expert_idx],
-                        f"mlp_fc2_weight.{expert_idx}": local_fc2[expert_idx],
+                        "mlp_shared_fc1_weight": shared_l0_chunks[tp_rank],
+                        "mlp_shared_fc2_weight": shared_l1_chunks[tp_rank],
                     })
 
-                # Split shared layers across TP like normal linear layers
-                params_dict.update({
-                    "mlp_shared_fc1_weight": shared_l0_chunks[tp_rank],
-                    "mlp_shared_fc2_weight": shared_l1_chunks[tp_rank],
-                })
+                    if self.md.norm_has_bias:
+                        params_dict.update({
+                            "pre_mlp_norm_bias": pre_mlp_norm_bias,
+                        })
 
-                if self.md.norm_has_bias:
-                    params_dict.update({
-                        "pre_mlp_norm_bias": pre_mlp_norm_bias,
-                    })
-                # Set norms and optional bias
-                model = self.get_local_model(pp_rank, ep_rank, tp_rank)
-                schema.set_layer(model, layer_id, params_dict)
+                    # Set norms and optional bias
+                    model = self.get_local_model(pp_rank, ep_rank, tp_rank)
+                    schema.set_layer(model, layer_id, params_dict)
 
-                # Ensure router expert_bias is stored in fp32 to avoid quantization on save
-                layer_ref = schema._get_layers(model)[layer_id]
-                rb_param = getattr(getattr(getattr(layer_ref, 'mlp'), 'router'), 'expert_bias', None)
-                if isinstance(rb_param, torch.Tensor):
-                    if rb_param.dtype != torch.float32:
-                        rb_param.data = rb_param.data.to(torch.float32)
-                    rb_param.data.copy_(router_bias.to(torch.float32))
+                    # Ensure router expert_bias is stored in fp32 to avoid quantization on save
+                    layer_ref = schema._get_layers(model)[layer_id]
+                    rb_param = getattr(getattr(getattr(layer_ref, 'mlp'), 'router'), 'expert_bias', None)
+                    if isinstance(rb_param, torch.Tensor):
+                        if rb_param.dtype != torch.float32:
+                            rb_param.data = rb_param.data.to(torch.float32)
+                        rb_param.data.copy_(router_bias.to(torch.float32))
 
     def _pad_weight(self, orig_word_embed, true_vocab_size):
         """
