@@ -719,7 +719,7 @@ class RerunStateMachine:
 
         return value >= self.max_values[context] * threshold
 
-    def state_dict(self, data_iterator: DataIteratorArgType, ckpt_format: str) -> dict[str, Any]:
+    def state_dict(self, data_iterator: DataIteratorArgType, ckpt_format: str, force: bool = False) -> dict[str, Any]:
         """Method that returns a state dict to be checkpointed.
 
         Args:
