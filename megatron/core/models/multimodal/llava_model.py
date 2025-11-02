@@ -520,6 +520,7 @@ class LLaVAModel(MegatronModule):
         packed_seq_params: Optional[PackedSeqParams] = None,
         vision_tokens_retention_mask: Optional[torch.Tensor] = None,
         sound_embeddings: Optional[torch.Tensor] = None,
+        sound_timestamps: Optional[torch.Tensor] = None,
     ):
         """Preprocess input data before input to language model.
 
@@ -786,6 +787,7 @@ class LLaVAModel(MegatronModule):
 
             sound_mask = input_ids == self.sound_token_index
             # Replace with sound embeddings where needed
+
             if sound_mask is not False and sound_mask.any():
                 # Get the positions where sounds should be placed in the NEW position space
                 # (after accounting for image token expansion)
@@ -793,6 +795,11 @@ class LLaVAModel(MegatronModule):
                 # Map the original token positions to the new (expanded) positions
                 sound_new_position_ids = new_position_ids[sound_batch_indices, sound_token_indices]
                 final_embedding[sound_batch_indices, sound_new_position_ids] = sound_embeddings.permute(1, 0, 2).reshape(-1, embed_dim)
+            else:
+                # TODO: Sound encoder from HF/Nemo can hang with text-only samples. Find a better way to handle this.
+                if sound_embeddings.shape[0] > 0:
+                    assert sound_embeddings.shape[:2] == torch.Size([2, 1]) and sound_timestamps.shape == torch.Size([0])
+                    final_embedding[:1, :1, :1] += 0 * sound_embeddings[:1, :1, :1]
 
         # Create the final labels and loss mask (if this is the last language model stage).
         final_labels, final_loss_mask = None, None
@@ -1428,6 +1435,7 @@ class LLaVAModel(MegatronModule):
             packed_seq_params=packed_seq_params,
             vision_tokens_retention_mask=image_tokens_retention_mask,
             sound_embeddings=sound_embeddings,
+            sound_timestamps=sound_timestamps,
         )  # [combined_seq_len, b, h_language], [b, combined_seq_len], [b, combined_seq_len]
 
         if self.context_parallel_lm > 1 or self.sequence_parallel_lm:
