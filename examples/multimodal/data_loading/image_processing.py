@@ -1202,6 +1202,256 @@ class MatchTilingDynamicResolutionStrategy(ImageTilingStrategy):
         return f"MatchTilingDynamicResolutionStrategy(vision_model_type={self._vision_model_type}, tile_size={self._tile_size}, use_thumbnail={self._use_thumbnail}, min_num_tiles={self._min_num_tiles}, max_num_tiles={self._max_num_tiles}, patch_size={self._patch_size}, pixel_shuffle={self._pixel_shuffle}, conv_merging={self._conv_merging}, enable_tile_degradation={self._enable_tile_degradation}, video_frame_strategy={self._video_frame_strategy})"
 
 
+@dataclass
+class MaskedTilingDynamicResolutionParams(ImageTilingParams):
+    tiling: tuple[int, int]
+
+
+class MaskedTilingDynamicResolutionStrategy(ImageTilingStrategy):
+    """
+    Like MatchTilingDynamicResolutionStrategy, but ensures tiles are isolated in the
+    vision encoder by emitting per-tile packed samples (block-diagonal attention across tiles).
+    """
+
+    def __init__(
+        self,
+        vision_model_type: str,
+        tile_size: int,
+        use_thumbnail: bool,
+        min_num_tiles: int,
+        max_num_tiles: int,
+        embeddings_per_tile: int,
+        patch_size: int,
+        get_num_embeddings: Callable[[int, int], int],
+        find_closest_aspect_ratio_fn=find_closest_aspect_ratio,
+        pixel_shuffle: bool = False,
+        conv_merging: bool = False,
+        tile_degradation_map: dict[int, int] = None,
+        video_frame_strategy: ImageTilingStrategy = None,
+        enable_tile_degradation: bool = True,
+    ):
+        assert "radio" in vision_model_type, (
+            "MaskedTilingDynamicResolution is only supported for radio models"
+        )
+
+        self._vision_model_type = vision_model_type
+        self._tile_size = tile_size
+        self._use_thumbnail = use_thumbnail
+        self._min_num_tiles = min_num_tiles
+        self._max_num_tiles = max_num_tiles
+        self._embeddings_per_tile = embeddings_per_tile
+        self._patch_size = patch_size
+        self._get_num_embeddings = get_num_embeddings
+        self._find_closest_aspect_ratio_fn = find_closest_aspect_ratio_fn
+        self._pixel_shuffle = pixel_shuffle
+        self._conv_merging = conv_merging
+        self._enable_tile_degradation = enable_tile_degradation
+
+        if tile_degradation_map is None:
+            self._tile_degradation_map = {12: 8, 8: 6, 6: 4, 4: 2, 2: 1}
+        else:
+            self._tile_degradation_map = tile_degradation_map
+
+        if video_frame_strategy is None:
+            self._video_frame_strategy = NoTilingStrategy(
+                vision_model_type=vision_model_type,
+                target_width=tile_size,
+                target_height=tile_size,
+                embeddings_per_image=embeddings_per_tile,
+            )
+        else:
+            self._video_frame_strategy = video_frame_strategy
+
+        self.target_ratios = {
+            max_num_tiles: sorted(
+                set(
+                    (x, y)
+                    for n in range(self._min_num_tiles, max_num_tiles + 1)
+                    for x in range(1, n + 1)
+                    for y in range(1, n + 1)
+                    if x * y <= max_num_tiles and x * y >= self._min_num_tiles
+                ),
+                key=lambda x: x[0] * x[1],
+            )
+            for max_num_tiles in range(self._min_num_tiles, self._max_num_tiles + 1)
+        }
+
+        pixel_mean, pixel_std = pixel_statistics[self._vision_model_type]
+        self._transform = T.Compose(
+            [
+                T.Lambda(lambda img: img.convert("RGB") if img.mode != "RGB" else img),
+                T.ToTensor(),
+                T.Normalize(mean=pixel_mean, std=pixel_std),
+            ]
+        )
+
+    def apply_params(self, params: MaskedTilingDynamicResolutionParams, **kwargs) -> list[torch.Tensor]:
+        # Handle video frames using the video frame strategy
+        if isinstance(params.media, VideoFrameMedia):
+            return self._video_frame_strategy.apply_params(params, **kwargs)
+
+        image = params.media.value
+        nx, ny = params.tiling
+        target_width = self._tile_size * nx
+        target_height = self._tile_size * ny
+
+        resized_img = image.resize((target_width, target_height))
+
+        processed_images = []
+        # Emit per-tile images (each becomes an isolated packed sample later)
+        for j in range(ny):
+            for i in range(nx):
+                box = (
+                    i * self._tile_size,
+                    j * self._tile_size,
+                    (i + 1) * self._tile_size,
+                    (j + 1) * self._tile_size,
+                )
+                tile_img = resized_img.crop(box)
+                processed_images.append(tile_img)
+
+        if self._use_thumbnail and (nx * ny) != 1:
+            thumbnail_img = image.resize((self._tile_size, self._tile_size))
+            processed_images.append(thumbnail_img)
+
+        return [self._transform(img) for img in processed_images]
+
+    def compute_params(
+        self,
+        media_list: list[ImageMedia | VideoFrameMedia],
+        num_tokens_available: int | None = None,
+        max_num_tiles: int | None = None,
+        **kwargs,
+    ) -> list[MaskedTilingDynamicResolutionParams]:
+        effective_max_num_tiles = max_num_tiles if max_num_tiles is not None else self._max_num_tiles
+        effective_max_num_tiles = min(effective_max_num_tiles, self._max_num_tiles)
+        max_num_tiles_to_use = effective_max_num_tiles
+        degradation_map = self._tile_degradation_map
+
+        while True:
+            params = []
+            total_embeddings_needed = 0
+
+            for media in media_list:
+                if isinstance(media, ImageMedia):
+                    img_size = (media.width, media.height)
+                    aspect_ratio = img_size[0] / img_size[1]
+
+                    target_ratios = self.target_ratios[max_num_tiles_to_use]
+                    tiling = self._find_closest_aspect_ratio_fn(
+                        aspect_ratio, target_ratios, img_size[0], img_size[1], self._tile_size
+                    )
+
+                    blocks = tiling[0] * tiling[1]
+                    # Each tile is tile_size x tile_size
+                    per_tile_emb = self._get_num_embeddings(self._tile_size, self._tile_size)
+                    num_embeddings = blocks * per_tile_emb
+
+                    num_tiles = blocks
+                    if self._use_thumbnail and blocks != 1:
+                        num_tiles += 1
+                        num_embeddings += self._get_num_embeddings(self._tile_size, self._tile_size)
+
+                    media_params = MaskedTilingDynamicResolutionParams(
+                        media=media,
+                        num_tiles=num_tiles,
+                        num_embeddings=num_embeddings,
+                        tiling=tiling,
+                    )
+                elif isinstance(media, VideoFrameMedia):
+                    video_params = self._video_frame_strategy.compute_params(
+                        [media], 1 * self._embeddings_per_tile
+                    )[0]
+                    media_params = MaskedTilingDynamicResolutionParams(
+                        media=media,
+                        num_tiles=video_params.num_tiles,
+                        num_embeddings=video_params.num_embeddings,
+                        tiling=(1, 1),
+                    )
+                else:
+                    raise ValueError(f"Unsupported media type: {type(media)}")
+
+                params.append(media_params)
+                total_embeddings_needed += media_params.num_embeddings
+
+            if not self._enable_tile_degradation:
+                break
+            if max_num_tiles_to_use == 1 or num_tokens_available is None:
+                break
+            if total_embeddings_needed > num_tokens_available:
+                if max_num_tiles_to_use in degradation_map:
+                    max_num_tiles_to_use = degradation_map[max_num_tiles_to_use]
+                    if max_num_tiles_to_use not in self.target_ratios:
+                        self.target_ratios[max_num_tiles_to_use] = sorted(
+                            set(
+                                (x, y)
+                                for n in range(self._min_num_tiles, max_num_tiles_to_use + 1)
+                                for x in range(1, n + 1)
+                                for y in range(1, n + 1)
+                                if x * y <= max_num_tiles_to_use and x * y >= self._min_num_tiles
+                            ),
+                            key=lambda x: x[0] * x[1],
+                        )
+                else:
+                    break
+            else:
+                break
+
+        return params
+
+    def stack(
+        self, images: list[torch.Tensor]
+    ) -> tuple[torch.Tensor, list[tuple[int, int]], list[int], list[int]]:
+        # Identical to dynamic resolution packing; each tile is already an independent image sample
+        imgs_sizes = torch.tensor(
+            [[img.shape[1], img.shape[2]] for img in images], dtype=torch.int32
+        )
+
+        def rearrange_img(x):
+            py = x.shape[-2] // self._patch_size
+            px = x.shape[-1] // self._patch_size
+            x = einops.rearrange(
+                x,
+                "c (py yy) (px xx) -> (py px) (c yy xx)",
+                py=py,
+                yy=self._patch_size,
+                px=px,
+                xx=self._patch_size,
+            )
+            return x
+
+        if len(images) > 0:
+            imgs = [rearrange_img(img) for img in images]
+
+            current_length = 0
+            max_length = 0
+            vision_cu_lengths = [0]
+            for img in imgs:
+                if max_length < img.shape[0]:
+                    max_length = img.shape[0]
+                current_length += img.shape[0]
+                vision_cu_lengths.append(current_length)
+
+            vision_cu_lengths = torch.tensor(vision_cu_lengths, dtype=torch.int32)
+            vision_max_lengths = torch.tensor(max_length, dtype=torch.int32)
+
+            return (
+                torch.cat(imgs, dim=0).unsqueeze(0),
+                imgs_sizes,
+                vision_cu_lengths,
+                vision_max_lengths,
+            )
+        else:
+            return (
+                torch.tensor([[0]], dtype=torch.float32),
+                torch.tensor([[0,0]], dtype=torch.int32),
+                None,
+                None,
+            )
+
+    def __str__(self):
+        return f"MaskedTilingDynamicResolutionStrategy(vision_model_type={self._vision_model_type}, tile_size={self._tile_size}, use_thumbnail={self._use_thumbnail}, min_num_tiles={self._min_num_tiles}, max_num_tiles={self._max_num_tiles}, patch_size={self._patch_size}, pixel_shuffle={self._pixel_shuffle}, conv_merging={self._conv_merging}, enable_tile_degradation={self._enable_tile_degradation}, video_frame_strategy={self._video_frame_strategy})"
+
 def create_image_tiling_strategy(args):
     """
     Create an image tiling strategy based on the provided arguments.
@@ -1239,6 +1489,7 @@ def create_image_tiling_strategy(args):
     assert args.img_h == args.img_w, "img_h and img_w must be the same"
     
     match_tiling_dynamic_resolution = args.match_tiling_dynamic_resolution
+    masked_tiling_dynamic_resolution = getattr(args, "masked_tiling_dynamic_resolution", False)
     dynamic_resolution = args.dynamic_resolution
     use_tiling = args.use_tiling
     use_area_weighted_aspect_ratio = args.use_area_weighted_aspect_ratio
@@ -1246,9 +1497,58 @@ def create_image_tiling_strategy(args):
     if match_tiling_dynamic_resolution:
         assert dynamic_resolution, "must enable --dynamic-resolution if using --match-tiling-dynamic-resolution"
         assert not use_tiling, "cannot use --use-tiling and --match-tiling-dynamic-resolution together"
+    if masked_tiling_dynamic_resolution:
+        assert dynamic_resolution, "must enable --dynamic-resolution if using --masked-tiling-dynamic-resolution"
+        assert not use_tiling, "cannot use --use-tiling and --masked-tiling-dynamic-resolution together"
+        assert not match_tiling_dynamic_resolution, "cannot combine --masked-tiling-dynamic-resolution with --match-tiling-dynamic-resolution"
     
     if dynamic_resolution:
-        if match_tiling_dynamic_resolution:
+        if masked_tiling_dynamic_resolution:
+            num_image_embeddings_per_tile = get_num_image_embeddings(
+                img_h=args.img_h,
+                img_w=args.img_w,
+                patch_dim=args.patch_dim,
+                vision_model_type=args.vision_model_type,
+                disable_vision_class_token=args.disable_vision_class_token,
+                class_token_len=1,
+                pixel_shuffle=args.pixel_shuffle,
+                use_tile_tags=args.use_tile_tags,
+                max_num_tiles=args.max_num_tiles,
+                tokenizer_type=args.tokenizer_prompt_format,
+                use_image_break_token=args.image_break_token is not None,
+                conv_merging=args.conv_merging,
+            )
+            image_tiling_strategy = MaskedTilingDynamicResolutionStrategy(
+                vision_model_type=args.vision_model_type,
+                tile_size=args.img_h,
+                use_thumbnail=args.use_thumbnail,
+                min_num_tiles=1,
+                max_num_tiles=args.max_num_tiles,
+                embeddings_per_tile=num_image_embeddings_per_tile,
+                patch_size=args.patch_dim,
+                get_num_embeddings=lambda width, height: get_num_image_embeddings(
+                    img_h=height,
+                    img_w=width,
+                    patch_dim=args.patch_dim,
+                    vision_model_type=args.vision_model_type,
+                    disable_vision_class_token=args.disable_vision_class_token,
+                    class_token_len=1,
+                    pixel_shuffle=args.pixel_shuffle,
+                    use_tile_tags=args.use_tile_tags,
+                    max_num_tiles=args.max_num_tiles,
+                    tokenizer_type=args.tokenizer_prompt_format,
+                    use_image_break_token=args.image_break_token is not None,
+                    conv_merging=args.conv_merging,
+                ),
+                find_closest_aspect_ratio_fn=(
+                    find_closest_area_weighted_aspect_ratio
+                    if use_area_weighted_aspect_ratio
+                    else find_closest_aspect_ratio
+                ),
+                pixel_shuffle=args.pixel_shuffle,
+                conv_merging=args.conv_merging,
+            )
+        elif match_tiling_dynamic_resolution:
             num_image_embeddings_per_tile = get_num_image_embeddings(
                 img_h=args.img_h,
                 img_w=args.img_w,

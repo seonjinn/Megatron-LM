@@ -236,6 +236,7 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
             min_side=self.args.dynamic_resolution_min_side,
             conv_merging=self.args.conv_merging,
             match_tiling_dynamic_resolution=self.args.match_tiling_dynamic_resolution,
+            masked_tiling_dynamic_resolution=getattr(self.args, "masked_tiling_dynamic_resolution", False),
             thumbnail_area_threshold=self.args.thumbnail_area_threshold,
         )
 
