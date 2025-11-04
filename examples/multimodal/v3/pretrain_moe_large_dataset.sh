@@ -67,17 +67,9 @@ EP=32
 
 CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/v3-sft-16gbs-lurking-ringtail-lc-v2-1e-5-constant-c-radio_v2-vlm-h-tp2/checkpoints"
 
-# New tokenizer.
-#TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--NVIDIA-Nemotron-Nano-31B-A3-v3/snapshots/1ec9e9c5597db38926449c98482d891218e58b05/"
-#TOKENIZER_PROMPT_FORMAT="nemotron6-moe"
-
 # New tokenizer 10/20.
 TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--Nemotron-Nano-3-30B-A3.5B-dev-1016/snapshots/bb271274159f07461e919379311e32802e5ec36b/"
 TOKENIZER_PROMPT_FORMAT="nemotron6-moe"
-
-# Old tokenizer.
-#TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/nemotron6-moe-tokenizer/"
-#TOKENIZER_PROMPT_FORMAT="nemotron6-moe-old"
 
 DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/pretrain_all_0p2_sft.yaml"
 
