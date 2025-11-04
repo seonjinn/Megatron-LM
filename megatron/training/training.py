@@ -1431,12 +1431,11 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
         unwrapped_model.update_momentum(args.curr_iteration)
 
     # Update learning rate.
-    if update_successful:
-        increment = samples_seen_in_iteration
-        opt_param_scheduler.step(increment=increment)
-        skipped_iter = 0
-    else:
-        skipped_iter = 1
+    # Updates lr even when iteration is skipped.
+    increment = get_num_microbatches() * args.micro_batch_size * args.data_parallel_size
+    opt_param_scheduler.step(increment=increment)
+
+    skipped_iter = 0 if update_successful else 1
 
     # Empty unused memory.
     if args.empty_unused_memory_level >= 2:
@@ -2432,20 +2431,21 @@ def train(
                     pre_hook_enabled = True
 
         iteration += 1
-
-        if getattr(args, 'perform_rl_step', False) and getattr(args, 'rl_use_sequence_packing', False):
-            iteration_sequences = rl_utils.get_iteration_sequence_count(args)
-            rl_utils.update_sequence_packing_metrics(args)
-            args.consumed_train_samples += iteration_sequences
-        else:
-            args.consumed_train_samples += samples_seen_in_iteration
-        num_skipped_samples_in_batch = (
-            get_current_global_batch_size() - get_current_running_global_batch_size()
+        batch_size = (
+            mpu.get_data_parallel_world_size() * args.micro_batch_size * get_num_microbatches()
         )
-        if args.decrease_batch_size_if_needed:
-            assert num_skipped_samples_in_batch >= 0
+        args.consumed_train_samples += batch_size
+
+        if skipped_iter:
+            num_skipped_samples_in_batch = batch_size
         else:
-            assert num_skipped_samples_in_batch == 0
+            num_skipped_samples_in_batch = (
+                get_current_global_batch_size() - get_current_running_global_batch_size()
+            )
+            if args.decrease_batch_size_if_needed:
+                assert num_skipped_samples_in_batch >= 0
+            else:
+                assert num_skipped_samples_in_batch == 0
         args.skipped_train_samples += num_skipped_samples_in_batch
         num_floating_point_operations_in_batch = num_floating_point_operations(args, samples_seen_in_iteration)
         num_floating_point_operations_so_far += num_floating_point_operations_in_batch
