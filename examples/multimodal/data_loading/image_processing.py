@@ -812,23 +812,26 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
                         target_patch_height = new_patch_height
                         target_patch_width = new_patch_width
 
-            # Rounds to nearest even number for pixel shuffle compatibility,
+            # Round patch grid to be divisible by 2 (pixel-shuffle OR conv-merging)
+            # or by 4 when BOTH are enabled (two successive 2x reductions)
             if self._pixel_shuffle or self._conv_merging:
-                if target_patch_height % 2 != 0:
-                    if (
-                        target_patch_height + 1
-                    ) * target_patch_width <= current_num_tokens_available:
-                        target_patch_height += 1
+                required_divisor = 4 if (self._pixel_shuffle and self._conv_merging) else 2
+
+                rem_h = target_patch_height % required_divisor
+                if rem_h != 0:
+                    inc_h = required_divisor - rem_h
+                    if (target_patch_height + inc_h) * target_patch_width <= current_num_tokens_available:
+                        target_patch_height += inc_h
                     else:
-                        target_patch_height -= 1
-                if target_patch_width % 2 != 0:
-                    if (
-                        target_patch_height * (target_patch_width + 1)
-                        <= current_num_tokens_available
-                    ):
-                        target_patch_width += 1
+                        target_patch_height = max(1, target_patch_height - rem_h)
+
+                rem_w = target_patch_width % required_divisor
+                if rem_w != 0:
+                    inc_w = required_divisor - rem_w
+                    if target_patch_height * (target_patch_width + inc_w) <= current_num_tokens_available:
+                        target_patch_width += inc_w
                     else:
-                        target_patch_width -= 1
+                        target_patch_width = max(1, target_patch_width - rem_w)
             assert target_patch_height * target_patch_width <= current_num_tokens_available, f"current_num_tokens_available {current_num_tokens_available} patches {patches} math.sqrt(current_num_tokens_available / patches) {math.sqrt(current_num_tokens_available / patches)} self._factor_max {self._factor_max} self._min_num_patches {self._min_num_patches}"
 
             #TEMP: hack for video

@@ -687,6 +687,73 @@ class LLaVAModel(MegatronModule):
                 >= first_padding_idx.unsqueeze(1)
             ] = False
 
+        # Build 3D position ids for M-RoPE if enabled: [3, B, max_seq_len]
+        final_position_ids = None
+
+        lm_position_type = getattr(self.language_model, "position_embedding_type", None)
+        if lm_position_type == "mrope":
+            # Temporal: 0..S-1 per sequence
+            pos_dtype = torch.int32
+            seq_positions = torch.arange(max_seq_len, device=input_ids.device, dtype=pos_dtype).unsqueeze(0).expand(batch_size, -1)
+            mrope_pos = torch.zeros((3, batch_size, max_seq_len), dtype=pos_dtype, device=input_ids.device)
+            mrope_pos[0] = seq_positions
+
+            # Spatial H/W for image tokens; text tokens remain 0
+            total_tiles = int(num_image_tiles.sum().item()) if num_image_tiles is not None and num_image_tiles.numel() > 0 else 0
+
+            if total_tiles > 0:
+                # Derive per-tile patch sizes (H, W) at the current tokenization resolution
+                if self._dynamic_resolution:
+                    # imgs_sizes has shape [num_tiles, 2] with pixel sizes; convert to patch grid
+                    tile_hw = (imgs_sizes // self._patch_dim).to(dtype=torch.int32)
+                else:
+                    h_patches = torch.tensor(self._img_h // self._patch_dim, dtype=torch.int32, device=input_ids.device)
+                    w_patches = torch.tensor(self._img_w // self._patch_dim, dtype=torch.int32, device=input_ids.device)
+                    tile_hw = torch.stack([
+                        h_patches.repeat(total_tiles),
+                        w_patches.repeat(total_tiles),
+                    ], dim=1)
+
+                # Adjust for pixel shuffle and conv merging (each halves H and W)
+                if self._pixel_shuffle:
+                    tile_hw = tile_hw // 2
+                if self._use_conv_merging:
+                    tile_hw = tile_hw // 2
+
+                # Currently, image break token insertion is not supported with M-RoPE mapping
+                if self.image_break_token is not None:
+                    raise NotImplementedError("M-RoPE is not supported with image_break_token enabled.")
+
+                class_tokens = 0 if self._drop_vision_class_token else int(self._class_token_len)
+
+                h_list: list[torch.Tensor] = []
+                w_list: list[torch.Tensor] = []
+                for i in range(tile_hw.shape[0]):
+                    H_i = int(tile_hw[i, 0].item())
+                    W_i = int(tile_hw[i, 1].item())
+
+                    # Prepend class tokens if present
+                    if class_tokens > 0:
+                        if class_tokens > 0:
+                            zeros = torch.zeros(class_tokens, dtype=pos_dtype, device=input_ids.device)
+                            h_list.append(zeros)
+                            w_list.append(zeros)
+
+                    if H_i > 0 and W_i > 0:
+                        h_idx = torch.arange(H_i, device=input_ids.device, dtype=pos_dtype).repeat_interleave(W_i)
+                        w_idx = torch.arange(W_i, device=input_ids.device, dtype=pos_dtype).repeat(H_i)
+                        h_list.append(h_idx)
+                        w_list.append(w_idx)
+
+                if len(h_list) > 0:
+                    h_flat = torch.cat(h_list, dim=0)
+                    w_flat = torch.cat(w_list, dim=0)
+                    # Assign into spatial planes at image token positions
+                    mrope_pos[1][images_mask] = h_flat
+                    mrope_pos[2][images_mask] = w_flat
+
+            final_position_ids = mrope_pos
+
         # Create the final input embedding (if this is the first language model stage).
         final_embedding = None
         if self.pre_process:
@@ -766,8 +833,6 @@ class LLaVAModel(MegatronModule):
             ]
 
             final_loss_mask[valid_batch_image_indices, valid_before_image_indices] = 0
-
-        final_position_ids = None
 
         if vision_tokens_retention_mask is not None:
             assert self.efficient_video_sampler is not None
@@ -889,7 +954,8 @@ class LLaVAModel(MegatronModule):
             batch = dict()
             if self.pre_process:
                 batch["combined_embeddings"] = combined_embeddings
-                if position_ids is not None:
+                # Only include 2D position_ids ([B,S]) in CP splitting; 3D mRoPE ids are handled in the model
+                if position_ids is not None and position_ids.dim() == 2:
                     batch["position_ids"] = position_ids
             if self.post_process and new_labels is not None:
                 batch["new_labels"] = new_labels
@@ -1163,16 +1229,7 @@ class LLaVAModel(MegatronModule):
                 image_embeddings = image_embeddings[:, :-pad_len, :]
                 imgs_sizes = imgs_sizes[:-1]
 
-            if self._pixel_shuffle:
-                if self._dynamic_resolution:
-                    image_embeddings = pixel_shuffle_dynamic_res(
-                        image_embeddings, imgs_sizes, self.vision_model.patch_dim
-                    )  # [num_tiles, img_seq_len_shuffled, h_vision_shuffled]
-                else:
-                    image_embeddings = pixel_shuffle(
-                        image_embeddings
-                    )  # [num_tiles, img_seq_len_shuffled, h_vision_shuffled]
-
+            # Apply conv-merge before pixel-shuffle to keep ConvTokenMerge input dims consistent
             if self.conv_merge is not None:
                 if self._dynamic_resolution:
                     image_embeddings = self.conv_merge(
@@ -1188,6 +1245,20 @@ class LLaVAModel(MegatronModule):
                             )
                         ],
                     )
+
+            if self._pixel_shuffle:
+                if self._dynamic_resolution:
+                    # After conv-merge, the effective patch size doubles for token layout
+                    eff_patch_dim = (
+                        self.vision_model.patch_dim * (2 if self.conv_merge is not None else 1)
+                    )
+                    image_embeddings = pixel_shuffle_dynamic_res(
+                        image_embeddings, imgs_sizes, eff_patch_dim
+                    )  # [num_tiles, img_seq_len_shuffled, h_vision_shuffled]
+                else:
+                    image_embeddings = pixel_shuffle(
+                        image_embeddings
+                    )  # [num_tiles, img_seq_len_shuffled, h_vision_shuffled]
 
             # contiguous() required as `permute` can sparsify the tensor and this breaks pipelining
             image_embeddings = image_embeddings.permute(

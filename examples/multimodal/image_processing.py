@@ -429,18 +429,26 @@ def dynamic_res_preprocess(image, min_patches=1, max_patches=128, res_step=16, f
                 target_patch_height = new_patch_height
                 target_patch_width = new_patch_width
 
-    # Rounds to nearest even number for pixel shuffle compatibility, 
+    # Round patch grid to be divisible by 2 (pixel-shuffle OR conv-merging)
+    # or by 4 when BOTH are enabled (two successive 2x reductions)
     if pixel_shuffle or conv_merging:
-        if target_patch_height % 2 != 0:
-            if (target_patch_height + 1) * target_patch_width <= max_patches:
-                target_patch_height += 1
+        required_divisor = 4 if (pixel_shuffle and conv_merging) else 2
+
+        rem_h = target_patch_height % required_divisor
+        if rem_h != 0:
+            inc_h = required_divisor - rem_h
+            if (target_patch_height + inc_h) * target_patch_width <= max_patches:
+                target_patch_height += inc_h
             else:
-                target_patch_height -= 1
-        if target_patch_width % 2 != 0:
-            if target_patch_height * (target_patch_width + 1) <= max_patches:
-                target_patch_width += 1
+                target_patch_height = max(1, target_patch_height - rem_h)
+
+        rem_w = target_patch_width % required_divisor
+        if rem_w != 0:
+            inc_w = required_divisor - rem_w
+            if target_patch_height * (target_patch_width + inc_w) <= max_patches:
+                target_patch_width += inc_w
             else:
-                target_patch_width -= 1
+                target_patch_width = max(1, target_patch_width - rem_w)
     assert target_patch_height * target_patch_width <= max_patches
 
     #TEMP: hacky way to process video same as in training
