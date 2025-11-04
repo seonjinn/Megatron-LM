@@ -165,6 +165,15 @@ class MambaStack(MegatronModule):
                 eps=self.config.layernorm_epsilon,
             )
 
+        if self.config.perform_initialization:
+            self.apply(
+                partial(
+                    _init_weights,
+                    n_layer=self.config.num_layers,
+                    initializer_range=self.config.init_method_std,
+                )
+            )
+
     def _select_layers_for_pipeline_parallel(self, layer_type_list):
         assert self.config.virtual_pipeline_model_parallel_size is None, (
             "The Mamba hybrid model does not currently support "

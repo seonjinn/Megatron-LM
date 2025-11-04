@@ -290,7 +290,8 @@ class LLaVAModel(MegatronModule):
 
                 # Apply FP8 override (FP8 has technical requirements that override user preferences)
                 if vision_transformer_config.fp8 or use_vision_backbone_fp8_arch:
-                    class_token_len = 16    # FP8 requires final sequence length to be a multiple of 16.
+                    # FP8 padding for final sequence length to be a multiple of 16 or 32.
+                    class_token_len = 32 if vision_transformer_config.fp8_recipe == "mxfp8" else 16
 
                 self.vision_model = RADIOViTModel(
                     vision_transformer_config,
