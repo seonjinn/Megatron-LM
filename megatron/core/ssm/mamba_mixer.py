@@ -313,7 +313,9 @@ class MambaMixer(MegatronModule):
                 # Inverse of softplus: https://github.com/pytorch/pytorch/issues/72759
                 inv_dt = dt + torch.log(-torch.expm1(-dt))
         else:
-            inv_dt = torch.empty(self.nheads_local_tp)
+            inv_dt = torch.empty(
+                self.nheads_local_tp, device=torch.cuda.current_device(), dtype=config.params_dtype
+            )
 
         self.dt_bias = nn.Parameter(inv_dt)
         self.dt_bias._no_reinit = True
