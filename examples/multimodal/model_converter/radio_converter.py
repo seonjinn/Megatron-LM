@@ -4,11 +4,11 @@ import os
 
 import torch
 
-def convert_radio_h(output_path, tensor_parallel_size, use_te, version):
+def convert_radio_h(output_path, tensor_parallel_size, use_te, version, torchhub_version, torchhub_source):
     device = "cuda"
 
     version = version if version is not None else 'c-radio_v2-vlm-h'
-    model = torch.hub.load('NVlabs/RADIO', 'radio_model', version=version, progress=True)
+    model = torch.hub.load(torchhub_version, 'radio_model', version=version, source=torchhub_source, progress=True)
 
     state_dict = model.state_dict()
     new_state_dicts = [{"model": dict()} for _ in range(tensor_parallel_size)]
@@ -49,6 +49,18 @@ def convert_radio_h(output_path, tensor_parallel_size, use_te, version):
                 new_name = "position_embeddings"
         elif "input_conditioner" in name:
             continue
+        elif "qradio" in name:
+            if "decoder" in name:
+                # We don't need the convert the decoder part of qradio
+                continue
+            elif "mask_token" in name:
+                # Mask tokens are only used during visual pre-training
+                continue
+            elif "tokens" in name:
+                # Tokens are learnable tokens that we need for RADIO 1D.
+                new_name = "radio_1d_tokens"
+                # Keep chunk dim as None to keep the same shape as the original tokens.
+                chunk_dim = None
         elif "blocks" in name:
             layer_idx = name.split(".")[2]
             base = f"decoder.layers.{layer_idx}"
@@ -124,11 +136,11 @@ def convert_radio_h(output_path, tensor_parallel_size, use_te, version):
     with open(os.path.join(output_path, "latest_checkpointed_iteration.txt"), "w") as f:
         f.write("1")
 
-def convert_radio_g(output_path, tensor_parallel_size, use_te, version):
+def convert_radio_g(output_path, tensor_parallel_size, use_te, version, torchhub_version, torchhub_source):
     device = "cuda"
 
     version = version if version is not None else 'radio_v2.5-g'
-    model = torch.hub.load('NVlabs/RADIO', 'radio_model', version=version, progress=True)
+    model = torch.hub.load(torchhub_version, 'radio_model', version=version, source=torchhub_source, progress=True)
 
     state_dict = model.state_dict()
     new_state_dicts = [{"model": dict()} for _ in range(tensor_parallel_size)]
@@ -276,11 +288,15 @@ def convert_radio_g(output_path, tensor_parallel_size, use_te, version):
             f.write("1")
 
 
-def convert(output_path, tensor_parallel_size, use_te, model_type, version):
+def convert(output_path, tensor_parallel_size, use_te, model_type, version, torchhub_version):
+    if os.path.exists(torchhub_version):
+        torchhub_source = "local"
+    else:
+        torchhub_source = "github"
     if model_type in ("radio_v2.5-h", "c-radio_v2-vlm-h"):
-        convert_radio_h(output_path, tensor_parallel_size, use_te, version)
+        convert_radio_h(output_path, tensor_parallel_size, use_te, version, torchhub_version, torchhub_source)
     elif model_type == "radio_v2.5-g":
-        convert_radio_g(output_path, tensor_parallel_size, use_te, version)
+        convert_radio_g(output_path, tensor_parallel_size, use_te, version, torchhub_version, torchhub_source)
     else:
         raise NotImplementedError(f"Converter doesn't support model type {model_type}")
 
@@ -306,9 +322,10 @@ python radio_converter.py --output /some/output/folder --tensor-parallel-size 4
     parser.add_argument("--use-te", action="store_true", help="Use Transformer Engine")
     parser.add_argument("--model-type", required=True, type=str, choices=['radio_v2.5-h', 'radio_v2.5-g', 'c-radio_v2-vlm-h'], help="Type of radio to load for conversion")
     parser.add_argument("--version", type=str, default=None, help="Version to pass to torch.hub.load. Can be a local path or a version RADIO on torch hub. By default use the version from the model type.")
+    parser.add_argument("--torchhub-version", type=str, default="NVlabs/RADIO", help="TorchHub repo. Can be a local path or a Github repo. By default use NVlabs/RADIO.")
 
     args = parser.parse_args()
 
-    convert(args.output, args.tensor_parallel_size, args.use_te, args.model_type, args.version)
+    convert(args.output, args.tensor_parallel_size, args.use_te, args.model_type, args.version, args.torchhub_version)
 
     print("done.")
