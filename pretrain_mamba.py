@@ -122,18 +122,12 @@ def model_provider(pre_process=True, post_process=True, vp_stage: Optional[int] 
 def get_batch(data_iterator):
     """Generate a batch."""
 
-    # TODO: this is pretty hacky, find a better way
-    if (not mpu.is_pipeline_first_stage()) and (not mpu.is_pipeline_last_stage()):
-        return None, None, None, None, None, None, None
-
-    # get batches based on the TP rank you are on
+    # TODO(duncan): Can, and should, we avoid calling this on PP ranks other than first and last
+    #    when not processing packed sequences?
     batch = get_batch_on_this_tp_rank(data_iterator)
 
     cu_seqlens = batch['cu_seqlens']
-    if cu_seqlens is None:
-        # slice batch along sequence dimension for context parallelism
-        batch = get_batch_on_this_cp_rank(batch)  # The implementation of this function is in MCore
-    else:  # Packed THD format
+    if cu_seqlens is not None:
         assert (
             cu_seqlens.dim() == 2 and cu_seqlens.shape[0] == 1
         ), "micro-batch-size must be 1 for packing"
@@ -145,6 +139,25 @@ def get_batch(data_iterator):
         # TODO(duncan): can this be kept as a 0-D tensor?
         batch['max_seqlen'] = int(max_seqlen[0].item())
 
+    if mpu.is_pipeline_first_stage():
+        total_tokens = batch['tokens'].size(1)
+    elif mpu.is_pipeline_last_stage():
+        total_tokens = batch['labels'].size(1)
+    else:
+        return (
+            None,  # tokens
+            None,  # labels
+            None,  # loss_mask
+            None,  # attention_mask
+            None,  # position_ids
+            cu_seqlens,  # Will be None if not packed
+            max_seqlen,  # Will be None if not packed
+        )
+
+    if cu_seqlens is None:
+        # slice batch along sequence dimension for context parallelism
+        batch = get_batch_on_this_cp_rank(batch)  # The implementation of this function is in MCore
+    else:  # Packed THD format
         cp_size = get_context_parallel_world_size()
         if cp_size > 1:  # slice batch along sequence dimension for context parallelism
             assert tex is not None and is_te_min_version("1.10.0"), (
@@ -154,28 +167,15 @@ def get_batch(data_iterator):
             cp_rank = get_context_parallel_rank()
             index = tex.thd_get_partitioned_indices(
                 cu_seqlens,
-                batch['tokens'].size(1),
+                total_tokens,
                 cp_size,
                 cp_rank,
             )
             for key, data in batch.items():
                 if key in {'attention_mask', 'cu_seqlens', 'max_seqlen'}:
                     continue
-                if data is None:  # On PP rank 0, labels and loss_mask will be None
-                    batch[key] = None
-                else:
+                if data is not None:  # on PP rank 0, labels and loss_mask will be None
                     batch[key] = data.index_select(1, index)
-
-        # Reshape from [B,S] to [T,1]
-        # I don't think this is needed
-        # for key, data in batch.items():
-        #     if key in {'attention_mask', 'cu_seqlens', 'max_seqlen'}:
-        #         continue
-        #     batch[key] = (
-        #         batch[key].contiguous()
-        #         .view(batch[key].shape[0] * batch[key].shape[1])
-        #         .unsqueeze(0)
-        #     )
 
     return batch.values()
 
@@ -298,14 +298,19 @@ def forward_step(data_iterator, model: MambaModel):
     return output_tensor, partial(loss_func, loss_mask)
 
 
-def is_dataset_built_on_rank(vp_stage=None):
-    ignore_virtual = True
-    if vp_stage is not None:
-        ignore_virtual = False
-    return (
-        mpu.is_pipeline_first_stage(ignore_virtual=ignore_virtual, vp_stage=vp_stage)
-        or mpu.is_pipeline_last_stage(ignore_virtual=ignore_virtual, vp_stage=vp_stage)
-    ) and mpu.get_tensor_model_parallel_rank() == 0
+def is_dataset_built_on_rank(vp_stage=None, sft=False):
+    if mpu.get_tensor_model_parallel_rank() != 0:
+        return False
+    elif sft:
+        return True
+    else:
+        ignore_virtual = True
+        if vp_stage is not None:
+            ignore_virtual = False
+        return (
+            mpu.is_pipeline_first_stage(ignore_virtual=ignore_virtual, vp_stage=vp_stage)
+            or mpu.is_pipeline_last_stage(ignore_virtual=ignore_virtual, vp_stage=vp_stage)
+        )
 
 
 def core_gpt_dataset_config_from_args(args):
@@ -367,7 +372,7 @@ def train_valid_test_datasets_provider(train_val_test_num_samples, vp_stage=None
     train_ds, valid_ds, test_ds = BlendedMegatronDatasetBuilder(
         dataset_type,
         train_val_test_num_samples,
-        partial(is_dataset_built_on_rank, vp_stage=vp_stage),
+        partial(is_dataset_built_on_rank, vp_stage=vp_stage, sft=args.sft),
         config
     ).build()
 
