@@ -14,7 +14,7 @@
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=stage1p5_nm_5p5_h_9b_cradio_parakeet_1104
+#SBATCH --job-name=stage1p5_nm_5p5_h_9b_cradio_parakeet_1106
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
@@ -40,7 +40,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS=" --special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box> <so_embedding> <so_start> <so_end> "
     DEBUG=1
 else
-    MODEL_NAME="stage1p5_nm_5p5_h_9b_cradio_parakeet_1104"
+    MODEL_NAME="stage1p5_nm_5p5_h_9b_cradio_parakeet_1106"
     SPECIAL_TOKENS=" --special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\> \<so_embedding\> \<so_start\> \<so_end\> "
 fi
 
@@ -55,7 +55,7 @@ TENSORBOARD_DIR="${OUTPUT}/tensorboard"
 
 TP=4
 
-CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/output/stage1_nm_5p5_h_9b_cradio_parakeet_1104/checkpoints"
+CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/output/stage1_nm_5p5_h_9b_cradio_parakeet_1105/checkpoints"
 
 DATA_TRAIN="${SOURCE}/examples/multimodal/avlm/data_config/stage1p5_commercial_alm_blend_nrt.yaml"
 
@@ -135,7 +135,12 @@ else
     SOUND_MODEL_TYPE="hf://nithinraok/parakeet-tdt-0.6b-v2-hf"
 fi
 
-EXTRA_ARGS+=" --recompute-granularity full --recompute-method block --recompute-num-layers 56 --recompute-vision "
+# LM (Mamba block) recompute
+EXTRA_ARGS+=" --recompute-granularity selective --recompute-modules core_attn mlp layernorm "
+# Vision (GPT block) recompute
+EXTRA_ARGS+=" --recompute-vision --recompute-method-vision block --recompute-granularity-vision full --recompute-vision-num-layers 32 "
+# Sound model.
+EXTRA_ARGS+=" --recompute-sound "
 
 OPTIONS=" \
     --use-checkpoint-args \

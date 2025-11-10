@@ -495,8 +495,7 @@ def get_sound_projection_config(config, hidden_size, enable_fusions=False):
         config.add_bias_linear = True
         config.normalization = "LayerNorm"
     elif config.language_model_type == "nemotron6-moe":
-        config.ffn_hidden_size = 16384
-        config.bias_dropout_fusion = False
+        config.ffn_hidden_size = 4096
         config.bias_activation_fusion = False
     elif config.language_model_type == "llama_nemotron_8b":
         config.ffn_hidden_size = 14336
