@@ -868,6 +868,10 @@ class LLaVAModel(MegatronModule):
 
         if final_embedding is not None:
             # Truncate if exceeding the language model's max sequence length.
+            if inference_context is not None and final_embedding.shape[1] > self._language_max_sequence_length:
+                raise ValueError(
+                    f"Final embedding shape {final_embedding.shape} exceeds language max sequence length {self._language_max_sequence_length}",
+                    "You might want to increase the value of the args decoder-seq-length, max-position-embeddings, inference-max-seq-length, and max-tokens-to-oom.")
             if final_embedding.shape[1] > self._language_max_sequence_length:
                 final_embedding = final_embedding[:, : self._language_max_sequence_length]
             # Transpose to [s,b,h] only if not using CP because CP Sharding expects seq in dim=1
