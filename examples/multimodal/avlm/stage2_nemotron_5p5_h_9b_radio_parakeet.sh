@@ -135,7 +135,13 @@ else
     SOUND_MODEL_TYPE="hf://nithinraok/parakeet-tdt-0.6b-v2-hf"
 fi
 
-EXTRA_ARGS+=" --recompute-granularity full --recompute-method block --recompute-num-layers 1 --recompute-vision --recompute-sound "
+# LM (Mamba block) recompute
+EXTRA_ARGS+=" --recompute-granularity selective --recompute-modules core_attn mlp layernorm "
+# Vision (GPT block) recompute
+EXTRA_ARGS+=" --recompute-vision --recompute-method-vision block --recompute-granularity-vision full --recompute-vision-num-layers 32 "
+# Sound model.
+EXTRA_ARGS+=" --recompute-sound "
+
 
 OPTIONS=" \
     --use-checkpoint-args \
