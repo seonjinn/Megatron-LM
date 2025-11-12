@@ -1324,6 +1324,8 @@ class MaskedTilingDynamicResolutionStrategy(ImageTilingStrategy):
         media_list: list[ImageMedia | VideoFrameMedia],
         num_tokens_available: int | None = None,
         max_num_tiles: int | None = None,
+        data_augment: bool = False,
+        tiling_augment_prob: float = 0.4,
         **kwargs,
     ) -> list[MaskedTilingDynamicResolutionParams]:
         effective_max_num_tiles = max_num_tiles if max_num_tiles is not None else self._max_num_tiles
@@ -1344,6 +1346,10 @@ class MaskedTilingDynamicResolutionStrategy(ImageTilingStrategy):
                     tiling = self._find_closest_aspect_ratio_fn(
                         aspect_ratio, target_ratios, img_size[0], img_size[1], self._tile_size
                     )
+                    
+                    # Apply tiling augmentation if enabled
+                    if data_augment and isinstance(media, ImageMedia) and random.random() < tiling_augment_prob:
+                        tiling = self.augment_tiling(tiling)
 
                     blocks = tiling[0] * tiling[1]
                     # Each tile is tile_size x tile_size
@@ -1401,6 +1407,45 @@ class MaskedTilingDynamicResolutionStrategy(ImageTilingStrategy):
                 break
 
         return params
+
+    def augment_tiling(self, tiling: tuple[int, int]) -> tuple[int, int]:
+        def num_tiles(tiling: tuple[int, int]) -> int:
+            return tiling[0] * tiling[1]
+
+        def plus_minus_one(tiling: tuple[int, int], minus_prob: float = 0.65) -> tuple[int, int]:
+            if random.random() < minus_prob:
+                # Minus one
+                if tiling[0] == 1 and tiling[1] == 1:
+                    return tiling
+                elif tiling[0] == 1:
+                    return (tiling[0], tiling[1] - 1)
+                elif tiling[1] == 1:
+                    return (tiling[0] - 1, tiling[1])
+                else:
+                    if random.random() < 0.5:
+                        return (tiling[0] - 1, tiling[1])
+                    else:
+                        return (tiling[0], tiling[1] - 1)
+            else:
+                # Plus one
+                if num_tiles(tiling) < self._max_num_tiles:
+                    tiling0 = (tiling[0] + 1, tiling[1])
+                    tiling1 = (tiling[0], tiling[1] + 1)
+                    if num_tiles(tiling0) > self._max_num_tiles and num_tiles(tiling1) > self._max_num_tiles:
+                        return tiling
+                    elif num_tiles(tiling0) > self._max_num_tiles:
+                        return tiling1
+                    elif num_tiles(tiling1) > self._max_num_tiles:
+                        return tiling0
+                    else:
+                        if random.random() < 0.5:
+                            return tiling0
+                        else:
+                            return tiling1
+                return tiling
+
+        new_tiling = plus_minus_one(tiling)
+        return new_tiling
 
     def stack(
         self, images: list[torch.Tensor]
