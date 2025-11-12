@@ -496,8 +496,25 @@ class MultiModalTaskEncoder(
             tiling_augment_prob=tiling_augment_prob
         )
 
+        # We need to compare the number of sound tokens before and after truncation
+        # If the numbers are different, raise an error to skip this sample
+        if self.sound_token_id is not None:
+            num_sound_tokens_before_truncation = (input_ids == self.sound_token_id).sum()
+        else:
+            num_sound_tokens_before_truncation = 0
+
         input_ids, target = self._truncate_to_decoder_seq_len(
             input_ids, target, image_media_params, audio_media_params
+        )
+
+        if self.sound_token_id is not None:
+            num_sound_tokens_after_truncation = (input_ids == self.sound_token_id).sum()
+        else:
+            num_sound_tokens_after_truncation = 0
+
+        assert num_sound_tokens_before_truncation == num_sound_tokens_after_truncation, (
+            f"Number of sound tokens changed after truncation: "
+            f"{num_sound_tokens_before_truncation} -> {num_sound_tokens_after_truncation}"
         )
 
         # We need to ensure that there are at least some trainable tokens in the sample.
