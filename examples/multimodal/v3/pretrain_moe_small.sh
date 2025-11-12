@@ -34,6 +34,7 @@ BATCH=$((1-$?))
 DEBUG=0
 USE_TILING=1
 USE_DYNAMIC_RES=0
+USE_IMAGE_BREAK=0
 USE_FP8=0
 
 
@@ -48,6 +49,11 @@ else
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
+WANDB_API_KEY=${WANDB_API_KEY}
+WANDB_PROJECT=${WANDB_PROJECT:-"megatron-vlm-v3"}
+WANDB_ENTITY=${WANDB_ENTITY:-"adlr"}
+WANDB_NAME=${MODEL_NAME}
+
 WORKSPACE="/lustre/fsw/portfolios/llmservice/users/${USER}/workspace"
 SOURCE=`pwd`
 OUTPUT_BASE="${WORKSPACE}/output"
@@ -56,6 +62,7 @@ OUTPUT="${OUTPUT_BASE}/${MODEL_NAME}"
 FINETUNE_DIR=${OUTPUT}/checkpoints
 LOGS_DIR="${OUTPUT}/logs"
 TENSORBOARD_DIR="${OUTPUT}/tensorboard"
+WANDB_DIR="${OUTPUT}/wandb"
 
 TP=2
 EP=4
@@ -92,6 +99,10 @@ fi
 SEQ_LEN=256
 DECODER_SEQ_LEN=16384
 
+if [ -n "${WANDB_API_KEY}" ]; then
+    EXTRA_ARGS+=" --wandb-project ${WANDB_PROJECT} --wandb-exp-name ${MODEL_NAME} --wandb-save-dir ${WANDB_DIR} --wandb-resume-same-run"
+fi
+
 if [[ $USE_TILING -eq 1 ]]; then
     EXTRA_ARGS+=" --pixel-shuffle --use-tiling --max-num-tiles 12 --use-thumbnail"
     SEQ_LEN=256
@@ -108,15 +119,16 @@ fi
 
 if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
     SEQ_LEN=12288
-
-    if [[ $BATCH -eq 0 ]]; then
-        IMAGE_BREAK_TOKEN="--image-break-token <image_break>"
-        SPECIAL_TOKENS+=" <image_break>"
-    else
-        IMAGE_BREAK_TOKEN="--image-break-token \<image_break\>"
-        SPECIAL_TOKENS+=" \<image_break\>"
+    if [[ $USE_IMAGE_BREAK -eq 1 ]]; then
+        if [[ $BATCH -eq 0 ]]; then
+            EXTRA_ARGS+=" --image-break-token <image_break>"
+            SPECIAL_TOKENS+=" <image_break>"
+        else
+            EXTRA_ARGS+=" --image-break-token \<image_break\>"
+            SPECIAL_TOKENS+=" \<image_break\>"
+        fi
     fi
-    EXTRA_ARGS+=" ${IMAGE_BREAK_TOKEN} --dynamic-resolution --dynamic-resolution-min-patches 1024 --conv-merging --allow-missing-conv-merge-checkpoint"
+    EXTRA_ARGS+=" --dynamic-resolution --dynamic-resolution-min-patches 1024 --conv-merging --allow-missing-conv-merge-checkpoint"
 fi
 
 
@@ -232,6 +244,7 @@ OPTIONS=" \
     --sequence-parallel \
 "
 
+export WANDB_ENTITY=$WANDB_ENTITY  # Not passed in via command line args, only env vars
 export NVTE_APPLY_QK_LAYER_SCALING=0
 export NVTE_ALLOW_NONDETERMINISTIC_ALGO=1
 
