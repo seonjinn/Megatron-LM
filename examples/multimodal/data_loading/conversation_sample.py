@@ -47,6 +47,16 @@ class VideoMedia(Media):
     metadata: dict[str, Union[str, int, float, bool]] | None = None
 
     @property
+    def clip_duration(self) -> float:
+        start_time = self.start_time
+        end_time = self.end_time
+        if start_time is None:
+            start_time = 0
+        if end_time is None:
+            end_time = self.metadata["video_duration"]
+        return end_time - start_time
+
+    @property
     def video_width(self) -> int:
         return self.metadata["video_width"]
 

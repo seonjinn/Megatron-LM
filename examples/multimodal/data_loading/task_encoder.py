@@ -397,8 +397,8 @@ class MultiModalTaskEncoder(
                 fragment = message.fragments[idx]
 
                 if isinstance(fragment, VideoMedia):
-                    if not allow_large_videos and fragment.value.entry.data_size / 1e6 > 160:
-                        raise ValueError(f"Video is too large: {str(fragment.value.entry.source_info.dataset_path) + '/' + fragment.value.entry.fname}")
+                    if not allow_large_videos and fragment.clip_duration > 60*10:
+                        raise ValueError(f"Video is too large: {fragment.value}")
 
                     frames, num_frames = self.video_to_frames(fragment)
                     message.fragments[idx : idx + 1] = frames
@@ -902,7 +902,7 @@ class MultiModalTaskEncoder(
                     for frame in frames:
                         frame.media.value = media_value
                 else:
-                    raise ValueError(f"Unexpected media type: {type(media_value)}. Path: {str(media.entry.source_info.dataset_path) + '/' + media.entry.fname}")
+                    raise ValueError(f"Unexpected media type: {type(media_value)}. Media: {media}")
         else:
             for media in sample.images:
                 media.media.value = media.media.value.get(sample)
