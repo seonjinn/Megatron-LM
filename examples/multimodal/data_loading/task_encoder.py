@@ -637,10 +637,10 @@ class MultiModalTaskEncoder(
         print(f"[pid={os.getpid()}] 50% percentile of lengths: {np.percentile(lengths, 50)}")
         print(f"[pid={os.getpid()}] 95% percentile of lengths: {np.percentile(lengths, 95)}")
 
-        trainable_tokens = [len([int(token) for token in sample.labels if token != IGNORE_INDEX]) for sample in samples]
-        print(f"[pid={os.getpid()}] 5% percentile of trainable tokens: {np.percentile(trainable_tokens, 5)}")
-        print(f"[pid={os.getpid()}] 50% percentile of trainable tokens: {np.percentile(trainable_tokens, 50)}")
-        print(f"[pid={os.getpid()}] 95% percentile of trainable tokens: {np.percentile(trainable_tokens, 95)}")
+        # trainable_tokens = [len([int(token) for token in sample.labels if token != IGNORE_INDEX]) for sample in samples]
+        # print(f"[pid={os.getpid()}] 5% percentile of trainable tokens: {np.percentile(trainable_tokens, 5)}")
+        # print(f"[pid={os.getpid()}] 50% percentile of trainable tokens: {np.percentile(trainable_tokens, 50)}")
+        # print(f"[pid={os.getpid()}] 95% percentile of trainable tokens: {np.percentile(trainable_tokens, 95)}")
 
         return packed_samples
 
