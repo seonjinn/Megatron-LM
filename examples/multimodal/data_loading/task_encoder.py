@@ -411,6 +411,9 @@ class MultiModalTaskEncoder(
                     if isinstance(fragment, (ImageMedia, VideoFrameMedia)):
                         # Image or a single frame
                         aggregated_num_frames.append(1)
+                    elif isinstance(fragment, str):
+                        # Text fragment
+                        pass
                     elif isinstance(fragment, bytes):
                         raise ValueError(f"Could not convert bytes to known media type: {fragment[:100]!r}")
                     else:
@@ -905,6 +908,9 @@ class MultiModalTaskEncoder(
                 elif isinstance(media_value, Image.Image):
                     for frame in frames:
                         frame.media.value = media_value
+                elif isinstance(media_value, str):
+                    # Text fragment
+                    pass
                 elif isinstance(media_value, bytes):
                     raise ValueError(f"Unable to parse bytes as known media type: {media_value[:100]!r}")
                 else:
