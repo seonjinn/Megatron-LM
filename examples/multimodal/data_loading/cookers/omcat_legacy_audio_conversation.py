@@ -179,22 +179,28 @@ def cook_omcat_legacy_conversation_monolithic(
                 #     assert isinstance(frag.value, AVDecoder), f"AudioMedia must be an AVDecoder, got {type(frag.value)}"
                 # elif isinstance(frag, VideoFrameMedia):
                 #     assert isinstance(frag.value, AVDecoder), f"VideoFrameMedia must be an AVDecoder, got {type(frag.value)}"
+                if frag.metadata is None:
+                    try:
+                        frag.metadata = primary.get_media_metadata(f".{frag.value}")
+                    except:
+                        pass
 
-                if isinstance(frag, ImageMedia):
-                    frag.metadata = dict(
-                        width=val.width, height=val.height, format=val.format, mode=val.mode
-                    )
-                elif isinstance(frag, (VideoMedia, AudioMedia, VideoFrameMedia)):
-                    frag.metadata = dataclasses.asdict(val.get_metadata())
+                if frag.metadata is None:
+                    if isinstance(frag, ImageMedia):
+                        frag.metadata = dict(
+                            width=val.width, height=val.height, format=val.format, mode=val.mode
+                        )
+                    elif isinstance(frag, (VideoMedia, AudioMedia, VideoFrameMedia)):
+                        frag.metadata = dataclasses.asdict(val.get_metadata())
 
-                    # if isinstance(frag, ImageMedia):
-                    #     assert isinstance(frag.value, Image.Image), f"ImageMedia must be an Image.Image, got {type(frag.value)}"
-                    # elif isinstance(frag, VideoMedia):
-                    #     assert isinstance(frag.value, AVDecoder), f"VideoMedia must be an AVDecoder, got {type(frag.value)}"
-                    # elif isinstance(frag, AudioMedia):
-                    #     assert isinstance(frag.value, AVDecoder), f"AudioMedia must be an AVDecoder, got {type(frag.value)}"
-                    # elif isinstance(frag, VideoFrameMedia):
-                    #     assert isinstance(frag.value, AVDecoder), f"VideoFrameMedia must be an AVDecoder, got {type(frag.value)}"
+                        # if isinstance(frag, ImageMedia):
+                        #     assert isinstance(frag.value, Image.Image), f"ImageMedia must be an Image.Image, got {type(frag.value)}"
+                        # elif isinstance(frag, VideoMedia):
+                        #     assert isinstance(frag.value, AVDecoder), f"VideoMedia must be an AVDecoder, got {type(frag.value)}"
+                        # elif isinstance(frag, AudioMedia):
+                        #     assert isinstance(frag.value, AVDecoder), f"AudioMedia must be an AVDecoder, got {type(frag.value)}"
+                        # elif isinstance(frag, VideoFrameMedia):
+                        #     assert isinstance(frag.value, AVDecoder), f"VideoFrameMedia must be an AVDecoder, got {type(frag.value)}"
 
             elif isinstance(frag, str):
                 # No source

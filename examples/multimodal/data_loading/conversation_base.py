@@ -200,6 +200,7 @@ def conversation_post_processing(
     conversation: list,
     sample: dict,
     cache: CachePool,
+    primary: FileStore,
     media_source: FileStore | None = None,
     process_conversation_in_place: bool = True,
     **media_sources: FileStore,
@@ -218,6 +219,12 @@ def conversation_post_processing(
                             ConversationSample.__MEDIA_TYPES_REVERSE__[type(frag)],
                             sample[frag.value]
                         )
+                        if frag.metadata is None:
+                            # Try to fetch the metadata directly from the primary dataset
+                            try:
+                                frag.metadata = primary.get_media_metadata(f".{frag.value}")
+                            except:
+                                pass
                         try:
                             frag.value = cache.to_cache(val, sample['__key__'] + f".{frag.value}")
                         except:
@@ -246,6 +253,7 @@ def conversation_post_processing(
 
                         if not media_path_properly_defined_in_metadataset:
                             if os.path.isfile(media_path):
+                                print(f"Warning: Media file {media_path} of {primary.get_path()} is an absolute path, loading is slow.")
                                 val = media_path
                             else:
                                 raise ValueError(f"Cannot find media file {media_path} in {sample}")
@@ -257,7 +265,13 @@ def conversation_post_processing(
                                 # if the media path is absolute path and cannot be found locally,
                                 # then use the basename and rely on the aux path in the metadataset
                                 m_path = media_basename
-                            val = cache.get(current_media_source, m_path)
+                            if frag.metadata is None:
+                                try:
+                                    frag.metadata = current_media_source.get_media_metadata(m_path)
+                                except:
+                                    pass
+                            if frag.metadata is None:
+                                val = cache.get(current_media_source, m_path)
                             frag.value = cache.get_lazy(current_media_source, m_path)
                         else:
                             # load and cache the media file on the fly
@@ -280,15 +294,16 @@ def conversation_post_processing(
                 else:
                     raise NotImplementedError(f"Postprocessing on media type {type(frag.value)} hasn't been implemented yet.")
 
-                if isinstance(frag, ImageMedia):
-                    frag.metadata = dict(
-                        width=val.width, height=val.height, format=val.format, mode=val.mode
-                    )
-                elif isinstance(frag, (VideoMedia, AudioMedia, VideoFrameMedia)):
-                    frag_val = val
-                    if isinstance(frag_val, bytes):
-                        frag_val = AVDecoder(io.BytesIO(frag_val))
-                    frag.metadata = dataclasses.asdict(frag_val.get_metadata())
+                if frag.metadata is None:
+                    if isinstance(frag, ImageMedia):
+                        frag.metadata = dict(
+                            width=val.width, height=val.height, format=val.format, mode=val.mode
+                        )
+                    elif isinstance(frag, (VideoMedia, AudioMedia, VideoFrameMedia)):
+                        frag_val = val
+                        if isinstance(frag_val, bytes):
+                            frag_val = AVDecoder(io.BytesIO(frag_val))
+                        frag.metadata = dataclasses.asdict(frag_val.get_metadata())
 
             elif isinstance(frag, str):
                 # No source

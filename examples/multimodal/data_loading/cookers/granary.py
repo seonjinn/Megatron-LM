@@ -77,16 +77,18 @@ def cook_granary_english_webdataset(
         conversation,
         sample,
         cache,
+        primary=primary,
         media_source=media_source,
         media_sources=media_sources,
     )
 
 
 @stateless
-@cooker(need_cache=True)
+@cooker(need_primary=True, need_cache=True)
 def cook_granary_english_jsonl(
     sample: dict,
     cache: CachePool,
+    primary: FileStore,
     media_source: FileStore | None = None,
     **media_sources: FileStore,
 ) -> ConversationSample:
@@ -133,6 +135,7 @@ def cook_granary_english_jsonl(
         conversation,
         sample,
         cache,
+        primary=primary,
         media_source=media_source,
         media_sources=media_sources,
     )

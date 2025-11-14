@@ -88,10 +88,11 @@ _re_clean_path = re.compile(r"(?:^\./|/\.(?=/))")
 
 
 @stateless
-@cooker(need_cache=True)
+@cooker(need_primary=True, need_cache=True)
 def cook_audio_conversation(
     sample: dict,
     cache: CachePool,
+    primary: FileStore,
     media_source: FileStore | None = None,
     **media_sources: FileStore,
 ) -> ConversationSample:
@@ -135,7 +136,13 @@ def cook_audio_conversation(
             if isinstance(frag, (ImageMedia, VideoMedia, AudioMedia, VideoFrameMedia)):
                 if media_source is not None:
                     # print(f"Cooking {frag.value!r} from {media_source.get_path()!r}")
-                    val = cache.get(media_source, frag.value)
+                    if frag.metadata is None:
+                        try:
+                            frag.metadata = media_source.get_media_metadata(frag.value)
+                        except:
+                            pass
+                    if frag.metadata is None:
+                        val = cache.get(media_source, frag.value)
                     frag.value = cache.get_lazy(media_source, frag.value)
                     # frag.value = media_source.get(frag.value, cs)
                     # if isinstance(frag, ImageMedia):
@@ -153,28 +160,35 @@ def cook_audio_conversation(
                         if path.startswith(prefix):
                             # print(f"Cooking {frag.value!r} from {media_sources[aux_key].get_path()!r}")
                             # Matching the prefix, so use that media source
-                            val = cache.get(media_sources[aux_key], path[len(prefix):])
+                            if frag.metadata is None:
+                                try:
+                                    frag.metadata = media_sources[aux_key].get_media_metadata(path[len(prefix):])
+                                except:
+                                    pass
+                            if frag.metadata is None:
+                                val = cache.get(media_sources[aux_key], path[len(prefix):])
                             frag.value = cache.get_lazy(media_sources[aux_key], path[len(prefix):])
                             # frag.value = media_sources[aux_key].get(path[len(prefix):], cs)
                             break
                     else:
                         raise ValueError(f"No prefix for {path!r} in {cs.__subflavors__['aux_data_prefixes']} for {cs.__sources__}")
 
-                if isinstance(frag, ImageMedia):
-                    frag.metadata = dict(
-                        width=val.width, height=val.height, format=val.format, mode=val.mode
-                    )
-                elif isinstance(frag, (VideoMedia, AudioMedia, VideoFrameMedia)):
-                    frag.metadata = dataclasses.asdict(val.get_metadata())
+                if frag.metadata is None:
+                    if isinstance(frag, ImageMedia):
+                        frag.metadata = dict(
+                            width=val.width, height=val.height, format=val.format, mode=val.mode
+                        )
+                    elif isinstance(frag, (VideoMedia, AudioMedia, VideoFrameMedia)):
+                        frag.metadata = dataclasses.asdict(val.get_metadata())
 
-                    # if isinstance(frag, ImageMedia):
-                    #     assert isinstance(frag.value, Image.Image), f"ImageMedia must be an Image.Image, got {type(frag.value)}"
-                    # elif isinstance(frag, VideoMedia):
-                    #     assert isinstance(frag.value, AVDecoder), f"VideoMedia must be an AVDecoder, got {type(frag.value)}"
-                    # elif isinstance(frag, AudioMedia):
-                    #     assert isinstance(frag.value, AVDecoder), f"AudioMedia must be an AVDecoder, got {type(frag.value)}"
-                    # elif isinstance(frag, VideoFrameMedia):
-                    #     assert isinstance(frag.value, AVDecoder), f"VideoFrameMedia must be an AVDecoder, got {type(frag.value)}"
+                        # if isinstance(frag, ImageMedia):
+                        #     assert isinstance(frag.value, Image.Image), f"ImageMedia must be an Image.Image, got {type(frag.value)}"
+                        # elif isinstance(frag, VideoMedia):
+                        #     assert isinstance(frag.value, AVDecoder), f"VideoMedia must be an AVDecoder, got {type(frag.value)}"
+                        # elif isinstance(frag, AudioMedia):
+                        #     assert isinstance(frag.value, AVDecoder), f"AudioMedia must be an AVDecoder, got {type(frag.value)}"
+                        # elif isinstance(frag, VideoFrameMedia):
+                        #     assert isinstance(frag.value, AVDecoder), f"VideoFrameMedia must be an AVDecoder, got {type(frag.value)}"
 
             elif isinstance(frag, str):
                 # No source

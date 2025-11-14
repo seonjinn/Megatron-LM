@@ -33,6 +33,11 @@ def cook_conversation(
     for msg in cs.conversation:
         for frag in msg.fragments:
             if isinstance(frag, (ImageMedia, VideoMedia, AudioMedia, VideoFrameMedia)):
+                if frag.metadata is None:
+                    try:
+                        frag.metadata = media_source.get_media_metadata(frag.value)
+                    except:
+                        pass
                 frag.value = cache.get_lazy(media_source, frag.value)
             elif isinstance(frag, str):
                 # No source
@@ -135,16 +140,18 @@ def cook_general_conversations_webdataset(
         conversation,
         sample,
         cache,
+        primary=primary,
         media_source=media_source,
         media_sources=media_sources,
     )
 
 
 @stateless
-@cooker(need_cache=True)
+@cooker(need_primary=True, need_cache=True)
 def cook_general_conversations_jsonl(
     sample: dict,
     cache: CachePool,
+    primary: FileStore,
     media_source: FileStore | None = None,
     **media_sources: FileStore,
 ) -> ConversationSample:
@@ -189,6 +196,7 @@ def cook_general_conversations_jsonl(
         conversation,
         sample,
         cache,
+        primary=primary,
         media_source=media_source,
         media_sources=media_sources,
     )
