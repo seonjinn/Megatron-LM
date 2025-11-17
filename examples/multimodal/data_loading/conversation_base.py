@@ -222,7 +222,7 @@ def conversation_post_processing(
                         if frag.metadata is None:
                             # Try to fetch the metadata directly from the primary dataset
                             try:
-                                frag.metadata = primary.get_media_metadata(f".{frag.value}")
+                                frag.metadata = dataclasses.asdict(primary.get_media_metadata(f".{frag.value}"))
                             except:
                                 pass
                         try:
@@ -267,7 +267,7 @@ def conversation_post_processing(
                                 m_path = media_basename
                             if frag.metadata is None:
                                 try:
-                                    frag.metadata = current_media_source.get_media_metadata(m_path)
+                                    frag.metadata = dataclasses.asdict(current_media_source.get_media_metadata(m_path))
                                 except:
                                     pass
                             if frag.metadata is None:

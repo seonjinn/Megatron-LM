@@ -1,5 +1,5 @@
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
-from dataclasses import asdict
+import dataclasses
 from collections import defaultdict
 
 from megatron.energon import CachePool, FileStore, basic_sample_keys, cooker, stateless
@@ -35,7 +35,7 @@ def cook_conversation(
             if isinstance(frag, (ImageMedia, VideoMedia, AudioMedia, VideoFrameMedia)):
                 if frag.metadata is None:
                     try:
-                        frag.metadata = media_source.get_media_metadata(frag.value)
+                        frag.metadata = dataclasses.asdict(media_source.get_media_metadata(frag.value))
                     except:
                         pass
                 frag.value = cache.get_lazy(media_source, frag.value)

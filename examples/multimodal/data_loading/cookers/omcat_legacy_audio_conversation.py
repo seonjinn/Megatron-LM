@@ -181,7 +181,7 @@ def cook_omcat_legacy_conversation_monolithic(
                 #     assert isinstance(frag.value, AVDecoder), f"VideoFrameMedia must be an AVDecoder, got {type(frag.value)}"
                 if frag.metadata is None:
                     try:
-                        frag.metadata = primary.get_media_metadata(f".{frag.value}")
+                        frag.metadata = dataclasses.asdict(primary.get_media_metadata(f".{frag.value}"))
                     except:
                         pass
 

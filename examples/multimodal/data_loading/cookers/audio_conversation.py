@@ -138,7 +138,7 @@ def cook_audio_conversation(
                     # print(f"Cooking {frag.value!r} from {media_source.get_path()!r}")
                     if frag.metadata is None:
                         try:
-                            frag.metadata = media_source.get_media_metadata(frag.value)
+                            frag.metadata = dataclasses.asdict(media_source.get_media_metadata(frag.value))
                         except:
                             pass
                     if frag.metadata is None:
@@ -162,7 +162,7 @@ def cook_audio_conversation(
                             # Matching the prefix, so use that media source
                             if frag.metadata is None:
                                 try:
-                                    frag.metadata = media_sources[aux_key].get_media_metadata(path[len(prefix):])
+                                    frag.metadata = dataclasses.asdict(media_sources[aux_key].get_media_metadata(path[len(prefix):]))
                                 except:
                                     pass
                             if frag.metadata is None:
