@@ -1,4 +1,5 @@
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+from collections import defaultdict
 import dataclasses
 import re
 
@@ -114,6 +115,8 @@ def convert_message(sample: dict, msg: dict, tags_appeared: set) -> Message:
     )
 
 
+warn_about_slow_media_loading = defaultdict(lambda: True)
+
 _re_clean_path = re.compile(r"(?:^\./|/\.(?=/))")
 
 
@@ -125,7 +128,7 @@ def cook_omcat_legacy_conversation_monolithic(
     primary: FileStore,
 ) -> ConversationSample:
     """Loads audio datasets that have the media in the same shards (monolithic) with legacy format."""
-
+    global warn_about_slow_media_loading
     data = sample["json"]
 
     for tag in tags_mapping_sample_to_allowed:
@@ -182,8 +185,10 @@ def cook_omcat_legacy_conversation_monolithic(
                 if frag.metadata is None:
                     try:
                         frag.metadata = dataclasses.asdict(primary.get_media_metadata(f".{frag.value}"))
-                    except:
-                        pass
+                    except Exception as e:
+                        if warn_about_slow_media_loading[primary.get_path()]:
+                            print(f"WARNING: Error getting media metadata for [{primary.get_path()}] {frag.value}: {e}")
+                            warn_about_slow_media_loading[primary.get_path()] = False
 
                 if frag.metadata is None:
                     if isinstance(frag, ImageMedia):

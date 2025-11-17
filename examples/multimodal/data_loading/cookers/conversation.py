@@ -19,6 +19,7 @@ from ..conversation_base import (
     conversation_post_processing,
 )
 
+warn_about_slow_media_loading = defaultdict(lambda: True)
 
 @stateless
 @cooker(need_cache=True)
@@ -27,6 +28,8 @@ def cook_conversation(
     cache: CachePool,
     media_source: FileStore,
 ) -> ConversationSample:
+    global warn_about_slow_media_loading
+
     data = sample["json"]
     cs = ConversationSample.from_json(data, **basic_sample_keys(sample))
 
@@ -36,8 +39,10 @@ def cook_conversation(
                 if frag.metadata is None:
                     try:
                         frag.metadata = dataclasses.asdict(media_source.get_media_metadata(frag.value))
-                    except:
-                        pass
+                    except Exception as e:
+                        if warn_about_slow_media_loading[media_source.get_path()]:
+                            print(f"WARNING: Error getting media metadata for [{media_source.get_path()}] {frag.value}: {e}")
+                            warn_about_slow_media_loading[media_source.get_path()] = False
                 frag.value = cache.get_lazy(media_source, frag.value)
             elif isinstance(frag, str):
                 # No source

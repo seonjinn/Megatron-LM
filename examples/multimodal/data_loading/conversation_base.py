@@ -196,6 +196,9 @@ def conversation_convert_message(
     ) 
 
 
+warn_about_slow_media_loading = defaultdict(lambda: True)
+
+
 def conversation_post_processing(
     conversation: list,
     sample: dict,
@@ -205,6 +208,7 @@ def conversation_post_processing(
     process_conversation_in_place: bool = True,
     **media_sources: FileStore,
 ) -> ConversationSample:
+    global warn_about_slow_media_loading
     
     messages = conversation
     if not process_conversation_in_place:
@@ -223,8 +227,10 @@ def conversation_post_processing(
                             # Try to fetch the metadata directly from the primary dataset
                             try:
                                 frag.metadata = dataclasses.asdict(primary.get_media_metadata(f".{frag.value}"))
-                            except:
-                                pass
+                            except Exception as e:
+                                if warn_about_slow_media_loading[primary.get_path()]:
+                                    print(f"WARNING: Error getting media metadata for [{primary.get_path()}] {f'.{frag.value}'}: {e}")
+                                    warn_about_slow_media_loading[primary.get_path()] = False
                         try:
                             frag.value = cache.to_cache(val, sample['__key__'] + f".{frag.value}")
                         except:
@@ -268,8 +274,10 @@ def conversation_post_processing(
                             if frag.metadata is None:
                                 try:
                                     frag.metadata = dataclasses.asdict(current_media_source.get_media_metadata(m_path))
-                                except:
-                                    pass
+                                except Exception as e:
+                                    if warn_about_slow_media_loading[current_media_source.get_path()]:
+                                        print(f"WARNING: Error getting media metadata for [{current_media_source.get_path()}] {m_path}: {e}")
+                                        warn_about_slow_media_loading[current_media_source.get_path()] = False
                             if frag.metadata is None:
                                 val = cache.get(current_media_source, m_path)
                             frag.value = cache.get_lazy(current_media_source, m_path)

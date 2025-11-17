@@ -1,4 +1,5 @@
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+from collections import defaultdict
 import dataclasses
 from pathlib import Path
 import re
@@ -18,6 +19,7 @@ from ..conversation_sample import (
 )
 
 
+warn_about_slow_media_loading = defaultdict(lambda: True)
 
 allowed_tags = ["image", "video", "sound", "video-sound"]
 
@@ -97,6 +99,7 @@ def cook_audio_conversation(
     **media_sources: FileStore,
 ) -> ConversationSample:
     """Loads datasets that have the media in separate files (polylithic)."""
+    global warn_about_slow_media_loading
 
     data = sample["json"]
 
@@ -139,8 +142,10 @@ def cook_audio_conversation(
                     if frag.metadata is None:
                         try:
                             frag.metadata = dataclasses.asdict(media_source.get_media_metadata(frag.value))
-                        except:
-                            pass
+                        except Exception as e:
+                            if warn_about_slow_media_loading[media_source.get_path()]:
+                                print(f"WARNING: Error getting media metadata for [{media_source.get_path()}] {frag.value}: {e}")
+                                warn_about_slow_media_loading[media_source.get_path()] = False
                     if frag.metadata is None:
                         val = cache.get(media_source, frag.value)
                     frag.value = cache.get_lazy(media_source, frag.value)
@@ -163,8 +168,10 @@ def cook_audio_conversation(
                             if frag.metadata is None:
                                 try:
                                     frag.metadata = dataclasses.asdict(media_sources[aux_key].get_media_metadata(path[len(prefix):]))
-                                except:
-                                    pass
+                                except Exception as e:
+                                    if warn_about_slow_media_loading:
+                                        print(f"WARNING: Error getting media metadata for {path[len(prefix):]}: {e}")
+                                        warn_about_slow_media_loading = False
                             if frag.metadata is None:
                                 val = cache.get(media_sources[aux_key], path[len(prefix):])
                             frag.value = cache.get_lazy(media_sources[aux_key], path[len(prefix):])
