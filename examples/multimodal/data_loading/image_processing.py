@@ -712,6 +712,169 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
         
         return [self._transform(img) for img in processed_images]
 
+    def process_media(
+        self,
+        media: ImageMedia | VideoFrameMedia,
+        num_tokens_available: int,
+    ) -> DynamicResolutionParams:
+        """Process a single media item and return its parameters.
+        
+        Args:
+            media: The media item to process
+            num_tokens_available: Number of tokens available for this media
+            
+        Returns:
+            DynamicResolutionParams for the media
+        """
+        current_num_tokens_available = num_tokens_available
+        if isinstance(media, ImageMedia):
+            orig_width, orig_height = media.width, media.height
+        elif isinstance(media, VideoFrameMedia):
+            orig_width, orig_height = media.video_width, media.video_height
+            # current_num_tokens_available = 1024 #TEMP: hack for video
+        else:
+            raise ValueError(f"Unsupported media type: {type(media)}")
+
+        closest_patch_height = round(orig_height / self._patch_size + 0.5)
+        closest_patch_width = round(orig_width / self._patch_size + 0.5)
+        patches = closest_patch_height * closest_patch_width
+
+        factor = min(math.sqrt(current_num_tokens_available / patches), self._factor_max)
+        target_patch_height = math.floor(factor * closest_patch_height)
+        target_patch_width = math.floor(factor * closest_patch_width)
+
+        # We only consider self._min_num_patches if it is greater than current_num_tokens_available.
+        if current_num_tokens_available > self._min_num_patches and target_patch_height * target_patch_width < self._min_num_patches:
+            up_factor = math.sqrt(
+                self._min_num_patches / (target_patch_height * target_patch_width)
+            )
+            target_patch_height = math.ceil(up_factor * target_patch_height)
+            target_patch_width = math.ceil(up_factor * target_patch_width)
+
+        if (
+            self._min_side is not None
+            and min(target_patch_width, target_patch_height) * self._patch_size
+            < self._min_side
+        ):
+            if target_patch_width <= target_patch_height:
+                up_factor = self._min_side / (target_patch_width * self._patch_size)
+                new_patch_height = math.ceil(up_factor * target_patch_height)
+                new_patch_width = math.ceil(up_factor * target_patch_width)
+
+                if new_patch_height * new_patch_width > current_num_tokens_available:
+                    # If only one side can be min_side, make as big as possible at native aspect ratio while staying below max_patches
+                    if (
+                        max(current_num_tokens_available // new_patch_width, 1)
+                        * self._patch_size
+                        < self._min_side
+                    ):
+                        up_factor = math.sqrt(
+                            current_num_tokens_available
+                            / (target_patch_height * target_patch_width)
+                        )
+                        target_patch_height = math.floor(
+                            up_factor * target_patch_height
+                        )
+                        target_patch_width = math.floor(
+                            up_factor * target_patch_width
+                        )
+                    target_patch_width = new_patch_width
+                    target_patch_height = max(
+                        current_num_tokens_available // new_patch_width, 1
+                    )
+                else:
+                    target_patch_height = new_patch_height
+                    target_patch_width = new_patch_width
+            else:
+                up_factor = self._min_side / (
+                    target_patch_height * self._patch_size
+                )
+                new_patch_height = math.ceil(up_factor * target_patch_height)
+                new_patch_width = math.ceil(up_factor * target_patch_width)
+
+                if new_patch_height * new_patch_width > current_num_tokens_available:
+                    # If only one side can be min_side, make as big as possible at native aspect ratio while staying below max_patches
+                    if (
+                        max(current_num_tokens_available // new_patch_height, 1)
+                        * self._patch_size
+                        < self._min_side
+                    ):
+                        up_factor = math.sqrt(
+                            current_num_tokens_available
+                            / (target_patch_height * target_patch_width)
+                        )
+                        target_patch_height = math.floor(
+                            up_factor * target_patch_height
+                        )
+                        target_patch_width = math.floor(
+                            up_factor * target_patch_width
+                        )
+                    else:
+                        target_patch_height = new_patch_height
+                        target_patch_width = max(
+                            current_num_tokens_available // new_patch_height, 1
+                        )
+                else:
+                    target_patch_height = new_patch_height
+                    target_patch_width = new_patch_width
+
+        # Round patch grid to be divisible by 2 (pixel-shuffle OR conv-merging)
+        # or by 4 when BOTH are enabled (two successive 2x reductions)
+        if self._pixel_shuffle or self._conv_merging:
+            required_divisor = 4 if (self._pixel_shuffle and self._conv_merging) else 2
+
+            rem_h = target_patch_height % required_divisor
+            if rem_h != 0:
+                inc_h = required_divisor - rem_h
+                if (target_patch_height + inc_h) * target_patch_width <= current_num_tokens_available:
+                    target_patch_height += inc_h
+                else:
+                    target_patch_height = max(required_divisor, target_patch_height - rem_h)
+
+            rem_w = target_patch_width % required_divisor
+            if rem_w != 0:
+                inc_w = required_divisor - rem_w
+                if target_patch_height * (target_patch_width + inc_w) <= current_num_tokens_available:
+                    target_patch_width += inc_w
+                else:
+                    target_patch_width = max(required_divisor, target_patch_width - rem_w)
+        assert target_patch_height * target_patch_width <= current_num_tokens_available, f"current_num_tokens_available {current_num_tokens_available} patches {patches} math.sqrt(current_num_tokens_available / patches) {math.sqrt(current_num_tokens_available / patches)} self._factor_max {self._factor_max} self._min_num_patches {self._min_num_patches}"
+
+        #TEMP: hack for video
+        if isinstance(media, VideoFrameMedia):
+            target_patch_width = 32
+            target_patch_height = 32
+
+        # Calculate embeddings for the main dynamic resolution image
+        num_embeddings = self._get_num_embeddings(
+            target_patch_width * self._patch_size,
+            target_patch_height * self._patch_size,
+        )
+
+        token_count = target_patch_width * target_patch_height
+        
+        # Add thumbnail embeddings if enabled and image area is below threshold
+        num_tiles = 1  # Base dynamic resolution image
+        if self._use_thumbnail:
+            # Calculate areas
+            resized_area = (target_patch_width * self._patch_size) * (target_patch_height * self._patch_size)
+            thumbnail_area = self._thumbnail_size * self._thumbnail_size
+            area_ratio = resized_area / thumbnail_area
+            
+            # Only add thumbnail if resized image area is less than threshold % of thumbnail area
+            if area_ratio < self._thumbnail_area_threshold:
+                num_tiles += 1  # Add 1 for thumbnail
+                # Add embeddings for thumbnail (thumbnail_size x thumbnail_size)
+                num_embeddings += self._get_num_embeddings(self._thumbnail_size, self._thumbnail_size)
+                token_count += self._thumbnail_size // self._patch_size * self._thumbnail_size // self._patch_size
+
+        return DynamicResolutionParams(
+            media=media,
+            num_tiles=num_tiles,
+            num_embeddings=num_embeddings,
+            patch_size=(target_patch_width, target_patch_height),
+        ), token_count
+
     def compute_params(
         self,
         media_list: list[ImageMedia | VideoFrameMedia],
@@ -719,156 +882,52 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
         max_num_tiles: int | None = None,
         **kwargs,
     ) -> list[ImageTilingParams]:
-        params = []
-        for media in media_list:
-            current_num_tokens_available = num_tokens_available
-            if isinstance(media, ImageMedia):
-                orig_width, orig_height = media.width, media.height
-            elif isinstance(media, VideoFrameMedia):
-                orig_width, orig_height = media.video_width, media.video_height
-                # current_num_tokens_available = 1024 #TEMP: hack for video
-            else:
-                raise ValueError(f"Unsupported media type: {type(media)}")
-
-            closest_patch_height = round(orig_height / self._patch_size + 0.5)
-            closest_patch_width = round(orig_width / self._patch_size + 0.5)
-            patches = closest_patch_height * closest_patch_width
-
-            factor = min(math.sqrt(current_num_tokens_available / patches), self._factor_max)
-            target_patch_height = math.floor(factor * closest_patch_height)
-            target_patch_width = math.floor(factor * closest_patch_width)
-
-            # We only consider self._min_num_patches if it is greater than current_num_tokens_available.
-            if current_num_tokens_available > self._min_num_patches and target_patch_height * target_patch_width < self._min_num_patches:
-                up_factor = math.sqrt(
-                    self._min_num_patches / (target_patch_height * target_patch_width)
-                )
-                target_patch_height = math.ceil(up_factor * target_patch_height)
-                target_patch_width = math.ceil(up_factor * target_patch_width)
-
-            if (
-                self._min_side is not None
-                and min(target_patch_width, target_patch_height) * self._patch_size
-                < self._min_side
-            ):
-                if target_patch_width <= target_patch_height:
-                    up_factor = self._min_side / (target_patch_width * self._patch_size)
-                    new_patch_height = math.ceil(up_factor * target_patch_height)
-                    new_patch_width = math.ceil(up_factor * target_patch_width)
-
-                    if new_patch_height * new_patch_width > current_num_tokens_available:
-                        # If only one side can be min_side, make as big as possible at native aspect ratio while staying below max_patches
-                        if (
-                            max(current_num_tokens_available // new_patch_width, 1)
-                            * self._patch_size
-                            < self._min_side
-                        ):
-                            up_factor = math.sqrt(
-                                current_num_tokens_available
-                                / (target_patch_height * target_patch_width)
-                            )
-                            target_patch_height = math.floor(
-                                up_factor * target_patch_height
-                            )
-                            target_patch_width = math.floor(
-                                up_factor * target_patch_width
-                            )
-                        target_patch_width = new_patch_width
-                        target_patch_height = max(
-                            current_num_tokens_available // new_patch_width, 1
-                        )
-                    else:
-                        target_patch_height = new_patch_height
-                        target_patch_width = new_patch_width
-                else:
-                    up_factor = self._min_side / (
-                        target_patch_height * self._patch_size
-                    )
-                    new_patch_height = math.ceil(up_factor * target_patch_height)
-                    new_patch_width = math.ceil(up_factor * target_patch_width)
-
-                    if new_patch_height * new_patch_width > current_num_tokens_available:
-                        # If only one side can be min_side, make as big as possible at native aspect ratio while staying below max_patches
-                        if (
-                            max(current_num_tokens_available // new_patch_height, 1)
-                            * self._patch_size
-                            < self._min_side
-                        ):
-                            up_factor = math.sqrt(
-                                current_num_tokens_available
-                                / (target_patch_height * target_patch_width)
-                            )
-                            target_patch_height = math.floor(
-                                up_factor * target_patch_height
-                            )
-                            target_patch_width = math.floor(
-                                up_factor * target_patch_width
-                            )
-                        else:
-                            target_patch_height = new_patch_height
-                            target_patch_width = max(
-                                current_num_tokens_available // new_patch_height, 1
-                            )
-                    else:
-                        target_patch_height = new_patch_height
-                        target_patch_width = new_patch_width
-
-            # Round patch grid to be divisible by 2 (pixel-shuffle OR conv-merging)
-            # or by 4 when BOTH are enabled (two successive 2x reductions)
-            if self._pixel_shuffle or self._conv_merging:
-                required_divisor = 4 if (self._pixel_shuffle and self._conv_merging) else 2
-
-                rem_h = target_patch_height % required_divisor
-                if rem_h != 0:
-                    inc_h = required_divisor - rem_h
-                    if (target_patch_height + inc_h) * target_patch_width <= current_num_tokens_available:
-                        target_patch_height += inc_h
-                    else:
-                        target_patch_height = max(required_divisor, target_patch_height - rem_h)
-
-                rem_w = target_patch_width % required_divisor
-                if rem_w != 0:
-                    inc_w = required_divisor - rem_w
-                    if target_patch_height * (target_patch_width + inc_w) <= current_num_tokens_available:
-                        target_patch_width += inc_w
-                    else:
-                        target_patch_width = max(required_divisor, target_patch_width - rem_w)
-            assert target_patch_height * target_patch_width <= current_num_tokens_available, f"current_num_tokens_available {current_num_tokens_available} patches {patches} math.sqrt(current_num_tokens_available / patches) {math.sqrt(current_num_tokens_available / patches)} self._factor_max {self._factor_max} self._min_num_patches {self._min_num_patches}"
-
-            #TEMP: hack for video
-            if isinstance(media, VideoFrameMedia):
-                target_patch_width = 32
-                target_patch_height = 32
-
-            # Calculate embeddings for the main dynamic resolution image
-            num_embeddings = self._get_num_embeddings(
-                target_patch_width * self._patch_size,
-                target_patch_height * self._patch_size,
-            )
+        """Compute parameters for all media with iterative token budgeting.
+        
+        Args:
+            media_list: List of media items to process
+            num_tokens_available: Total number of tokens available across all media
+            max_num_tiles: Maximum number of tiles (unused in this implementation)
             
-            # Add thumbnail embeddings if enabled and image area is below threshold
-            num_tiles = 1  # Base dynamic resolution image
-            if self._use_thumbnail:
-                # Calculate areas
-                resized_area = (target_patch_width * self._patch_size) * (target_patch_height * self._patch_size)
-                thumbnail_area = self._thumbnail_size * self._thumbnail_size
-                area_ratio = resized_area / thumbnail_area
-                
-                # Only add thumbnail if resized image area is less than threshold % of thumbnail area
-                if area_ratio < self._thumbnail_area_threshold:
-                    num_tiles += 1  # Add 1 for thumbnail
-                    # Add embeddings for thumbnail (thumbnail_size x thumbnail_size)
-                    num_embeddings += self._get_num_embeddings(self._thumbnail_size, self._thumbnail_size)
-
-            params.append(
-                DynamicResolutionParams(
-                    media=media,
-                    num_tiles=num_tiles,
-                    num_embeddings=num_embeddings,
-                    patch_size=(target_patch_width, target_patch_height),
-                )
-            )
-        return params
+        Returns:
+            List of ImageTilingParams for each media item
+        """
+        max_iterations = 3
+        num_tokens_available_per_media = [num_tokens_available] * len(media_list)
+        
+        for iteration in range(max_iterations):
+            # Step 1: Process each media with current token budget
+            params = []
+            token_counts = []
+            
+            for media, tokens_for_media in zip(media_list, num_tokens_available_per_media):
+                param, token_count = self.process_media(media, tokens_for_media)
+                params.append(param)
+                token_counts.append(token_count)
+            
+            # Step 2: Check if total tokens is within budget
+            total_tokens = sum(token_counts)
+            
+            if total_tokens <= num_tokens_available:
+                # We're within budget, return the params
+                return params
+            
+            # Step 3: We're over budget, need to scale down
+            # Calculate scaling factor to get under budget
+            scaling_factor = num_tokens_available / total_tokens
+            
+            # Recalculate token budgets for each media based on scaling
+            # Each media gets a proportional share of the total budget
+            num_tokens_available_per_media = [
+                max(self._min_num_patches, int(token_count * scaling_factor))
+                for token_count in token_counts
+            ]
+            
+        # Failed to fit within budget after max_iterations
+        raise ValueError(
+            f"Failed to fit media within token budget after {max_iterations} iterations. "
+            f"Total tokens: {total_tokens}, Available: {num_tokens_available}. Final token counts: {token_counts}"
+        )
 
     def stack(
         self, images: list[torch.Tensor]
