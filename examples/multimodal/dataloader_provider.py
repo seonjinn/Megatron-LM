@@ -2,7 +2,7 @@
 import os
 
 import torch
-from dataset_helpers import TaskEncoder, print_error_handler
+from dataset_helpers import TaskEncoder
 from data_loading.task_encoder import MultiModalTaskEncoder
 
 from megatron.core import parallel_state
@@ -22,6 +22,7 @@ from megatron.energon import (
     get_train_dataset,
     get_val_datasets,
 )
+from megatron.energon.errors import log_exception
 from megatron.training import get_args
 from megatron.training.checkpointing import get_checkpoint_name
 
@@ -51,7 +52,6 @@ def datasets_provider(task_encoder,worker_config=None):
         shuffle_buffer_size=100,
         worker_config=worker_config,
         packing_buffer_size=args.packing_buffer_size,
-        handler=print_error_handler,
     )
 
     val_datasets_without_source_datasets = None
@@ -66,7 +66,6 @@ def datasets_provider(task_encoder,worker_config=None):
             # TODO: Currently disabled for val, there is no non-packed val dataset yet.
             # packing_buffer_size=args.packing_buffer_size,
             packing_buffer_size=None,
-            handler=print_error_handler,
         )
         val_datasets_without_source_datasets = [
             # Limit the dataset to eval_iters * num_microbatches
@@ -139,6 +138,8 @@ def train_valid_test_dataloaders_provider(train_val_test_num_samples, task_encod
         worker_debug_path=worker_debug_path,
         worker_log_level=worker_log_level,
         seed_offset=args.dataloader_seed,
+        global_error_handler=log_exception,
+        restore_error_handler=log_exception,
     )
     train_ds, valid_ds1, test_ds = datasets_provider(task_encoder, worker_config)
 

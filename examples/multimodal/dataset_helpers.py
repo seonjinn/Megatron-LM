@@ -1098,11 +1098,3 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
             max_length=max_length,
             num_tiles=[n for s in samples for n in s.num_tiles],
         )
-
-
-def print_error_handler(exc: Exception, key: Optional[str]):
-    print(
-        f"The following exception occurred in the dataloader for sample {key} and is skipped",
-        file=sys.stderr,
-    )
-    traceback.print_exc()
