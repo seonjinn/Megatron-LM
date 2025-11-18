@@ -229,7 +229,7 @@ def conversation_post_processing(
                                 frag.metadata = dataclasses.asdict(primary.get_media_metadata(f".{frag.value}"))
                             except Exception as e:
                                 if warn_about_slow_media_loading[primary.get_path()]:
-                                    print(f"WARNING: Error getting media metadata for [{primary.get_path()}] {f'.{frag.value}'}: {e}")
+                                    print(f"WARNING: Dataset {primary.get_path()} not prepared with media metadata, slow metadata for .{frag.value}: {e!r}")
                                     warn_about_slow_media_loading[primary.get_path()] = False
                         try:
                             frag.value = cache.to_cache(val, sample['__key__'] + f".{frag.value}")
@@ -276,7 +276,7 @@ def conversation_post_processing(
                                     frag.metadata = dataclasses.asdict(current_media_source.get_media_metadata(m_path))
                                 except Exception as e:
                                     if warn_about_slow_media_loading[current_media_source.get_path()]:
-                                        print(f"WARNING: Error getting media metadata for [{current_media_source.get_path()}] {m_path}: {e}")
+                                        print(f"WARNING: Dataset {current_media_source.get_path()} not prepared with media metadata, slow metadata for {m_path}: {e!r}")
                                         warn_about_slow_media_loading[current_media_source.get_path()] = False
                             if frag.metadata is None:
                                 val = cache.get(current_media_source, m_path)

@@ -187,7 +187,7 @@ def cook_omcat_legacy_conversation_monolithic(
                         frag.metadata = dataclasses.asdict(primary.get_media_metadata(f".{frag.value}"))
                     except Exception as e:
                         if warn_about_slow_media_loading[primary.get_path()]:
-                            print(f"WARNING: Error getting media metadata for [{primary.get_path()}] {frag.value}: {e}")
+                            print(f"WARNING: Dataset {primary.get_path()} not prepared with media metadata, slow metadata for .{frag.value}: {e!r}")
                             warn_about_slow_media_loading[primary.get_path()] = False
 
                 if frag.metadata is None:

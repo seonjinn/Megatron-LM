@@ -144,7 +144,7 @@ def cook_audio_conversation(
                             frag.metadata = dataclasses.asdict(media_source.get_media_metadata(frag.value))
                         except Exception as e:
                             if warn_about_slow_media_loading[media_source.get_path()]:
-                                print(f"WARNING: Error getting media metadata for [{media_source.get_path()}] {frag.value}: {e}")
+                                print(f"WARNING: Dataset {media_source.get_path()} not prepared with media metadata, slow metadata for {frag.value}: {e!r}")
                                 warn_about_slow_media_loading[media_source.get_path()] = False
                     if frag.metadata is None:
                         val = cache.get(media_source, frag.value)
@@ -169,9 +169,9 @@ def cook_audio_conversation(
                                 try:
                                     frag.metadata = dataclasses.asdict(media_sources[aux_key].get_media_metadata(path[len(prefix):]))
                                 except Exception as e:
-                                    if warn_about_slow_media_loading:
-                                        print(f"WARNING: Error getting media metadata for {path[len(prefix):]}: {e}")
-                                        warn_about_slow_media_loading = False
+                                    if warn_about_slow_media_loading[media_sources[aux_key].get_path()]:
+                                        print(f"WARNING: Dataset {media_sources[aux_key].get_path()} not prepared with media metadata, slow metadata for {path[len(prefix):]}: {e!r}")
+                                        warn_about_slow_media_loading[media_sources[aux_key].get_path()] = False
                             if frag.metadata is None:
                                 val = cache.get(media_sources[aux_key], path[len(prefix):])
                             frag.value = cache.get_lazy(media_sources[aux_key], path[len(prefix):])
