@@ -90,7 +90,7 @@ if [[ $DEBUG -eq 1 ]]; then
     NUM_GPU=8
 else
     MBZ=1
-    BZ=128
+    BZ=32
     NW=4
     AD=0.0
     HD=0.0
