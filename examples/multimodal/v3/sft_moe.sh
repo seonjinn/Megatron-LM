@@ -90,7 +90,7 @@ if [[ $DEBUG -eq 1 ]]; then
     NUM_GPU=8
 else
     MBZ=1
-    BZ=32
+    BZ=128
     NW=4
     AD=0.0
     HD=0.0
@@ -215,7 +215,7 @@ OPTIONS=" \
     --global-batch-size ${BZ} \
     --train-full-dataset \
     --lr-warmup-fraction 0.1 \
-    --lr 4e-5 \
+    --lr 2e-4 \
     --min-lr 0.0 \
     --lr-decay-style cosine \
     --weight-decay 0.05 \
