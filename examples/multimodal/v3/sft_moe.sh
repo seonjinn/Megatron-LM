@@ -10,7 +10,7 @@
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=sft_moe_1029
+#SBATCH --job-name=sft_moe_dyres_noimgbrk_pixelshuffle_1119
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
@@ -34,9 +34,10 @@ which srun
 BATCH=$((1-$?))
 
 DEBUG=0
-USE_TILING=1
-USE_DYNAMIC_RES=0
-USE_IMAGE_BREAK=0
+USE_TILING=0
+USE_DYNAMIC_RES=1
+USE_IMAGE_BREAK=0   # Only used if USE_DYNAMIC_RES is 1.
+USE_CONV_MERGE=0    # Only used if USE_DYNAMIC_RES is 1.
 USE_FP8=0
 
 
@@ -47,7 +48,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="sft_moe_1029"
+    MODEL_NAME="sft_moe_dyres_noimgbrk_pixelshuffle_1119"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -68,13 +69,13 @@ WANDB_DIR="${OUTPUT}/wandb"
 
 TP=2
 EP=32
-CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/output/pretrain_moe_1024/checkpoints"
+CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/amalasanjayd/workspace/output/pretrain_moe_dyres_noimgbrk_pixelshuffle_1117/checkpoints"
 
 # New tokenizer 10/20.
 TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--Nemotron-Nano-3-30B-A3.5B-dev-1016/snapshots/bb271274159f07461e919379311e32802e5ec36b/"
 TOKENIZER_PROMPT_FORMAT="nemotron6-moe"
 
-DATA_TRAIN="/lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/users/amalasanjayd/eagle_recipe/online_packing/eagle_sft_v13.51.yaml"
+DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/eagle_sft_v13.52.no.text.yaml"
 
 if [[ $DEBUG -eq 1 ]]; then
     MBZ=1
@@ -130,7 +131,12 @@ if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
             SPECIAL_TOKENS+=" \<image_break\>"
         fi
     fi
-    EXTRA_ARGS+=" --dynamic-resolution --dynamic-resolution-min-patches 1024 --conv-merging --allow-missing-conv-merge-checkpoint"
+    if [[ $USE_CONV_MERGE -eq 1 ]]; then
+        EXTRA_ARGS+=" --conv-merging --allow-missing-conv-merge-checkpoint"
+    else
+        EXTRA_ARGS+=" --pixel-shuffle"
+    fi
+    EXTRA_ARGS+=" --dynamic-resolution --dynamic-resolution-min-patches 1024"
 fi
 
 
