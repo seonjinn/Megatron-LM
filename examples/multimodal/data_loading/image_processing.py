@@ -867,14 +867,14 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
                 num_embeddings += self._get_num_embeddings(self._thumbnail_size, self._thumbnail_size)
                 token_count += self._thumbnail_size // self._patch_size * self._thumbnail_size // self._patch_size
 
-        assert num_embeddings <= current_num_tokens_available, f"current_num_tokens_available {current_num_tokens_available} patches {patches} math.sqrt(current_num_tokens_available / patches) {math.sqrt(current_num_tokens_available / patches)} self._factor_max {self._factor_max} self._min_num_patches {self._min_num_patches}"
+        assert token_count <= current_num_tokens_available, f"current_num_tokens_available {current_num_tokens_available} patches {patches} math.sqrt(current_num_tokens_available / patches) {math.sqrt(current_num_tokens_available / patches)} self._factor_max {self._factor_max} self._min_num_patches {self._min_num_patches}"
 
         return DynamicResolutionParams(
             media=media,
             num_tiles=num_tiles,
             num_embeddings=num_embeddings,
             patch_size=(target_patch_width, target_patch_height),
-        )
+        ), token_count
 
     def compute_params(
         self,
@@ -894,6 +894,7 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
             List of ImageTilingParams for each media item
         """
         max_iterations = 3
+        num_tokens_available = num_tokens_available * (4 if self._pixel_shuffle else 1) * (4 if self._conv_merging else 1)
         num_tokens_available_per_media = [num_tokens_available] * len(media_list)
         
         for iteration in range(max_iterations):
@@ -902,9 +903,9 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
             token_counts = []
             
             for media, tokens_for_media in zip(media_list, num_tokens_available_per_media):
-                param = self.process_media(media, tokens_for_media)
+                param, token_count = self.process_media(media, tokens_for_media)
                 params.append(param)
-                token_counts.append(param.num_embeddings)
+                token_counts.append(token_count)
             
             # Step 2: Check if total tokens is within budget
             total_tokens = sum(token_counts)
