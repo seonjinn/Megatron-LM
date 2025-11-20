@@ -1,15 +1,25 @@
 # Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
 
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+import logging
+from typing import Callable, List, Optional
 
 import torch
 
-from .optimizer import ChainedOptimizer, MegatronOptimizer, Float16OptimizerWithFloat16Params
-from .optimizer_config import OptimizerConfig
-from .clip_grads import clip_grad_by_total_norm_fp32, count_zeros_fp32, get_grad_norm_fp32
-
+from megatron.core.dist_checkpointing.dict_utils import nested_values
+from megatron.core.dist_checkpointing.mapping import LocalNonpersistentObject, ShardedStateDict
 from megatron.core.process_groups_config import ProcessGroupCollection
 from megatron.core.utils import get_pg_rank, get_pg_size
+
+from .clip_grads import count_zeros_fp32, get_grad_norm_fp32
+from .optimizer import (
+    ChainedOptimizer,
+    Float16OptimizerWithFloat16Params,
+    FP32Optimizer,
+    MegatronOptimizer,
+)
+from .optimizer_config import OptimizerConfig
+
+logger = logging.getLogger(__name__)
 
 
 class LayerWiseDistributedOptimizer(ChainedOptimizer):
@@ -142,6 +152,61 @@ class LayerWiseDistributedOptimizer(ChainedOptimizer):
         self.broadcast_params()
 
         return update_successful, grad_norm, num_zeros_in_grad
+
+    def load_state_dict(self, state_dict):
+        if len(self.chained_optimizers) == 1:
+            wrapped_state_dict = {1: state_dict}
+        else:
+            wrapped_state_dict = state_dict
+        for sd in wrapped_state_dict.values():
+            if 'fp32_from_fp16_params' in sd and isinstance(sd['fp32_from_fp16_params'], dict):
+                logger.info('[layerwise] converting fp32_from_fp16_params from dict to list')
+                sd['fp32_from_fp16_params'] = [
+                    v for k, v in sorted(sd['fp32_from_fp16_params'].items())
+                ]
+        super().load_state_dict(state_dict)
+
+    def sharded_state_dict(
+        self, model_sharded_state_dict: ShardedStateDict, is_loading: bool = False, **kwargs
+    ):
+        sharded_state_dict = super().sharded_state_dict(
+            model_sharded_state_dict, is_loading, **kwargs
+        )
+
+        for sh_base in nested_values(sharded_state_dict):
+            if hasattr(sh_base, 'replica_id'):
+                assert (
+                    isinstance(sh_base.replica_id, int) or len(sh_base.replica_id) == 3
+                ), f'Expected replica_id as int or (PP, TP, DP), got: {sh_base}'
+                sh_base.replica_id = (
+                    0 if isinstance(sh_base.replica_id, int) else (*sh_base.replica_id[:2], 0)
+                )
+
+        if len(self.chained_optimizers) == 1:
+            wrapped_sharded_state_dict = {1: sharded_state_dict}
+        else:
+            wrapped_sharded_state_dict = sharded_state_dict
+
+        for sd in wrapped_sharded_state_dict.values():
+            if 'fp32_from_fp16_params' in sd:
+                sd['fp32_from_fp16_params'][:] = [
+                    group if group else LocalNonpersistentObject(group)
+                    for group in sd['fp32_from_fp16_params']
+                ]
+                sd['fp32_from_fp16_params'] = {
+                    i: v for i, v in enumerate(sd['fp32_from_fp16_params'])
+                }
+            if not sd['optimizer']['state']:
+                sd['optimizer']['state'] = LocalNonpersistentObject(sd['optimizer']['state'])
+            for i, group in enumerate(sd['optimizer']['param_groups']):
+                local_params = group.pop('params')
+                group['params'] = bool(local_params.unwrap())
+                all_rank_groups = [None for _ in range(torch.distributed.get_world_size())]
+                torch.distributed.all_gather_object(all_rank_groups, group)
+                nonempty_rank_group = next((g for g in all_rank_groups if g['params']), group)
+                nonempty_rank_group['params'] = local_params
+                sd['optimizer']['param_groups'][i] = nonempty_rank_group
+        return sharded_state_dict
 
     def save_state_dict_to_file(self, filename: str) -> None:
         """Save the parameter state of the optimizer.
