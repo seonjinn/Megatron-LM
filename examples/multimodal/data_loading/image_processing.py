@@ -873,7 +873,7 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
             num_tiles=num_tiles,
             num_embeddings=num_embeddings,
             patch_size=(target_patch_width, target_patch_height),
-        ), token_count
+        ), num_embeddings
 
     def compute_params(
         self,

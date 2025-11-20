@@ -496,6 +496,7 @@ class MultiModalTaskEncoder(
         )
 
         max_image_token_allowed = self.args.decoder_seq_length - len(input_ids) - 4
+        assert max_image_token_allowed >= 0, f"Max image token allowed is negative: {max_image_token_allowed} with decoder seq length {self.args.decoder_seq_length} and input ids length {len(input_ids)}"
         image_media_params = self.image_tiling_strategy.compute_params(
             image_media,
             max_image_token_allowed,
