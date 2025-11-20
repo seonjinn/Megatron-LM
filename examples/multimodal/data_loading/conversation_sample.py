@@ -33,6 +33,14 @@ class ImageMedia(Media):
     def height(self) -> int:
         return self.metadata["height"]
 
+    @width.setter
+    def width(self, value):
+        self.metadata["width"] = value
+
+    @height.setter
+    def height(self, value):
+        self.metadata["height"] = value
+
 
 @edataclass
 class VideoMedia(Media):
