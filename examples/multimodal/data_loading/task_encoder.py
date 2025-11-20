@@ -496,7 +496,6 @@ class MultiModalTaskEncoder(
         )
 
         max_image_token_allowed = self.args.decoder_seq_length - len(input_ids) - 4
-        assert max_image_token_allowed >= 0, f"Max image token allowed is negative: {max_image_token_allowed} with decoder seq length {self.args.decoder_seq_length} and input ids length {len(input_ids)}"
         image_media_params = self.image_tiling_strategy.compute_params(
             image_media,
             max_image_token_allowed,
@@ -555,7 +554,11 @@ class MultiModalTaskEncoder(
 
         # Transform the images
         image_tiles = []
-        for media in sample.images:
+        for media_idx, media in enumerate(sample.images):
+            # Debug: Save images if DEBUG environment variable is set to 1
+            if os.environ.get("DEBUG_DATALOADER", "0") == "1":
+                self._debug_save_image(media, media_idx, sample.__key__, data_augment)
+            
             image_tiles.extend(self.image_tiling_strategy.apply_params(media, data_augment=data_augment))
 
         sound_clips = []
@@ -589,6 +592,90 @@ class MultiModalTaskEncoder(
             num_sound_clips=num_sound_clips,
             samples_seen=torch.tensor(1, dtype=torch.int32),
         )
+
+    def _debug_save_image(self, media, media_idx, sample_key, data_augment):
+        """Save debug images with original and transformed sizes."""
+        import matplotlib.pyplot as plt
+        import matplotlib.patches as patches
+        from datetime import datetime
+        
+        # Create debug directory if it doesn't exist
+        debug_dir = os.path.join(os.getcwd(), "debug_images")
+        os.makedirs(debug_dir, exist_ok=True)
+        
+        # Get original image and size
+        original_image = media.media.value
+        
+        if isinstance(media.media, ImageMedia):
+            orig_width, orig_height = media.media.width, media.media.height
+        elif isinstance(media.media, VideoFrameMedia):
+            orig_width, orig_height = media.media.video_width, media.media.video_height
+        else:
+            return  # Skip if not a supported media type
+        
+        # Apply the transformation to get the processed tiles
+        transformed_tiles = self.image_tiling_strategy.apply_params(media, data_augment=data_augment)
+        
+        # Get the normalization stats for denormalization
+        from .image_processing import pixel_statistics
+        pixel_mean, pixel_std = pixel_statistics.get(
+            self.args.vision_model_type, 
+            ([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
+        )
+        
+        # Convert lists to tensors for denormalization
+        mean = torch.tensor(pixel_mean).view(3, 1, 1)
+        std = torch.tensor(pixel_std).view(3, 1, 1)
+        
+        # Create a figure with subplots
+        num_tiles = len(transformed_tiles)
+        fig, axes = plt.subplots(1, num_tiles + 1, figsize=(5 * (num_tiles + 1), 5))
+        if num_tiles == 0:
+            axes = [axes]
+        
+        # Plot original image
+        ax = axes[0] if num_tiles > 0 else axes
+        ax.imshow(original_image)
+        ax.set_title(f"Original Image\nSize: {orig_width}x{orig_height}", fontsize=10, fontweight='bold')
+        ax.axis('off')
+        
+        # Plot transformed tiles
+        for tile_idx, tile_tensor in enumerate(transformed_tiles):
+            ax = axes[tile_idx + 1]
+            
+            # Denormalize the tensor: img = img * std + mean
+            denormalized = tile_tensor * std + mean
+            
+            # Clamp to [0, 1] range
+            denormalized = torch.clamp(denormalized, 0, 1)
+            
+            # Convert to numpy and transpose from CxHxW to HxWxC
+            tile_image = denormalized.permute(1, 2, 0).cpu().numpy()
+            
+            # Get the new size
+            new_height, new_width = tile_image.shape[:2]
+            
+            ax.imshow(tile_image)
+            ax.set_title(
+                f"Tile {tile_idx + 1}/{num_tiles}\n"
+                f"Size: {tile_tensor.shape[2]}x{tile_tensor.shape[1]}\n"
+                f"Original: {orig_width}x{orig_height}",
+                fontsize=9,
+                fontweight='bold'
+            )
+            ax.axis('off')
+        
+        # Create a unique filename with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        safe_key = str(sample_key).replace("/", "_").replace("\\", "_")[:50]
+        filename = f"{safe_key}_media{media_idx}_{timestamp}.png"
+        filepath = os.path.join(debug_dir, filename)
+
+        print(f"[DEBUG] Saved debug image to: {filepath}")
+        
+        plt.tight_layout()
+        plt.savefig(filepath, dpi=150, bbox_inches='tight')
+        plt.close(fig)
 
     @stateless(restore_seeds=True)
     def select_samples_to_pack(

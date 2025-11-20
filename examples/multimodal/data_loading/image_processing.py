@@ -893,11 +893,16 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
         Returns:
             List of ImageTilingParams for each media item
         """
-        max_iterations = 3
         num_tokens_available = num_tokens_available * (4 if self._pixel_shuffle else 1) * (4 if self._conv_merging else 1)
+        # When the number of available token is too small, allow self._min_num_patches per media and
+        # let the sample be truncated.
+        num_tokens_available = max(num_tokens_available, self._min_num_patches * len(media_list))
+
         num_tokens_available_per_media = [num_tokens_available] * len(media_list)
-        
-        for iteration in range(max_iterations):
+
+        # In theory this could be a while True loop, but in case the process_media method slightly
+        # changes, I want to make sure we don't get stuck in an infinite loop.
+        for _ in range(10):
             # Step 1: Process each media with current token budget
             params = []
             token_counts = []
@@ -920,16 +925,20 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
             
             # Recalculate token budgets for each media based on scaling
             # Each media gets a proportional share of the total budget
-            num_tokens_available_per_media = [
+            scaled_down_num_tokens_available_per_media = [
                 max(self._min_num_patches, int(token_count * scaling_factor))
                 for token_count in token_counts
             ]
-            
-        # Failed to fit within budget after max_iterations
-        raise ValueError(
-            f"Failed to fit media within token budget after {max_iterations} iterations. "
-            f"Total tokens: {total_tokens}, Available: {num_tokens_available}. Final token counts: {token_counts}"
-        )
+            scaled_down = any([
+                scaled_down_num_tokens_available_per_media[i] < num_tokens_available_per_media[i]
+                for i in range(len(num_tokens_available_per_media))])
+            # If there was not scaling down, we're stuck just use min_num_patches per media, else
+            # try with the scaled down num_tokens_available_per_media.
+            if not scaled_down:
+                num_tokens_available_per_media = [self._min_num_patches] * len(media_list)
+            else:
+                num_tokens_available_per_media = scaled_down_num_tokens_available_per_media
+        return params
 
     def stack(
         self, images: list[torch.Tensor]
