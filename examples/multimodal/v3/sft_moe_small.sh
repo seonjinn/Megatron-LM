@@ -32,8 +32,10 @@ which srun
 BATCH=$((1-$?))
 
 DEBUG=0
-USE_TILING=1
-USE_DYNAMIC_RES=0
+USE_TILING=0
+USE_DYNAMIC_RES=1
+USE_IMAGE_BREAK=0   # Only used if USE_DYNAMIC_RES is 1.
+USE_CONV_MERGE=0    # Only used if USE_DYNAMIC_RES is 1.
 USE_FP8=0
 
 
@@ -108,15 +110,21 @@ fi
 
 if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
     SEQ_LEN=12288
-
-    if [[ $BATCH -eq 0 ]]; then
-        IMAGE_BREAK_TOKEN="--image-break-token <image_break>"
-        SPECIAL_TOKENS+=" <image_break>"
-    else
-        IMAGE_BREAK_TOKEN="--image-break-token \<image_break\>"
-        SPECIAL_TOKENS+=" \<image_break\>"
+    if [[ $USE_IMAGE_BREAK -eq 1 ]]; then
+        if [[ $BATCH -eq 0 ]]; then
+            EXTRA_ARGS+=" --image-break-token <image_break>"
+            SPECIAL_TOKENS+=" <image_break>"
+        else
+            EXTRA_ARGS+=" --image-break-token \<image_break\>"
+            SPECIAL_TOKENS+=" \<image_break\>"
+        fi
     fi
-    EXTRA_ARGS+=" ${IMAGE_BREAK_TOKEN} --dynamic-resolution --dynamic-resolution-min-patches 1024 --conv-merging --allow-missing-conv-merge-checkpoint"
+    if [[ $USE_CONV_MERGE -eq 1 ]]; then
+        EXTRA_ARGS+=" --conv-merging --allow-missing-conv-merge-checkpoint"
+    else
+        EXTRA_ARGS+=" --pixel-shuffle"
+    fi
+    EXTRA_ARGS+=" --dynamic-resolution --dynamic-resolution-min-patches 1024"
 fi
 
 EXTRA_ARGS+=" --packing-buffer-size 128 --packing-seq-length ${DECODER_SEQ_LEN} --packing-knapsack-algorithm balanced_greedy_knapsack "
