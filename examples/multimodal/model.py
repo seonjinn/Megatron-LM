@@ -310,6 +310,7 @@ def model_provider(
         freeze_vision_projection=getattr(args, "freeze_vision_projection", False),
         freeze_sound_model=getattr(args, "freeze_sound_model", False),
         freeze_sound_projection=getattr(args, "freeze_sound_projection", False),
+        unfreeze_router=getattr(args, "unfreeze_router", False),
     )
 
     return model

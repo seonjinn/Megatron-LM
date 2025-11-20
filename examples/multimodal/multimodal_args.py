@@ -232,4 +232,7 @@ def add_multimodal_extra_args(parser):
     group.add_argument(
         "--only-keep-samples-with-img", action="store_true", default=False, help="Discard samples that do not have an image."
     )
+    group.add_argument(
+        "--unfreeze-router", action="store_true", default=False, help="Unfreeze MoE router weights."
+    )
     return parser

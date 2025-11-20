@@ -475,7 +475,7 @@ class LLaVAModel(MegatronModule):
 
     def freeze(
         self, freeze_language_model: bool, freeze_vision_model: bool, freeze_vision_projection: bool,
-        freeze_sound_model: bool, freeze_sound_projection: bool
+        freeze_sound_model: bool, freeze_sound_projection: bool, unfreeze_router: bool
     ):
         """Freeze model modules.
 
@@ -499,7 +499,10 @@ class LLaVAModel(MegatronModule):
             modules.append(self.sound_projection)
 
         for module in modules:
-            for param in module.parameters():
+            for name, param in module.named_parameters():
+                # Option to leave router weights unfrozen even if LLM is frozen.
+                if unfreeze_router and "router" in name:
+                    continue
                 param.requires_grad = False
 
     def _preprocess_data(
