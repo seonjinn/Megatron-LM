@@ -28,6 +28,7 @@ from megatron.core.models.vision.multimodal_projector import MultimodalProjector
 from megatron.core.models.vision.radio import RADIOViTModel
 from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.parallel_state import get_context_parallel_group
+from megatron.core.parallel_state import get_tensor_model_parallel_rank
 from megatron.core.transformer import MegatronModule
 from megatron.core.transformer.spec_utils import ModuleSpec
 from megatron.core.transformer.transformer_config import TransformerConfig
@@ -523,6 +524,7 @@ class LLaVAModel(MegatronModule):
         packed_seq_params: Optional[PackedSeqParams] = None,
         vision_tokens_retention_mask: Optional[torch.Tensor] = None,
         sound_embeddings: Optional[torch.Tensor] = None,
+        sound_embeddings_len: Optional[torch.Tensor] = None,
         sound_timestamps: Optional[torch.Tensor] = None,
     ):
         """Preprocess input data before input to language model.
@@ -790,16 +792,21 @@ class LLaVAModel(MegatronModule):
 
             sound_mask = input_ids == self.sound_token_index
             # Replace with sound embeddings where needed
-
             if sound_mask is not False and sound_mask.any():
-                # Get the positions where sounds should be placed in the NEW position space
-                # (after accounting for image token expansion)
+                # Get the positions where sounds should be placed
                 sound_batch_indices, sound_token_indices = torch.where(sound_mask)
                 # Map the original token positions to the new (expanded) positions
                 sound_new_position_ids = new_position_ids[sound_batch_indices, sound_token_indices]
-                final_embedding[sound_batch_indices, sound_new_position_ids] = sound_embeddings.permute(1, 0, 2).reshape(-1, embed_dim)
+                # Remove the padding from sound embeddings
+                if self.sound_model.config.sound_pad_to_clip_duration:  # ignore lengths, feed padding tokens to the LLM
+                    sound_embeddings = sound_embeddings.permute(1, 0, 2).reshape(-1, embed_dim)
+                else:
+                    sound_embeddings = torch.cat([se[:sel] for se, sel in zip(sound_embeddings.permute(1, 0, 2), sound_embeddings_len)], dim=0)
+                final_embedding[sound_batch_indices, sound_new_position_ids] = sound_embeddings.reshape(-1, embed_dim)
             else:
                 # TODO: Sound encoder from HF/Nemo can hang with text-only samples. Find a better way to handle this.
+                # Note(pzelasko): This should actually be fixed with dynamic shape MR since it disabled NCCL sync of max 
+                #                 observed seq lengths on DP ranks in FastConformer; but I have no way to test it at the moment.
                 if sound_embeddings.shape[0] > 0:
                     assert sound_embeddings.shape[:2] == torch.Size([2, 1]) and sound_timestamps.shape == torch.Size([0])
                     final_embedding[:1, :1, :1] += 0 * sound_embeddings[:1, :1, :1]
@@ -1361,12 +1368,14 @@ class LLaVAModel(MegatronModule):
 
         if use_inference_kv_cache:
             sound_embeddings = None
+            sound_embeddings_len = None
         elif self.add_encoder and not has_sounds:
             device = sound_clips.device if sound_clips is not None else "cuda"
             dtype = sound_clips.dtype if sound_clips is not None else torch.float32
             sound_embeddings = torch.tensor([], dtype=dtype, device=device).reshape(
                 0, 0, 0
             )
+            sound_embeddings_len = torch.tensor([], dtype=torch.long, device=device).reshape(0)
         elif self.add_encoder and has_sounds:
             sound_pad = None
             is_parakeet = "parakeet" in self.sound_model.config.sound_model_type.lower()
@@ -1379,7 +1388,26 @@ class LLaVAModel(MegatronModule):
                     assert sound_pad == sound_pad2, "something went wrong with splitting to context parallel ranks"
 
             if is_parakeet:
-                sound_embeddings = self.sound_model(sound_clips, sound_length) # [num_clips, sound_seq_len, h_sound]
+                # note(pzelasko): With dynamic shapes we are getting much larger batch sizes (throughput ~2.5x) but still dominated by padding.
+                #                 Unless bucketing is enabled, set this to 2 or higher to avoid OOMs.
+                #                 Bucketing via '--packing-knapsack-algorithm bucketing_greedy_knapsack' resolves this issue and increases throughput another ~1.65x.
+                if (split_factor := self.sound_model.config.sound_batch_split) <= 1:
+                    sound_embeddings, sound_embeddings_len = self.sound_model(sound_clips, sound_length) # [num_clips, sound_seq_len, h_sound]
+                else:
+                    sound_clips = torch.chunk(sound_clips, split_factor, dim=0)
+                    sound_length = torch.chunk(sound_length, split_factor, dim=0)
+                    se = []
+                    sel = []
+                    for sound_clip, sound_length in zip(sound_clips, sound_length):
+                        maxlen = sound_length.max()
+                        sound_clip = sound_clip[:, :maxlen]  # save time and memory
+                        sound_embeddings, sound_embeddings_len = self.sound_model(sound_clip, sound_length) # [num_clips, sound_seq_len, h_sound]
+                        se.append(sound_embeddings)
+                        sel.append(sound_embeddings_len)
+                    maxlen = max([emb.shape[1] for emb in se])
+                    se = [torch.cat([emb, torch.zeros(emb.shape[0], maxlen - emb.shape[1], emb.shape[2], device=emb.device, dtype=emb.dtype)], dim=1) for emb in se]
+                    sound_embeddings = torch.cat(se, dim=0)
+                    sound_embeddings_len = torch.cat(sel, dim=0)
             else:
                 sound_embeddings = self.sound_model(sound_clips) # [num_clips, sound_seq_len, h_sound]
 
@@ -1438,6 +1466,7 @@ class LLaVAModel(MegatronModule):
             packed_seq_params=packed_seq_params,
             vision_tokens_retention_mask=image_tokens_retention_mask,
             sound_embeddings=sound_embeddings,
+            sound_embeddings_len=sound_embeddings_len,
             sound_timestamps=sound_timestamps,
         )  # [combined_seq_len, b, h_language], [b, combined_seq_len], [b, combined_seq_len]
 

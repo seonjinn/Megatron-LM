@@ -55,11 +55,13 @@ from .image_processing import (
 )
 from .knapsacks import (
     balanced_greedy_knapsack,
+    bucketing_greedy_knapsack,
     greedy_knapsack,
 )
 
 
 AUDIO_MAX_DURATION_SECONDS = 900
+AUDIO_MIN_DURATION_SECONDS = 0.1
 
 
 def _clean_think(match: re.Match) -> str:
@@ -262,6 +264,8 @@ class MultiModalTaskEncoder(
             self.packing_knapsack_algorithm = greedy_knapsack
         elif self.args.packing_knapsack_algorithm == "balanced_greedy_knapsack":
             self.packing_knapsack_algorithm = balanced_greedy_knapsack
+        elif self.args.packing_knapsack_algorithm == "bucketing_greedy_knapsack":
+            self.packing_knapsack_algorithm = bucketing_greedy_knapsack
         else:
             raise ValueError(
                 f"Unknown knapsack algorithm: {self.args.packing_knapsack_algorithm}")
@@ -269,7 +273,14 @@ class MultiModalTaskEncoder(
         if getattr(self.args, "sound_model_type", None) is not None:
             self.sound_token_id = self.tokenizer.convert_tokens_to_ids(SOUND_TOKEN)
             if 'parakeet' in self.args.sound_model_type.lower():
-                self.transform_audio = AudioTransformParakeetStrategy(self.args.sound_model_type, self.args.sound_target_rate, self.args.sound_embedding_size, self.args.sound_clip_duration)
+                self.transform_audio = AudioTransformParakeetStrategy(
+                    sound_model_type=self.args.sound_model_type, 
+                    target_freq=self.args.sound_target_rate, 
+                    embedding_size=self.args.sound_embedding_size, 
+                    clip_duration=self.args.sound_clip_duration, 
+                    min_duration=self.args.sound_min_duration,
+                    pad_to_clip_duration=self.args.sound_pad_to_clip_duration
+                )
             else:
                 self.transform_audio = AudioTransformStrategy(self.args.sound_model_type, self.args.sound_target_rate, self.args.sound_embedding_size, self.args.sound_clip_duration)
         else:
@@ -405,6 +416,7 @@ class MultiModalTaskEncoder(
                     idx += len(frames)
                     aggregated_num_frames.append(num_frames)
                 elif isinstance(fragment, AudioMedia):
+                    assert fragment.audio_duration >= AUDIO_MIN_DURATION_SECONDS, f"Audio duration is too short: {fragment.audio_duration}sec < {AUDIO_MIN_DURATION_SECONDS}s"
                     assert fragment.audio_duration <= AUDIO_MAX_DURATION_SECONDS, f"Audio duration is too long: {fragment.audio_duration}sec > {AUDIO_MAX_DURATION_SECONDS}s"
                     idx += 1
                 else:
@@ -924,7 +936,9 @@ class MultiModalTaskEncoder(
 
         all_sound_clips = [sc for sample in samples for sc in sample.sound_clips]
         if all_sound_clips:
-            sound_clips = torch.cat(all_sound_clips, dim=0)
+            # note(pzelasko): all_sound_clips is a list of tensors shaped (num_clips, sound_seq_len)
+            # we need to flatten it and then pad it to the same length
+            sound_clips = torch.nn.utils.rnn.pad_sequence([sc for clips in all_sound_clips for sc in clips], batch_first=True)
             sound_lengths = []
             for sample in samples:
                 for sound_length in sample.sound_length:

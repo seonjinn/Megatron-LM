@@ -12,6 +12,9 @@ def get_nemo_sound_model(sound_model_type):
     if _NEMO_SOUND_MODEL_SINGLETON is None:
         import nemo.collections.asr as nemo_asr
         asr_model = nemo_asr.models.ASRModel.from_pretrained(model_name=sound_model_type.split("nemo://")[1])
+        asr_model.encoder.sync_max_audio_length = False  # fix: hanging on unnecessary max seq len sync via NCCL in some edge cases
+        for layer in asr_model.encoder.layers:
+            layer.self_attn.use_pytorch_sdpa = True
         _NEMO_SOUND_MODEL_SINGLETON = (asr_model.preprocessor, asr_model.encoder)
     return _NEMO_SOUND_MODEL_SINGLETON
 
@@ -54,7 +57,7 @@ class ParakeetHuggingFaceModel(HuggingFaceModule):
         if self.use_nemo:
             features = self.feature_extractor(input_signal=args[0], length=args[1])
             y = self.model(audio_signal=features[0], length=features[1])
-            return y[0].permute(0, 2, 1)
+            return y[0].permute(0, 2, 1), y[1]
         else:
             features = self.feature_extractor(*args, **kwargs, return_tensors="pt", sampling_rate=16000, return_attention_mask=True)
             y = self.model(features.input_features.to(torch.bfloat16), features.attention_mask)

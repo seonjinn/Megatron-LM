@@ -31,7 +31,7 @@ DEBUG=0
 USE_TILING=1
 USE_DYNAMIC_RES=0
 USE_FP8=0
-USE_PRECISION_AWARE_OPTIMIZER=0
+USE_PRECISION_AWARE_OPTIMIZER=1
 USE_CP=0
 USE_NEMO=1
 
@@ -226,6 +226,7 @@ OPTIONS=" \
     --mamba-state-dim 128 \
     --sound-model-type ${SOUND_MODEL_TYPE}  \
     --sound-target-rate 16000 \
+    --sound-pad-to-clip-duration \
     --allow-missing-sound-projection-checkpoint \
     --allow-missing-sound-model-checkpoint \
     --sound-embedding-size 751 \

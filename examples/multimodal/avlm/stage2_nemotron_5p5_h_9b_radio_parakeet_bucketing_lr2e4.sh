@@ -14,10 +14,12 @@
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=stage1p5_nm_5p5_h_9b_cradio_parakeet_1106
+#SBATCH --job-name=stage2_nm_5p5_h_9b_cradio_parakeet_bucketing_lr2e4_1016
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
+
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 USER=$SLURM_JOB_USER
 
@@ -25,6 +27,7 @@ USER=$SLURM_JOB_USER
 which srun
 BATCH=$((1-$?))
 
+USE_WANDB=0
 DEBUG=0
 USE_TILING=1
 USE_DYNAMIC_RES=0
@@ -36,11 +39,11 @@ USE_NEMO=1
 # Remember to update model and job name if running in batch mode!!
 if [[ $BATCH -eq 0 ]]; then
     DATETIME=`date +'%y-%m-%d-%H-%M-%S'`
-    MODEL_NAME="interactive_stage1p5_nm_5p5_h_9b_cradio_parakeet_${DATETIME}"
+    MODEL_NAME="interactive_stage2_nm_5p5_h_9b_cradio_parakeet_bucketing_lr2e4_${DATETIME}"
     SPECIAL_TOKENS=" --special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box> <so_embedding> <so_start> <so_end> "
     DEBUG=1
 else
-    MODEL_NAME="stage1p5_nm_5p5_h_9b_cradio_parakeet_1106"
+    MODEL_NAME="stage2_nm_5p5_h_9b_cradio_parakeet_1016_dynchnk_bucketing_lr2e4"
     SPECIAL_TOKENS=" --special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\> \<so_embedding\> \<so_start\> \<so_end\> "
 fi
 
@@ -55,9 +58,10 @@ TENSORBOARD_DIR="${OUTPUT}/tensorboard"
 
 TP=4
 
-CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/output/stage1_nm_5p5_h_9b_cradio_parakeet_1105/checkpoints"
+CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/output/stage1_nm_5p5_h_9b_cradio_parakeet_1015/checkpoints"
+CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/pzelasko/workspace/output/stage1p5_nm_5p5_h_9b_cradio_parakeet_1015_dynchnk/checkpoints"
 
-DATA_TRAIN="${SOURCE}/examples/multimodal/avlm/data_config/stage1p5_commercial_alm_blend_nrt.yaml"
+DATA_TRAIN="${SOURCE}/examples/multimodal/avlm/data_config/stage2_commercial_alm_blend_nrt.yaml"
 
 SEQ_LEN=1024
 DECODER_SEQ_LEN=16384
@@ -69,12 +73,11 @@ if [[ $DEBUG -eq 1 ]]; then
     AD=0.0
     HD=0.0
     LI=1
-    PBS=128
+    PBS=4000
+    SAVE_INTERVAL=493  # debugging issue at iter 495
 
     NONDETERMINISTIC_ATTN=1
 
-    #CUDA_VISIBLE_DEVICES=0,1,2,3
-    #NUM_GPU=4
     NUM_GPU=8
 else
     MBZ=1
@@ -86,6 +89,7 @@ else
     EXTRA_ARGS=""
     NONDETERMINISTIC_ATTN=1
     PBS=4000
+    SAVE_INTERVAL=2000
 
     NUM_GPU=8
 fi
@@ -104,7 +108,7 @@ if [[ $USE_FP8 -eq 1 ]]; then
     EXTRA_ARGS+=" --use-vision-backbone-fp8-arch "
 fi
 
-EXTRA_ARGS+=" --packing-buffer-size ${PBS} --packing-seq-length ${DECODER_SEQ_LEN} --packing-knapsack-algorithm balanced_greedy_knapsack "
+EXTRA_ARGS+=" --packing-buffer-size ${PBS} --packing-seq-length ${DECODER_SEQ_LEN} --packing-knapsack-algorithm bucketing_greedy_knapsack "
 
 if [[ $USE_PRECISION_AWARE_OPTIMIZER -eq 1 ]]; then
     EXTRA_ARGS+=" --use-precision-aware-optimizer --main-grads-dtype bf16 --main-params-dtype fp16 --exp-avg-dtype fp16 --exp-avg-sq-dtype fp16 "
@@ -135,12 +139,14 @@ else
     SOUND_MODEL_TYPE="hf://nithinraok/parakeet-tdt-0.6b-v2-hf"
 fi
 
-# LM (Mamba block) recompute
-EXTRA_ARGS+=" --recompute-granularity selective --recompute-modules core_attn mlp layernorm "
-# Vision (GPT block) recompute
-EXTRA_ARGS+=" --recompute-vision --recompute-method-vision block --recompute-granularity-vision full --recompute-vision-num-layers 32 "
-# Sound model.
-EXTRA_ARGS+=" --recompute-sound "
+EXTRA_ARGS+=" --recompute-granularity full --recompute-method block --recompute-num-layers 1 --recompute-vision --recompute-sound "
+
+WANDB_ARGS=
+if [[ $USE_WANDB -eq 1 ]]; then
+    export WANDB_API_KEY=  # INSERT YOUR OWN KEY
+    export WANDB_PROJECT="AVLM_$(whoami)"
+    WANDB_ARGS="--wandb-project ${WANDB_PROJECT} --wandb-exp-name ${MODEL_NAME} --wandb-save-dir ${OUTPUT} --wandb-resume-same-run "
+fi
 
 OPTIONS=" \
     --use-checkpoint-args \
@@ -180,7 +186,7 @@ OPTIONS=" \
     --lr-warmup-fraction 0.1 \
     --micro-batch-size ${MBZ} \
     --global-batch-size ${BZ} \
-    --lr 2e-5 \
+    --lr 2e-4 \
     --min-lr 0.0 \
     --lr-decay-style cosine \
     --log-interval ${LI} \
@@ -188,7 +194,7 @@ OPTIONS=" \
     --eval-interval 100000 \
     --data-path ${DATA_TRAIN} \
     --prompt-path ${SOURCE}/examples/multimodal/manual_prompts.json \
-    --save-interval 2000 \
+    --save-interval ${SAVE_INTERVAL} \
     --save ${FINETUNE_DIR} \
     --load ${FINETUNE_DIR} \
     --pretrained-checkpoint ${CHECKPOINT_DIR} \
@@ -223,17 +229,15 @@ OPTIONS=" \
     --mamba-head-dim 80 \
     --mamba-num-heads 128 \
     --mamba-state-dim 128 \
-    --use-loss-scaling \
     --sound-model-type ${SOUND_MODEL_TYPE}  \
     --sound-target-rate 16000 \
-    --sound-pad-to-clip-duration \
     --allow-missing-sound-projection-checkpoint \
     --allow-missing-sound-model-checkpoint \
     --sound-embedding-size 751 \
     --sound-clip-duration 60 \
-    --freeze-LM \
-    --freeze-ViT \
     --allow-large-videos \
+    --freeze-ViT \
+    ${WANDB_ARGS} \
 "
 
 export NVTE_APPLY_QK_LAYER_SCALING=0

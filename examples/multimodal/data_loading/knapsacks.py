@@ -93,3 +93,67 @@ def balanced_greedy_knapsack(
             knapsack_lengths.append(0)
         ks_index = knapsack_lengths.index(min(knapsack_lengths))
     return knapsacks
+
+
+def bucketing_greedy_knapsack(
+    item_sizes: list[int], samples: list, max_capacity: int
+) -> list[list]:
+    """
+    Bucketing greedy knapsack algorithm for distributing samples across knapsacks.
+    Each packed sample will be composed of samples with similar lengths.
+    Bucketing is implicit - by sorting and packing greedily, similar-sized items
+    naturally end up in the same batches.
+
+    Note(pzelasko): This type of bucketing is inefficient hardware-wise because the 'max_capacity' heuristic
+    results in batches that do not utilize the GPU memory equally across different sequence length buckets.
+    This implementation can be improved through OOMptimizer, i.e. pre-computing a list of bucket bins (ideally with shapes aligned to hardware)
+    and finding the maximum batch size that can still fit in the GPU memory during the full training step, for each bin.
+    
+    Args:
+        item_sizes: List of sizes for each sample
+        samples: List of samples to pack
+        max_capacity: Maximum capacity (sum of sizes) for each batch
+        
+    Returns:
+        List of batches, where each batch contains samples with similar sizes
+    """
+    assert len(item_sizes) == len(samples), (
+        "item_sizes and samples must have the same length."
+    )
+    
+    if len(item_sizes) == 0:
+        return []
+    
+    # Check if any sample exceeds max_capacity
+    if max(item_sizes) > max_capacity:
+        raise ValueError(
+            f"bucketing_greedy_knapsack: A sample has size {max(item_sizes)} "
+            f"which exceeds max_capacity {max_capacity}."
+        )
+    
+    # Sort by size (ascending)
+    item_size_samples = list(zip(item_sizes, samples))
+    item_size_samples.sort(key=lambda x: x[0])
+    
+    # Build batches by iterating through sorted items
+    batches = []
+    current_batch = []
+    current_tot_size = 0
+    
+    for size, sample in item_size_samples:
+        # If adding this item would exceed capacity, start a new batch
+        if current_tot_size + size > max_capacity:
+            if current_batch:
+                batches.append(current_batch)
+            current_batch = [sample]
+            current_tot_size = size
+        else:
+            # Add item to current batch
+            current_batch.append(sample)
+            current_tot_size += size
+    
+    # Add the last batch if it has items
+    if current_batch:
+        batches.append(current_batch)
+    
+    return batches

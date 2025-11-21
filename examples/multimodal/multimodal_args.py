@@ -209,6 +209,24 @@ def add_multimodal_extra_args(parser):
         help="Sound model clip duration in seconds."
     )
     group.add_argument(
+        "--sound-min-duration",
+        type=float,
+        default=0.1,
+        help="We will pad the audio clip to at least this duration (in seconds), even when sound-pad-to-clip-duration is False."
+    )
+    group.add_argument(
+        "--sound-pad-to-clip-duration",
+        action="store_true",
+        default=False,
+        help="Pad every audio clip to the clip duration (introduces potentially many padding tokens in the LLM input)."
+    )
+    group.add_argument(
+        "--sound-batch-split",
+        type=int,
+        default=1,
+        help="Splits the sound batch into this many chunks to avoid OOMs. Not necessary when using bucketing; use this only when --sound-pad-to-clip-duration is not specified and bucketing is not enabled."
+    )
+    group.add_argument(
         "--use-new-dataloader-path", action="store_true", default=False, help="Use the new dataloader path."
     )
     group.add_argument(
