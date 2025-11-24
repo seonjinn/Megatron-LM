@@ -387,8 +387,8 @@ def sound_model_provider(base_config, language_hidden_size):
         sound_config.recompute_granularity = None
         sound_config.recompute_method = None
         sound_config.recompute_num_layers = None
-    sound_config.sound_pad_to_clip_duration = args.sound_pad_to_clip_duration
-    sound_config.sound_batch_split = args.sound_batch_split
+    sound_config.sound_pad_to_clip_duration = getattr(args, "sound_pad_to_clip_duration", True)
+    sound_config.sound_batch_split = getattr(args, "sound_batch_split", 1)
 
     sound_projection_config.recompute_granularity = None
     sound_projection_config.recompute_method = None
