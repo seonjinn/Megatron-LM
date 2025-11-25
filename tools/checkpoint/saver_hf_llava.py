@@ -14,6 +14,47 @@ def add_arguments(parser):
     group.add_argument('--megatron-path', type=str, default=None,
                        help='Base directory of Megatron repository')
 
+def _convert_nemo_parakeet_key_to_hf(key: str) -> str:
+    """Convert NeMo Parakeet key names to HuggingFace Parakeet format.
+    
+    The NeMo checkpoint uses different naming conventions than the HuggingFace
+    transformers ParakeetEncoder. This function converts keys during checkpoint saving.
+    
+    Key mappings:
+    - pre_encode.out.* -> subsampling.linear.*
+    - pre_encode.conv.N.* -> subsampling.layers.N.*
+    - layers.N.self_attn.linear_q.* -> layers.N.self_attn.q_proj.*
+    - layers.N.self_attn.linear_k.* -> layers.N.self_attn.k_proj.*
+    - layers.N.self_attn.linear_v.* -> layers.N.self_attn.v_proj.*
+    - layers.N.self_attn.linear_out.* -> layers.N.self_attn.o_proj.*
+    - layers.N.self_attn.linear_pos.* -> layers.N.self_attn.relative_k_proj.*
+    - layers.N.self_attn.pos_bias_u -> layers.N.self_attn.bias_u
+    - layers.N.self_attn.pos_bias_v -> layers.N.self_attn.bias_v
+    - layers.N.conv.batch_norm.* -> layers.N.conv.norm.*
+    """
+    # Subsampling conversions
+    if ".pre_encode.out." in key:
+        key = key.replace(".pre_encode.out.", ".subsampling.linear.")
+    if ".pre_encode.conv." in key:
+        key = key.replace(".pre_encode.conv.", ".subsampling.layers.")
+    
+    # Self-attention projections
+    key = key.replace(".self_attn.linear_q.", ".self_attn.q_proj.")
+    key = key.replace(".self_attn.linear_k.", ".self_attn.k_proj.")
+    key = key.replace(".self_attn.linear_v.", ".self_attn.v_proj.")
+    key = key.replace(".self_attn.linear_out.", ".self_attn.o_proj.")
+    key = key.replace(".self_attn.linear_pos.", ".self_attn.relative_k_proj.")
+    
+    # Position bias names
+    key = key.replace(".self_attn.pos_bias_u", ".self_attn.bias_u")
+    key = key.replace(".self_attn.pos_bias_v", ".self_attn.bias_v")
+    
+    # Batch norm -> norm
+    key = key.replace(".conv.batch_norm.", ".conv.norm.")
+    
+    return key
+
+
 def recover_qkv(new_tensor, num_head, head_dim):
     # Step 1: Reshape back to (num_head, 3*head_dim, -1)
     temp = new_tensor.view(num_head, 3 * head_dim, -1)
@@ -160,8 +201,88 @@ class HFCheckpointSaverLLaVA(HFCheckpointSaver):
                 self.state_dict["conv_merge.mlp.0.bias"] = projection_msg["conv merge l0 bias"]
                 self.state_dict["conv_merge.mlp.2.bias"] = projection_msg["conv merge l1 bias"]
 
+    def receive_sound_projection(self):
+        """Receive and save sound projection MLP weights."""
+        if getattr(self.md, 'sound_model_type', None) is None:
+            return
+        
+        try:
+            projection_msg = self.queue_get("sound projection")
+        except:
+            print("No sound projection data available, skipping")
+            return
+        
+        print("Receiving sound projection weights...")
+        
+        # Map to HuggingFace SoundProjection structure
+        # Megatron: sound_mlp1.{0,1,3} -> HF: sound_projection.{norm, linear1, linear2}
+        # Sound projection is an MLP: linear1 -> norm -> activation -> linear2
+        self.state_dict["sound_projection.linear1.weight"] = projection_msg["sound projection l0 weight"]
+        self.state_dict["sound_projection.norm.weight"] = projection_msg["sound projection norm weight"]
+        self.state_dict["sound_projection.linear2.weight"] = projection_msg["sound projection l1 weight"]
+        
+        if "sound projection norm bias" in projection_msg:
+            self.state_dict["sound_projection.norm.bias"] = projection_msg["sound projection norm bias"]
+        
+        if getattr(self.md, 'sound_projection_linear_bias', False):
+            self.state_dict["sound_projection.linear1.bias"] = projection_msg["sound projection l0 bias"]
+            self.state_dict["sound_projection.linear2.bias"] = projection_msg["sound projection l1 bias"]
+        
+        print("Loaded sound projection parameters")
+
+    def receive_sound_model(self):
+        """Receive the sound_model weights (e.g., Parakeet encoder) and map them to HF layout.
+
+        The loader (`loader_llava.py`) sends the underlying sound model state dict in chunks
+        with keys prefixed by:
+          - ``sound_model.feature_extractor.*``
+          - ``sound_model.model.*``
+
+        In the Hugging Face NemotronH checkpoint, the audio encoder lives under
+        ``sound_encoder.encoder`` (see ``audio_model.SoundEncoder``), so we rewrite
+        those prefixes accordingly:
+
+          sound_model.feature_extractor.X -> sound_encoder.encoder.feature_extractor.X
+          sound_model.model.X             -> sound_encoder.encoder.X
+        """
+        # If no sound model is expected, do nothing
+        if getattr(self.md, "sound_model_type", None) is None:
+            return
+
+        start_msg = self.queue_get("sound model start")
+
+        total_chunks = start_msg.get("chunks", 0)
+        merged = {}
+        for idx in range(total_chunks):
+            chunk_msg = self.queue_get(f"sound model chunk {idx}")
+            merged.update(chunk_msg)
+
+        # Consume end sentinel
+        _ = self.queue_get("sound model end")
+
+        fe_prefix = "sound_model.feature_extractor."
+        mdl_prefix = "sound_model.model."
+
+        for key, value in merged.items():
+            if key.startswith(fe_prefix):
+                # Map feature_extractor weights into HF `SoundEncoder.encoder.feature_extractor`
+                new_key = "sound_encoder.encoder.feature_extractor." + key[len(fe_prefix):]
+            elif key.startswith(mdl_prefix):
+                # Map main encoder weights into HF `SoundEncoder.encoder`
+                new_key = "sound_encoder.encoder." + key[len(mdl_prefix):]
+            else:
+                # Unknown prefix; skip rather than breaking conversion.
+                continue
+
+            # Convert NeMo key names to HuggingFace format
+            new_key = _convert_nemo_parakeet_key_to_hf(new_key)
+            self.state_dict[new_key] = value
+
+        print("Loaded sound model parameters")
+
     def receive_model(self):
-        """Override to handle both vision and language models for LLaVA"""
+        """Override to handle vision, sound, and language models for LLaVA"""
+        # Vision model
         vision_model_prefix = "vision_model.vision_model."
         vision_layer_prefix = "encoder.layers"
         if self.md.vision_model_type == "radio":
@@ -177,6 +298,13 @@ class HFCheckpointSaverLLaVA(HFCheckpointSaver):
 
         self.receive_vision_projection()
 
+        # Sound model (if present)
+        # Note: Order must match loader_llava.py lines 455-456
+        if getattr(self.md, 'sound_model_type', None) is not None:
+            self.receive_sound_projection()
+            self.receive_sound_model()
+
+        # Language model
         language_model_prefix = "language_model."
         if self.md.model_type == "hybrid":
             language_layer_prefix = "backbone.layers"
