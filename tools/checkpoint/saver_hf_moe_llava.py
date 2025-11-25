@@ -33,6 +33,12 @@ class HFCheckpointSaverLLaVAMoE(HFCheckpointSaverLLaVA, HFCheckpointSaverMoE):
         self.receive_vision_backbone(vision_schema)
         self.receive_vision_projection()
 
+        # Sound model (if present)
+        # Note: Order must match loader_llava.py - projection comes before model
+        if getattr(self.md, 'sound_model_type', None) is not None:
+            self.receive_sound_projection()
+            self.receive_sound_model()
+
         # Language model (MoE-aware)
         language_model_prefix = "language_model."
         if self.md.model_type == "hybrid":
