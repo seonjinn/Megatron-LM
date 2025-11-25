@@ -38,6 +38,8 @@ INFERENCE_PARAMS = {
     "out_seq_length": 1024,             # Output sequence length (will become out-seq-length)
     "inference_max_seq_length": 65536,  # Maximum sequence length for inference
     "max_tokens_to_oom": 65536,         # Maximum tokens before OOM
+    "decoder_seq_length": 65536,        # Decoder sequence length
+    "max_position_embeddings": 65536,   # Maximum position embeddings
 
     # Dropout parameters
     "attention_dropout": 0.0,        # Attention dropout for inference
