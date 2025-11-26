@@ -234,11 +234,7 @@ def conversation_post_processing(
                         try:
                             frag.value = cache.to_cache(val, sample['__key__'] + f".{frag.value}")
                         except:
-                            # let's try again on the raw bytes
-                            if isinstance(sample[frag.value], bytes):
-                                frag.value = cache.to_cache(sample[frag.value], sample['__key__'] + f".{frag.value}")
-                            else:
-                                raise ValueError(f"fragment's value: {val} cannot be cached.")
+                            raise ValueError(f"fragment's value: {val} cannot be cached.")
                     else:
                         # it is a media file outside the primary dataset
                         media_path = frag.value
@@ -293,12 +289,7 @@ def conversation_post_processing(
                                 val = val_opened
                             except:
                                 # let's try again on the raw bytes
-                                if isinstance(val, str):
-                                    val = Path(val).read_bytes()
-                                if isinstance(val, bytes):
-                                    frag.value = cache.to_cache(val, sample['__key__'] + f".{media_extension}")
-                                else:
-                                    raise ValueError(f"fragment's value: {val_opened} cannot be cached.")
+                                raise ValueError(f"fragment's value: {val_opened} cannot be cached.")
                 else:
                     raise NotImplementedError(f"Postprocessing on media type {type(frag.value)} hasn't been implemented yet.")
 
@@ -308,10 +299,7 @@ def conversation_post_processing(
                             width=val.width, height=val.height, format=val.format, mode=val.mode
                         )
                     elif isinstance(frag, (VideoMedia, AudioMedia, VideoFrameMedia)):
-                        frag_val = val
-                        if isinstance(frag_val, bytes):
-                            frag_val = AVDecoder(io.BytesIO(frag_val))
-                        frag.metadata = dataclasses.asdict(frag_val.get_metadata())
+                        frag.metadata = dataclasses.asdict(val.get_metadata())
 
             elif isinstance(frag, str):
                 # No source

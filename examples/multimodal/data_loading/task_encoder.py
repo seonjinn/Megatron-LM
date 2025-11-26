@@ -28,6 +28,7 @@ from megatron.energon import (
     Sample,
     SampleDecoder,
     stateless,
+    __version__ as energon_version,
 )
 from megatron.energon.edataclass import edataclass
 from megatron.energon.av import AVDecoder
@@ -286,6 +287,7 @@ class MultiModalTaskEncoder(
         else:
             self.sound_token_id = None
             self.transform_audio = None
+        print(f"{type(self).__name__} initialized. Energon Version: {energon_version}")
 
     @staticmethod
     def get_seq_frames_v3(
