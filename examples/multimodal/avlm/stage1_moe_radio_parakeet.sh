@@ -214,7 +214,7 @@ OPTIONS=" \
     --load ${FINETUNE_DIR} \
     --save ${FINETUNE_DIR} \
     --dataloader-save ${FINETUNE_DIR}/dataloader \
-    --save-interval 2000 \
+    --save-interval 10000 \
     --ckpt-format torch \
     --log-progress  \
     --bf16 \

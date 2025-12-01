@@ -218,7 +218,7 @@ OPTIONS=" \
     --load ${FINETUNE_DIR} \
     --save ${FINETUNE_DIR} \
     --dataloader-save ${FINETUNE_DIR}/dataloader \
-    --save-interval 5000 \
+    --save-interval 10000 \
     --ckpt-format torch \
     --bf16 \
     --adam-beta1 0.9 \
