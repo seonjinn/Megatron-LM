@@ -10,7 +10,7 @@
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=sft_moe_dyres_noimgbrk_pixelshuffle_1119
+#SBATCH --job-name=sft_moe_dyres_noimgbrk_pixelshuffle_bs128_lr5e5_tot_1121
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
@@ -48,7 +48,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="sft_moe_dyres_noimgbrk_pixelshuffle_1119"
+    MODEL_NAME="sft_moe_dyres_noimgbrk_pixelshuffle_bs128_lr5e5_tot_1121"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -215,7 +215,7 @@ OPTIONS=" \
     --global-batch-size ${BZ} \
     --train-full-dataset \
     --lr-warmup-fraction 0.1 \
-    --lr 2e-4 \
+    --lr 5e-5 \
     --min-lr 0.0 \
     --lr-decay-style cosine \
     --weight-decay 0.05 \
