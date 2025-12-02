@@ -1195,17 +1195,19 @@ def setup_model_and_optimizer(
     timers = get_timers()
     one_logger = get_one_logger()
 
-    model = get_model(model_provider_func, model_type)
+    wrap_with_ddp = not args.skip_train
+    model = get_model(model_provider_func, model_type, wrap_with_ddp=wrap_with_ddp)
     unwrapped_model = unwrap_model(model)
 
-    kwargs = {}
-    for f in dataclasses.fields(OptimizerConfig):
-        if hasattr(args, f.name):
-            kwargs[f.name] = getattr(args, f.name)
-    config = OptimizerConfig(**kwargs)
-    config.timers = timers
-
-    if 'muon' not in config.optimizer:
+    if args.skip_train:
+        optimizer, opt_param_scheduler = None, None
+    else:
+        kwargs = {}
+        for f in dataclasses.fields(OptimizerConfig):
+            if hasattr(args, f.name):
+                kwargs[f.name] = getattr(args, f.name)
+        config = OptimizerConfig(**kwargs)
+        config.timers = timers
         optimizer = get_megatron_optimizer(
             config,
             model,
@@ -1214,6 +1216,7 @@ def setup_model_and_optimizer(
             lr_mult,
             use_gloo_process_groups=args.enable_gloo_process_groups,
         )
+<<<<<<< HEAD
     else:
         optimizer = get_megatron_muon_optimizer(
             config,
@@ -1225,6 +1228,9 @@ def setup_model_and_optimizer(
             layer_wise_distributed_optimizer='dist' in config.optimizer,
         )
     opt_param_scheduler = get_optimizer_param_scheduler(optimizer)
+=======
+        opt_param_scheduler = get_optimizer_param_scheduler(optimizer)
+>>>>>>> 2cc0cd1d5 (Skip optimizer and main_grad creation to save memory when --skip-train argument is provided)
 
     if args.moe_use_upcycling:
         torch.distributed.barrier()
@@ -2896,7 +2902,11 @@ def get_train_valid_test_num_samples():
     else:
         train_samples_in_current_phase = train_samples
 
-    eval_iters = (args.train_iters // args.eval_interval + 1) * args.eval_iters
+    if args.skip_train:
+        eval_iters = args.eval_iters
+    else:
+        assert args.train_iters is not None
+        eval_iters = (args.train_iters // args.eval_interval + 1) * args.eval_iters
     test_iters = args.eval_iters
 
     return (train_samples_in_current_phase, eval_iters * args.global_batch_size, test_iters * args.global_batch_size)
@@ -2954,7 +2964,10 @@ def build_train_valid_test_data_loaders(build_train_valid_test_datasets_provider
             build_train_valid_test_datasets_provider, (1, 1, 1) if getattr(args, 'perform_rl_step', False) else None
         )
         # Build dataloders.
-        train_dataloader = build_pretraining_data_loader(train_ds, consumed_train_samples_in_current_phase)
+        if args.skip_train:
+            train_dataloader = None
+        else:
+            train_dataloader = build_pretraining_data_loader(train_ds, consumed_train_samples_in_current_phase)
         if args.skip_train:
             valid_dataloader = build_pretraining_data_loader(valid_ds, 0)
         else:
@@ -2962,7 +2975,7 @@ def build_train_valid_test_data_loaders(build_train_valid_test_datasets_provider
         test_dataloader = build_pretraining_data_loader(test_ds, 0)
 
         # Flags to know if we need to do training/validation/testing.
-        do_train = train_dataloader is not None and (args.train_iters or args.train_samples)
+        do_train = train_dataloader is not None and (args.skip_train or args.train_iters > 0)
         do_valid = valid_dataloader is not None and args.eval_iters > 0
         do_test = test_dataloader is not None and args.eval_iters > 0
         flags = torch.tensor(
