@@ -643,12 +643,14 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
         use_thumbnail: bool = False,
         thumbnail_size: int = 448,
         thumbnail_area_threshold: float = 0.8,
+        max_num_patches: int = 0,
+        apply_data_augment: bool = False,
     ):
         """
         Args:
             vision_model_type: Vision model type.
             min_num_patches: Minimum number of patches required. Defaults to 1.
-            max_num_patches: Maximum number of patches allowed. Defaults to 128.
+            max_num_patches: Maximum number of patches allowed. Defaults to 0 (no maximum).
             patch_size: Resolution step size (patch dimension). Defaults to 16.
             get_num_embeddings: Function to get the number of embeddings from the patch size (width, height).
             factor_max: Maximum scaling factor to apply. Defaults to 1.0.
@@ -663,12 +665,14 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
             thumbnail_area_threshold: Maximum area percentage (0.0-1.0) of the resized image relative to thumbnail area
                 for which to add a thumbnail. If the resized image area is larger than this threshold of the thumbnail
                 area, no thumbnail will be added. Defaults to 0.8 (80%).
+            apply_data_augment: Whether to apply data augmentation to the image. Defaults to False.
         """
         assert "radio" in vision_model_type, (
             "Dynamic resolution is only supported for radio models"
         )
         self._vision_model_type = vision_model_type
         self._min_num_patches = min_num_patches
+        self._max_num_patches = max_num_patches if max_num_patches > 0 else float("inf")
         self._patch_size = patch_size
         self._get_num_embeddings = get_num_embeddings
         self._factor_max = factor_max
@@ -678,7 +682,6 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
         self._use_thumbnail = use_thumbnail
         self._thumbnail_size = thumbnail_size
         self._thumbnail_area_threshold = thumbnail_area_threshold
-
         pixel_mean, pixel_std = pixel_statistics[self._vision_model_type]
         self._transform = T.Compose(
             [
@@ -687,6 +690,7 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
                 T.Normalize(mean=pixel_mean, std=pixel_std),
             ]
         )
+        self._apply_data_augment = apply_data_augment
 
     def apply_params(self, params: DynamicResolutionParams, **kwargs) -> list[torch.Tensor]:
         # resize the image
@@ -716,13 +720,15 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
         self,
         media: ImageMedia | VideoFrameMedia,
         num_tokens_available: int,
+        data_augment: bool = False,
+        tiling_augment_prob: float = 0.4,
     ) -> DynamicResolutionParams:
         """Process a single media item and return its parameters.
         
         Args:
             media: The media item to process
             num_tokens_available: Number of tokens available for this media
-            
+            data_augment: Whether to apply data augmentation to the image. Defaults to False.
         Returns:
             DynamicResolutionParams for the media
         """
@@ -839,6 +845,9 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
                 else:
                     target_patch_width = max(required_divisor, target_patch_width - rem_w)
 
+        if data_augment and self._apply_data_augment and random.random() < tiling_augment_prob:
+            target_patch_width, target_patch_height = self.augment_resolution(target_patch_width, target_patch_height, current_num_tokens_available)
+
         #TEMP: hack for video
         if isinstance(media, VideoFrameMedia):
             target_patch_width = 32
@@ -867,20 +876,45 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
                 num_embeddings += self._get_num_embeddings(self._thumbnail_size, self._thumbnail_size)
                 token_count += self._thumbnail_size // self._patch_size * self._thumbnail_size // self._patch_size
 
-        assert token_count <= current_num_tokens_available, f"current_num_tokens_available {current_num_tokens_available} patches {patches} math.sqrt(current_num_tokens_available / patches) {math.sqrt(current_num_tokens_available / patches)} self._factor_max {self._factor_max} self._min_num_patches {self._min_num_patches}"
-
         return DynamicResolutionParams(
             media=media,
             num_tiles=num_tiles,
             num_embeddings=num_embeddings,
             patch_size=(target_patch_width, target_patch_height),
         ), token_count
+    
+    def augment_resolution(self, target_patch_width: int, target_patch_height: int, current_num_tokens_available: int) -> tuple[int, int]:
+
+        min_num_patch_one_side = 32
+
+        if random.random() < 0.5:
+            # Minus one
+            if target_patch_width <= min_num_patch_one_side and target_patch_height <= min_num_patch_one_side:
+                return target_patch_width, target_patch_height
+            elif target_patch_width <= min_num_patch_one_side:
+                return target_patch_width, target_patch_height - min_num_patch_one_side
+            elif target_patch_height <= min_num_patch_one_side:
+                return target_patch_width - min_num_patch_one_side, target_patch_height
+            else:
+                if random.random() < 0.5:
+                    return target_patch_width - min_num_patch_one_side, target_patch_height
+                else:
+                    return target_patch_width, target_patch_height - min_num_patch_one_side
+        else:
+            # Plus one
+            if target_patch_width * target_patch_height < current_num_tokens_available:
+                if random.random() < 0.5:
+                    return target_patch_width + min_num_patch_one_side, target_patch_height
+                else:
+                    return target_patch_width, target_patch_height + min_num_patch_one_side
+            return target_patch_width, target_patch_height
 
     def compute_params(
         self,
         media_list: list[ImageMedia | VideoFrameMedia],
         num_tokens_available: int | None = None,
         max_num_tiles: int | None = None,
+        data_augment: bool = False,
         **kwargs,
     ) -> list[ImageTilingParams]:
         """Compute parameters for all media with iterative token budgeting.
@@ -889,7 +923,7 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
             media_list: List of media items to process
             num_tokens_available: Total number of tokens available across all media
             max_num_tiles: Maximum number of tiles (unused in this implementation)
-            
+            data_augment: Whether to apply data augmentation to the image. Defaults to False.
         Returns:
             List of ImageTilingParams for each media item
         """
@@ -898,7 +932,10 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
         # let the sample be truncated.
         num_tokens_available = max(num_tokens_available, self._min_num_patches * len(media_list))
 
-        num_tokens_available_per_media = [num_tokens_available] * len(media_list)
+        # Clip the number of tokens available per media to be between min and max patches.
+        num_tokens_available_per_media = [
+            max(min(num_tokens_available, self._max_num_patches), self._min_num_patches)
+            for _ in range(len(media_list))]
 
         # In theory this could be a while True loop, but in case the process_media method slightly
         # changes, I want to make sure we don't get stuck in an infinite loop.
@@ -908,7 +945,7 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
             token_counts = []
             
             for media, tokens_for_media in zip(media_list, num_tokens_available_per_media):
-                param, token_count = self.process_media(media, tokens_for_media)
+                param, token_count = self.process_media(media, tokens_for_media, data_augment=data_augment)
                 params.append(param)
                 token_counts.append(token_count)
             
@@ -1737,6 +1774,8 @@ def create_image_tiling_strategy(args):
                 use_thumbnail=args.use_thumbnail,
                 thumbnail_size=args.img_h,
                 thumbnail_area_threshold=args.thumbnail_area_threshold,
+                max_num_patches=args.dynamic_resolution_max_patches,
+                apply_data_augment=args.apply_data_augment,
             )
     else:
         num_image_embeddings_per_tile = get_num_image_embeddings(

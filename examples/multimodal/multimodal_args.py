@@ -135,6 +135,9 @@ def add_multimodal_extra_args(parser):
         "--dynamic-resolution-min-patches", type=int, default=0, help="Minimum number of patches per image for dynamic resolution"
     )
     group.add_argument(
+        "--dynamic-resolution-max-patches", type=int, default=0, help="Maximum number of patches per image for dynamic resolution"
+    )
+    group.add_argument(
         "--dynamic-resolution-min-side", type=int, default=None, help="Minimum side length for dynamic resolution"
     )
     group.add_argument(
@@ -252,5 +255,8 @@ def add_multimodal_extra_args(parser):
     )
     group.add_argument(
         "--unfreeze-router", action="store_true", default=False, help="Unfreeze MoE router weights."
+    )
+    group.add_argument(
+        "--apply-data-augment", action="store_true", default=False, help="Apply data augmentation to the image."
     )
     return parser

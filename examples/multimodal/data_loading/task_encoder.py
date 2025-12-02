@@ -996,9 +996,8 @@ class MultiModalTaskEncoder(
                         ],
                         video_unit="seconds",
                     )
-                    # print(f"frame_clips {video.fname}: {len(frame_clips.video_clips)}: {[img.shape for img in frame_clips.video_clips]}")
                     images = [
-                        tensor_to_pil(img[0][0]) for img in frame_clips.video_clips
+                        tensor_to_pil(img[0]) for img in frame_clips.video_clips
                     ]
 
                     if len(images) < len(frames):
