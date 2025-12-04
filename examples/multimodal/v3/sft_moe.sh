@@ -10,7 +10,7 @@
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=sft_moe_dyres_noimgbrk_pixelshuffle_bs128_lr5e5_tot_1121
+#SBATCH --job-name=sft_moe_dyres_max_patch_data_aug_1201
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
@@ -49,7 +49,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="sft_moe_dyres_noimgbrk_pixelshuffle_bs128_lr5e5_tot_1121"
+    MODEL_NAME="sft_moe_dyres_max_patch_data_aug_1201"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -67,6 +67,25 @@ FINETUNE_DIR=${OUTPUT}/checkpoints
 LOGS_DIR="${OUTPUT}/logs"
 TENSORBOARD_DIR="${OUTPUT}/tensorboard"
 WANDB_DIR="${OUTPUT}/wandb"
+
+# Ensure output directories exist
+mkdir -p "${FINETUNE_DIR}" "${LOGS_DIR}" "${TENSORBOARD_DIR}" "${WANDB_DIR}"
+
+# Snapshot the source code into the OUTPUT directory on first run, and always run from the snapshot thereafter
+if [[ $DEBUG -eq 0 ]]; then
+    CODE_SNAPSHOT_DIR="${OUTPUT}/code_snapshot"
+    CODE_DIR="${SOURCE}"
+    if [[ ! -d "${CODE_SNAPSHOT_DIR}" ]]; then
+        echo "[info] Creating code snapshot at ${CODE_SNAPSHOT_DIR} from ${SOURCE}"
+        rsync -a --delete \
+            --exclude "__pycache__" \
+            --exclude "*.pyc" \
+            "${SOURCE}/" "${CODE_SNAPSHOT_DIR}/"
+    fi
+    CODE_DIR="${CODE_SNAPSHOT_DIR}"
+else
+    CODE_DIR="${SOURCE}"
+fi
 
 TP=2
 EP=32
@@ -137,7 +156,7 @@ if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
     else
         EXTRA_ARGS+=" --pixel-shuffle"
     fi
-    EXTRA_ARGS+=" --dynamic-resolution --dynamic-resolution-min-patches 1024"
+    EXTRA_ARGS+=" --dynamic-resolution --dynamic-resolution-min-patches 1024 --dynamic-resolution-max-patches 13312 --apply-data-augment"
 fi
 
 if [[ $USE_CPE_EVAL_MODE -eq 1 ]]; then
@@ -166,7 +185,7 @@ OPTIONS=" \
     --use-loss-scaling \
     ${SPECIAL_TOKENS} \
     --disable-vision-class-token \
-    --prompt-path ${SOURCE}/examples/multimodal/manual_prompts.json \
+    --prompt-path ${CODE_DIR}/examples/multimodal/manual_prompts.json \
     --eod-mask-loss \
     --image-tag-type internvl \
     --moe-token-dispatcher-type alltoall \
@@ -252,9 +271,10 @@ export NVTE_ALLOW_NONDETERMINISTIC_ALGO=1
 
 # Interactive or batch mode
 if [[ $BATCH -eq 0 ]]; then
+    cd ${CODE_DIR}
     torchrun --nproc_per_node ${NUM_GPU} examples/multimodal/train.py ${OPTIONS}
 else
-    run_cmd="python -u ${SOURCE}/examples/multimodal/train.py ${OPTIONS}"
+    run_cmd="python -u ${CODE_DIR}/examples/multimodal/train.py ${OPTIONS}"
 
     DATETIME=`date +'date_%y-%m-%d_time_%H-%M-%S'`
 

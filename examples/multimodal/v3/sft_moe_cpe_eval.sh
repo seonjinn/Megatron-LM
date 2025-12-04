@@ -22,6 +22,7 @@ export NVTE_BWD_LAYERNORM_SM_MARGIN=16
 export NCCL_P2P_NET_CHUNKSIZE=2097152
 export NCCL_DEBUG=WARN
 export TORCHINDUCTOR_WORKER_START=fork
+#export TORCH_NCCL_AVOID_RECORD_STREAMS=0
 export TRITON_CACHE_DIR=${TRITON_CACHE_DIR:-"/tmp/triton_cache_\${SLURM_NODEID}"}
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
@@ -38,17 +39,17 @@ USE_DYNAMIC_RES=1
 USE_IMAGE_BREAK=0   # Only used if USE_DYNAMIC_RES is 1.
 USE_CONV_MERGE=0    # Only used if USE_DYNAMIC_RES is 1.
 USE_FP8=0
-USE_VISION_ENCODER_EVAL_MODE=0
+USE_CPE_EVAL_MODE=1
 
 
 # Remember to update model and job name if running in batch mode!!
 if [[ $BATCH -eq 0 ]]; then
     DATETIME=`date +'%y-%m-%d-%H-%M-%S'`
-    MODEL_NAME="interactive_pretrain_moe_${DATETIME}"
+    MODEL_NAME="interactive_sft_moe_${DATETIME}"
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="pretrain_moe_dyres_1202"
+    MODEL_NAME="sft_moe_dyres_max_patch_data_aug_cpe_eval_1202"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -67,16 +68,34 @@ LOGS_DIR="${OUTPUT}/logs"
 TENSORBOARD_DIR="${OUTPUT}/tensorboard"
 WANDB_DIR="${OUTPUT}/wandb"
 
+# Ensure output directories exist
+mkdir -p "${FINETUNE_DIR}" "${LOGS_DIR}" "${TENSORBOARD_DIR}" "${WANDB_DIR}"
+
+# Snapshot the source code into the OUTPUT directory on first run, and always run from the snapshot thereafter
+if [[ $DEBUG -eq 0 ]]; then
+    CODE_SNAPSHOT_DIR="${OUTPUT}/code_snapshot"
+    CODE_DIR="${SOURCE}"
+    if [[ ! -d "${CODE_SNAPSHOT_DIR}" ]]; then
+        echo "[info] Creating code snapshot at ${CODE_SNAPSHOT_DIR} from ${SOURCE}"
+        rsync -a --delete \
+            --exclude "__pycache__" \
+            --exclude "*.pyc" \
+            "${SOURCE}/" "${CODE_SNAPSHOT_DIR}/"
+    fi
+    CODE_DIR="${CODE_SNAPSHOT_DIR}"
+else
+    CODE_DIR="${SOURCE}"
+fi
+
 TP=2
 EP=32
-
-CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/v3-sft-16gbs-lurking-ringtail-lc-v2-1e-5-constant-c-radio_v2-vlm-h-tp2/checkpoints"
+CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/pretrain_moe_dyres_1202/checkpoints"
 
 # New tokenizer 10/20.
 TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--Nemotron-Nano-3-30B-A3.5B-dev-1016/snapshots/bb271274159f07461e919379311e32802e5ec36b/"
 TOKENIZER_PROMPT_FORMAT="nemotron6-moe"
 
-DATA_TRAIN="${SOURCE}/examples/multimodal/v2/data_config/pretrain_dataset_commercial_sft_extended.yaml"
+DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/eagle_sft_v13.52.no.text.yaml"
 
 if [[ $DEBUG -eq 1 ]]; then
     MBZ=1
@@ -91,8 +110,8 @@ if [[ $DEBUG -eq 1 ]]; then
     NUM_GPU=8
 else
     MBZ=1
-    BZ=512
-    NW=8
+    BZ=128
+    NW=4
     AD=0.0
     HD=0.0
     LI=5
@@ -140,28 +159,33 @@ if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
     EXTRA_ARGS+=" --dynamic-resolution --dynamic-resolution-min-patches 1024 --dynamic-resolution-max-patches 13312 --apply-data-augment"
 fi
 
-if [[ $USE_VISION_ENCODER_EVAL_MODE -eq 1 ]]; then
-    EXTRA_ARGS+=" --radio-force-eval-mode"  # Entire vision encoder in eval mode (eval CPE, no dropout)
+if [[ $USE_CPE_EVAL_MODE -eq 1 ]]; then
+    EXTRA_ARGS+=" --radio-force-cpe-eval-mode"  # Only CPE in eval mode (not entire vision encoder)
 fi
+
+EXTRA_ARGS+=" --packing-buffer-size 3247 --packing-seq-length ${DECODER_SEQ_LEN} --packing-knapsack-algorithm balanced_greedy_knapsack "
+# LM (Mamba block) recompute
+EXTRA_ARGS+=" --recompute-granularity selective --recompute-modules core_attn mlp layernorm moe_act moe "
+# core_attn moe_act layernorm mlp moe
+# Vision (GPT block) recompute
+EXTRA_ARGS+=" --recompute-vision --recompute-method-vision block --recompute-granularity-vision full --recompute-vision-num-layers 32 "
 
 OPTIONS=" \
     --use-checkpoint-args \
     --transformer-impl transformer_engine \
     --use-te \
     --data-path ${DATA_TRAIN} \
-    --freeze-ViT \
-    --freeze-LM \
     --patch-dim 16 \
     --img-h 512 \
     --img-w 512 \
     --dataloader-type external \
     --language-model-type nemotron6-moe \
     ${EXTRA_ARGS} \
-    --allow-missing-vision-projection-checkpoint \
     --vision-model-type radio \
     --use-loss-scaling \
     ${SPECIAL_TOKENS} \
     --disable-vision-class-token \
+    --prompt-path ${CODE_DIR}/examples/multimodal/manual_prompts.json \
     --eod-mask-loss \
     --image-tag-type internvl \
     --moe-token-dispatcher-type alltoall \
@@ -179,7 +203,6 @@ OPTIONS=" \
     --moe-router-dtype fp32 \
     --moe-router-load-balancing-type seq_aux_loss \
     --moe-shared-expert-intermediate-size 3712 \
-    --attention-backend flash \
     --is-hybrid-model \
     --mamba-num-heads 64 \
     --mamba-head-dim 64 \
@@ -190,7 +213,7 @@ OPTIONS=" \
     --use-mcore-models \
     --untie-embeddings-and-output-weights \
     --disable-bias-linear \
-    --init-method-std 0.02 \
+    --init-method-std 0.014 \
     --position-embedding-type none \
     --squared-relu \
     --num-layers 52 \
@@ -215,11 +238,11 @@ OPTIONS=" \
     --global-batch-size ${BZ} \
     --train-full-dataset \
     --lr-warmup-fraction 0.1 \
-    --lr 1e-3 \
-    --min-lr 1e-5 \
-    --weight-decay 0.01 \
-    --clip-grad 1.0 \
+    --lr 5e-5 \
+    --min-lr 0.0 \
     --lr-decay-style cosine \
+    --weight-decay 0.05 \
+    --clip-grad 1.0 \
     --log-interval ${LI} \
     --eval-iters 0 \
     --eval-interval 99999999999 \
@@ -230,27 +253,16 @@ OPTIONS=" \
     --load ${FINETUNE_DIR} \
     --save ${FINETUNE_DIR} \
     --dataloader-save ${FINETUNE_DIR}/dataloader \
-    --save-interval 10000 \
+    --save-interval 5000 \
     --ckpt-format torch \
-    --log-progress  \
-    --timing-log-option minmax \
-    --log-params-norm \
-    --log-num-zeros-in-grad \
-    --log-throughput \
-    --logging-level 20 \
-    --log-memory-interval 500 \
     --bf16 \
     --adam-beta1 0.9 \
     --adam-beta2 0.999 \
     --use-distributed-optimizer \
-    --ddp-num-buckets 8 \
-    --ddp-pad-buckets-for-high-nccl-busbw \
-    --overlap-grad-reduce \
-    --overlap-param-gather \
-    --manual-gc \
     --num-workers ${NW} \
     --tensorboard-dir ${TENSORBOARD_DIR} \
     --sequence-parallel \
+    --allow-large-videos \
 "
 
 export WANDB_ENTITY=$WANDB_ENTITY  # Not passed in via command line args, only env vars
@@ -259,9 +271,10 @@ export NVTE_ALLOW_NONDETERMINISTIC_ALGO=1
 
 # Interactive or batch mode
 if [[ $BATCH -eq 0 ]]; then
+    cd ${CODE_DIR}
     torchrun --nproc_per_node ${NUM_GPU} examples/multimodal/train.py ${OPTIONS}
 else
-    run_cmd="python -u ${SOURCE}/examples/multimodal/train.py ${OPTIONS}"
+    run_cmd="python -u ${CODE_DIR}/examples/multimodal/train.py ${OPTIONS}"
 
     DATETIME=`date +'date_%y-%m-%d_time_%H-%M-%S'`
 
