@@ -109,6 +109,9 @@ class LLaVAModel(MegatronModule):
         image_break_token (str): Token for image break.
         conv_merging (bool): Enable conv merging.
         allow_missing_conv_merge_checkpoint (bool): Allow missing conv merge checkpoint.
+        force_eval_mode: (bool): Force RADIO to stay in eval mode, optional for pre-training. Defaults to False.
+        force_cpe_eval_mode: (bool): Force RADIO to use cropped PE in eval mode, optional for SFT. Defaults to False.
+        disable_cpe: (bool): Disable RADIO cropped position embeddings, optional for pre-training and/or SFT. Defaults to False.
     """
 
     def __init__(
@@ -157,6 +160,11 @@ class LLaVAModel(MegatronModule):
         sound_model: Optional[torch.nn.Module] = None,
         sound_projection: Optional[torch.nn.Module] = None,
         sound_token_index: int = DEFAULT_SOUND_TOKEN_INDEX,
+        radio_force_eval_mode: bool = False,
+        radio_force_cpe_eval_mode: bool = False,
+        radio_interpolate_only_cpe: bool = False,
+        radio_cpe_aspect_ratio_select: bool = False,
+        radio_disable_cpe: bool = False,
     ) -> None:
         super().__init__(config=language_transformer_config)
         if has_config_logger_enabled(language_transformer_config):
@@ -287,6 +295,11 @@ class LLaVAModel(MegatronModule):
                     embedder_bias=embedder_bias,
                     dynamic_resolution=dynamic_resolution,
                     use_mask_token=use_mask_token,
+                    force_eval_mode=radio_force_eval_mode,
+                    force_cpe_eval_mode=radio_force_cpe_eval_mode,
+                    interpolate_only_cpe=radio_interpolate_only_cpe,
+                    cpe_aspect_ratio_select=radio_cpe_aspect_ratio_select,
+                    has_cpe=not radio_disable_cpe,
                 )
             elif vision_transformer_config.vision_model_type.startswith("hf://"):
                 from megatron.core.models.huggingface.module import build_hf_model

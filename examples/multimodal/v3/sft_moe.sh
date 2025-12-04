@@ -39,6 +39,7 @@ USE_DYNAMIC_RES=1
 USE_IMAGE_BREAK=0   # Only used if USE_DYNAMIC_RES is 1.
 USE_CONV_MERGE=0    # Only used if USE_DYNAMIC_RES is 1.
 USE_FP8=0
+USE_CPE_EVAL_MODE=0
 
 
 # Remember to update model and job name if running in batch mode!!
@@ -139,6 +140,9 @@ if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
     EXTRA_ARGS+=" --dynamic-resolution --dynamic-resolution-min-patches 1024"
 fi
 
+if [[ $USE_CPE_EVAL_MODE -eq 1 ]]; then
+    EXTRA_ARGS+=" --radio-force-cpe-eval-mode"  # Only CPE in eval mode (not entire vision encoder)
+fi
 
 EXTRA_ARGS+=" --packing-buffer-size 3247 --packing-seq-length ${DECODER_SEQ_LEN} --packing-knapsack-algorithm balanced_greedy_knapsack "
 # LM (Mamba block) recompute

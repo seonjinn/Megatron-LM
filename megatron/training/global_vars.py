@@ -210,6 +210,8 @@ def _set_wandb_writer(args):
             'config': wandb_config}
         os.makedirs(wandb_kwargs['dir'], exist_ok=True)
 
+        if args.wandb_entity:  # Overwrite WANDB_ENTITY env var default
+            wandb_kwargs['entity'] = args.wandb_entity
 
         # check for the wandb.id file, or create one
         if args.wandb_resume_same_run:
@@ -259,12 +261,16 @@ def _set_adlr_autoresume(args):
     if args.adlr_autoresume:
         if args.rank == 0:
             print('enabling autoresume ...', flush=True)
-        sys.path.append(os.environ.get('SUBMIT_SCRIPTS', '.'))
+        sys.path.append(os.environ.get('SUBMIT_SCRIPTS', '.'))  # Older ADLR utils setup
         try:
             from userlib.auto_resume import AutoResume
         except ImportError:
-            print('ADLR autoresume is not available, exiting ...')
-            sys.exit()
+            sys.path.append(os.environ.get('ADLR_UTILS', '.'))  # Newer ADLR utils setup
+            try:
+                from userlib.auto_resume import AutoResume
+            except ImportError:
+                print('ADLR autoresume is not available, exiting ...')
+                sys.exit()
 
         _GLOBAL_ADLR_AUTORESUME = AutoResume
 

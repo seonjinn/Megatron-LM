@@ -130,6 +130,9 @@ def parse_args(extra_args_provider=None, ignore_unknown_args=False, yaml_config=
     args.rank = int(os.getenv('RANK', '0'))
     args.world_size = int(os.getenv("WORLD_SIZE", '1'))
 
+    if args.use_per_rank_triton_cache_dir and os.getenv('TRITON_CACHE_DIR') is not None:
+        os.environ['TRITON_CACHE_DIR'] = os.path.join(os.environ['TRITON_CACHE_DIR'], f'{args.rank}')
+
     # Args to disable MSC
     if not args.enable_msc:
         MultiStorageClientFeature.disable()
@@ -1699,6 +1702,8 @@ def _add_logging_args(parser):
                        help='Enable world size logging to tensorboard.')
     group.add_argument('--wandb-project', type=str, default='',
                        help='The wandb project name. Ignore wandb by default.')
+    group.add_argument('--wandb-entity', type=str, default=None,
+                       help='The wandb entity name. Not passed into wandb init if not specified.')
     group.add_argument('--wandb-exp-name', type=str, default='',
                        help='The wandb experiment name.')
     group.add_argument('--wandb-save-dir', type=str, default='',
@@ -1916,6 +1921,9 @@ def _add_training_args(parser):
                        help='Total number of samples to train over all '
                        'training runs. Note that either train-iters or '
                        'train-samples should be provided.')
+    group.add_argument('--early-exit-iters', type=int, default=None,
+                        help='Exit the program after this many iterations, regardless of other'
+                        ' --train-iters/--train-samples/--train-full-dataset flags.')
     group.add_argument('--log-interval', type=int, default=100,
                        help='Report loss and timing interval.')
     group.add_argument('--log-memory-interval', type=int, default=None,
@@ -2396,6 +2404,8 @@ def _add_distributed_args(parser):
                        'a custom built image that support ring-exchange p2p.')
     group.add_argument('--local-rank', type=int, default=int(os.getenv('LOCAL_RANK', '0')),
                        help='local rank passed from distributed launcher.')
+    group.add_argument('--use-per-rank-triton-cache-dir', action='store_true',
+                       default=False, help='If set, append a per-rank folder to TRITON_CACHE_DIR.')
     group.add_argument('--lazy-mpu-init', type=bool, required=False,
                        help='If set to True, initialize_megatron() '
                        'skips DDP initialization and returns function to '

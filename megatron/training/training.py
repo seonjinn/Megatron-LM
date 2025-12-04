@@ -50,6 +50,7 @@ from megatron.core.fp8_utils import correct_amax_history_if_needed
 from megatron.training.checkpointing import load_checkpoint
 from megatron.training.checkpointing import save_checkpoint
 from megatron.training.checkpointing import checkpoint_exists
+from megatron.training.global_vars import get_adlr_autoresume
 from megatron.core.transformer.module import Float16Module
 from megatron.core.distributed import DistributedDataParallelConfig, TorchFullyShardedDataParallelConfig
 from megatron.core.distributed import DistributedDataParallel as DDP
@@ -1707,6 +1708,7 @@ def training_log(
         timers.write(timers_to_log, writer, iteration, normalizer=total_iterations)
     if writer and (iteration % args.tensorboard_log_interval == 0):
         if wandb_writer:
+            wandb_writer.log({'iteration': iteration}, iteration)  # Req. to log evals at same iter
             wandb_writer.log({'samples vs steps': args.consumed_train_samples}, iteration)
         writer.add_scalar('learning-rate', learning_rate, iteration)
         writer.add_scalar('learning-rate vs samples', learning_rate, args.consumed_train_samples)
@@ -2113,6 +2115,11 @@ def checkpoint_and_decide_exit(
         should_save_checkpoint = should_exit = True
         print_datetime(f'exiting program at iteration {iteration}')
 
+    # Exit based on fixed exit iteration
+    if args.early_exit_iters and iteration >= args.early_exit_iters:
+        should_save_checkpoint = should_exit = True
+        print_datetime(f'exiting program at iteration {iteration} (early_exit_iters={args.early_exit_iters})')
+
     torch.distributed.barrier()
 
     if should_save_checkpoint and args.save:  # `args.save` is the location, which can be empty
@@ -2312,9 +2319,15 @@ def train(
         torch.distributed.barrier()
         print_rank_0(f">>> Weight hashes match after {iteration} iterations...")
 
+    def _finished_training(iteration):
+        return (
+            (args.train_iters and iteration >= args.train_iters) or
+            (args.train_samples and args.consumed_train_samples >= args.train_samples) or
+            (args.early_exit_iters and iteration >= args.early_exit_iters)
+        )
+
     # Run training iterations till done.
-    while (not args.train_iters or iteration < args.train_iters) and \
-            (not args.train_samples or args.consumed_train_samples < args.train_samples):
+    while not _finished_training(iteration):
         if args.profile and torch.distributed.get_rank() in args.profile_ranks:
             if args.use_pytorch_profiler:
                 prof.step()
@@ -2551,6 +2564,12 @@ def train(
         ft_integration.shutdown()
         one_logger_utils.finish()
         sys.exit(exit_code)
+
+    # If we really finished training, but we requested autoresume near the last iter, cancel it
+    if args.adlr_autoresume and _finished_training(iteration):
+        print_rank_0("Finished training, canceling autoresume")
+        autoresume = get_adlr_autoresume()
+        autoresume.stop_resuming()
 
     return iteration, num_floating_point_operations_so_far
 

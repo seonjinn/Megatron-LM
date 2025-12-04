@@ -302,6 +302,11 @@ def model_provider(
         sound_model=sound_model,
         sound_projection=sound_projection,
         sound_token_index=sound_token_index,
+        radio_force_eval_mode=getattr(args, "radio_force_eval_mode", False),
+        radio_force_cpe_eval_mode=getattr(args, "radio_force_cpe_eval_mode", False),
+        radio_interpolate_only_cpe=getattr(args, "radio_interpolate_only_cpe", False),
+        radio_cpe_aspect_ratio_select=getattr(args, "radio_cpe_aspect_ratio_select", False),
+        radio_disable_cpe=getattr(args, "radio_disable_cpe", False),
     )
 
     model.freeze(

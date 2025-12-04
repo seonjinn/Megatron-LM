@@ -259,4 +259,34 @@ def add_multimodal_extra_args(parser):
     group.add_argument(
         "--apply-data-augment", action="store_true", default=False, help="Apply data augmentation to the image."
     )
+    group.add_argument(
+        "--radio-force-eval-mode",
+        action="store_true",
+        default=False,
+        help="Force RADIO to stay in eval mode (eval-mode CPE, no dropout). Recommended for pre-training."
+    )
+    group.add_argument(
+        "--radio-force-cpe-eval-mode",
+        action="store_true",
+        default=False,
+        help="Force RADIO to use CPE (cropped position embeddings) in eval mode. Recommended for SFT."
+    )
+    group.add_argument(
+        "--radio-interpolate-only-cpe",
+        action="store_true",
+        default=False,
+        help="Interpolate the position embeddings to input size, without any cropping."
+    )
+    group.add_argument(
+        "--radio-cpe-aspect-ratio-select",
+        action="store_true",
+        default=False,
+        help="Select position embeddings based on aspect ratio so long edge always mapped to 1."
+    )
+    group.add_argument(
+        "--radio-disable-cpe",
+        action="store_true",
+        default=False,
+        help="Disable cropped position embeddings in the radio model."
+    )
     return parser
