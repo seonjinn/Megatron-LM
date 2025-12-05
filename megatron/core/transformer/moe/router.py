@@ -323,7 +323,16 @@ class TopKRouter(Router):
             # which scales both the main_loss gradient and aux_loss gradient by
             # 1/(num_local_tokens * dp_size * num_micro_batches) in finalize_model_grads function.
             # To correct this scaling, we need to scale the aux_loss by num_local_tokens here.
-            activation = MoEAuxLossAutoScaler.apply(activation, aux_loss * activation.shape[0])
+            factor = None
+            if self.config.no_load_balancing_sequence_scaling:
+                # VLM --use-loss-scaling sets num_tokens to 1, so disabling the above sequence-length scaling.
+                # Additionally, the factor would change for different training stages, which complicates setting
+                # aux loss coeff.
+                factor = 1
+            else:
+                factor = activation.shape[0]
+
+            activation = MoEAuxLossAutoScaler.apply(activation, aux_loss * factor)
         else:
             activation = MoEAuxLossAutoScaler.apply(activation, aux_loss)
         return activation
@@ -351,7 +360,16 @@ class TopKRouter(Router):
                 # which scales both the main_loss gradient and z_loss gradient by
                 # 1/(num_local_tokens * dp_size * num_micro_batches) in finalize_model_grads().
                 # To correct this scaling, we need to scale the z_loss by num_local_tokens here.
-                logits = MoEAuxLossAutoScaler.apply(logits, z_loss * logits.shape[0])
+                factor = None
+                if self.config.no_load_balancing_sequence_scaling:
+                    # VLM --use-loss-scaling sets num_tokens to 1, so disabling the above sequence-length scaling.
+                    # Additionally, the factor would change for different training stages, which complicates setting
+                    # aux loss coeff.
+                    factor = 1
+                else:
+                    factor = logits.shape[0]
+
+                logits = MoEAuxLossAutoScaler.apply(logits, z_loss * factor)
             else:
                 logits = MoEAuxLossAutoScaler.apply(logits, z_loss)
             save_to_aux_losses_tracker(

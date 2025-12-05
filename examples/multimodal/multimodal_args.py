@@ -293,5 +293,9 @@ def add_multimodal_extra_args(parser):
         "--no-calculate-per-token-loss", action="store_true", default=False,
         help="Disable calculating per-token loss."
     )
+    group.add_argument(
+        "--no-load-balancing-sequence-scaling", action="store_true", default=False,
+        help="Disable scaling the load balancing gradient by the number of tokens."
+    )
 
     return parser
