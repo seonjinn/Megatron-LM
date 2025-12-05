@@ -302,7 +302,10 @@ def loss_func(loss_mask, output_tensor, samples_seen):
     loss_mask = loss_mask.contiguous().view(-1).float()
     loss = torch.sum(losses * loss_mask)
 
-    if args.context_parallel_size > 1:
+    if args.no_calculate_per_token_loss:
+        num_tokens = loss_mask.sum().clone().detach().to(torch.int)
+        num_tokens = torch.clamp(num_tokens, min=1)
+    elif args.use_loss_scaling and args.context_parallel_size > 1:
         # num_tokens are all-reduced from all CP ranks and loss will be divided by the total num_tokens = args.context_parallel_size.
         # So we need to multiply loss by args.context_parallel_size to get the correct loss.
         num_tokens = torch.tensor(1, dtype=torch.int, device=losses.device)

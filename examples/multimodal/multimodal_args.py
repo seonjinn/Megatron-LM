@@ -289,4 +289,9 @@ def add_multimodal_extra_args(parser):
         default=False,
         help="Disable cropped position embeddings in the radio model."
     )
+    group.add_argument(
+        "--no-calculate-per-token-loss", action="store_true", default=False,
+        help="Disable calculating per-token loss."
+    )
+
     return parser

@@ -165,6 +165,7 @@ class LLaVAModel(MegatronModule):
         radio_interpolate_only_cpe: bool = False,
         radio_cpe_aspect_ratio_select: bool = False,
         radio_disable_cpe: bool = False,
+        use_loss_scaling: bool = False,
     ) -> None:
         super().__init__(config=language_transformer_config)
         if has_config_logger_enabled(language_transformer_config):
@@ -189,6 +190,8 @@ class LLaVAModel(MegatronModule):
         self.sound_model = sound_model
         self.sound_projection = sound_projection
         self.sound_token_index = sound_token_index
+
+        self.use_loss_scaling = use_loss_scaling
 
         language_model_type = getattr(language_transformer_config, "language_model_type", "")
         self.sequence_parallel_lm = language_transformer_config.sequence_parallel
@@ -1492,7 +1495,11 @@ class LLaVAModel(MegatronModule):
                     else [0, combined_embeddings.shape[0]]
                 )
                 num_samples = len(acc_lengths) - 1
-                loss_weight = pre_calc_loss_weight(num_samples, acc_lengths, new_labels[0])
+                if self.use_loss_scaling:
+                    loss_weight = pre_calc_loss_weight(num_samples, acc_lengths, new_labels[0])
+                else:
+                    loss_weight = torch.ones(new_labels[0].shape[0], device=new_labels[0].device, dtype=torch.float32)
+                    loss_weight[new_labels[0]==IGNORE_INDEX] = 0
                 loss_weight = loss_weight.unsqueeze(0)
 
             combined_embeddings, new_labels, new_loss_mask, position_ids, packed_seq_params = (

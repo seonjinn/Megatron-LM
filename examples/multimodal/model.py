@@ -117,7 +117,10 @@ def model_provider(
     base_config.language_model_type = args.language_model_type
     base_config.vision_model_type = args.vision_model_type
     base_config.sound_model_type = getattr(args, "sound_model_type", None)
-    base_config.calculate_per_token_loss = True
+    base_config.calculate_per_token_loss = False if getattr(args, "no_calculate_per_token_loss", False) else True
+
+    if getattr(args, "no_calculate_per_token_loss", False):
+        assert not args.use_loss_scaling, "Cannot disable calculating per-token loss and use loss scaling at the same time, either remove --no-calculate-per-token-loss or --use-loss-scaling"
 
     language_config, language_transformer_layer_spec = get_language_config_and_spec(base_config)
 
@@ -128,7 +131,7 @@ def model_provider(
         vision_config = core_transformer_config_from_args(without_hetero)
         vision_config.language_model_type = args.language_model_type
         vision_config.vision_model_type = args.vision_model_type
-        vision_config.calculate_per_token_loss = True
+        vision_config.calculate_per_token_loss = base_config.calculate_per_token_loss
         vision_config.num_layers_in_first_pipeline_stage = None
         vision_config.num_layers_in_last_pipeline_stage = None
     else:
@@ -180,7 +183,7 @@ def model_provider(
         vision_projection_config = core_transformer_config_from_args(without_hetero)
         vision_projection_config.language_model_type = args.language_model_type
         vision_projection_config.vision_model_type = args.vision_model_type
-        vision_projection_config.calculate_per_token_loss = True
+        vision_projection_config.calculate_per_token_loss = base_config.calculate_per_token_loss
     else:
         vision_projection_config = deepcopy(base_config)
 
@@ -307,6 +310,7 @@ def model_provider(
         radio_interpolate_only_cpe=getattr(args, "radio_interpolate_only_cpe", False),
         radio_cpe_aspect_ratio_select=getattr(args, "radio_cpe_aspect_ratio_select", False),
         radio_disable_cpe=getattr(args, "radio_disable_cpe", False),
+        use_loss_scaling=args.use_loss_scaling,
     )
 
     model.freeze(
