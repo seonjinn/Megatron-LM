@@ -226,7 +226,6 @@ OPTIONS=" \
     --use-loss-scaling \
     --sound-model-type ${SOUND_MODEL_TYPE}  \
     --sound-target-rate 16000 \
-    --sound-pad-to-clip-duration \
     --allow-missing-sound-projection-checkpoint \
     --allow-missing-sound-model-checkpoint \
     --sound-embedding-size 751 \

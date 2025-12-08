@@ -37,12 +37,14 @@ def main(args):
     elif "oci-nrt" in hostname:
         cluster = "oci-nrt-cs-001"
 
-    base_url = f"https://dashboards.telemetry.dgxc.ngc.nvidia.com/d/fdimc4dtoyfpcf_cw_dfw_05_15_2015_1/dcgm-health?orgId=8&var-cluster={cluster}&var-gpu=All"
+    base_url = f"https://dashboards.telemetry.dgxc.ngc.nvidia.com/d/rYdddlPWk_cw_dfw_05_15_2024/node-health?orgId=8var-gpu=$__all"
+
+    base_url += f"&var-cluster={cluster}"
 
     node_url_str = ""
     for n in nodelist:
         if len(n) > 0:
-            node_url_str += f"&var-instance={n}:9400"
+            node_url_str += f"&var-node={n}"
 
     time_str = ""
     if start is not None:
