@@ -1,0 +1,499 @@
+__module__: megatron.energon
+__class__: MetadatasetV2
+splits:
+  train:
+    blend_epochized:
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/llava_video_178k_full/2_3_m_activitynetqa_oe_qa_processed_guoc
+      subflavors:
+        name: llava_video_178k_2_3_m_activitynetqa_oe_qa_processed
+        cook: conversation
+        data_augment: false
+        length: 6490
+        orig_length: 6490
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/LLaVA-Video-178K/2_3_m_activitynetqa
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/llava_video_178k_full/0_30_s_nextqa_mc_qa_processed_guoc
+      subflavors:
+        name: llava_video_178k_0_30_s_nextqa_mc_qa_processed
+        cook: conversation
+        data_augment: false
+        length: 5496
+        orig_length: 5496
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/LLaVA-Video-178K/0_30_s_nextqa
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/llava_video_178k_full/0_30_s_nextqa_oe_qa_processed_guoc
+      subflavors:
+        name: llava_video_178k_0_30_s_nextqa_oe_qa_processed
+        cook: conversation
+        data_augment: false
+        length: 5492
+        orig_length: 5492
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/LLaVA-Video-178K/0_30_s_nextqa
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/llava_video_178k_full/2_3_m_nextqa_mc_qa_processed_guoc
+      subflavors:
+        name: llava_video_178k_2_3_m_nextqa_mc_qa_processed
+        cook: conversation
+        data_augment: false
+        length: 52
+        orig_length: 52
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/LLaVA-Video-178K/2_3_m_nextqa
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/llava_video_178k_full/2_3_m_nextqa_oe_qa_processed_guoc
+      subflavors:
+        name: llava_video_178k_2_3_m_nextqa_oe_qa_processed
+        cook: conversation
+        data_augment: false
+        length: 61
+        orig_length: 61
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/LLaVA-Video-178K/2_3_m_nextqa
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/llava_video_178k_full/30_60_s_nextqa_oe_qa_processed_guoc
+      subflavors:
+        name: llava_video_178k_30_60_s_nextqa_oe_qa_processed
+        cook: conversation
+        data_augment: false
+        length: 6843
+        orig_length: 6843
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/LLaVA-Video-178K/30_60_s_nextqa
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/llava_video_178k_full/30_60_s_nextqa_mc_qa_processed_guoc
+      subflavors:
+        name: llava_video_178k_30_60_s_nextqa_mc_qa_processed
+        cook: conversation
+        data_augment: false
+        length: 6843
+        orig_length: 6843
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/LLaVA-Video-178K/30_60_s_nextqa
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/llava_video_178k_full/1_2_m_activitynetqa_oe_qa_processed_guoc
+      subflavors:
+        name: llava_video_178k_1_2_m_activitynetqa_oe_qa_processed
+        cook: conversation
+        data_augment: false
+        length: 7420
+        orig_length: 7420
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/LLaVA-Video-178K/1_2_m_activitynetqa
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/llava_video_178k_full/30_60_s_activitynetqa_oe_qa_processed_guoc
+      subflavors:
+        name: llava_video_178k_30_60_s_activitynetqa_oe_qa_processed
+        cook: conversation
+        data_augment: false
+        length: 3840
+        orig_length: 3840
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/LLaVA-Video-178K/30_60_s_activitynetqa
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/llava_video_178k_full/1_2_m_nextqa_mc_qa_processed_guoc
+      subflavors:
+        name: llava_video_178k_1_2_m_nextqa_mc_qa_processed
+        cook: conversation
+        data_augment: false
+        length: 4633
+        orig_length: 4633
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/LLaVA-Video-178K/1_2_m_nextqa
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/llava_video_178k_full/1_2_m_nextqa_oe_qa_processed_guoc
+      subflavors:
+        name: llava_video_178k_1_2_m_nextqa_oe_qa_processed
+        cook: conversation
+        data_augment: false
+        length: 4694
+        orig_length: 4694
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/LLaVA-Video-178K/1_2_m_nextqa
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/llava_video_178k_full/0_30_s_activitynetqa_oe_qa_processed_guoc
+      subflavors:
+        name: llava_video_178k_0_30_s_activitynetqa_oe_qa_processed
+        cook: conversation
+        data_augment: false
+        length: 2580
+        orig_length: 2580
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/LLaVA-Video-178K/0_30_s_activitynetqa
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/llava_video_178k_full/0_30_s_perceptiontest_mc_qa_processed_guoc
+      subflavors:
+        name: llava_video_178k_0_30_s_perceptiontest_mc_qa_processed
+        cook: conversation
+        data_augment: false
+        length: 1785
+        orig_length: 1785
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/LLaVA-Video-178K/0_30_s_perceptiontest
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/llava_video_178k_full/30_60_s_perceptiontest_mc_qa_processed_guoc
+      subflavors:
+        name: llava_video_178k_30_60_s_perceptiontest_mc_qa_processed
+        cook: conversation
+        data_augment: false
+        length: 618
+        orig_length: 618
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/LLaVA-Video-178K/30_60_s_perceptiontest
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/vid_vqa_video_tag_prefix_nextqa
+      subflavors:
+        name: video-vqa-nextqa
+        cook: conversation
+        data_augment: false
+        length: 34132
+        orig_length: 34132
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/nextqa/NExTVideo
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/vid_vqa_video_tag_prefix_clevrerqa
+      subflavors:
+        name: video-vqa-clevrerqa
+        cook: conversation
+        data_augment: false
+        length: 40000
+        orig_length: 39999
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/clevrer
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/vid_cls_video_tag_prefix_videochat2_k710
+      subflavors:
+        name: video-cls-videochat2-k710
+        cook: conversation
+        data_augment: false
+        length: 39452
+        orig_length: 39499
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/videochat2_k710
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/vid_vqa_video_tag_prefix_egoqa
+      subflavors:
+        name: video-vqa-videochat2-egoqa
+        cook: conversation
+        data_augment: false
+        length: 7797
+        orig_length: 7812
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/videochat2_egoqa
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/vid_vqa_video_tag_prefix_tvqa_long_mcq_shuffle_repeat2
+      subflavors:
+        name: video-vqa-tvqa-long-mcq-multiturn-shuffle-repeat-2
+        cook: conversation
+        data_augment: false
+        length: 34868
+        orig_length: 17434
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/tvqa_fps3_mp4
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/vid_vqa_video_tag_prefix_egoexolearn_ego_untrimmed_caption
+      subflavors:
+        name: video-cap-egoexolearn-ego-untrimmed
+        cook: conversation
+        data_augment: false
+        length: 36373
+        orig_length: 36372
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/EgoExoLearn
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/vid_cls_k710_full_train
+      subflavors:
+        name: video-cls-k710-full-train
+        cook: conversation
+        data_augment: false
+        length: 647883
+        orig_length: 647882
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/k710
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/multiimage_cap_mementos_caption
+      subflavors:
+        name: multiimage-cap-mementos
+        cook: conversation
+        data_augment: false
+        length: 4060
+        orig_length: 4060
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/Mementos_data
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/vid_vqa_video_tag_prefix_perception_test
+      subflavors:
+        name: video-vqa-perceptiontest-mcq-singleturn
+        cook: conversation
+        data_augment: false
+        length: 7392
+        orig_length: 7391
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/perception_test_train_videos
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/vid_tal_video_tag_prefix_anet
+      subflavors:
+        name: video-tal-anet-train
+        cook: conversation
+        data_augment: false
+        length: 10021
+        orig_length: 10023
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/anet
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/vid_tal_video_tag_prefix_ego4d_mq
+      subflavors:
+        name: video-tal-ego4d-mq-train
+        cook: conversation
+        data_augment: false
+        length: 1506
+        orig_length: 1505
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/ego4d_mq_short448_30fps
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/vid_tal_video_tag_prefix_fineaction
+      subflavors:
+        name: video-tal-fineaction-train
+        cook: conversation
+        data_augment: false
+        length: 7504
+        orig_length: 7507
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/fineaction
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/vid_tal_video_tag_prefix_hacs
+      subflavors:
+        name: video-tal-hacs-train
+        cook: conversation
+        data_augment: false
+        length: 31223
+        orig_length: 31222
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/hacs
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/vid_tal_video_tag_prefix_hirest_class
+      subflavors:
+        name: video-tal-hirest-class-train
+        cook: conversation
+        data_augment: false
+        length: 822
+        orig_length: 821
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/hirest
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/vid_tal_video_tag_prefix_perception_test
+      subflavors:
+        name: video-tal-perceptiontest-train
+        cook: conversation
+        data_augment: false
+        length: 2135
+        orig_length: 2134
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/perception_test_train_videos
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/vid_dvfc_video_tag_prefix_anet_caption
+      subflavors:
+        name: video-dvfc-anet-caption-train
+        cook: conversation
+        data_augment: false
+        length: 9064
+        orig_length: 9063
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/anet
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/vid_dvpc_video_tag_prefix_hirest_step
+      subflavors:
+        name: video-dvpc-hirest-step-train
+        cook: conversation
+        data_augment: false
+        length: 525
+        orig_length: 524
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/hirest
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/vid_dvpc_video_tag_prefix_youcook2
+      subflavors:
+        name: video-dvpc-youcook2-train
+        cook: conversation
+        data_augment: false
+        length: 1180
+        orig_length: 1179
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/youcook2
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/vid_vtg2_video_tag_prefix_didemo
+      subflavors:
+        name: video-vtg-didemo-train
+        cook: conversation
+        data_augment: false
+        length: 7452
+        orig_length: 7334
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/didemo
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/vid_vtg2_video_tag_prefix_ego4d_nlq
+      subflavors:
+        name: video-vtg-ego4d-nlq-train
+        cook: conversation
+        data_augment: false
+        length: 2665
+        orig_length: 997
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/ego4d_nlq_short448_30fps
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/vid_vtg2_video_tag_prefix_medvidqa
+      subflavors:
+        name: video-vtg-medvidqa-train
+        cook: conversation
+        data_augment: false
+        length: 933
+        orig_length: 764
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/medvidqa
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/vid_vtg2_video_tag_prefix_queryd
+      subflavors:
+        name: video-vtg-queryd
+        cook: conversation
+        data_augment: false
+        length: 1562
+        orig_length: 828
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/queryd
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/vid_vtg2_video_tag_prefix_youcook2
+      subflavors:
+        name: video-vtg-youcook2-train
+        cook: conversation
+        data_augment: false
+        length: 2270
+        orig_length: 1179
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/youcook2
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/vid_vqa_video_tag_egoexolearn_video_qa
+      subflavors:
+        name: video-vqa-egoexolearn-video-oe
+        cook: conversation
+        data_augment: false
+        length: 9998
+        orig_length: 9998
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/EgoExoLearn
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/vid_tas_video_tag_prefix_breakfast
+      subflavors:
+        name: video-tas-breakfast-train
+        cook: conversation
+        data_augment: false
+        length: 1204
+        orig_length: 1203
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/breakfast_h264
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/users/guilinl/workspace/data/commercial_jsonl/video/longvid_open_source/vid_vqa_video_tag_egoexolearn_video_mcq
+      subflavors:
+        name: video-vqa-egoexolearn-video-mcq
+        cook: conversation
+        data_augment: false
+        length: 6832
+        orig_length: 6832
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vids/EgoExoLearn
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/video_data/crosstask_mcq_30s
+      subflavors:
+        name: crosstask_mcq_30s
+        cook: conversation
+        data_augment: false
+        length: 75686
+        orig_length: 75686
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/videos/crosstask_30s
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/video_data/crosstask_open_30s
+      subflavors:
+        name: crosstask_open_30s
+        cook: conversation
+        data_augment: false
+        length: 20399
+        orig_length: 21696
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/videos/crosstask_30s
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/video_data/egoprocel_mcq_30s
+      subflavors:
+        name: egoprocel_mcq_30s
+        cook: conversation
+        data_augment: false
+        length: 4789
+        orig_length: 4789
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/videos/egoprocel_30s
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/video_data/egoprocel_open_30s
+      subflavors:
+        name: egoprocel_open_30s
+        cook: conversation
+        data_augment: false
+        length: 5667
+        orig_length: 6081
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/videos/egoprocel_30s
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/video_data/HC-STVG_mcq_30s
+      subflavors:
+        name: HC-STVG_mcq_30s
+        cook: conversation
+        data_augment: false
+        length: 147799
+        orig_length: 147799
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/videos/HC-STVG_30s
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/video_data/HC-STVG_open_30s
+      subflavors:
+        name: HC-STVG_open_30s
+        cook: conversation
+        data_augment: false
+        length: 41050
+        orig_length: 45431
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/videos/HC-STVG_30s
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/video_data/tapos_mcq_30s
+      subflavors:
+        name: tapos_mcq_30s
+        cook: conversation
+        data_augment: false
+        length: 33941
+        orig_length: 33941
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/videos/tapos_30s
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/video_data/tapos_open_30s
+      subflavors:
+        name: tapos_open_30s
+        cook: conversation
+        data_augment: false
+        length: 13991
+        orig_length: 15793
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/videos/tapos_30s

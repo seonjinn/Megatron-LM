@@ -1,0 +1,9 @@
+__module__: megatron.energon
+__class__: MetadatasetV2
+splits:
+  train:
+    blend_epochized:
+
+    ### commercial video v1 & v2 0919 ###
+    - path: commercial_video_v1_and_v2_0919.yaml
+      repetitions: 1

@@ -1,0 +1,51 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/ALM_SFT/AVLM_SFT_AUDIO/youtube_caps
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/ALM_SFT/AVLM_SFT_AUDIO/audioset_caps
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/energon/laion_music/laion_music_batch1_captions_final/music_captions_batch1_final.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/energon/laion_music/laion_music_batch1_qa_final/music_qa_batch1_final.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/energon/laion_music/laion_music_batch2_captions/music_captions_batch2.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/energon/laion_music/laion_music_batch2_qa/music_qa_batch2_final.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/energon/laion_music/laion_music_batch2_qa/music_qa_batch2_diverse_final.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/energon/laion_music/laion_music_batch3_captions/music_captions_batch3.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/energon/laion_music/laion_music_batch3_qa/music_qa_batch3_genre_mood_final.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/energon/laion_music/laion_music_batch3_qa/music_qa_batch3_temporal_cultural_final.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/energon/laion_music/laion_music_batch3_qa/music_qa_batch3_lyrics_final.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
