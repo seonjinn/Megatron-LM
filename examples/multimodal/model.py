@@ -210,7 +210,7 @@ def model_provider(
     vision_projection_config.pipeline_model_parallel_size = vision_config.pipeline_model_parallel_size
 
     # Make sure the vision model does not inherit first and last pipeline num layers from the language model.
-    vision_config.first_pipeline_num_layers = vision_config.last_pipeline_num_layers = None
+    vision_config.num_layers_in_first_pipeline_stage = vision_config.num_layers_in_last_pipeline_stage = None
 
     if vision_projection_config.normalization:
         vision_projection_layer_spec = get_norm_mlp_module_spec_te().submodules
@@ -311,7 +311,7 @@ def model_provider(
         radio_interpolate_only_cpe=getattr(args, "radio_interpolate_only_cpe", False),
         radio_cpe_aspect_ratio_select=getattr(args, "radio_cpe_aspect_ratio_select", False),
         radio_disable_cpe=getattr(args, "radio_disable_cpe", False),
-        use_loss_scaling=args.use_loss_scaling,
+        use_loss_scaling=getattr(args, "use_loss_scaling", False),
     )
 
     model.freeze(

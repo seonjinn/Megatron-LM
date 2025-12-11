@@ -168,15 +168,77 @@ class MambaStack(MegatronModule):
             )
 
     def _select_layers_for_pipeline_parallel(self, layer_type_list):
-        num_layers_per_pipeline_rank = self.config.num_layers // self.pp_group.size()
-
         assert self.config.virtual_pipeline_model_parallel_size is None, (
             "The Mamba hybrid model does not currently support "
             "virtual/interleaved pipeline parallelism"
         )
 
-        offset = self.pp_group.rank() * num_layers_per_pipeline_rank
-        selected_list = layer_type_list[offset : offset + num_layers_per_pipeline_rank]
+        pp_rank = self.pp_group.rank()
+        pp_size = self.pp_group.size()
+
+        # Handle uneven pipeline parallelism with num_layers_in_first/last_pipeline_stage
+        if (
+            self.config.num_layers_in_first_pipeline_stage is not None
+            or self.config.num_layers_in_last_pipeline_stage is not None
+        ):
+            num_layers_in_first = (
+                self.config.num_layers_in_first_pipeline_stage
+                if self.config.num_layers_in_first_pipeline_stage is not None
+                else 0
+            )
+            num_layers_in_last = (
+                self.config.num_layers_in_last_pipeline_stage
+                if self.config.num_layers_in_last_pipeline_stage is not None
+                else 0
+            )
+
+            # Calculate middle layers and middle pipeline stages
+            middle_num_layers = self.config.num_layers - num_layers_in_first - num_layers_in_last
+            middle_pp_stages = pp_size
+            if self.config.num_layers_in_first_pipeline_stage is not None:
+                middle_pp_stages -= 1
+            if self.config.num_layers_in_last_pipeline_stage is not None:
+                middle_pp_stages -= 1
+
+            # Verify middle layers are evenly divisible
+            if middle_pp_stages > 0:
+                assert middle_num_layers % middle_pp_stages == 0, (
+                    f"With uneven pipeline parallelism, the middle layers ({middle_num_layers}) "
+                    f"must be divisible by the number of middle pipeline stages ({middle_pp_stages})"
+                )
+                num_layers_per_middle_rank = middle_num_layers // middle_pp_stages
+            else:
+                num_layers_per_middle_rank = 0
+
+            # Determine offset and num_layers for current PP rank
+            is_first_stage = pp_rank == 0
+            is_last_stage = pp_rank == pp_size - 1
+
+            if is_first_stage and self.config.num_layers_in_first_pipeline_stage is not None:
+                offset = 0
+                num_layers_for_this_rank = num_layers_in_first
+            elif is_last_stage and self.config.num_layers_in_last_pipeline_stage is not None:
+                offset = self.config.num_layers - num_layers_in_last
+                num_layers_for_this_rank = num_layers_in_last
+            else:
+                # Middle pipeline rank
+                # Adjust pp_rank to be relative to middle stages
+                middle_pp_rank = pp_rank
+                if self.config.num_layers_in_first_pipeline_stage is not None:
+                    middle_pp_rank -= 1
+                offset = num_layers_in_first + (middle_pp_rank * num_layers_per_middle_rank)
+                num_layers_for_this_rank = num_layers_per_middle_rank
+        else:
+            # Even pipeline parallelism
+            assert self.config.num_layers % pp_size == 0, (
+                f"num_layers ({self.config.num_layers}) should be divisible by "
+                f"pipeline_model_parallel_size ({pp_size})"
+            )
+            num_layers_per_pipeline_rank = self.config.num_layers // pp_size
+            offset = pp_rank * num_layers_per_pipeline_rank
+            num_layers_for_this_rank = num_layers_per_pipeline_rank
+
+        selected_list = layer_type_list[offset : offset + num_layers_for_this_rank]
 
         return offset, selected_list
 

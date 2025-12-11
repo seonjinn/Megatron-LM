@@ -1444,6 +1444,7 @@ class LLaVAModel(MegatronModule):
                 inference_context.key_value_memory_dict["sound_tokens_count"] = sound_embeddings.shape[1]
         else:
             sound_embeddings = self.encoder_hidden_state
+            sound_embeddings_len = None
 
         if not self.add_decoder:
             return image_embeddings, loss_mask
