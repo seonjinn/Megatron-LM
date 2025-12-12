@@ -160,6 +160,7 @@ class LLaVAModel(MegatronModule):
         sound_model: Optional[torch.nn.Module] = None,
         sound_projection: Optional[torch.nn.Module] = None,
         sound_token_index: int = DEFAULT_SOUND_TOKEN_INDEX,
+        class_token_len: Optional[int] = None,
         radio_force_eval_mode: bool = False,
         radio_force_cpe_eval_mode: bool = False,
         radio_interpolate_only_cpe: bool = False,
@@ -220,13 +221,19 @@ class LLaVAModel(MegatronModule):
         # on the word embeddings inside `finalize_model_grads._allreduce_word_embedding_grads`.
         self.share_embeddings_and_output_weights = share_embeddings_and_output_weights
 
-        class_token_len = 1
+        # Store CLI class_token_len value (will be None if not provided)
+        cli_class_token_len = class_token_len
         self._drop_vision_class_token = drop_vision_class_token
         if self.add_encoder:
             self._vision_fp8 = vision_transformer_config.fp8 or use_vision_backbone_fp8_arch
             self._vision_fp8_no_arch = vision_transformer_config.fp8
             vision_projection_input_size = vision_transformer_config.hidden_size
             add_class_token = True
+
+            # Set class_token_len: CLI parameter takes precedence, then model-specific defaults
+            if cli_class_token_len is not None:
+                class_token_len = cli_class_token_len
+            # Otherwise, use model-specific defaults (will be set in each section)
             if vision_transformer_config.vision_model_type.startswith(
                 ("clip", "siglip", "internvit")
             ):
@@ -238,6 +245,9 @@ class LLaVAModel(MegatronModule):
                         "set disable-vision-class-token to False."
                     )
                     assert not self._drop_vision_class_token, error_msg
+                elif cli_class_token_len is None:
+                    # Set default for CLIP/InternViT if no CLI value provided
+                    class_token_len = 1
                 self.vision_model = CLIPViTModel(
                     vision_transformer_config,
                     vision_transformer_layer_spec,
@@ -250,22 +260,32 @@ class LLaVAModel(MegatronModule):
                 )
             elif vision_transformer_config.vision_model_type in ("radio", "radio-g", "cradio-g"):
                 # TODO: should refactor into model code itself?
-                class_token_len = 0
+                # Initialize defaults - use CLI parameter if provided, otherwise model defaults
                 max_img_h = 0
                 max_img_w = 0
                 embedder_bias = False
                 ln_post_impl = None
                 use_mask_token = False
 
+                # Set model-specific defaults only if CLI parameter not provided
+                if cli_class_token_len is None:
+                    if vision_transformer_config.vision_model_type == "radio":
+                        class_token_len = 8
+                    elif vision_transformer_config.vision_model_type == "radio-g":
+                        class_token_len = 5
+                    elif vision_transformer_config.vision_model_type == "cradio-g":
+                        class_token_len = 8
+                    else:
+                        class_token_len = 8  # Default fallback
+
+                # Set other model-specific parameters
                 if vision_transformer_config.vision_model_type == "radio":
-                    class_token_len = 8
                     max_img_h = 2048
                     max_img_w = 2048
                     embedder_bias = False
                     ln_post_impl = None
                     use_mask_token = False
                 elif vision_transformer_config.vision_model_type == "radio-g":
-                    class_token_len = 5
                     max_img_h = 1792
                     max_img_w = 1792
                     embedder_bias = True
@@ -274,13 +294,13 @@ class LLaVAModel(MegatronModule):
                     ln_post_impl = TENorm
                     use_mask_token = True
                 elif vision_transformer_config.vision_model_type == "cradio-g":
-                    class_token_len = 8
                     max_img_h = 2048
                     max_img_w = 2048
                     embedder_bias = False
                     ln_post_impl = None
                     use_mask_token = False
 
+                # Apply FP8 override (FP8 has technical requirements that override user preferences)
                 if vision_transformer_config.fp8 or use_vision_backbone_fp8_arch:
                     class_token_len = 16    # FP8 requires final sequence length to be a multiple of 16.
 
@@ -821,7 +841,7 @@ class LLaVAModel(MegatronModule):
                 final_embedding[sound_batch_indices, sound_new_position_ids] = sound_embeddings.reshape(-1, embed_dim)
             else:
                 # TODO: Sound encoder from HF/Nemo can hang with text-only samples. Find a better way to handle this.
-                # Note(pzelasko): This should actually be fixed with dynamic shape MR since it disabled NCCL sync of max 
+                # Note(pzelasko): This should actually be fixed with dynamic shape MR since it disabled NCCL sync of max
                 #                 observed seq lengths on DP ranks in FastConformer; but I have no way to test it at the moment.
                 if sound_embeddings.shape[0] > 0:
                     assert sound_embeddings.shape[:2] == torch.Size([2, 1]) and sound_timestamps.shape == torch.Size([0])

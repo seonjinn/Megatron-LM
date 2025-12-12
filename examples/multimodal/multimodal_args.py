@@ -95,6 +95,7 @@ def add_multimodal_extra_args(parser):
         help="Surround image tokens with tags.",
     )
     group.add_argument("--use-tile-tags", action="store_true", default=False, help="Use tile tags")
+    group.add_argument("--class-token-len", type=int, default=None, help="Length of class token. If not set, uses model-specific defaults (radio: 8, radio-g: 5, cradio-g: 8). FP8 overrides to 16.")
     group.add_argument(
         "--packing-buffer-size",
         type=int,

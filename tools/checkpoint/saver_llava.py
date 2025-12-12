@@ -153,6 +153,7 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
         margs.disable_vision_class_token = getattr(self.md.checkpoint_args, "disable_vision_class_token", False)
         margs.use_tiling = getattr(self.md.checkpoint_args, "use_tiling", False)
         margs.pixel_shuffle = getattr(self.md.checkpoint_args, "pixel_shuffle", False)
+        margs.class_token_len = getattr(self.md.checkpoint_args, "class_token_len", None)
         margs.use_tile_tags = getattr(self.md.checkpoint_args, "use_tile_tags", False)
         margs.max_num_tiles = getattr(self.md.checkpoint_args, "max_num_tiles", 1)
         margs.use_thumbnail = getattr(self.md.checkpoint_args, "use_thumbnail", False)

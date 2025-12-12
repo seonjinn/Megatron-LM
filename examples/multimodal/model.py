@@ -306,6 +306,7 @@ def model_provider(
         sound_model=sound_model,
         sound_projection=sound_projection,
         sound_token_index=sound_token_index,
+        class_token_len=getattr(args, 'class_token_len', None),
         radio_force_eval_mode=getattr(args, "radio_force_eval_mode", False),
         radio_force_cpe_eval_mode=getattr(args, "radio_force_cpe_eval_mode", False),
         radio_interpolate_only_cpe=getattr(args, "radio_interpolate_only_cpe", False),

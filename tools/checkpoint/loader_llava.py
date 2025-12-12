@@ -66,6 +66,7 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
         margs.disable_vision_class_token = getattr(checkpoint_args, "disable_vision_class_token", False)
         margs.use_tiling = getattr(checkpoint_args, "use_tiling", False)
         margs.pixel_shuffle = getattr(checkpoint_args, "pixel_shuffle", False)
+        margs.class_token_len = getattr(checkpoint_args, "class_token_len", None)
         margs.use_tile_tags = getattr(checkpoint_args, "use_tile_tags", False)
         margs.max_num_tiles = getattr(checkpoint_args, "max_num_tiles", 1)
         margs.use_thumbnail = getattr(checkpoint_args, "use_thumbnail", False)
