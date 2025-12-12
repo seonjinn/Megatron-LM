@@ -1244,8 +1244,16 @@ class LLaVAModel(MegatronModule):
             if self._dynamic_resolution:
                 if self.context_parallel_lm > 1:
                     # This will split the images and imgs_sizes to context parallel ranks. Each rank will have a different imgs_sizes.
-                    images, imgs_sizes, vision_packed_seq_params, has_pad_img = split_to_context_parallel_ranks_dynamic_res(images, imgs_sizes, vision_packed_seq_params, self._vision_fp8)
+                    # If there are fewer images than CP ranks, dummy images are added to keep all ranks active.
+                    dummy_img_size = self.vision_model.patch_dim
+                    if self._pixel_shuffle:
+                        dummy_img_size = dummy_img_size * 2
+                    if self.conv_merge is not None:
+                        dummy_img_size = dummy_img_size * 2
+                    images, imgs_sizes, vision_packed_seq_params, has_pad_img, num_padded_imgs = split_to_context_parallel_ranks_dynamic_res(
+                        images, imgs_sizes, vision_packed_seq_params, self._vision_fp8, dummy_img_size)
                 else:
+                    num_padded_imgs = 0  # No CP padding when not using context parallelism
                     # TODO: should we replace the dataset_helper/task_encoder code in training that adds the padding image with this?
                     # Add FP8 padding for inference when not using context parallelism
                     if inference_context is not None and not has_pad_img and self._vision_fp8_no_arch:
@@ -1340,7 +1348,7 @@ class LLaVAModel(MegatronModule):
                 image_embeddings = image_embeddings[:-vision_projection_padding_needed, :, :]
 
             if self.context_parallel_lm > 1 and self._dynamic_resolution:
-                image_embeddings = gather_from_context_parallel_ranks_dynamic_res(image_embeddings)
+                image_embeddings = gather_from_context_parallel_ranks_dynamic_res(image_embeddings, num_padded_imgs)
                 # Go back from local imgs_sizes to global imgs_sizes.
                 imgs_sizes = global_imgs_sizes
 

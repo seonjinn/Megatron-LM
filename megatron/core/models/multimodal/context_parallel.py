@@ -214,12 +214,15 @@ def gather_from_context_parallel_ranks(local_t, global_pad):
 
     return global_t
 
-def gather_from_context_parallel_ranks_dynamic_res(local_t):
+def gather_from_context_parallel_ranks_dynamic_res(local_t, num_padded_imgs=0):
     """Gather the tensor local_t from context parallel ranks.
 
     A twist here is that the tensors have different sequence lengths.
     So we gather the shapes first, then all-to-all the tensors (all-gather requires same shape).
 
+    Args:
+        local_t: Local tensor to gather
+        num_padded_imgs: Number of padding images that were added in split (will be removed from end)
     """
     cp_size = get_context_parallel_world_size()
     shape = torch.as_tensor(local_t.shape, device=local_t.device)
@@ -234,21 +237,58 @@ def gather_from_context_parallel_ranks_dynamic_res(local_t):
     ]
     torch.distributed.nn.functional.all_to_all(outputs, inputs, group=get_context_parallel_group())
 
+    # If padding images were added, remove them from the last num_padded_imgs outputs
+    if num_padded_imgs > 0:
+        outputs = outputs[:-num_padded_imgs]
+
     global_t = torch.cat(outputs, dim=0)
 
     return global_t
 
 
-def split_to_context_parallel_ranks_dynamic_res(global_t, global_imgs_sizes, global_packed_seq_params, fp8_enabled=False):
+def split_to_context_parallel_ranks_dynamic_res(global_t, global_imgs_sizes, global_packed_seq_params, fp8_enabled=False, patch_dim=16):
     """Split the tensors global_t and global_imgs_sizes into context parallel world size parts.
 
     global_packed_seq_params will be used to compute the local PackedSeqParams corresponding to the split.
     fp8_enabled is used to compute possible padding.
+    
+    Returns:
+        local_t: Local tensor for this CP rank
+        local_imgs_sizes: Local image sizes for this CP rank
+        local_packed_seq_params: Local packed sequence params for this CP rank
+        has_padding: Whether FP8 padding was added
+        num_padded_imgs: Number of empty images added to pad when num_imgs < cp_size
+        patch_dim: Patch dimension used for the vision model
     """
     cp_size = get_context_parallel_world_size()
     cp_rank = get_context_parallel_rank()
 
     cu_seqlens = global_packed_seq_params.cu_seqlens_q
+    
+    # If we have fewer images than CP ranks, pad with dummy images
+    num_imgs = len(global_imgs_sizes)
+    num_padded_imgs = 0
+    if num_imgs < cp_size:
+        num_padded_imgs = cp_size - num_imgs
+        # Add dummy images with minimal size to keep all CP ranks active
+        # Use a small image size (1x1) that requires minimal tokens
+        dummy_img_size = torch.tensor([[patch_dim, patch_dim]], device=global_imgs_sizes.device, dtype=global_imgs_sizes.dtype)
+        hidden_dim = int(global_t.shape[2])
+        dummy_seqlen = int(patch_dim*patch_dim*3/hidden_dim)
+        
+        # Create dummy image tensors
+        dummy_img = torch.zeros([1, dummy_seqlen, hidden_dim], device=global_t.device, dtype=global_t.dtype)
+        
+        # Build new tensors with padding
+        seqlens = cu_seqlens[1:] - cu_seqlens[:-1]
+        for _ in range(num_padded_imgs):
+            global_imgs_sizes = torch.cat([global_imgs_sizes, dummy_img_size], dim=0)
+            global_t = torch.cat([global_t, dummy_img], dim=1)
+            seqlens = torch.cat([seqlens, torch.tensor([dummy_seqlen], device=seqlens.device, dtype=seqlens.dtype)])
+        
+        # Recompute cu_seqlens with the added dummy images
+        cu_seqlens = torch.cat([torch.tensor([0], device=cu_seqlens.device, dtype=cu_seqlens.dtype), torch.cumsum(seqlens, dim=0)])
+    
     # How many sequences per CP rank?
     # TODO: this has imbalance per ranks. Add a better algorithm to balance the load.
     seq_per_rank = len(global_imgs_sizes) // cp_size
@@ -298,4 +338,4 @@ def split_to_context_parallel_ranks_dynamic_res(global_t, global_imgs_sizes, glo
     else:
         local_t = torch.cat([global_t[:, offset + cu_seqlens_local[0] : offset + cu_seqlens_local[-2]], pad_img], dim=1)
 
-    return local_t, local_imgs_sizes, local_packed_seq_params, has_padding
+    return local_t, local_imgs_sizes, local_packed_seq_params, has_padding, num_padded_imgs
