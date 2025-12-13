@@ -232,6 +232,7 @@ OPTIONS=" \
     --sound-embedding-size 751 \
     --sound-clip-duration 60 \
     --freeze-ViT \
+    --sound-batch-split 4 \
 "
 
 #     --pretrained-checkpoint ${CHECKPOINT_DIR} \

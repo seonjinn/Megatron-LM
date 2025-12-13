@@ -189,6 +189,9 @@ def add_multimodal_extra_args(parser):
         "--recompute-vision-projection", action="store_true", default=False, help="Enable activation checkpointing in the vision projection layer."
     )
     group.add_argument(
+        "--recompute-sound-projection", action="store_true", default=False, help="Enable activation checkpointing in the sound projection layer."
+    )
+    group.add_argument(
         "--allow-large-videos", action="store_true", default=False, help="Allow large videos to be loaded into the model."
     )
     group.add_argument(

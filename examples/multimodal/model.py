@@ -249,7 +249,6 @@ def model_provider(
         vision_projection_config.recompute_method = None
         vision_projection_config.recompute_num_layers = None
 
-
     tokenizer = get_tokenizer()
     image_token_index = tokenizer.convert_tokens_to_ids(IMAGE_TOKEN)
     assert image_token_index is not None, f"IMAGE_TOKEN={IMAGE_TOKEN} needs to be added using the --special-tokens arg."
@@ -398,12 +397,17 @@ def sound_model_provider(base_config, language_hidden_size):
         sound_config.recompute_granularity = None
         sound_config.recompute_method = None
         sound_config.recompute_num_layers = None
+
+    # Toggle --recompute* for the sound projection layer.
+    if getattr(args, "recompute_sound_projection", False):
+        sound_projection_config.recompute_granularity = "full"
+    else:
+        sound_projection_config.recompute_granularity = None
+        sound_projection_config.recompute_method = None
+        sound_projection_config.recompute_num_layers = None
+
     sound_config.sound_pad_to_clip_duration = getattr(args, "sound_pad_to_clip_duration", True)
     sound_config.sound_batch_split = getattr(args, "sound_batch_split", 1)
-
-    sound_projection_config.recompute_granularity = None
-    sound_projection_config.recompute_method = None
-    sound_projection_config.recompute_num_layers = None
 
     sound_projection_config.sequence_parallel = False
     sound_projection_config.context_parallel_size = 1

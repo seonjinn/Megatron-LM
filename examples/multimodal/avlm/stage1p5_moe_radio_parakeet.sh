@@ -232,6 +232,7 @@ OPTIONS=" \
     --sound-clip-duration 60 \
     --freeze-LM \
     --freeze-ViT \
+    --sound-batch-split 2 \
 "
 
 export NVTE_APPLY_QK_LAYER_SCALING=0
