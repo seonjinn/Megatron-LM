@@ -225,7 +225,7 @@ class LLaVAModel(MegatronModule):
         self.context_parallel_lm = language_transformer_config.context_parallel_size
         if self.sequence_parallel_lm or self.context_parallel_lm > 1:
             # TODO: maybe need a better check for when using heterogeneous layer config
-            if not language_model_type.startswith('nemotron5-hybrid') and not language_model_type.startswith('nemotron6-moe') and not isinstance(language_transformer_config, HeterogeneousTransformerConfig):
+            if not language_model_type.startswith('nemotron5-hybrid') and not language_model_type.startswith('nemotron6-moe') and not language_model_type.startswith('nemotron6-super') and not isinstance(language_transformer_config, HeterogeneousTransformerConfig):
                 attn_module = language_transformer_layer_spec.submodules.self_attention
                 assert (
                     attn_module.submodules.core_attention == TEDotProductAttention and HAVE_TE
