@@ -303,8 +303,6 @@ def model_provider(
         patch_dim=args.patch_dim,
         language_rotary_base=args.rotary_base,
         language_rope_scaling=args.use_rope_scaling,
-        hybrid_attention_ratio=args.hybrid_attention_ratio,
-        hybrid_mlp_ratio=args.hybrid_mlp_ratio,
         hybrid_override_pattern=args.hybrid_override_pattern,
         fp16_lm_cross_entropy=args.fp16_lm_cross_entropy,
         image_token_index=image_token_index,
