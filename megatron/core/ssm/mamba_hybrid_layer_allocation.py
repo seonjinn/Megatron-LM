@@ -65,43 +65,6 @@ def allocate_layers(layer_pattern: str, vp_stage: int = 0) -> tuple[list, int]:
                 f"In hybrid layer pattern, '{l}' is not " f"one of {Symbols.VALID}"
             )
 
-    if target_attention_ratio > 0.0 or target_mlp_ratio > 0.0 or override_pattern is not None:
-        actual_attention_layers_count = layer_type_list.count(Symbols.ATTENTION)
-        actual_attention_ratio = actual_attention_layers_count / total_layers_count
-        actual_mlp_layers_count = layer_type_list.count(Symbols.MLP)
-        actual_mlp_ratio = actual_mlp_layers_count / total_layers_count
-        allocation_string = "".join(layer_type_list)
-        log_single_rank(
-            logger,
-            logging.INFO,
-            f"Hybrid allocation ({Symbols.MAMBA} is mamba, "
-            f"{Symbols.ATTENTION} is attention, "
-            f"{Symbols.MLP} is mlp):",
-        )
-        log_single_rank(logger, logging.INFO, allocation_string)
-        log_single_rank(
-            logger,
-            logging.INFO,
-            f"{actual_attention_layers_count} attention layers in "
-            f"{total_layers_count} total layers.",
-        )
-        log_single_rank(
-            logger,
-            logging.INFO,
-            f"Target attention ratio: {target_attention_ratio:.2f}. "
-            f"Actual attention ratio: {actual_attention_ratio:.2f}.",
-        )
-        log_single_rank(
-            logger,
-            logging.INFO,
-            f"{actual_mlp_layers_count} mlp layers in " f"{total_layers_count} total layers.",
-        )
-        log_single_rank(
-            logger,
-            logging.INFO,
-            f"Target mlp ratio: {target_mlp_ratio:.2f}. "
-            f"Actual mlp ratio: {actual_mlp_ratio:.2f}.",
-        )
     log_on_each_pipeline_stage(
         logger,
         logging.INFO,

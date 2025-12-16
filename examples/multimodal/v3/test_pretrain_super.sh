@@ -6,7 +6,7 @@
 #SBATCH --mem=0
 #SBATCH --ntasks-per-node=8
 #SBATCH --dependency=singleton
-#SBATCH --nodes=32
+#SBATCH --nodes=16
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
@@ -164,7 +164,6 @@ OPTIONS=" \
     --eod-mask-loss \
     --image-tag-type internvl \
     --moe-token-dispatcher-type alltoall \
-    --moe-shared-expert-overlap \
     --enable-experimental \
     --moe-permute-fusion \
     --use-fused-weighted-squared-relu \

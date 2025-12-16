@@ -191,7 +191,6 @@ OPTIONS=" \
     --eod-mask-loss \
     --image-tag-type internvl \
     --moe-token-dispatcher-type alltoall \
-    --moe-shared-expert-overlap \
     --enable-experimental \
     --moe-permute-fusion \
     --use-fused-weighted-squared-relu \
@@ -206,6 +205,7 @@ OPTIONS=" \
     --moe-router-load-balancing-type seq_aux_loss \
     --moe-shared-expert-intermediate-size 5376 \
     --moe-latent-size 1024 \
+    --attention-backend flash \
     --is-hybrid-model \
     --mamba-num-heads 128 \
     --hybrid-override-pattern MEMEMEM*EMEMEMEM*EMEMEMEM*EMEMEMEMEM*EMEMEMEMEM*EMEMEMEMEM*EMEMEMEMEM*EMEMEMEM*EMEMEMEME \
