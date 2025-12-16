@@ -6,11 +6,11 @@
 #SBATCH --mem=0
 #SBATCH --ntasks-per-node=8
 #SBATCH --dependency=singleton
-#SBATCH --nodes=32
+#SBATCH --nodes=64
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=sft_super_12b
+#SBATCH --job-name=test_sft_super_12b
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
@@ -49,14 +49,14 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="sft_super_12b"
+    MODEL_NAME="test_sft_super_12b"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
-WANDB_API_KEY=${WANDB_API_KEY}
-WANDB_PROJECT=${WANDB_PROJECT:-"megatron-vlm-v3"}
-WANDB_ENTITY=${WANDB_ENTITY:-"adlr"}
-WANDB_NAME=${MODEL_NAME}
+# WANDB_API_KEY=${WANDB_API_KEY}
+# WANDB_PROJECT=${WANDB_PROJECT:-"megatron-vlm-v3"}
+# WANDB_ENTITY=${WANDB_ENTITY:-"adlr"}
+# WANDB_NAME=${MODEL_NAME}
 
 WORKSPACE="/lustre/fsw/portfolios/llmservice/users/${USER}/workspace"
 SOURCE=`pwd`
@@ -75,14 +75,14 @@ mkdir -p "${FINETUNE_DIR}" "${LOGS_DIR}" "${TENSORBOARD_DIR}" "${WANDB_DIR}"
 
 CODE_DIR="${SOURCE}"
 
-TP=2
-EP=64
+# TP=2
+TP=8
+# EP=64
+EP=512
+ETP=1
 
-# TODO: Update this path to point to a valid pretrained VLM checkpoint (from pretrain_super.sh)
-CHECKPOINT_DIR="/path/to/pretrained_super_12b_vlm/checkpoint"
-
-# TODO: Update this path to point to the correct tokenizer for the 12B model
-TOKENIZER_MODEL="/path/to/12b_hybrid_moe/tokenizer"
+# Use the old nemotron6-moe tokenizer for testing
+TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--Nemotron-Nano-3-30B-A3.5B-dev-1016/snapshots/bb271274159f07461e919379311e32802e5ec36b/"
 TOKENIZER_PROMPT_FORMAT="nemotron6-moe"
 
 DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/eagle_sft_v13.52.no.text.yaml"
@@ -161,7 +161,6 @@ EXTRA_ARGS+=" --recompute-granularity selective --recompute-modules core_attn ml
 EXTRA_ARGS+=" --recompute-vision --recompute-method-vision block --recompute-granularity-vision full --recompute-vision-num-layers 32 "
 
 OPTIONS=" \
-    --use-checkpoint-args \
     --transformer-impl transformer_engine \
     --use-te \
     --data-path ${DATA_TRAIN} \
@@ -219,7 +218,7 @@ OPTIONS=" \
     --exit-duration-in-mins 230 \
     --tensor-model-parallel-size ${TP} \
     --expert-model-parallel-size ${EP} \
-    --expert-tensor-parallel-size 1 \
+    --expert-tensor-parallel-size ${ETP} \
     --pipeline-model-parallel-size 1 \
     --seq-length ${SEQ_LEN} \
     --decoder-seq-length ${DECODER_SEQ_LEN} \
@@ -239,7 +238,6 @@ OPTIONS=" \
     --tokenizer-type MultimodalTokenizer \
     --tokenizer-model ${TOKENIZER_MODEL} \
     --tokenizer-prompt-format ${TOKENIZER_PROMPT_FORMAT} \
-    --pretrained-checkpoint ${CHECKPOINT_DIR} \
     --load ${FINETUNE_DIR} \
     --save ${FINETUNE_DIR} \
     --dataloader-save ${FINETUNE_DIR}/dataloader \

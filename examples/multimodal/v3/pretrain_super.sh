@@ -59,6 +59,8 @@ WANDB_NAME=${MODEL_NAME}
 
 WORKSPACE="/lustre/fsw/portfolios/llmservice/users/${USER}/workspace"
 SOURCE=`pwd`
+# Clean up double slashes in SOURCE path
+SOURCE=$(echo "$SOURCE" | sed 's|^//|/|')
 OUTPUT_BASE="${WORKSPACE}/output"
 OUTPUT="${OUTPUT_BASE}/${MODEL_NAME}"
 

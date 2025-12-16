@@ -688,6 +688,14 @@ class TransformerLayer(MegatronModule, BaseTransformerLayer):
             hidden_states = hidden_states + shared_expert_output
 
         mlp_output_with_bias = (hidden_states, mlp_bias)
+
+        if self.recompute_pre_mlp_layernorm:
+            # discard the output of the pre-mlp layernorm and register the recompute
+            # as a gradient hook of mlp_output_with_bias[0]
+            self.pre_mlp_norm_checkpoint.discard_output_and_register_recompute(
+                mlp_output_with_bias[0]
+            )
+
         return self._forward_post_mlp(mlp_output_with_bias, residual)
 
 
