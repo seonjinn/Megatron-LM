@@ -413,7 +413,7 @@ class LLaVAModel(MegatronModule):
                     language_transformer_config, language_transformer_config.language_model_type
                 )
                 self.language_model = build_hf_model(language_transformer_config)
-            elif language_model_type.startswith('nemotron5-hybrid') or language_model_type.startswith('nemotron6-moe'):
+            elif language_model_type.startswith('nemotron5-hybrid') or language_model_type.startswith('nemotron6-moe') or language_model_type.startswith('nemotron6-super'):
                 self.language_model = MambaModel(
                     config=language_transformer_config,
                     mamba_stack_spec=language_transformer_layer_spec,
