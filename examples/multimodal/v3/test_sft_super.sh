@@ -6,7 +6,7 @@
 #SBATCH --mem=0
 #SBATCH --ntasks-per-node=8
 #SBATCH --dependency=singleton
-#SBATCH --nodes=64
+#SBATCH --nodes=32
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
@@ -77,8 +77,7 @@ CODE_DIR="${SOURCE}"
 
 # TP=2
 TP=8
-# EP=64
-EP=512
+EP=64
 ETP=1
 
 # Use the old nemotron6-moe tokenizer for testing
