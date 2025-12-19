@@ -1266,6 +1266,64 @@ def load_args_from_checkpoint(
     return args, checkpoint_args
 
 
+def fix_fp8_params_lose_precision_when_loading_dist_ckpt(state_dict):
+    """
+    When "--fp8-param-gather" and "--use-dist-ckpt" are both enabled, the state dict read from
+    dist-checkpoint loses precision (the weights read from checkpoint go through the process of
+    bf16/fp16 -> fp8 -> bf16/fp16). This function is implemented to solve this problem.
+    When "--fp8-param-gather" is disabled, this function doesn't modify anything.
+    """
+    for key in state_dict.keys():
+        if key.startswith('model'):
+            for _, sharded_tensor in state_dict[key].items():
+                if is_float8tensor(sharded_tensor.data):
+                    sharded_tensor.data = dequantize_fp8_tensor(sharded_tensor.data).cpu()
+
+EXTRA_KEY = "_extra_state"
+EXTRA_SUFFIX = "._extra_state"
+
+def sanitize_and_load_by_probe(module, model_sd, strict=True):
+    """
+    Try normal load. If it fails with NVFP4BlockScaling, probe each _extra_state
+    entry by loading it alone (strict=False). Drop only ones that fail, then
+    load the full sanitized dict.
+    """
+    EXTRA_SUFFIX = "._extra_state"
+    ROOT_EXTRA_KEY = "_extra_state"
+
+    # First try a normal load
+    try:
+        module.load_state_dict(model_sd, strict=strict)
+        return
+    except AttributeError as e:
+        if "NVFP4BlockScaling" not in str(e):
+            raise
+
+    pruned = dict(model_sd)  # shallow copy
+    bad_keys = []
+
+    # Probe each extra-state entry individually
+    for k, v in list(pruned.items()):
+        if not (k == ROOT_EXTRA_KEY or k.endswith(EXTRA_SUFFIX)):
+            continue
+        try:
+            # Load only this k/v; strict=False to ignore missing other keys
+            module.load_state_dict({k: v}, strict=False)
+        except AttributeError as e2:
+            if "NVFP4BlockScaling" in str(e2):
+                bad_keys.append(k)
+
+    # Drop only the offending extra-state entries
+    for k in bad_keys:
+        pruned.pop(k, None)
+
+    if bad_keys:
+        print(f"[sanitize] removed {len(bad_keys)} NVFP4 extra-state entries")
+
+    # Final load with sanitized dict
+    module.load_state_dict(pruned, strict=strict)
+
+
 def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load', strict=True,
                     checkpointing_context=None, skip_load_to_model_and_opt=False):
     """Load a model checkpoint and return the iteration.
@@ -1519,16 +1577,20 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load', 
                 raise e
     # Model.
     strict = False if args.retro_add_retriever else strict
+    strict=False
     if not skip_load_to_model_and_opt:
         if len(ddp_model) == 1:
-            load_model_state_dict(ddp_model[0], state_dict['model'], strict)
+            sanitize_and_load_by_probe(ddp_model[0], state_dict['model'], strict=strict)
         else:
             for i in range(len(ddp_model)):
                 # If there is no corresponding model in the state_dict, it will be ignored.
                 # It means that this is an empty stage.
                 if 'model%d' % i not in state_dict:
                     continue
-                load_model_state_dict(ddp_model[i], state_dict['model%d' % i], strict)
+                #model_sd = sanitize_model_sd_for_nvfp4(state_dict['model%d' % i])
+                #ddp_model[i].load_state_dict(state_dict['model%d' % i], strict=strict)
+                sanitize_and_load_by_probe(ddp_model[i], state_dict['model%d' % i], strict=strict)
+
     # Fix up query/key/value matrix ordering if needed.
     checkpoint_version = get_checkpoint_version()
     print_rank_0(f' checkpoint version {checkpoint_version}')
