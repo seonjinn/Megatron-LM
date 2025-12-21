@@ -64,10 +64,14 @@ EP=4
 CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/output/pretrain_moe_small_1104/checkpoints"
 
 # New tokenizer.
-TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--NVIDIA-Nemotron-Nano-31B-A3-v3/snapshots/22c64afb03eb7c27c5d1fa30042b68a1eed53f33/"
+TOKENIZER_MODEL="/scratch/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--Nemotron-Nano-3-30B-A3.5B-dev-1016/snapshots/bb271274159f07461e919379311e32802e5ec36b/"
 TOKENIZER_PROMPT_FORMAT="nemotron6-moe"
 
 DATA_TRAIN="/lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/users/amalasanjayd/eagle_recipe/online_packing/eagle_sft_v13.51.yaml"
+if [[ $SLURM_SUBMIT_HOST == *"lbd-lax"* ]]; then
+    echo "Using lax dataset"
+    DATA_TRAIN="/scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/datasets/eagle-next/"
+fi
 
 if [[ $DEBUG -eq 1 ]]; then
     MBZ=1

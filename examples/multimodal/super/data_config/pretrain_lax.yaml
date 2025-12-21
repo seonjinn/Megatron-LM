@@ -1,0 +1,19 @@
+__module__: megatron.energon
+__class__: Metadataset
+splits:
+  train:
+    datasets:
+      - weight: 1.
+        path: /scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/datasets/eagle-next/commercial/commercial_pretrain_0930
+        subflavors:
+          has_image: True
+      - weight: 1.
+        path: /scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/datasets/eagle-next/commercial/pretrain_eagle_sft_v13.52_no_text_reasoning
+        subflavors:
+          has_image: True
+  val:
+    datasets:
+      - weight: 1.
+        path: /scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/datasets/vqa/VQAv2/stage1
+        subflavors:
+          augmentation: False

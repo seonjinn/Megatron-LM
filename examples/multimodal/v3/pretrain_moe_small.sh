@@ -69,10 +69,14 @@ EP=4
 CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/output/pretrain_moe_small_1104/checkpoints"
 
 # New tokenizer.
-TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--NVIDIA-Nemotron-Nano-31B-A3-v3/snapshots/1ec9e9c5597db38926449c98482d891218e58b05/"
+TOKENIZER_MODEL="/scratch/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--Nemotron-Nano-3-30B-A3.5B-dev-1016/snapshots/bb271274159f07461e919379311e32802e5ec36b/"
 TOKENIZER_PROMPT_FORMAT="nemotron6-moe"
 
-DATA_TRAIN="${SOURCE}/examples/multimodal/v2/data_config/pretrain_dataset_commercial.yaml"
+DATA_TRAIN="${SOURCE}/examples/multimodal/v2/data_config/pretrain_dataset_commercial_sft_extended.yaml"
+if [[ $SLURM_SUBMIT_HOST == *"lbd-lax"* ]]; then
+    echo "Using lax dataset"
+    DATA_TRAIN="${SOURCE}/examples/multimodal/super/data_config/pretrain_lax.yaml"
+fi
 
 if [[ $DEBUG -eq 1 ]]; then
     MBZ=1
@@ -219,7 +223,6 @@ OPTIONS=" \
     --tokenizer-prompt-format ${TOKENIZER_PROMPT_FORMAT} \
     --load ${FINETUNE_DIR} \
     --save ${FINETUNE_DIR} \
-    --pretrained-checkpoint ${CHECKPOINT_DIR} \
     --dataloader-save ${FINETUNE_DIR}/dataloader \
     --save-interval 1000 \
     --ckpt-format torch \
