@@ -111,7 +111,7 @@ if [[ $DEBUG -eq 1 ]]; then
 else
     MBZ=1
     BZ=128
-    NW=4
+    NW=8
     AD=0.0
     HD=0.0
     LI=5
@@ -165,10 +165,10 @@ fi
 
 EXTRA_ARGS+=" --packing-buffer-size 3247 --packing-seq-length ${DECODER_SEQ_LEN} --packing-knapsack-algorithm balanced_greedy_knapsack "
 # LM (Mamba block) recompute
-EXTRA_ARGS+=" --recompute-granularity selective --recompute-modules core_attn mlp layernorm moe_act moe "
+EXTRA_ARGS+=" --recompute-granularity selective --recompute-modules core_attn layernorm moe_act "
 # core_attn moe_act layernorm mlp moe
 # Vision (GPT block) recompute
-EXTRA_ARGS+=" --recompute-vision --recompute-method-vision block --recompute-granularity-vision full --recompute-vision-num-layers 32 "
+EXTRA_ARGS+=" --recompute-vision --recompute-method-vision block --recompute-granularity-vision full --recompute-vision-num-layers 28 "
 
 OPTIONS=" \
     --use-checkpoint-args \
@@ -264,6 +264,7 @@ OPTIONS=" \
     --sequence-parallel \
     --allow-large-videos \
 "
+
 
 export WANDB_ENTITY=$WANDB_ENTITY  # Not passed in via command line args, only env vars
 export NVTE_APPLY_QK_LAYER_SCALING=0
