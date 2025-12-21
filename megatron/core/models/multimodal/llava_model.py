@@ -184,6 +184,9 @@ class LLaVAModel(MegatronModule):
         video_temporal_patch_size: int = 1,  # Default 1 = no temporal compression
         allow_checkpoint_without_temporal_compression: bool = False,
         separate_video_embedder: bool = False,  # Use separate embedders for images (C*P*P) and videos (C*T*P*P)
+        mtp_block_spec: Optional[ModuleSpec] = None,
+        mtp_hybrid_override_pattern: Optional[str] = None,
+        disable_mtp: bool = False,
     ) -> None:
         super().__init__(config=language_transformer_config)
         if has_config_logger_enabled(language_transformer_config):
@@ -419,16 +422,18 @@ class LLaVAModel(MegatronModule):
                     mamba_stack_spec=language_transformer_layer_spec,
                     vocab_size=language_vocab_size,
                     max_sequence_length=language_max_sequence_length,
-                    parallel_output=parallel_output,
-                    position_embedding_type=language_position_embedding_type,
                     pre_process=self.pre_process,
                     hybrid_override_pattern=hybrid_override_pattern,
+                    mtp_hybrid_override_pattern=mtp_hybrid_override_pattern,
                     post_process=self.post_process,
+                    fp16_lm_cross_entropy=fp16_lm_cross_entropy,
+                    parallel_output=parallel_output,
+                    share_embeddings_and_output_weights=share_embeddings_and_output_weights,
+                    position_embedding_type=language_position_embedding_type,
                     rotary_percent=language_rotary_percent,
                     rotary_base=language_rotary_base,
-                    fp16_lm_cross_entropy=fp16_lm_cross_entropy,
+                    mtp_block_spec=mtp_block_spec,
                     scatter_embedding_sequence_parallel=False,
-                    share_embeddings_and_output_weights=share_embeddings_and_output_weights,
                 )
             else:
                 self.language_model = GPTModel(
@@ -462,6 +467,10 @@ class LLaVAModel(MegatronModule):
             self.language_model.register_load_state_dict_post_hook(
                 _load_state_dict_hook_ignore_extra_state
             )
+            if disable_mtp:
+                self.language_model.register_load_state_dict_post_hook(
+                    _load_state_dict_hook_ignore_mtp
+                )
 
         self.img_seq_len = get_num_image_embeddings(
             img_h=img_h,
@@ -1875,6 +1884,20 @@ def _load_state_dict_hook_ignore_extra_state(
             if "extra_state" in key:
                 logging.getLogger(__name__).debug(
                     f"_extra_state key {key} being removed from {name}"
+                )
+                keys.remove(key)
+
+
+def _load_state_dict_hook_ignore_mtp(
+    module: torch.nn.Module, incompatible_keys: namedtuple
+):
+    """Hook to ignore MTP.
+    """
+    for name, keys in incompatible_keys._asdict().items():
+        for key in keys[::-1]:
+            if "mtp" in key:
+                logging.getLogger(__name__).warning(
+                    f"mtp key {key} being removed from {name}"
                 )
                 keys.remove(key)
 

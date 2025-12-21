@@ -356,5 +356,32 @@ def add_multimodal_extra_args(parser):
     group.add_argument(
         "--log-model-act-norms", action="store_true", default=False, help="Log the activation norms of the model components."
     )
+    group.add_argument(
+        "--dynamic-resolution-no-truncate", action="store_true", default=False,
+        help="Disable trunctation during dynamic resolution, and instead throw away the entire sample"
+    )
+    group.add_argument(
+        "--video-aug-scale-frames-up", type=int, default=None,
+        help="Video data augmentation (scale UP): randomly sample s from 1..N and scale both "
+             "FPS and max_frames by s (iso-token mode), while dividing video_target_num_patches "
+             "by s. E.g. --video-aug-scale-frames-up 8 samples uniformly from {1,2,...,8}."
+    )
+    group.add_argument(
+        "--video-aug-scale-resolution-only", action="store_true", default=False,
+        help="When used with --video-aug-scale-frames-up or --video-aug-scale-resolution-up, "
+             "only change the image patch count without changing the frame count. "
+             "With --video-aug-scale-frames-up this reduces spatial resolution; "
+             "with --video-aug-scale-frames-down this increases spatial resolution."
+    )
+    group.add_argument(
+        "--video-aug-scale-resolution-up", type=int, default=None,
+        help="Video data augmentation (resolution UP): randomly sample s from 1..N and divide "
+             "both FPS and max_frames by s, while multiplying video_target_num_patches by s "
+             "(higher resolution per frame, fewer frames). "
+             "E.g. --video-aug-scale-resolution-up 4 samples uniformly from {1,2,3,4}."
+    )
+    group.add_argument(
+        "--disable-mtp", action="store_true", default=False, help="Disable Multi-Token Prediction (MTP)."
+    )
 
     return parser

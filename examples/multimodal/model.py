@@ -19,6 +19,7 @@ from layer_specs import (get_layer_spec, get_layer_spec_te, get_mlp_module_spec,
 from megatron.core.models.gpt.gpt_layer_specs import (
     get_gpt_decoder_block_spec,
 )
+from megatron.core.models.mamba.mamba_layer_specs import get_mamba_mtp_block_spec
 from megatron.core.models.gpt.heterogeneous.heterogeneous_layer_specs import get_gpt_heterogeneous_layer_spec
 from megatron.core.models.multimodal.efficient_video_sampling import EVSVariant
 from megatron.core.models.multimodal.llava_model import IMAGE_TOKEN, SOUND_TOKEN, LLaVAModel
@@ -139,7 +140,7 @@ def model_provider(
     if getattr(args, "no_calculate_per_token_loss", False):
         assert not args.use_loss_scaling, "Cannot disable calculating per-token loss and use loss scaling at the same time, either remove --no-calculate-per-token-loss or --use-loss-scaling"
 
-    language_config, language_transformer_layer_spec = get_language_config_and_spec(base_config)
+    language_config, language_transformer_layer_spec, mtp_block_spec = get_language_config_and_spec(base_config)
 
     if args.heterogeneous_layers_config_path is not None:
         without_hetero = get_args()
@@ -331,6 +332,9 @@ def model_provider(
         video_temporal_patch_size=getattr(args, "video_temporal_patch_size", 1),
         allow_checkpoint_without_temporal_compression=getattr(args, "allow_checkpoint_without_temporal_compression", False),
         separate_video_embedder=getattr(args, "separate_video_embedder", False),
+        mtp_block_spec=mtp_block_spec,
+        mtp_hybrid_override_pattern=args.mtp_hybrid_override_pattern,
+        disable_mtp=args.disable_mtp,
     )
 
     model.freeze(
@@ -391,7 +395,16 @@ def get_language_config_and_spec(base_config):
             is_vit=False, normalization=language_config.normalization
         )
 
-    return language_config, language_transformer_layer_spec
+    mtp_block_spec = None
+    if args.mtp_num_layers is not None:
+        assert args.mtp_spec is not None
+        assert args.mtp_hybrid_override_pattern is not None, "We need to set the override hybrid pattern for MTP layers!"
+        mtp_mamba_stack_spec = import_module(args.mtp_spec)
+        mtp_block_spec = get_mamba_mtp_block_spec(
+            language_config, mtp_mamba_stack_spec, use_transformer_engine=use_te, vp_stage=vp_stage
+        )
+
+    return language_config, language_transformer_layer_spec, mtp_block_spec
 
 
 def sound_model_provider(base_config, language_hidden_size):

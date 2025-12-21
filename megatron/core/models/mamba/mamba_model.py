@@ -354,7 +354,6 @@ class MambaModel(LanguageModule):
 
         if self.mtp_process:
             extra_block_kwargs = None
-            packed_seq_params = None
             import transformer_engine as te
             if self.config.keep_mtp_spec_in_bf16:
                 disable_low_precision = te.pytorch.fp8_autocast(enabled=False)
@@ -456,7 +455,7 @@ class MambaModel(LanguageModule):
             ShardedStateDict: sharded state dict for the MambaModel
         """
         sharded_state_dict = super().sharded_state_dict(prefix, sharded_offsets, metadata)
-        
+
         # Multi-Token Prediction (MTP) need both embedding layer and output layer in
         # mtp process stage.
         # If MTP is not placed in the pre processing stage, we need to maintain a copy of

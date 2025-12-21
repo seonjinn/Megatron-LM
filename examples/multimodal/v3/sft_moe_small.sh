@@ -64,7 +64,10 @@ EP=4
 CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/output/pretrain_moe_small_1104/checkpoints"
 
 # New tokenizer.
-TOKENIZER_MODEL="/scratch/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--Nemotron-Nano-3-30B-A3.5B-dev-1016/snapshots/bb271274159f07461e919379311e32802e5ec36b/"
+TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--Nemotron-Nano-3-30B-A3.5B-dev-1016/snapshots/bb271274159f07461e919379311e32802e5ec36b/"
+if [[ $SLURM_SUBMIT_HOST == *"lbd-lax"* ]]; then
+    TOKENIZER_MODEL="{$TOKENIZER_MODEL/lustre/scratch}"
+fi
 TOKENIZER_PROMPT_FORMAT="nemotron6-moe"
 
 DATA_TRAIN="/lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/users/amalasanjayd/eagle_recipe/online_packing/eagle_sft_v13.51.yaml"

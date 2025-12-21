@@ -10,10 +10,10 @@
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=pretrain_super_12b
+#SBATCH --job-name=pretrain_super
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
-export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
+export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/trintamaki/msc_config/msc_config.yaml"
 
 export UB_TIMEOUT=720
 export CUDA_DEVICE_MAX_CONNECTIONS=1
@@ -48,7 +48,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="pretrain_super_12b"
+    MODEL_NAME="pretrain_super"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -72,14 +72,17 @@ WANDB_DIR="${OUTPUT}/wandb"
 TP=2
 EP=64
 
-# TODO: Update this path to point to a valid 12B hybrid MOE checkpoint
-CHECKPOINT_DIR="/path/to/12b_hybrid_moe/checkpoint"
+CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/super-radio-tp2-ep64"
 
 # TODO: Update this path to point to the correct tokenizer for the 12B model
-TOKENIZER_MODEL="/path/to/12b_hybrid_moe/tokenizer"
+TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--Nemotron-Nano-3-30B-A3.5B-dev-1016/snapshots/bb271274159f07461e919379311e32802e5ec36b/"
 TOKENIZER_PROMPT_FORMAT="nemotron6-moe"
 
 DATA_TRAIN="${SOURCE}/examples/multimodal/v2/data_config/pretrain_dataset_commercial_sft_extended.yaml"
+if [[ $SLURM_SUBMIT_HOST == *"lbd-lax"* ]]; then
+    echo "Using lax dataset"
+    DATA_TRAIN="${SOURCE}/examples/multimodal/super/data_config/pretrain_lax.yaml"
+fi
 
 if [[ $DEBUG -eq 1 ]]; then
     MBZ=1
@@ -253,7 +256,14 @@ OPTIONS=" \
     --num-workers ${NW} \
     --tensorboard-dir ${TENSORBOARD_DIR} \
     --sequence-parallel \
+    --disable-mtp \
 "
+
+#    --mtp-spec megatron.core.models.mamba.mamba_layer_specs mamba_stack_spec \
+#    --mtp-num-layers 2 \
+#    --mtp-hybrid-override-pattern \"*E\" \
+#    --mtp-loss-scaling-factor 0.3 \
+#    --keep-mtp-spec-in-bf16 \
 
 export WANDB_ENTITY=$WANDB_ENTITY  # Not passed in via command line args, only env vars
 export NVTE_APPLY_QK_LAYER_SCALING=0
@@ -268,7 +278,7 @@ else
     DATETIME=`date +'date_%y-%m-%d_time_%H-%M-%S'`
 
     srun -l --verbose \
-    --container-image /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/containers/pytorch25.06-moe-avlm-editable-energon.sqsh \
+    --container-image /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/containers/pytorch25.06-moe-avlm-editable-energon-super.sqsh \
     --container-mounts "/lustre" \
     --output=${LOGS_DIR}/%x_%j_$DATETIME.log \
     sh -c "echo ${run_cmd}; ${run_cmd}"
