@@ -70,7 +70,7 @@ TOKENIZER_PROMPT_FORMAT="nemotron6-moe"
 DATA_TRAIN="/lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/users/amalasanjayd/eagle_recipe/online_packing/eagle_sft_v13.51.yaml"
 if [[ $SLURM_SUBMIT_HOST == *"lbd-lax"* ]]; then
     echo "Using lax dataset"
-    DATA_TRAIN="/scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/datasets/eagle-next/"
+    DATA_TRAIN="/scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/datasets/eagle-next/online_packing/eagle_sft_v13.52.no.text.yaml"
 fi
 
 if [[ $DEBUG -eq 1 ]]; then
@@ -154,8 +154,7 @@ OPTIONS=" \
     ${SPECIAL_TOKENS} \
     --disable-vision-class-token \
     --prompt-path ${SOURCE}/examples/multimodal/manual_prompts.json \
-    --moe-token-dispatcher-type flex \
-    --moe-enable-deepep \
+    --moe-token-dispatcher-type alltoall \
     --moe-shared-expert-overlap \
     --enable-experimental \
     --moe-permute-fusion \
