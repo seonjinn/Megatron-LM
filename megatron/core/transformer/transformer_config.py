@@ -50,6 +50,9 @@ class TransformerConfig(ModelParallelConfig):
     mtp_loss_scaling_factor: Optional[float] = None
     """Weighting factor of Multi-Token Prediction (MTP) loss."""
 
+    mtp_use_repeated_layer: bool = False
+    """Use a single MTP layer repeatedly instead of multiple separate layers."""
+
     num_layers_in_first_pipeline_stage: Optional[int] = None
     """Number of transformer layers on first pipeline stage.
     None implies equal layer division across PP ranks."""
@@ -1222,28 +1225,15 @@ class TransformerConfig(ModelParallelConfig):
                 raise ValueError("Storing activation input in FP8 is supported only for SwiGLU.")
 
         if self.apply_rope_fusion:
-            if self.multi_latent_attention:
-                warnings.warn(
-                    "apply_rope_fusion for multi-latent attention only supports training. "
-                    "It is experimental and may change in future versions."
-                )
-            else:
-                if self.rotary_interleaved:
-                    if not is_te_min_version("2.3.0.dev0"):
-                        raise ValueError(
-                            "rotary_interleaved does not work with apply_rope_fusion for "
-                            "TE < 2.3.0.dev0. Please install TE >= 2.3.0.dev0"
-                        )
+            if self.rotary_interleaved:
+                raise ValueError("rotary_interleaved does not work with apply_rope_fusion.")
 
-                from megatron.core.models.common.embeddings.rope_utils import (
-                    fused_apply_rotary_pos_emb,
-                    fused_apply_rotary_pos_emb_thd,
-                )
+            from megatron.core.models.common.embeddings.rope_utils import HAVE_APPLY_ROPE_FUSION
 
-                if fused_apply_rotary_pos_emb is None and fused_apply_rotary_pos_emb_thd is None:
-                    raise ValueError(
-                        "apply_rope_fusion is not available. Please install TE >= 1.4 or Apex."
-                    )
+            if not HAVE_APPLY_ROPE_FUSION:
+                raise ValueError(
+                    "apply_rope_fusion is not available. Please install TE >= 1.4 or Apex."
+                )
 
         if self.multi_latent_attention and self.rotary_interleaved:
             raise ValueError("rotary_interleaved does not work with multi_latent_attention.")
