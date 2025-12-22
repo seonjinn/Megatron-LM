@@ -11,7 +11,7 @@ if __name__ == "__main__":
         content = f.read()
 
     content = content.replace("llmservice_fm_vision", "llmservice_nemotron_super")
-    content = content.replace("batch_block1,batch_large,batch_long", "batch_long")
+    content = content.replace("batch_block1,batch_large,batch_long", "batch,batch_large,batch_large_long,batch_long")
     content = content.replace("/lustre", "/scratch")
 
     script = args.script.replace(".sh", "")

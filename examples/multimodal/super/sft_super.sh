@@ -10,7 +10,7 @@
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=sft_super
+#SBATCH --job-name=sft_super_1222
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/trintamaki/msc_config/msc_config.yaml"
@@ -49,7 +49,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="sft_super"
+    MODEL_NAME="sft_super_1222"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -78,8 +78,7 @@ CODE_DIR="${SOURCE}"
 TP=2
 EP=64
 
-# TODO: Update this path to point to a valid pretrained VLM checkpoint (from pretrain_super.sh)
-CHECKPOINT_DIR="/path/to/pretrained_super_12b_vlm/checkpoint"
+CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/output/pretrain_super_1221/checkpoints"
 
 # TODO: Update this path to point to the correct tokenizer for the 12B model
 TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--Nemotron-Nano-3-30B-A3.5B-dev-1016/snapshots/bb271274159f07461e919379311e32802e5ec36b/"
@@ -105,7 +104,7 @@ if [[ $DEBUG -eq 1 ]]; then
 else
     MBZ=1
     BZ=128
-    NW=4
+    NW=8
     AD=0.0
     HD=0.0
     LI=5
@@ -159,10 +158,10 @@ fi
 
 EXTRA_ARGS+=" --packing-buffer-size 3247 --packing-seq-length ${DECODER_SEQ_LEN} --packing-knapsack-algorithm balanced_greedy_knapsack "
 # LM (Mamba block) recompute
-EXTRA_ARGS+=" --recompute-granularity selective --recompute-modules core_attn mlp layernorm moe_act moe "
+#EXTRA_ARGS+=" --recompute-granularity selective --recompute-modules core_attn mlp layernorm moe_act moe "
 # core_attn moe_act layernorm mlp moe
 # Vision (GPT block) recompute
-EXTRA_ARGS+=" --recompute-vision --recompute-method-vision block --recompute-granularity-vision full --recompute-vision-num-layers 32 "
+#EXTRA_ARGS+=" --recompute-vision --recompute-method-vision block --recompute-granularity-vision full --recompute-vision-num-layers 32 "
 
 OPTIONS=" \
     --use-checkpoint-args \
@@ -247,7 +246,7 @@ OPTIONS=" \
     --load ${FINETUNE_DIR} \
     --save ${FINETUNE_DIR} \
     --dataloader-save ${FINETUNE_DIR}/dataloader \
-    --save-interval 5000 \
+    --save-interval 10000 \
     --ckpt-format torch \
     --bf16 \
     --adam-beta1 0.9 \
@@ -257,12 +256,14 @@ OPTIONS=" \
     --tensorboard-dir ${TENSORBOARD_DIR} \
     --sequence-parallel \
     --allow-large-videos \
-    --mtp-spec megatron.core.models.mamba.mamba_layer_specs mamba_stack_spec \
-    --mtp-num-layers 2 \
-    --mtp-hybrid-override-pattern \"*E\" \
-    --mtp-loss-scaling-factor 0.3 \
-    --keep-mtp-spec-in-bf16 \
+    --disable-mtp \
 "
+
+#    --mtp-spec megatron.core.models.mamba.mamba_layer_specs mamba_stack_spec \
+#    --mtp-num-layers 2 \
+#    --mtp-hybrid-override-pattern \"*E\" \
+#    --mtp-loss-scaling-factor 0.3 \
+#    --keep-mtp-spec-in-bf16 \
 
 export WANDB_ENTITY=$WANDB_ENTITY  # Not passed in via command line args, only env vars
 export NVTE_APPLY_QK_LAYER_SCALING=0
@@ -278,7 +279,7 @@ else
     DATETIME=`date +'date_%y-%m-%d_time_%H-%M-%S'`
 
     srun -l --verbose \
-    --container-image /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/containers/pytorch25.06-moe-avlm-editable-energon.sqsh \
+    --container-image /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/containers/pytorch25.06-moe-avlm-editable-energon-super.sqsh \
     --container-mounts "/lustre" \
     --output=${LOGS_DIR}/%x_%j_$DATETIME.log \
     sh -c "echo ${run_cmd}; ${run_cmd}"
