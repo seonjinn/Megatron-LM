@@ -833,6 +833,7 @@ class MultiTokenPredictionBlock(MegatronModule):
         output_layer=None,
         output_weight: Optional[torch.Tensor] = None,
         compute_language_model_loss=None,
+        decoder_input: Tensor = None,
     ) -> Tensor:
         """
         Perform the forward pass through all of the MTP modules.
@@ -842,6 +843,10 @@ class MultiTokenPredictionBlock(MegatronModule):
                 where s is the sequence length, b is the batch size, and h is the hidden size.
             attention_mask (Tensor): Boolean tensor of shape [1, 1, s, s] for masking
                 self-attention.
+            decoder_input (Tensor, optional): Pre-computed embeddings of shape [s, b, h].
+                When provided (e.g., for multimodal models with combined image+text embeddings),
+                these embeddings are rolled directly instead of rolling input_ids and re-embedding.
+                If None, the standard behavior of embedding input_ids is used.
 
         Returns:
             (Tensor): The mtp loss tensor of shape [b, s].
@@ -854,18 +859,32 @@ class MultiTokenPredictionBlock(MegatronModule):
             # if loss_mask is not provided, use all ones as loss_mask
             loss_mask = torch.ones_like(labels)
 
+        # Determine if we're using pre-computed embeddings (multimodal mode)
+        use_precomputed_embeddings = decoder_input is not None
+
         hidden_states_main_model = hidden_states
         for layer_number in range(len(self.layers)):
             # Calc logits for the current Multi-Token Prediction (MTP) layers.
-            input_ids, _ = roll_tensor(input_ids, shifts=-1, dims=-1, cp_group=self.cp_group)
-            position_ids, _ = roll_tensor(position_ids, shifts=-1, dims=-1, cp_group=self.cp_group)
-            # embedding
-            decoder_input = embedding(input_ids=input_ids, position_ids=position_ids)
+            if use_precomputed_embeddings:
+                # Multimodal mode: roll pre-computed embeddings directly
+                # decoder_input is [s, b, h], so roll on dim 0 (sequence dimension)
+                decoder_input, _ = roll_tensor(
+                    decoder_input, shifts=-1, dims=0, cp_group=self.cp_group
+                )
+                layer_decoder_input = decoder_input
+            else:
+                # Standard mode: roll input_ids and embed
+                input_ids, _ = roll_tensor(input_ids, shifts=-1, dims=-1, cp_group=self.cp_group)
+                position_ids, _ = roll_tensor(
+                    position_ids, shifts=-1, dims=-1, cp_group=self.cp_group
+                )
+                # embedding
+                layer_decoder_input = embedding(input_ids=input_ids, position_ids=position_ids)
             if self.config.recompute_granularity == 'full' and self.training:
                 hidden_states = self._checkpointed_forward(
                     layer_number=layer_number,
                     hidden_states=hidden_states,
-                    decoder_input=decoder_input,
+                    decoder_input=layer_decoder_input,
                     attention_mask=attention_mask,
                     rotary_pos_emb=rotary_pos_emb,
                     rotary_pos_cos=rotary_pos_cos,
@@ -879,7 +898,7 @@ class MultiTokenPredictionBlock(MegatronModule):
                 custom_forward = self._custom(layer_number)
                 hidden_states = custom_forward(
                     hidden_states=hidden_states,
-                    decoder_input=decoder_input,
+                    decoder_input=layer_decoder_input,
                     attention_mask=attention_mask,
                     rotary_pos_emb=rotary_pos_emb,
                     rotary_pos_cos=rotary_pos_cos,

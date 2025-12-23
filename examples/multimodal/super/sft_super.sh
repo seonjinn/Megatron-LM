@@ -40,6 +40,7 @@ USE_IMAGE_BREAK=0   # Only used if USE_DYNAMIC_RES is 1.
 USE_CONV_MERGE=0    # Only used if USE_DYNAMIC_RES is 1.
 USE_FP8=0
 USE_CPE_EVAL_MODE=0
+USE_MTP=0
 
 
 # Remember to update model and job name if running in batch mode!!
@@ -156,6 +157,16 @@ if [[ $USE_CPE_EVAL_MODE -eq 1 ]]; then
     EXTRA_ARGS+=" --radio-force-cpe-eval-mode"  # Only CPE in eval mode (not entire vision encoder)
 fi
 
+if [[ $USE_MTP -eq 1 ]]; then
+    EXTRA_ARGS+=" --mtp-spec megatron.core.models.mamba.mamba_layer_specs mamba_stack_spec"
+    EXTRA_ARGS+=" --mtp-num-layers 2"
+    EXTRA_ARGS+=" --mtp-hybrid-override-pattern *E"
+    EXTRA_ARGS+=" --mtp-loss-scaling-factor 0.3"
+    EXTRA_ARGS+=" --keep-mtp-spec-in-bf16"
+else
+    EXTRA_ARGS+=" --disable-mtp"
+fi
+
 EXTRA_ARGS+=" --packing-buffer-size 3247 --packing-seq-length ${DECODER_SEQ_LEN} --packing-knapsack-algorithm balanced_greedy_knapsack "
 # LM (Mamba block) recompute
 #EXTRA_ARGS+=" --recompute-granularity selective --recompute-modules core_attn mlp layernorm moe_act moe "
@@ -256,14 +267,7 @@ OPTIONS=" \
     --tensorboard-dir ${TENSORBOARD_DIR} \
     --sequence-parallel \
     --allow-large-videos \
-    --disable-mtp \
 "
-
-#    --mtp-spec megatron.core.models.mamba.mamba_layer_specs mamba_stack_spec \
-#    --mtp-num-layers 2 \
-#    --mtp-hybrid-override-pattern \"*E\" \
-#    --mtp-loss-scaling-factor 0.3 \
-#    --keep-mtp-spec-in-bf16 \
 
 export WANDB_ENTITY=$WANDB_ENTITY  # Not passed in via command line args, only env vars
 export NVTE_APPLY_QK_LAYER_SCALING=0

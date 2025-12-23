@@ -391,6 +391,7 @@ class MambaModel(LanguageModule):
                     output_weight=output_weight,
                     runtime_gather_output=runtime_gather_output,
                     compute_language_model_loss=self.compute_language_model_loss,
+                    decoder_input=decoder_input,
                     **(extra_block_kwargs or {}),
                 )
 

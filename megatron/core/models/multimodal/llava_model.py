@@ -1832,6 +1832,7 @@ class LLaVAModel(MegatronModule):
             inference_context=inference_context,
             runtime_gather_output=runtime_gather_output,
             packed_seq_params=packed_seq_params,
+            loss_mask=new_loss_mask,
         )
         # Track norms for language_model output
         if self.log_model_act_norms and self.training:
