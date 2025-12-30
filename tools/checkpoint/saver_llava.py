@@ -184,6 +184,12 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
         margs.enable_fusions = getattr(self.md.checkpoint_args, "enable_fusions", False)
         margs.context_parallel_size = 1
         margs.efficient_video_sampling_variant = getattr(self.md.checkpoint_args, "efficient_video_sampling_variant", None)
+        # RADIO specific
+        margs.radio_force_eval_mode = getattr(self.md.checkpoint_args, "radio_force_eval_mode", False)
+        margs.radio_force_cpe_eval_mode = getattr(self.md.checkpoint_args, "radio_force_cpe_eval_mode", False)
+        margs.radio_interpolate_only_cpe = getattr(self.md.checkpoint_args, "radio_interpolate_only_cpe", False)
+        margs.radio_cpe_aspect_ratio_select = getattr(self.md.checkpoint_args, "radio_cpe_aspect_ratio_select", False)
+        margs.radio_disable_cpe = getattr(self.md.checkpoint_args, "radio_disable_cpe", False)
         # Sound/audio specific args
         margs.allow_missing_sound_projection_checkpoint = getattr(self.md.checkpoint_args, "allow_missing_sound_projection_checkpoint", False)
         margs.allow_missing_sound_model_checkpoint = getattr(self.md.checkpoint_args, "allow_missing_sound_model_checkpoint", False)

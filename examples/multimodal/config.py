@@ -248,6 +248,7 @@ def get_vision_model_config(config, enable_fusions=False):
         config.apply_query_key_layer_scaling = False
         config.attention_softmax_in_fp32 = True
         config.normalization = 'LayerNorm'
+        config.class_token_len = 1
     elif config.vision_model_type == "siglip":
         config.num_layers = 27
         config.num_attention_heads = 16
@@ -267,6 +268,7 @@ def get_vision_model_config(config, enable_fusions=False):
         config.normalization = 'LayerNorm'
         config.qk_layernorm = False
         config.layernorm_epsilon = 1e-6
+        config.class_token_len = 0
     elif config.vision_model_type == "internvit":
         config.num_layers = 45
         config.num_attention_heads = ((24 // config.tensor_model_parallel_size) + 1) * config.tensor_model_parallel_size
@@ -284,6 +286,7 @@ def get_vision_model_config(config, enable_fusions=False):
         config.attention_softmax_in_fp32 = True
         config.normalization = 'RMSNorm'
         config.layernorm_epsilon = 1e-6
+        config.class_token_len = 1
     elif config.vision_model_type == "internvit300M":
         config.num_layers = 24
         config.num_attention_heads = 16
@@ -302,6 +305,7 @@ def get_vision_model_config(config, enable_fusions=False):
         config.normalization = 'LayerNorm'
         config.layernorm_epsilon = 1e-6
         config.qk_layernorm = False
+        config.class_token_len = 1
     elif config.vision_model_type == "radio":
         config.num_layers = 32
         config.num_attention_heads = 16
@@ -319,6 +323,25 @@ def get_vision_model_config(config, enable_fusions=False):
         config.normalization = 'LayerNorm'
         config.qk_layernorm = False
         config.layernorm_epsilon = 1e-6
+        config.class_token_len = 8
+    elif config.vision_model_type == "radio-so400m":
+        config.num_layers = 27
+        config.num_attention_heads = 16
+        config.add_bias_linear = True
+        config.add_qkv_bias = True
+        config.hidden_size = 1152
+        config.ffn_hidden_size = 4304
+        config.gated_linear_unit = False
+        config.activation_func = fast_gelu
+        config.kv_channels = 64
+        config.num_query_groups = 16
+        config.layernorm_zero_centered_gamma = False
+        config.apply_query_key_layer_scaling = False
+        config.attention_softmax_in_fp32 = True
+        config.normalization = 'LayerNorm'
+        config.qk_layernorm = False
+        config.layernorm_epsilon = 1e-6
+        config.class_token_len = 10
     elif config.vision_model_type == "radio-g":
         config.num_layers = 40
         config.num_attention_heads = 24
@@ -336,6 +359,7 @@ def get_vision_model_config(config, enable_fusions=False):
         config.normalization = 'LayerNorm'
         config.qk_layernorm = False
         config.layernorm_epsilon = 1e-6
+        config.class_token_len = 5
     elif config.vision_model_type == "cradio-g":
         config.num_layers = 40
         config.num_attention_heads = 24
@@ -353,6 +377,7 @@ def get_vision_model_config(config, enable_fusions=False):
         config.normalization = 'LayerNorm'
         config.qk_layernorm = False
         config.layernorm_epsilon = 1e-6
+        config.class_token_len = 8
     elif config.vision_model_type.startswith("hf://"):
         import transformers
         hf_config = transformers.AutoConfig.from_pretrained(config.vision_model_type.split("hf://")[1])

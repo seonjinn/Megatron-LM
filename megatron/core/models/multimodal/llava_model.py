@@ -237,17 +237,18 @@ class LLaVAModel(MegatronModule):
             if vision_transformer_config.vision_model_type.startswith(
                 ("clip", "siglip", "internvit")
             ):
+                # Use CLI value if provided, otherwise use config default
+                if cli_class_token_len is None:
+                    class_token_len = getattr(vision_transformer_config, 'class_token_len', 1)
+
                 if vision_transformer_config.vision_model_type == "siglip":
-                    class_token_len = 0
                     add_class_token = False
                     error_msg = (
                         "Siglip does not support vision class token, "
                         "set disable-vision-class-token to False."
                     )
                     assert not self._drop_vision_class_token, error_msg
-                elif cli_class_token_len is None:
-                    # Set default for CLIP/InternViT if no CLI value provided
-                    class_token_len = 1
+
                 self.vision_model = CLIPViTModel(
                     vision_transformer_config,
                     vision_transformer_layer_spec,
@@ -258,34 +259,21 @@ class LLaVAModel(MegatronModule):
                     model_subtype=vision_transformer_config.vision_model_type,
                     add_class_token=add_class_token,
                 )
-            elif vision_transformer_config.vision_model_type in ("radio", "radio-g", "cradio-g"):
+            elif "radio" in vision_transformer_config.vision_model_type:
                 # TODO: should refactor into model code itself?
-                # Initialize defaults - use CLI parameter if provided, otherwise model defaults
+                # Initialize defaults - use CLI parameter if provided, otherwise use config default
                 max_img_h = 0
                 max_img_w = 0
                 embedder_bias = False
                 ln_post_impl = None
                 use_mask_token = False
 
-                # Set model-specific defaults only if CLI parameter not provided
+                # Use CLI value if provided, otherwise use config default
                 if cli_class_token_len is None:
-                    if vision_transformer_config.vision_model_type == "radio":
-                        class_token_len = 8
-                    elif vision_transformer_config.vision_model_type == "radio-g":
-                        class_token_len = 5
-                    elif vision_transformer_config.vision_model_type == "cradio-g":
-                        class_token_len = 8
-                    else:
-                        class_token_len = 8  # Default fallback
+                    class_token_len = getattr(vision_transformer_config, 'class_token_len', 8)
 
                 # Set other model-specific parameters
-                if vision_transformer_config.vision_model_type == "radio":
-                    max_img_h = 2048
-                    max_img_w = 2048
-                    embedder_bias = False
-                    ln_post_impl = None
-                    use_mask_token = False
-                elif vision_transformer_config.vision_model_type == "radio-g":
+                if vision_transformer_config.vision_model_type == "radio-g":
                     max_img_h = 1792
                     max_img_w = 1792
                     embedder_bias = True
@@ -293,7 +281,7 @@ class LLaVAModel(MegatronModule):
 
                     ln_post_impl = TENorm
                     use_mask_token = True
-                elif vision_transformer_config.vision_model_type == "cradio-g":
+                else:
                     max_img_h = 2048
                     max_img_w = 2048
                     embedder_bias = False
