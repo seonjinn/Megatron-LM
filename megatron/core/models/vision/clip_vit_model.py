@@ -212,10 +212,10 @@ def get_num_image_embeddings(
         keep_class_token = False
     elif vision_model_type in ("clip", "internvit", "internvit300M"):
         keep_class_token = not disable_vision_class_token
-    elif vision_model_type.startswith("radio"):
-        keep_class_token = not disable_vision_class_token
     elif vision_model_type == "cradio-g":
         class_token_len = 8
+        keep_class_token = not disable_vision_class_token
+    elif "radio" in vision_model_type:
         keep_class_token = not disable_vision_class_token
     elif vision_model_type.startswith("hf://"):
         from megatron.core.models.huggingface.module import get_hf_model_type

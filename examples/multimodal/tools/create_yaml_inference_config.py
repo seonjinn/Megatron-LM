@@ -592,7 +592,7 @@ def main():
     args = parser.parse_args()
 
     if args.model_name is not None:
-        user = os.environ["SLURM_JOB_USER"]
+        user = os.environ.get("SLURM_JOB_USER", os.environ.get("USER"))
         path = f"/lustre/fsw/portfolios/llmservice/users/{user}/workspace/output/{args.model_name}"
         some_iter = int(open(f"{path}/checkpoints/latest_checkpointed_iteration.txt").read().strip())
         ckpt_path = f"{path}/checkpoints/iter_{some_iter:07d}/mp_rank_00/model_optim_rng.pt"

@@ -34,6 +34,7 @@ pixel_statistics = {
     "siglip": (SIGLIP_PIXEL_MEAN, SIGLIP_PIXEL_STD),
     "internvit": (IMAGENET_PIXEL_MEAN, IMAGENET_PIXEL_STD),
     "radio": (CLIP_PIXEL_MEAN, CLIP_PIXEL_STD),
+    "radio-so400m": (CLIP_PIXEL_MEAN, CLIP_PIXEL_STD),
     "radio-g": (RADIO_G_PIXEL_MEAN, RADIO_G_PIXEL_STD),
     "huggingface": (SIGLIP_PIXEL_MEAN, SIGLIP_PIXEL_STD),
     "radio_siglip_move": (CLIP_PIXEL_MEAN, CLIP_PIXEL_STD),

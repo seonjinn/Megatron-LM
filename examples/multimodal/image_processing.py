@@ -23,6 +23,7 @@ pixel_statistics = {
     "siglip": (SIGLIP_PIXEL_MEAN, SIGLIP_PIXEL_STD),
     "internvit": (IMAGENET_PIXEL_MEAN, IMAGENET_PIXEL_STD),
     "radio": (CLIP_PIXEL_MEAN, CLIP_PIXEL_STD),
+    "radio-so400m": (CLIP_PIXEL_MEAN, CLIP_PIXEL_STD),
     "radio-g": (RADIO_G_PIXEL_MEAN, RADIO_G_PIXEL_STD),
     "cradio-g": (CLIP_PIXEL_MEAN, CLIP_PIXEL_STD),
     "internvit300M": (IMAGENET_PIXEL_MEAN, IMAGENET_PIXEL_STD),
@@ -68,11 +69,11 @@ def find_closest_area_weighted_aspect_ratio(aspect_ratio, target_ratios, width, 
 
 def process_images(sample_imgs, patch_dim, dynamic_resolution, batch_mode=False):
     """Process a batch of images for multimodal training or evaluation.
-    
-    This function handles image preprocessing with support for both static and dynamic 
-    resolution processing. For dynamic resolution, it rearranges images into patches 
+
+    This function handles image preprocessing with support for both static and dynamic
+    resolution processing. For dynamic resolution, it rearranges images into patches
     and computes cumulative sequence lengths for efficient batching.
-    
+
     Args:
         sample_imgs (List[torch.Tensor]): List of image tensors with shape (C, H, W).
         patch_dim (int): Dimension of each patch (e.g., 14 for 14x14 patches).
@@ -82,7 +83,7 @@ def process_images(sample_imgs, patch_dim, dynamic_resolution, batch_mode=False)
         batch_mode (bool, optional): Whether this is being called from training batch processing.
             If True, wraps tensors in additional list dimension for consistency with batch format.
             If False, returns tensors directly as used in evaluation. Defaults to False.
-    
+
     Returns:
         tuple: A 4-tuple containing:
             - images (torch.Tensor): Processed image tensor.
@@ -97,13 +98,13 @@ def process_images(sample_imgs, patch_dim, dynamic_resolution, batch_mode=False)
             - vision_max_lengths (torch.Tensor or None): Maximum sequence length
                 among all images for dynamic resolution. Scalar tensor for evaluation mode,
                 or shape (1,) for batch mode. None for static resolution.
-    
+
     Note:
         This function is designed for processing one microbatch at a time for dynamic resolution.
     """
     vision_cu_lengths = None
     vision_max_lengths = None
-    
+
     if len(sample_imgs) > 0:
         imgs_sizes = torch.tensor([[img.shape[1], img.shape[2]] for img in sample_imgs], dtype=torch.int32)
         if dynamic_resolution:
@@ -122,18 +123,18 @@ def process_images(sample_imgs, patch_dim, dynamic_resolution, batch_mode=False)
             vision_cu_lengths = [0]
             for img in imgs:
                 if max_length < img.shape[0]:
-                    max_length = img.shape[0] 
+                    max_length = img.shape[0]
                 current_length += img.shape[0]
                 vision_cu_lengths.append(current_length)
-            
+
             vision_cu_lengths = torch.tensor(vision_cu_lengths, dtype=torch.int32)
             vision_max_lengths = torch.tensor(max_length, dtype=torch.int32)
-            
+
             # For batch mode, wrap in additional dimension for consistency
             if batch_mode:
                 vision_cu_lengths = vision_cu_lengths.unsqueeze(0)  # Shape: (1, batch_size + 1)
                 vision_max_lengths = vision_max_lengths.unsqueeze(0)  # Shape: (1,)
-            
+
             imgs = torch.cat(imgs, dim=0)
             images = imgs.unsqueeze(0)
         else:
@@ -225,28 +226,28 @@ class ImageTransform:
         elif self._match_tiling_dynamic_resolution:
             assert img_h == img_w, "match tiling dynamic resolution expects equal tile height and width"
             assert "radio" in self._vision_model_type, "Match tiling dynamic resolution is only supported for radio models"
-            
+
             # Use tiling logic to determine optimal dimensions
             orig_width, orig_height = img.size
             aspect_ratio = orig_width / orig_height
-            
+
             # Calculate target ratios (same logic as tiling)
             target_ratios = set(
                 (i, j) for n in range(1, max_num_tiles + 1) for i in range(1, n + 1) for j in range(1, n + 1) if
                 i * j <= max_num_tiles and i * j >= 1)
             target_ratios = sorted(target_ratios, key=lambda x: x[0] * x[1])
-            
+
             # Find the closest aspect ratio to the target
             target_aspect_ratio = find_closest_aspect_ratio_fn(
                 aspect_ratio, target_ratios, orig_width, orig_height, img_h)
-            
+
             # Calculate the target width and height using tiling logic
             target_width = img_h * target_aspect_ratio[0]
             target_height = img_w * target_aspect_ratio[1]
-            
+
             # Resize image to target dimensions (same as tiling, but don't split)
             resized_img = img.resize((target_width, target_height))
-            
+
             # Process as single dynamic resolution image
             pixel_mean, pixel_std = pixel_statistics[self._vision_model_type]
             transform = T.Compose([
@@ -255,13 +256,13 @@ class ImageTransform:
                 T.Normalize(mean=pixel_mean, std=pixel_std),
             ])
             processed_images = [resized_img]
-            
+
             # Add thumbnail if use_thumbnail=True and there's more than 1 tile
             blocks = target_aspect_ratio[0] * target_aspect_ratio[1]
             if use_thumbnail and blocks != 1:
                 thumbnail_img = img.resize((img_h, img_h))
                 processed_images.append(thumbnail_img)
-            
+
             imgs = [transform(img) for img in processed_images]
         elif self._dynamic_resolution:
             pixel_mean, pixel_std = pixel_statistics[self._vision_model_type]
@@ -272,7 +273,7 @@ class ImageTransform:
             ])
             processed_img = dynamic_res_preprocess(img, min_patches=self._min_num_patches, max_patches=self._max_num_patches, res_step=self._res_step, pixel_shuffle=self._pixel_shuffle, min_side=self._min_side, conv_merging=self._conv_merging, is_video=is_video)
             processed_images = [processed_img]
-            
+
             # Add thumbnail if enabled and image area is below threshold
             if use_thumbnail:
                 # Calculate areas
@@ -280,12 +281,12 @@ class ImageTransform:
                 resized_area = processed_width * processed_height
                 thumbnail_area = img_h * img_h  # img_h should be square thumbnail size
                 area_ratio = resized_area / thumbnail_area
-                
+
                 # Only add thumbnail if resized image area is less than threshold % of thumbnail area
                 if area_ratio < self._thumbnail_area_threshold:
                     thumbnail_img = img.resize((img_h, img_h))  # Use square thumbnail with img_h size
                     processed_images.append(thumbnail_img)
-            
+
             imgs = [transform(img) for img in processed_images]
         else:
             imgs = [self._transform(img)]
@@ -338,11 +339,11 @@ def dynamic_preprocess(
 
 def dynamic_res_preprocess(image, min_patches=1, max_patches=128, res_step=16, factor_max=1., pixel_shuffle=False, min_side=None, conv_merging=False, is_video=False):
     """Preprocess an image with dynamic resolution for vision transformers.
-    
+
     This function resizes an image to optimize the number of patches while respecting
     constraints on minimum/maximum patches, minimum side length, and compatibility
     with pixel shuffle or convolution merging operations.
-    
+
     The algorithm works by:
     1. Computing the initial patch grid size based on the image dimensions and res_step
     2. Scaling the patch grid to fit within the max_patches constraint
@@ -350,7 +351,7 @@ def dynamic_res_preprocess(image, min_patches=1, max_patches=128, res_step=16, f
     4. Optionally enforcing a minimum side length constraint
     5. Rounding patch dimensions to even numbers for pixel_shuffle/conv_merging compatibility
     6. Resizing the image to the computed target dimensions
-    
+
     Args:
         image (PIL.Image): Input image to preprocess.
         min_patches (int, optional): Minimum number of patches required. Defaults to 1.
@@ -363,16 +364,16 @@ def dynamic_res_preprocess(image, min_patches=1, max_patches=128, res_step=16, f
             at least one side meets this constraint. Defaults to None.
         conv_merging (bool, optional): Whether to ensure compatibility with convolution
             merging by rounding to even patch dimensions. Defaults to False.
-    
+
     Returns:
         PIL.Image: Resized image with dimensions optimized for patch-based processing.
             The output dimensions will be (target_patch_width * res_step, target_patch_height * res_step).
-    
+
     Note:
         The function preserves aspect ratio as much as possible while satisfying all constraints.
         When constraints conflict (e.g., min_side vs max_patches), the function prioritizes
         staying within max_patches while maximizing the image size.
-    
+
     Example:
         >>> from PIL import Image
         >>> img = Image.open("example.jpg")  # 800x600 image
@@ -457,7 +458,7 @@ def dynamic_res_preprocess(image, min_patches=1, max_patches=128, res_step=16, f
         # min_patches = 512
         target_patch_width = 32
         target_patch_height = 32
-        
+
 
     # resize the image
     resized_img = image.resize((target_patch_width * res_step, target_patch_height * res_step))
@@ -469,7 +470,7 @@ def dynamic_res_preprocess(image, min_patches=1, max_patches=128, res_step=16, f
 # Based on https://github.com/openai/CLIP/blob/dcba3cb2e2827b402d2701e7e1c7d9fed8a20ef1/clip/clip.py#L79
 # and https://github.com/OpenGVLab/InternVL/blob/aa521e6eb1df4cf153aa4118fcf13e673c055d46/internvl_chat/internvl/train/dataset.py#L276
 def _build_transform(input_size, vision_model_type):
-    if vision_model_type in ("siglip", "internvit", "internvit300M", "radio", "radio-g", "cradio-g"):
+    if vision_model_type in ("siglip", "internvit", "internvit300M") or "radio" in vision_model_type:
         pixel_mean, pixel_std = pixel_statistics[vision_model_type]
 
         transform = T.Compose([

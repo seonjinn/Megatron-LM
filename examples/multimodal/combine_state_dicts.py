@@ -12,10 +12,12 @@ sys.path.append(
 )
 
 
-def combine(input_files, module_prefixes, output_files):
+def combine(input_files: list[str], module_prefixes: list[str], output_files: list[str]) -> None:
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     num_inputs_per_output = int(len(input_files) / len(output_files))
 
     for output_idx, output_file in enumerate(output_files):
+        print(f"Processing file {output_idx + 1} of {len(output_files)}: {output_file}")
         combined_state_dict = None
 
         lb = output_idx * num_inputs_per_output
@@ -27,7 +29,7 @@ def combine(input_files, module_prefixes, output_files):
             zip(current_input_files, current_module_prefixes)
         ):
             # initialize the combined state dict using the first provided input file
-            current_state_dict = torch.load(input_file, weights_only=False)
+            current_state_dict = torch.load(input_file, weights_only=False, map_location=device)
             if i == 0:
                 combined_state_dict = current_state_dict.copy()
                 combined_state_dict["model"] = dict()

@@ -214,7 +214,7 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
         vp_size = self.margs.virtual_pipeline_model_parallel_size or 1
         encoder_tp_size = self.md.previous_encoder_tensor_parallel_size
 
-        if self.md.vision_model_type not in ("internvit", "siglip", "radio", "radio-g", "cradio-g"):
+        if self.md.vision_model_type not in ("internvit", "siglip", "radio", "radio-so400m", "radio-g", "cradio-g"):
             raise Exception(f'unrecognized vision model type: {self.md.vision_model_type}')
 
         message = {}
@@ -227,7 +227,7 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
         if self.md.vision_model_type == "radio-g":
             message["mask token"] = self.get_local_model().vision_model.mask_token.data
 
-        if self.md.vision_model_type in ("radio", "radio-g", "cradio-g"):
+        if self.md.vision_model_type in ("radio", "radio-so400m", "radio-g", "cradio-g"):
             message["embedder weight"] = torch.cat([self.get_local_model(tp_rank=tp_rank).vision_model.embedder.weight.data for tp_rank in range(encoder_tp_size)], dim=0)
             if self.md.vision_model_type == "radio-g":
                 message["embedder bias"] = torch.cat([self.get_local_model(tp_rank=tp_rank).vision_model.embedder.bias.data for tp_rank in range(encoder_tp_size)], dim=0)
@@ -237,7 +237,7 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
             message["ln post weight"] = self.get_local_model().vision_model.ln_post.weight.data
             message["ln post bias"] = self.get_local_model().vision_model.ln_post.bias.data
 
-        if self.md.vision_model_type in ("internvit", "radio", "radio-g", "cradio-g"):
+        if self.md.vision_model_type in ("internvit", "radio", "radio-so400m", "radio-g", "cradio-g"):
             message["class token"] = self.get_local_model().vision_model.class_token.data
 
         self.queue_put("vit embeddings", message)

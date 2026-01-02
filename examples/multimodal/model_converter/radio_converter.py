@@ -5,6 +5,22 @@ import os
 import torch
 
 
+def print_state_dict_keys(state_dict, name_filter=None):
+    """Print all keys and shapes from a state dict."""
+    print(f"\n{'Key':<80} {'Shape':>25} {'Dtype':>15}")
+    print("=" * 120)
+    for name, tensor in sorted(state_dict.items()):
+        if name_filter and name_filter not in name:
+            continue
+        if hasattr(tensor, 'shape'):
+            shape_str = str(tuple(tensor.shape))
+            dtype_str = str(tensor.dtype).replace('torch.', '')
+            print(f"{name:<80} {shape_str:>25} {dtype_str:>15}")
+        else:
+            print(f"{name:<80} {'(non-tensor)':>25} {str(type(tensor).__name__):>15}")
+    print()
+
+
 def generate_qkv_indices(num_heads, hidden_dim):
     """
     Generate indices to convert QKV attention weights from PyTorch format to Megatron format.
@@ -418,12 +434,14 @@ Convert RADIO weights to megatron format.
 
 Example usage:
 python radio_converter.py --output /some/output/folder --tensor-parallel-size 4
+
+To inspect keys and shapes without converting, add `--print-keys`
 """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
     parser.add_argument(
-        "--output", type=str, required=True, help="output directory for megatron state dict file(s)"
+        "--output", type=str, default=None, help="output directory for megatron state dict file(s)"
     )
     parser.add_argument(
         "--tensor-parallel-size", type=int, default=1, help="model tensor parallel size"
@@ -439,12 +457,41 @@ python radio_converter.py --output /some/output/folder --tensor-parallel-size 4
     parser.add_argument("--version", type=str, default=None, help="Version to pass to torch.hub.load. Can be a local path or a version RADIO on torch hub. By default use the version from the model type.")
     parser.add_argument("--torchhub-version", type=str, default="NVlabs/RADIO", help="TorchHub repo. Can be a local path or a Github repo. By default use NVlabs/RADIO.")
     parser.add_argument("--radio-downscaling-levels", nargs='*', type=int, default=None, help="Block indices where downscaling happens. If not set, uses model-specific defaults. Use empty list for legacy format.")
+    parser.add_argument(
+        "--print-keys", action="store_true",
+        help="Print all tensor keys and shapes from the model, then exit without converting"
+    )
+    parser.add_argument(
+        "--key-filter", type=str, default=None,
+        help="Optional filter to only show keys containing this substring (used with --print-keys)"
+    )
 
     args = parser.parse_args()
+
+    # Handle --print-keys mode
+    if args.print_keys:
+        torchhub_version = args.torchhub_version
+        if torchhub_version.startswith("/lustre/") and not os.path.exists(torchhub_version):
+            raise ValueError(f"Torchhub version is a lustre path that does not exist: {torchhub_version}")
+        torchhub_source = "local" if os.path.exists(torchhub_version) else "github"
+
+        version = args.version if args.version else args.model_type
+        print(f"Loading model: {version} from {torchhub_version} ({torchhub_source})")
+        model = torch.hub.load(torchhub_version, 'radio_model', version=version, source=torchhub_source, progress=True)
+
+        state_dict = model.state_dict()
+        print(f"\nTotal parameters: {len(state_dict)}")
+        print_state_dict_keys(state_dict, args.key_filter)
+        print("Exiting after printing keys.")
+        exit(0)
+
+    # Existing conversion logic requires --output
+    if args.output is None:
+        parser.error("--output is required when not using --print-keys")
 
     assert args.radio_downscaling_levels is None or len(args.radio_downscaling_levels) > 0, \
         "If using --radio-downscaling-levels, it must be a non-empty list of block indices"
 
     convert(args.output, args.tensor_parallel_size, args.use_te, args.model_type, args.version, args.torchhub_version, args.radio_downscaling_levels)
 
-    print("done.")
+    print("Finished model conversion.")

@@ -225,7 +225,7 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
         # The ViT embeddings are put on the PP / EP / TP 0
         vit_embeddings_msg = self.queue_get("vit embeddings")
 
-        if self.md.vision_model_type in ("radio", "radio-g", "cradio-g"):
+        if self.md.vision_model_type in ("radio", "radio-so400m", "radio-g", "cradio-g"):
             embedder_weight = chunk_weight(vit_embeddings_msg["embedder weight"], "column", self.args.target_tensor_parallel_size, self.args.target_expert_parallel_size)
             if self.md.vision_model_type == "radio-g":
                 embedder_bias = chunk_bias(vit_embeddings_msg["embedder bias"], "column", self.args.target_tensor_parallel_size, self.args.target_expert_parallel_size)
@@ -242,7 +242,7 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
                 if self.md.vision_model_type == "radio-g":
                     model.vision_model.mask_token.data.copy_(vit_embeddings_msg["mask token"])
 
-                if self.md.vision_model_type in ("radio", "radio-g", "cradio-g"):
+                if self.md.vision_model_type in ("radio", "radio-so400m", "radio-g", "cradio-g"):
                     model.vision_model.embedder.weight.data.copy_(embedder_weight[tp_rank])
                     if self.md.vision_model_type == "radio-g":
                         model.vision_model.embedder.bias.data.copy_(embedder_bias[tp_rank])
@@ -256,7 +256,7 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
                     model.vision_model.ln_post.weight.data.copy_(vit_embeddings_msg["ln post weight"])
                     model.vision_model.ln_post.bias.data.copy_(vit_embeddings_msg["ln post bias"])
 
-                if self.md.vision_model_type in ("internvit", "clip", "radio", "radio-g", "cradio-g"):
+                if self.md.vision_model_type in ("internvit", "clip", "radio", "radio-so400m", "radio-g", "cradio-g"):
                     model.vision_model.class_token.data.copy_(vit_embeddings_msg["class token"])
 
         # ViT Transformer layers.

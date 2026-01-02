@@ -897,7 +897,9 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
         imgs = [img for s in samples for img in s.imgs]
 
         if len(imgs) > 0 and self.args.dynamic_resolution:
-            assert self.args.vision_model_type in ("radio", "radio-g", "cradio-g"), "Dynamic resolution only works with radio right now"
+            assert "radio" in self.args.vision_model_type or self.args.vision_model_type in ["clip", "siglip"], (
+                "Dynamic resolution currently only works with radio or clip/siglip"
+            )
 
         # If the user hasn't defined a target dataloader sequence length, then use the max along the sample lengths.
         max_seq_len = self.dataloader_seq_length
