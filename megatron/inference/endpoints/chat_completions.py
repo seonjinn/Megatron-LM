@@ -7,7 +7,7 @@ See https://platform.openai.com/docs/api-reference/completions/create
 import torch
 import numpy as np
 from megatron.training import get_tokenizer
-from megatron.inference.text_generation.mcore_engine_server import run_mcore_engine
+from megatron.inference.text_generation.mcore_engine_server import run_mcore_engine_avlm, run_mcore_engine
 from megatron.inference.text_generation.api import generate_and_post_process
 from megatron.inference.endpoints.common import send_do_generate, LOCK
 
@@ -36,7 +36,7 @@ def detokenize(prompt, tok) -> list[str]:
         raise ValueError(f"Unknown prompt type: {type(prompt)}")
 
 
-class MegatronCompletions(Resource):
+class MegatronAVLMChatCompletions(Resource):
     def __init__(self, engine, args, mcore_engine_func=run_mcore_engine, return_generated_text=False):
         self.engine = engine
         self.args = args
@@ -46,7 +46,12 @@ class MegatronCompletions(Resource):
     def post(self):
         req = request.get_json()
         tokenizer = get_tokenizer()
-        prompts = detokenize(req["prompt"], tokenizer)
+        # convert messages to string so that it can be broadcasted to all ranks
+        prompts = [str(req["messages"])]
+        print(f"============MegatronChatCompletions.post()===================")
+        print(f"req: {req}")
+        print(f"prompts: {prompts}")
+        print(f"=============================================================")
 
         # convert the openai-local-completions api to the format
         # expected by the generate_and_post_process function
@@ -76,7 +81,6 @@ class MegatronCompletions(Resource):
             local_kwargs["top_p_sampling"] = 0
 
         echo = local_kwargs.pop("echo")
-        random_seed = local_kwargs.pop("random_seed")
         if not echo and local_kwargs["tokens_to_generate"] == 0:
             return "echo=False not supported when tokens_to_generate == 0", 400
 
@@ -112,8 +116,6 @@ class MegatronCompletions(Resource):
                 logprobs,
                 tokens_to_generate,
                 top_n_logprobs=top_n_logprobs,
-                echo=echo,
-                random_seed=random_seed,
             )
             result = [
                 response_dict["text"],
@@ -186,7 +188,10 @@ class MegatronCompletions(Resource):
             results.append(
                 {
                     "index": batch_idx,
-                    "text": truncated_generation if not self.return_generated_text else generated_text,
+                    "message": {
+                        "role": "assistant",
+                        "content": truncated_generation if not self.return_generated_text else generated_text,
+                    },
                     "logprobs": {
                         "token_logprobs": [None] + truncated_generation_logprobs,
                         "tokens": [

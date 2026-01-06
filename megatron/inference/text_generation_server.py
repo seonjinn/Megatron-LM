@@ -10,8 +10,9 @@ from flask_restful import Resource, Api
 from megatron.core.inference.sampling_params import SamplingParams
 from megatron.inference.endpoints.common import send_do_generate, send_do_beam_search, LOCK
 from megatron.inference.endpoints.completions import MegatronCompletions
+from megatron.inference.endpoints.chat_completions import MegatronAVLMChatCompletions
 from megatron.inference.text_generation import beam_search_and_post_process
-from megatron.inference.text_generation.mcore_engine_server import run_mcore_engine
+from megatron.inference.text_generation.mcore_engine_server import run_mcore_engine, run_mcore_engine_avlm
 
 sys.path.append(
     os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, os.path.pardir))
@@ -19,9 +20,10 @@ sys.path.append(
 
 
 class MegatronGenerate(Resource):
-    def __init__(self, engine, args):
+    def __init__(self, engine, args, mcore_engine_func=run_mcore_engine):
         self.engine = engine
         self.args = args
+        self.mcore_engine_func = mcore_engine_func
 
     def put(self):
         if not "prompts" in request.get_json():
@@ -197,7 +199,7 @@ class MegatronGenerate(Resource):
                 else:
                     send_do_generate()  # Tell other ranks we're doing generate
 
-                    response_dict = run_mcore_engine(self.engine, prompts, temperature, top_k, top_p, logprobs, tokens_to_generate)
+                    response_dict = self.mcore_engine_func(self.engine, prompts, temperature, top_k, top_p, logprobs, tokens_to_generate)
 
                     return jsonify(response_dict)
 
@@ -206,11 +208,23 @@ class MegatronGenerate(Resource):
 
 
 class MegatronServer(object):
-    def __init__(self, model, args=None):
+    def __init__(self, model, args=None, mcore_engine_func=run_mcore_engine, return_generated_text=False):
         self.app = Flask(__name__, static_url_path='')
         api = Api(self.app)
-        api.add_resource(MegatronGenerate, '/api', resource_class_args=[model, args])
-        api.add_resource(MegatronCompletions, '/completions', resource_class_args=[model, args])
+        api.add_resource(MegatronGenerate, '/api', resource_class_args=[model, args, mcore_engine_func])
+        api.add_resource(MegatronCompletions, '/completions', resource_class_args=[model, args, mcore_engine_func, return_generated_text])
+
+    def run(self, url, port):
+        self.app.run(url, threaded=True, debug=False, port=port)
+
+
+class MegatronAVLMServer(object):
+    def __init__(self, model, args=None, mcore_engine_func=run_mcore_engine_avlm, return_generated_text=True):
+        self.app = Flask(__name__, static_url_path='')
+        api = Api(self.app)
+        api.add_resource(MegatronGenerate, '/api', resource_class_args=[model, args, mcore_engine_func])
+        api.add_resource(MegatronCompletions, '/completions', resource_class_args=[model, args, mcore_engine_func, return_generated_text])
+        api.add_resource(MegatronAVLMChatCompletions, '/chat/completions', resource_class_args=[model, args, mcore_engine_func, return_generated_text])
 
     def run(self, url, port):
         self.app.run(url, threaded=True, debug=False, port=port)

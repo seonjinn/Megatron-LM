@@ -109,6 +109,11 @@ def _tokenize_prompts_and_batch(prompts, tokens_to_generate, add_BOS, tokenizer_
         eod_token = tokenizer.eos_id
     else:
         raise AttributeError('No eod token found in Tokenizer')
+    
+    # Handle None tokenizer_kwargs
+    if tokenizer_kwargs is None:
+        tokenizer_kwargs = {}
+    
     if add_BOS:
         prompts_tokens = [[eod_token] + tokenizer.tokenize(prompt, **tokenizer_kwargs)
                           for prompt in prompts]

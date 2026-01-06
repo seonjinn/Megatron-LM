@@ -337,6 +337,22 @@ class MultimodalTokenizer(MegatronTokenizer):
         self._prompt_format = prompt_format
         self._image_tag = IMAGE_TAGS[image_tag_type]
 
+    def offsets(self, ids: list[int], text: str) -> list[int]:
+        """
+        Assume that the tokenizer is a HuggingFaceTokenizer.
+        Copied from megatron.training.tokenizer.tokenizer.py:_HuggingFaceTokenizer.offsets
+        """
+        retok_ids: "transformers.BatchEncoding" = self._tokenizer(text)
+        offsets, next_start_idx = [], 0
+        for i in range(len(ids)):
+            span = retok_ids.token_to_chars(i)
+            if span is not None:
+                offsets.append(span.start)
+                next_start_idx = span.end
+            else:
+                offsets.append(next_start_idx)
+        return offsets
+
     def _apply_image_tag(self, text: Union[str, List[Dict]]):
         """Surround <image> with image tags such as <img> and </img>."""
         if self._image_tag is None:

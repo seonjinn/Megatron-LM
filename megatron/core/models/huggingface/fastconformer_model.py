@@ -59,6 +59,10 @@ class ParakeetHuggingFaceModel(HuggingFaceModule):
             y = self.model(audio_signal=features[0], length=features[1])
             return y[0].permute(0, 2, 1), y[1]
         else:
-            features = self.feature_extractor(*args, **kwargs, return_tensors="pt", sampling_rate=16000, return_attention_mask=True)
+            # HF feature extractor expects audio as first arg only, not (audio, length) like NeMo
+            # args[0] is sound_clips tensor, args[1] is sound_length (skipping it for HF)
+            sound_clips = args[0]
+            features = self.feature_extractor(sound_clips, **kwargs, return_tensors="pt", sampling_rate=16000, return_attention_mask=True)
             y = self.model(features.input_features.to(torch.bfloat16), features.attention_mask)
-            return y.last_hidden_state
+            lengths = features.attention_mask.sum(dim=-1).to(y.last_hidden_state.device)
+            return y.last_hidden_state, lengths

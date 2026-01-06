@@ -1238,8 +1238,9 @@ class TextGenerationController:
             if sampling_params.return_segments:
                 request.segments = segments[0]
             # TODO: hacky way to deal with `request.prompt` not being a string
+            lengths_tensor = torch.tensor([len(required_result_tokens)], device=required_result_tokens.device)
             request.generated_text = self.detokenize_generations(
-                required_result_tokens, len(required_result_tokens), sampling_params.return_segments
+                required_result_tokens, lengths_tensor, sampling_params.return_segments
             )[0]
 
         return active_requests

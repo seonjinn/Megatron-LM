@@ -82,3 +82,18 @@ class VLMInferenceRequest(InferenceRequest):
     imgs_sizes: torch.Tensor
     vision_packed_seq_params: Optional[PackedSeqParams] = None
     decoder_seq_length: int
+
+
+@dataclass(kw_only=True)
+class AVLMInferenceRequest(InferenceRequest):
+    """Class for a AVLM inference request"""
+
+    num_img_embeddings: int
+    imgs: torch.Tensor
+    num_tiles: torch.Tensor
+    imgs_sizes: torch.Tensor
+    vision_packed_seq_params: Optional[PackedSeqParams] = None
+    decoder_seq_length: int
+    num_sound_embeddings: int
+    sound_clips: torch.Tensor
+    sound_length: torch.Tensor

@@ -6,6 +6,7 @@ import argparse
 import dataclasses
 import json
 import os
+import sys
 from pathlib import Path
 import re
 import types
@@ -81,6 +82,7 @@ def add_megatron_arguments(parser: argparse.ArgumentParser):
 
     return parser
 
+
 def parse_args(extra_args_provider=None, ignore_unknown_args=False, yaml_config=None):
     """Parse all arguments."""
     parser = argparse.ArgumentParser(description='Megatron-LM Arguments',
@@ -114,7 +116,23 @@ def parse_args(extra_args_provider=None, ignore_unknown_args=False, yaml_config=
                 else:
                     yaml_args.append(f"--{key}")
                     yaml_args.append(str(value))
-        args = parser.parse_args(yaml_args)
+
+        # Get CLI args, removing '--model-config' and its value if present
+        cmd_args = sys.argv[1:]
+        if '--model-config' in cmd_args:
+            idx = cmd_args.index('--model-config')
+            cmd_args = cmd_args[:idx] + cmd_args[idx+2:]
+
+        # Check if there are any CLI args.
+        has_cli_overrides = len(cmd_args) > 0
+
+        if has_cli_overrides:
+            # CLI args provided: use YAML as base, CLI overrides duplicate args
+            # argparse uses the last value when an argument appears multiple times
+            args = parser.parse_args(yaml_args + cmd_args)
+        else:
+            # YAML config only: no CLI overrides
+            args = parser.parse_args(yaml_args)
     else:
         args = parser.parse_args()
 
@@ -140,7 +158,6 @@ def parse_args(extra_args_provider=None, ignore_unknown_args=False, yaml_config=
         print('WARNING: The MSC feature is disabled.')
 
     return args
-
 
 def validate_model_config_args_from_heterogeneous_config(args):
     """Validate model config arguments from heterogeneous config.
