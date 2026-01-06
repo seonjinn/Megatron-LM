@@ -221,12 +221,6 @@ def get_language_model_config(config, enable_fusions=False, apply_rope_fusion=No
         config.activation_func = squared_relu
         config.bias_activation_fusion = False
         config.bias_dropout_fusion = False
-        config.squared_relu = True
-        config.add_bias_linear = False
-        config.apply_query_key_layer_scaling = False
-        config.gated_linear_unit = False
-        config.layernorm_zero_centered_gamma = False
-        config.attention_softmax_in_fp32 = True
     else:
         raise ValueError(f"unknown language model type {config.language_model_type}")
 

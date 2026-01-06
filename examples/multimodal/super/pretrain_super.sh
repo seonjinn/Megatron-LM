@@ -10,7 +10,7 @@
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=pretrain_super_1221
+#SBATCH --job-name=pretrain_super_1222_lb_1e-6
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/trintamaki/msc_config/msc_config.yaml"
@@ -49,7 +49,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="pretrain_super_1221"
+    MODEL_NAME="pretrain_super_1222_lb_1e-6"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -189,7 +189,7 @@ OPTIONS=" \
     --moe-grouped-gemm \
     --num-experts 512 \
     --moe-router-topk 22 \
-    --moe-aux-loss-coeff 1e-4 \
+    --moe-aux-loss-coeff 1e-6 \
     --moe-router-topk-scaling-factor 5.0 \
     --moe-router-enable-expert-bias \
     --moe-router-dtype fp32 \

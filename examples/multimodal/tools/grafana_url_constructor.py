@@ -36,6 +36,8 @@ def main(args):
         cluster = "draco-oci-iad"
     elif "oci-nrt" in hostname:
         cluster = "oci-nrt-cs-001"
+    elif "lbd-lax" in hostname:
+        cluster = "lbd-lax-cs-001"
 
     base_url = f"https://dashboards.telemetry.dgxc.ngc.nvidia.com/d/rYdddlPWk_cw_dfw_05_15_2024/node-health?orgId=8var-gpu=$__all"
 

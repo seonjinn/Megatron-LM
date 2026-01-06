@@ -626,8 +626,13 @@ def main():
     args = parser.parse_args()
 
     if args.model_name is not None:
-        user = os.environ.get("SLURM_JOB_USER", os.environ.get("USER"))
-        path = f"/lustre/fsw/portfolios/llmservice/users/{user}/workspace/output/{args.model_name}"
+        if args.model_base_path is not None:
+            path = args.model_base_path
+        else:
+            user = os.environ.get("SLURM_JOB_USER", os.environ.get("USER"))
+            path = f"/lustre/fsw/portfolios/llmservice/users/{user}/workspace/output/{args.model_name}"
+            if not os.path.exists(path):
+                path = path.replace("/lustre", "/scratch")
         some_iter = int(open(f"{path}/checkpoints/latest_checkpointed_iteration.txt").read().strip())
         ckpt_path = f"{path}/checkpoints/iter_{some_iter:07d}/mp_rank_00/model_optim_rng.pt"
         ckpt_path2 = f"{path}/checkpoints/iter_{some_iter:07d}/mp_rank_00_000/model_optim_rng.pt"
