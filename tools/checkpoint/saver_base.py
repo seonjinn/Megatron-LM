@@ -759,6 +759,155 @@ class MegatronCheckpointSaverBase:
                             rb_param.data = rb_param.data.to(torch.float32)
                         rb_param.data.copy_(router_bias.to(torch.float32))
 
+    def _receive_mtp_layer(self, msg, mtp_schema, pp_rank, mtp_layer_idx):
+        """
+        Receive and process MTP layer parameters from the queue message.
+        
+        Args:
+            msg: Queue message containing MTP layer parameters
+            mtp_schema: MTP schema for parameter setting
+            pp_rank: Pipeline parallel rank (should be last PP stage)
+            mtp_layer_idx: Index of the MTP layer
+        """
+        # Non-parallel params (norms)
+        enorm_weight = msg.pop("enorm weight")
+        enorm_bias = msg.pop("enorm bias", None)
+        hnorm_weight = msg.pop("hnorm weight")
+        hnorm_bias = msg.pop("hnorm bias", None)
+        final_layernorm_weight = msg.pop("final layernorm weight")
+        final_layernorm_bias = msg.pop("final layernorm bias", None)
+        
+        # eh_proj weight (column-parallel, split on dim=0)
+        eh_proj_weight = chunk_weight(msg.pop("eh proj weight"), "column", self.args.target_tensor_parallel_size)
+        
+        # Transformer layer params within mtp_model_layer
+        # Attention norm (non-parallel)
+        mtp_attn_norm_weight = msg.pop("mtp attn norm weight", None)
+        mtp_attn_norm_bias = msg.pop("mtp attn norm bias", None)
+        
+        # QKV weights (column-parallel)
+        mtp_qkv_weight = msg.pop("mtp qkv weight", None)
+        mtp_qkv_bias = msg.pop("mtp qkv bias", None)
+        if mtp_qkv_weight is not None:
+            mtp_qkv_weight = chunk_weight(mtp_qkv_weight, "column", self.args.target_tensor_parallel_size)
+        if mtp_qkv_bias is not None:
+            mtp_qkv_bias = chunk_bias(mtp_qkv_bias, "column", self.args.target_tensor_parallel_size)
+        
+        # Projection weights (row-parallel)
+        mtp_dense_weight = msg.pop("mtp dense weight", None)
+        mtp_dense_bias = msg.pop("mtp dense bias", None)
+        if mtp_dense_weight is not None:
+            mtp_dense_weight = chunk_weight(mtp_dense_weight, "row", self.args.target_tensor_parallel_size)
+        
+        # MLP norm (non-parallel)
+        mtp_mlp_norm_weight = msg.pop("mtp mlp norm weight", None)
+        mtp_mlp_norm_bias = msg.pop("mtp mlp norm bias", None)
+        
+        # MLP fc1 weights (column-parallel)
+        if self.md.swiglu:
+            mtp_mlp_l0_weight_W = msg.pop("mtp mlp l0 weight W", None)
+            mtp_mlp_l0_weight_V = msg.pop("mtp mlp l0 weight V", None)
+            mtp_mlp_l0_bias_W = msg.pop("mtp mlp l0 bias W", None)
+            mtp_mlp_l0_bias_V = msg.pop("mtp mlp l0 bias V", None)
+            if mtp_mlp_l0_weight_W is not None and mtp_mlp_l0_weight_V is not None:
+                mtp_mlp_l0_weight_W = chunk_weight(mtp_mlp_l0_weight_W, "column", self.args.target_tensor_parallel_size)
+                mtp_mlp_l0_weight_V = chunk_weight(mtp_mlp_l0_weight_V, "column", self.args.target_tensor_parallel_size)
+                mtp_mlp_l0_weight = torch.cat((mtp_mlp_l0_weight_W, mtp_mlp_l0_weight_V), dim=-2)
+            else:
+                mtp_mlp_l0_weight = None
+            if mtp_mlp_l0_bias_W is not None and mtp_mlp_l0_bias_V is not None:
+                mtp_mlp_l0_bias_W = chunk_bias(mtp_mlp_l0_bias_W, "column", self.args.target_tensor_parallel_size)
+                mtp_mlp_l0_bias_V = chunk_bias(mtp_mlp_l0_bias_V, "column", self.args.target_tensor_parallel_size)
+                mtp_mlp_l0_bias = torch.cat((mtp_mlp_l0_bias_W, mtp_mlp_l0_bias_V), dim=-1)
+            else:
+                mtp_mlp_l0_bias = None
+        else:
+            mtp_mlp_l0_weight = msg.pop("mtp mlp l0 weight", None)
+            mtp_mlp_l0_bias = msg.pop("mtp mlp l0 bias", None)
+            if mtp_mlp_l0_weight is not None:
+                mtp_mlp_l0_weight = chunk_weight(mtp_mlp_l0_weight, "column", self.args.target_tensor_parallel_size)
+            if mtp_mlp_l0_bias is not None:
+                mtp_mlp_l0_bias = chunk_bias(mtp_mlp_l0_bias, "column", self.args.target_tensor_parallel_size)
+        
+        # MLP fc2 weights (row-parallel)
+        mtp_mlp_l1_weight = msg.pop("mtp mlp l1 weight", None)
+        mtp_mlp_l1_bias = msg.pop("mtp mlp l1 bias", None)
+        if mtp_mlp_l1_weight is not None:
+            mtp_mlp_l1_weight = chunk_weight(mtp_mlp_l1_weight, "row", self.args.target_tensor_parallel_size)
+        
+        # Save to models
+        for ep_rank in range(self.args.target_expert_parallel_size):
+            for tp_rank in range(self.args.target_tensor_parallel_size):
+                params_dict = {
+                    # MTP-specific params
+                    "enorm_weight": enorm_weight,
+                    "enorm_bias": enorm_bias if self.md.norm_has_bias else None,
+                    "hnorm_weight": hnorm_weight,
+                    "hnorm_bias": hnorm_bias if self.md.norm_has_bias else None,
+                    "eh_proj_weight": eh_proj_weight[tp_rank],
+                    "final_layernorm_weight": final_layernorm_weight,
+                    "final_layernorm_bias": final_layernorm_bias if self.md.norm_has_bias else None,
+                    # Transformer layer params within mtp_model_layer
+                    "self_attn_norm_weight": mtp_attn_norm_weight,
+                    "self_attn_norm_bias": mtp_attn_norm_bias if self.md.norm_has_bias else None,
+                }
+                
+                if mtp_qkv_weight is not None:
+                    params_dict["self_attn_qkv_weight"] = mtp_qkv_weight[tp_rank]
+                if self.md.qkv_bias and mtp_qkv_bias is not None:
+                    params_dict["self_attn_qkv_bias"] = mtp_qkv_bias[tp_rank]
+                
+                if mtp_dense_weight is not None:
+                    params_dict["self_attn_proj_weight"] = mtp_dense_weight[tp_rank]
+                if self.md.linear_bias and mtp_dense_bias is not None:
+                    params_dict["self_attn_proj_bias"] = mtp_dense_bias
+                
+                params_dict["mlp_norm_weight"] = mtp_mlp_norm_weight
+                if self.md.norm_has_bias:
+                    params_dict["mlp_norm_bias"] = mtp_mlp_norm_bias
+                
+                if mtp_mlp_l0_weight is not None:
+                    params_dict["mlp_fc1_weight"] = mtp_mlp_l0_weight[tp_rank]
+                if self.md.linear_bias and mtp_mlp_l0_bias is not None:
+                    params_dict["mlp_fc1_bias"] = mtp_mlp_l0_bias[tp_rank]
+                
+                if mtp_mlp_l1_weight is not None:
+                    params_dict["mlp_fc2_weight"] = mtp_mlp_l1_weight[tp_rank]
+                if self.md.linear_bias and mtp_mlp_l1_bias is not None:
+                    params_dict["mlp_fc2_bias"] = mtp_mlp_l1_bias
+                
+                model = self.get_local_model(pp_rank, ep_rank, tp_rank)
+                mtp_schema.set_mtp_layer(model, mtp_layer_idx, params_dict)
+
+    def receive_mtp(self, mtp_schema, main_schema):
+        """
+        Receive MTP block parameters over queue and save them in self.models.
+        Only called on the last pipeline stage where MTP layers exist.
+        
+        Args:
+            mtp_schema: MTP schema for parameter setting
+            main_schema: Main model schema (for reference)
+        """
+        # Check if MTP is enabled
+        if getattr(self.md, 'mtp_num_layers', None) is None or self.md.mtp_num_layers == 0:
+            return
+        
+        # MTP layers only exist on the last pipeline stage
+        last_pp_rank = self.args.target_pipeline_parallel_size - 1
+        
+        # Determine number of physical MTP layers
+        # When mtp_use_repeated_layer is True, there's only 1 physical layer
+        if getattr(self.md, 'mtp_use_repeated_layer', False):
+            num_physical_layers = 1
+        else:
+            num_physical_layers = self.md.mtp_num_layers
+        
+        # Receive each MTP layer
+        for mtp_layer_idx in range(num_physical_layers):
+            msg = self.queue_get(f"mtp layer {mtp_layer_idx}")
+            self._receive_mtp_layer(msg, mtp_schema, last_pp_rank, mtp_layer_idx)
+            self.check_message(msg)
+
     def _pad_weight(self, orig_word_embed, true_vocab_size):
         """
         Helper method to pad weight tensors for vocabulary size alignment.
@@ -893,7 +1042,7 @@ class MegatronCheckpointSaverBase:
 
         # TODO: delete weight when not used
         if msg != "done":
-            print("ERROR: got some more data but was expecting to be done")
+            print(f"ERROR: got some more data but was expecting to be done: {msg}")
 
     def receive_lm(self, schema, prefix=None):
         """
@@ -966,6 +1115,15 @@ class MegatronCheckpointSaverBase:
                     self.check_message(msg)
 
                 if pp_rank == self.args.target_pipeline_parallel_size - 1:
+                    # Handle MTP layers before final layer outputs
+                    if getattr(self.md, 'mtp_num_layers', None) is not None and self.md.mtp_num_layers > 0:
+                        from schema_core import get_mtp_schema
+                        is_hybrid = getattr(self.md, 'mtp_hybrid_override_pattern', None) is not None
+                        mtp_schema = get_mtp_schema(
+                            self.margs.transformer_impl,
+                            is_hybrid=is_hybrid,
+                        )
+                        self.receive_mtp(mtp_schema, schema)
                     self._receive_final_layer_outputs(schema, pp_rank, out_word_embed, prefix)
         else:
             total_layer_num = 0
@@ -987,6 +1145,15 @@ class MegatronCheckpointSaverBase:
                     self.check_message(msg)
 
                 if pp_rank == self.args.target_pipeline_parallel_size - 1:
+                    # Handle MTP layers before final layer outputs
+                    if getattr(self.md, 'mtp_num_layers', None) is not None and self.md.mtp_num_layers > 0:
+                        from schema_core import get_mtp_schema
+                        is_hybrid = getattr(self.md, 'mtp_hybrid_override_pattern', None) is not None
+                        mtp_schema = get_mtp_schema(
+                            self.margs.transformer_impl,
+                            is_hybrid=is_hybrid,
+                        )
+                        self.receive_mtp(mtp_schema, schema)
                     self._receive_final_layer_outputs(schema, pp_rank, out_word_embed, prefix)
 
     def import_model_provider(self):

@@ -567,6 +567,157 @@ class MegatronCheckpointLoaderBase:
 
         return message
 
+    def _send_mtp_layer(self, models, mtp_layer_idx, mtp_schema, main_schema):
+        """
+        Extract MTP layer parameters and return message dictionary.
+        
+        Args:
+            models: List of models across TP ranks
+            mtp_layer_idx: Index of the MTP layer
+            mtp_schema: MTP schema for parameter extraction
+            main_schema: Main model schema (for transformer layer params)
+        """
+        tp_size = self.margs.tensor_model_parallel_size
+        message = {}
+        
+        # Get first model's MTP layer for non-parallel params
+        first_mtp_params = mtp_schema.get_mtp_layer(models[0], mtp_layer_idx)
+        
+        # Non-parallel params (norms)
+        message["enorm weight"] = first_mtp_params["enorm_weight"]
+        if self.md.norm_has_bias and first_mtp_params.get("enorm_bias") is not None:
+            message["enorm bias"] = first_mtp_params["enorm_bias"]
+        
+        message["hnorm weight"] = first_mtp_params["hnorm_weight"]
+        if self.md.norm_has_bias and first_mtp_params.get("hnorm_bias") is not None:
+            message["hnorm bias"] = first_mtp_params["hnorm_bias"]
+        
+        message["final layernorm weight"] = first_mtp_params["final_layernorm_weight"]
+        if self.md.norm_has_bias and first_mtp_params.get("final_layernorm_bias") is not None:
+            message["final layernorm bias"] = first_mtp_params["final_layernorm_bias"]
+        
+        # Collect eh_proj weight across TP (column-parallel)
+        eh_proj_weights = []
+        for model_tp in models:
+            mtp_params = mtp_schema.get_mtp_layer(model_tp, mtp_layer_idx)
+            eh_proj_weights.append(mtp_params["eh_proj_weight"])
+        message["eh proj weight"] = torch.cat(eh_proj_weights, dim=0)
+        
+        # Transformer layer params within mtp_model_layer
+        # These follow the same parallel strategy as main transformer layers
+        
+        # Self-attention norm (non-parallel)
+        message["mtp attn norm weight"] = first_mtp_params.get("self_attn_norm_weight")
+        if self.md.norm_has_bias and first_mtp_params.get("self_attn_norm_bias") is not None:
+            message["mtp attn norm bias"] = first_mtp_params.get("self_attn_norm_bias")
+        
+        # QKV weights (column-parallel)
+        qkv_weights = []
+        qkv_biases = []
+        for model_tp in models:
+            mtp_params = mtp_schema.get_mtp_layer(model_tp, mtp_layer_idx)
+            if mtp_params.get("self_attn_qkv_weight") is not None:
+                qkv_weights.append(mtp_params["self_attn_qkv_weight"])
+            if self.md.qkv_bias and mtp_params.get("self_attn_qkv_bias") is not None:
+                qkv_biases.append(mtp_params["self_attn_qkv_bias"])
+        
+        if qkv_weights:
+            message["mtp qkv weight"] = torch.cat(qkv_weights, dim=0)
+        if qkv_biases:
+            message["mtp qkv bias"] = torch.cat(qkv_biases, dim=0)
+        
+        # Projection weights (row-parallel)
+        proj_weights = []
+        for model_tp in models:
+            mtp_params = mtp_schema.get_mtp_layer(model_tp, mtp_layer_idx)
+            if mtp_params.get("self_attn_proj_weight") is not None:
+                proj_weights.append(mtp_params["self_attn_proj_weight"])
+        
+        if proj_weights:
+            message["mtp dense weight"] = torch.cat(proj_weights, dim=1)
+        if self.md.linear_bias and first_mtp_params.get("self_attn_proj_bias") is not None:
+            message["mtp dense bias"] = first_mtp_params["self_attn_proj_bias"]
+        
+        # MLP norm (non-parallel)
+        message["mtp mlp norm weight"] = first_mtp_params.get("mlp_norm_weight")
+        if self.md.norm_has_bias and first_mtp_params.get("mlp_norm_bias") is not None:
+            message["mtp mlp norm bias"] = first_mtp_params.get("mlp_norm_bias")
+        
+        # MLP fc1 weights (column-parallel)
+        mlp_l0_weights = []
+        mlp_l0_biases = []
+        for model_tp in models:
+            mtp_params = mtp_schema.get_mtp_layer(model_tp, mtp_layer_idx)
+            if mtp_params.get("mlp_fc1_weight") is not None:
+                mlp_l0_weights.append(mtp_params["mlp_fc1_weight"])
+            if self.md.linear_bias and mtp_params.get("mlp_fc1_bias") is not None:
+                mlp_l0_biases.append(mtp_params["mlp_fc1_bias"])
+        
+        if mlp_l0_weights:
+            if self.md.swiglu:
+                # Chunk each weight and separate W and V
+                for i in range(tp_size):
+                    mlp_l0_weights[i] = torch.chunk(mlp_l0_weights[i], 2, dim=0)
+                message["mtp mlp l0 weight W"] = torch.cat([w[0] for w in mlp_l0_weights], dim=0)
+                message["mtp mlp l0 weight V"] = torch.cat([w[1] for w in mlp_l0_weights], dim=0)
+            else:
+                message["mtp mlp l0 weight"] = torch.cat(mlp_l0_weights, dim=0)
+        
+        if mlp_l0_biases:
+            if self.md.swiglu:
+                for i in range(tp_size):
+                    mlp_l0_biases[i] = torch.chunk(mlp_l0_biases[i], 2, dim=0)
+                message["mtp mlp l0 bias W"] = torch.cat([b[0] for b in mlp_l0_biases], dim=0)
+                message["mtp mlp l0 bias V"] = torch.cat([b[1] for b in mlp_l0_biases], dim=0)
+            else:
+                message["mtp mlp l0 bias"] = torch.cat(mlp_l0_biases, dim=0)
+        
+        # MLP fc2 weights (row-parallel)
+        mlp_l1_weights = []
+        for model_tp in models:
+            mtp_params = mtp_schema.get_mtp_layer(model_tp, mtp_layer_idx)
+            if mtp_params.get("mlp_fc2_weight") is not None:
+                mlp_l1_weights.append(mtp_params["mlp_fc2_weight"])
+        
+        if mlp_l1_weights:
+            message["mtp mlp l1 weight"] = torch.cat(mlp_l1_weights, dim=1)
+        if self.md.linear_bias and first_mtp_params.get("mlp_fc2_bias") is not None:
+            message["mtp mlp l1 bias"] = first_mtp_params["mlp_fc2_bias"]
+        
+        return message
+
+    def send_mtp_over_queue(self, mtp_schema, main_schema):
+        """
+        Send MTP block parameters over the queue.
+        Only called on the last pipeline stage where MTP layers exist.
+        """
+        # Check if MTP is enabled
+        if self.md.mtp_num_layers is None or self.md.mtp_num_layers == 0:
+            return
+        
+        tp_size = self.margs.tensor_model_parallel_size
+        pp_size = self.margs.pipeline_model_parallel_size
+        vp_size = self.margs.virtual_pipeline_model_parallel_size or 1
+        
+        # MTP layers only exist on the last pipeline stage
+        last_pp_rank = pp_size - 1
+        last_vp_rank = vp_size - 1
+        
+        # Get models for the last pipeline stage
+        models = self.get_assembled_tensor_parallel_models(pp_rank=last_pp_rank, vp_rank=last_vp_rank)
+        
+        # Determine number of physical MTP layers
+        # When mtp_use_repeated_layer is True, there's only 1 physical layer
+        if self.md.mtp_use_repeated_layer:
+            num_physical_layers = 1
+        else:
+            num_physical_layers = self.md.mtp_num_layers
+        
+        # Send each MTP layer
+        for mtp_layer_idx in range(num_physical_layers):
+            message = self._send_mtp_layer(models, mtp_layer_idx, mtp_schema, main_schema)
+            self.queue_put(f"mtp layer {mtp_layer_idx}", message)
+
     def send_llm_over_queue(self, schema):
         """
         Using self.all_models, extract model parameters and send them over the queue.
@@ -638,14 +789,24 @@ class MegatronCheckpointLoaderBase:
                         self.queue_put(f"transformer layer {total_layer_num}", message)
                         total_layer_num += 1
 
-        # 3) Final norm
+        # 3) MTP (Multi-Token Prediction) layers - sent before final layer outputs
+        if self.md.mtp_num_layers is not None and self.md.mtp_num_layers > 0:
+            from schema_core import get_mtp_schema
+            is_hybrid = self.md.mtp_hybrid_override_pattern is not None
+            mtp_schema = get_mtp_schema(
+                self.margs.transformer_impl,
+                is_hybrid=is_hybrid,
+            )
+            self.send_mtp_over_queue(mtp_schema, schema)
+
+        # 4) Final norm
         final_norm = schema.get("final_norm", models[0])
         message = {"weight": final_norm["weight"]}
         if self.md.norm_has_bias:
             message["bias"] = final_norm["bias"]
         self.queue_put("final norm", message)
 
-        # 4) Output layer
+        # 5) Output layer
         if self.md.output_layer:
             output_layers = [schema.get("output_layer", m) for m in models]
             message = {
@@ -653,7 +814,7 @@ class MegatronCheckpointLoaderBase:
             }
             self.queue_put("output layer", message)
 
-        # 5) BERT-specific parameters
+        # 6) BERT-specific parameters
         if self.md.model_type == 'BERT':
             # Pooler
             pooler = schema.get("pooler", models[0])
@@ -762,6 +923,12 @@ class MegatronCheckpointLoaderBase:
         if self.args.ckpt_step is not None:
             md.ckpt_step = self.args.ckpt_step
             md.iteration = self.args.ckpt_step
+        
+        # Multi-Token Prediction (MTP) metadata
+        md.mtp_num_layers = getattr(self.margs, 'mtp_num_layers', None)
+        md.mtp_use_repeated_layer = getattr(self.margs, 'mtp_use_repeated_layer', False)
+        md.mtp_hybrid_override_pattern = getattr(self.margs, 'mtp_hybrid_override_pattern', None)
+        
         return md
 
     def build_sys_argv(self):

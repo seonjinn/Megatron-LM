@@ -111,6 +111,8 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
         margs.context_parallel_size = 1
         # margs.use_cpu_initialization = False
         margs.disable_mtp = getattr(checkpoint_args, "disable_mtp", False)
+        # MTP spec is required when mtp_hybrid_override_pattern is set
+        margs.mtp_spec = getattr(checkpoint_args, "mtp_spec", None)
 
         return margs
 
