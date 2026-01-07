@@ -475,7 +475,6 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
             prefix="language_model."
         )
         self.send_llm_over_queue(schema)
-        self.queue.put("done")
 
 def load_checkpoint(queue, args):
     """

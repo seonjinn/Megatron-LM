@@ -919,11 +919,9 @@ class MegatronCheckpointSaverBase:
             from megatron.core.ssm.mamba_hybrid_layer_allocation import Symbols as LayerSymbols
             from megatron.core.ssm.mamba_hybrid_layer_allocation import allocate_layers
 
-            layer_type_list = allocate_layers(
-                self.md.num_layers,
-                self.margs.hybrid_attention_ratio,
-                self.margs.hybrid_mlp_ratio,
+            layer_type_list, _ = allocate_layers(
                 self.margs.hybrid_override_pattern,
+                vp_stage=None,
             )
             total_layer_num = 0
             for pp_rank in range(self.args.target_pipeline_parallel_size):
