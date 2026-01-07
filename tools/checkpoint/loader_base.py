@@ -214,8 +214,9 @@ class MegatronCheckpointLoaderBase:
         mpu._EXPERT_TENSOR_AND_MODEL_PARALLEL_GROUP = fake_ep_tp_model_group
         mpu._EXPERT_TENSOR_MODEL_PIPELINE_PARALLEL_GROUP = fake_ep_tp_model_pp_group
 
-        get_cuda_rng_tracker().add('model-parallel-rng', self.margs.seed)
-        # Ensure expert-parallel RNG tracker exists for MoE components
+        # Match seed offsets from model_parallel_cuda_manual_seed in random.py
+        get_cuda_rng_tracker().add('data-parallel-rng', self.margs.seed)
+        get_cuda_rng_tracker().add('model-parallel-rng', self.margs.seed + 2718)
         get_cuda_rng_tracker().add('expert-parallel-rng', self.margs.seed + 1024)
 
         fused_kernels.load(self.margs)
@@ -446,6 +447,14 @@ class MegatronCheckpointLoaderBase:
 
         message["router weight"] = ref_layer["router_weight"]
         message["router bias"] = ref_layer["router_bias"]
+
+        # MoE latent projections (duplicated mode, not sharded across TP)
+        if self.md.moe_latent_size:
+            message["fc1 latent proj weight"] = ref_layer["fc1_latent_proj_weight"]
+            message["fc2 latent proj weight"] = ref_layer["fc2_latent_proj_weight"]
+            if self.md.linear_bias:
+                message["fc1 latent proj bias"] = ref_layer["fc1_latent_proj_bias"]
+                message["fc2 latent proj bias"] = ref_layer["fc2_latent_proj_bias"]
 
         # Assemble shared experts across TP
         shared_l0_tp = []
@@ -728,6 +737,7 @@ class MegatronCheckpointLoaderBase:
         md.num_attention_heads = self.margs.num_attention_heads
         md.num_query_groups = self.margs.num_query_groups
         md.num_experts = self.margs.num_experts
+        md.moe_latent_size = getattr(self.margs, 'moe_latent_size', None)
         md.max_position_embeddings = self.margs.max_position_embeddings
         md.tokenizer_type = self.margs.tokenizer_type
         md.iteration = self.margs.iteration

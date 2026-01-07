@@ -194,9 +194,9 @@ class MegatronCheckpointSaverBase:
         mpu._EXPERT_TENSOR_AND_MODEL_PARALLEL_GROUP = fake_ep_tp_model_group
         mpu._EXPERT_TENSOR_MODEL_PIPELINE_PARALLEL_GROUP = fake_ep_tp_model_pp_group
 
-        #TODO: does this mess anything else up? need some value here for hybrid
-        get_cuda_rng_tracker().add('model-parallel-rng', self.margs.seed)
-        # Ensure expert-parallel RNG tracker exists for MoE components
+        # Match seed offsets from model_parallel_cuda_manual_seed in random.py
+        get_cuda_rng_tracker().add('data-parallel-rng', self.margs.seed)
+        get_cuda_rng_tracker().add('model-parallel-rng', self.margs.seed + 2718)
         get_cuda_rng_tracker().add('expert-parallel-rng', self.margs.seed + 1024)
 
         fused_kernels.load(self.margs)
@@ -661,6 +661,15 @@ class MegatronCheckpointSaverBase:
         router_weight = msg.pop("router weight")
         router_bias = msg.pop("router bias")
 
+        # MoE latent projections (duplicated mode, not sharded across TP)
+        moe_latent_size = getattr(self.md, 'moe_latent_size', None)
+        if moe_latent_size:
+            fc1_latent_proj_weight = msg.pop("fc1 latent proj weight")
+            fc2_latent_proj_weight = msg.pop("fc2 latent proj weight")
+            if self.md.linear_bias:
+                fc1_latent_proj_bias = msg.pop("fc1 latent proj bias")
+                fc2_latent_proj_bias = msg.pop("fc2 latent proj bias")
+
         # fc1
         if self.md.swiglu:
             mlp_l0_weight_W = msg.pop("mlp l0 weight W")  # [E, out/2, in]
@@ -725,6 +734,18 @@ class MegatronCheckpointSaverBase:
                         params_dict.update({
                             "pre_mlp_norm_bias": pre_mlp_norm_bias,
                         })
+
+                    # MoE latent projections (duplicated mode, replicated to all ranks)
+                    if moe_latent_size:
+                        params_dict.update({
+                            "fc1_latent_proj_weight": fc1_latent_proj_weight,
+                            "fc2_latent_proj_weight": fc2_latent_proj_weight,
+                        })
+                        if self.md.linear_bias:
+                            params_dict.update({
+                                "fc1_latent_proj_bias": fc1_latent_proj_bias,
+                                "fc2_latent_proj_bias": fc2_latent_proj_bias,
+                            })
 
                     # Set norms and optional bias
                     model = self.get_local_model(pp_rank, ep_rank, tp_rank)

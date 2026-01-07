@@ -148,6 +148,12 @@ class CoreMoETESchema(CoreSchema):
             "mlp_shared_fc1_weight" : "mlp.shared_experts.linear_fc1.weight",
             "mlp_shared_fc2_weight" : "mlp.shared_experts.linear_fc2.weight",
 
+            # MoE latent projections (duplicated across TP, not sharded)
+            "fc1_latent_proj_weight" : "mlp.fc1_latent_proj.weight",
+            "fc1_latent_proj_bias" : "mlp.fc1_latent_proj.bias",
+            "fc2_latent_proj_weight" : "mlp.fc2_latent_proj.weight",
+            "fc2_latent_proj_bias" : "mlp.fc2_latent_proj.bias",
+
         } | extra_layer_schema, prefix=prefix)
 
 
@@ -236,6 +242,12 @@ class CoreHybridMoETESchema(CoreHybridTESchema):
             # Shared experts (not EP-split): treat like normal linear layers
             "mlp_shared_fc1_weight" : "mlp.shared_experts.linear_fc1.weight",
             "mlp_shared_fc2_weight" : "mlp.shared_experts.linear_fc2.weight",
+
+            # MoE latent projections (duplicated across TP, not sharded)
+            "fc1_latent_proj_weight" : "mlp.fc1_latent_proj.weight",
+            "fc1_latent_proj_bias" : "mlp.fc1_latent_proj.bias",
+            "fc2_latent_proj_weight" : "mlp.fc2_latent_proj.weight",
+            "fc2_latent_proj_bias" : "mlp.fc2_latent_proj.bias",
         } | extra_layer_schema, prefix=prefix)
 
 def get_model_schema(
