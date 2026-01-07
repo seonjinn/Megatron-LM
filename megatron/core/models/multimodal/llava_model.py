@@ -1455,6 +1455,9 @@ class LLaVAModel(MegatronModule):
 
             if self.context_parallel_lm > 1 and sound_pad is not None:
                 sound_embeddings = gather_from_context_parallel_ranks(sound_embeddings, sound_pad)
+                if sound_embeddings_len is not None:
+                    # Gather sound_embeddings_len along the clips dimension (unsqueeze to 2D, gather, squeeze back)
+                    sound_embeddings_len = gather_from_context_parallel_ranks(sound_embeddings_len.unsqueeze(0), sound_pad).squeeze(0)
 
             if inference_context is not None:
                 inference_context.key_value_memory_dict["sound_tokens_count"] = sound_embeddings.shape[1]
