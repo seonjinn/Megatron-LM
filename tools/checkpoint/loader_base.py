@@ -53,7 +53,7 @@ class MegatronCheckpointLoaderBase:
                 tp_rank = tp_rank % self.margs.expert_tensor_parallel_size
 
         return self.all_models[pp_rank][vp_rank][ep_rank][tp_rank]
-        
+
 
     def get_assembled_tensor_parallel_models(self, pp_rank=0, vp_rank=0):
         """
@@ -111,7 +111,7 @@ class MegatronCheckpointLoaderBase:
         # Expert parallelism requires sequence parallelism
         if margs.expert_model_parallel_size > 1:
             margs.sequence_parallel = True
-        
+
         margs = self._maybe_parse_additional_megatron_args(margs, checkpoint_args)
 
         # Validate final arguments
@@ -195,7 +195,7 @@ class MegatronCheckpointLoaderBase:
         mpu.set_pipeline_model_parallel_world_size(self.margs.pipeline_model_parallel_size)
         mpu.set_virtual_pipeline_model_parallel_world_size(self.margs.virtual_pipeline_model_parallel_size)
         mpu.set_expert_model_parallel_world_size(self.margs.expert_model_parallel_size)
-        
+
         # For backward compatibility during local parallel states refactoring
         fake_tp_group = _ConverterFakeProcessGroup(size=self.margs.tensor_model_parallel_size)
         fake_ep_group = _ConverterFakeProcessGroup(size=self.margs.expert_model_parallel_size)
@@ -332,7 +332,7 @@ class MegatronCheckpointLoaderBase:
             all_models.append(get_models_for_pipeline_stage(tp_size, ep_size, dtype))
 
         return all_models, consumed_train_samples, consumed_valid_samples
-    
+
     def send_metadata_over_queue(self):
         # Let the consumer know the overall metadata:
         self.md.consumed_train_samples = self.consumed_train_samples
@@ -512,7 +512,7 @@ class MegatronCheckpointLoaderBase:
         tp_size = self.margs.tensor_model_parallel_size
         layer = schema.get_layer(models[0], layer_idx)
         message = {}
-        
+
         # Non-parallel params
         message["in proj norm weight"] = layer["mixer_in_proj_layer_norm_weight"]
 
@@ -524,7 +524,7 @@ class MegatronCheckpointLoaderBase:
         conv_1d_weight, conv_1d_bias = [], []
         norm_weight = []
         out_proj_weight = []
-        
+
         for model_tp in models:
             layer_p = schema.get_layer(model_tp, layer_idx)
             dt_bias.append(layer_p["mixer_dt_bias"])
@@ -588,10 +588,8 @@ class MegatronCheckpointLoaderBase:
             from megatron.core.ssm.mamba_hybrid_layer_allocation import allocate_layers
 
             layer_type_list = allocate_layers(
-                self.md.num_layers,
-                self.margs.hybrid_attention_ratio,
-                self.margs.hybrid_mlp_ratio,
                 self.margs.hybrid_override_pattern,
+                vp_stage=None,
             )
 
             total_layer_num = 0
@@ -601,7 +599,7 @@ class MegatronCheckpointLoaderBase:
                     num_layers = schema.get_num_layers(self.all_models[pp_rank][vp_rank][0][0])
                     for layer_idx in range(num_layers):
                         layer_type = layer_type_list[layer_idx]
-                        
+
                         if layer_type == LayerSymbols.MAMBA:
                             message = self._send_mamba_layer(models, layer_idx, schema)
                         elif layer_type == LayerSymbols.ATTENTION:
@@ -624,7 +622,7 @@ class MegatronCheckpointLoaderBase:
                         # Combine attention and MLP layer parameters
                         attention_message = self._send_attention_layer(models, layer_idx, schema)
                         mlp_message = self._send_mlp_layer(models, layer_idx, schema)
-                        
+
                         # Merge both messages
                         message = {**attention_message, **mlp_message}
 
@@ -703,14 +701,14 @@ class MegatronCheckpointLoaderBase:
 
         # 6) Build metadata
         self.md = self.build_checkpoint_metadata(true_vocab_size)
-    
+
         # 7) Load all model shards
         self.all_models, self.consumed_train_samples, self.consumed_valid_samples = self.load_model_shards(
             model_provider,
             self.md.params_dtype
         )
 
-        # 8) Send model over the queue        
+        # 8) Send model over the queue
         self.send_model_over_queue()
 
     def build_checkpoint_metadata(self, true_vocab_size):
@@ -749,8 +747,6 @@ class MegatronCheckpointLoaderBase:
         md.checkpoint_args = self.checkpoint_args
         md.use_legacy_models = self.margs.use_legacy_models
         if self.args.model_type == "hybrid":
-            md.hybrid_attention_ratio = self.margs.hybrid_attention_ratio
-            md.hybrid_mlp_ratio = self.margs.hybrid_mlp_ratio
             md.hybrid_override_pattern = self.margs.hybrid_override_pattern
             md.mamba_state_dim = self.margs.mamba_state_dim
         if self.args.ckpt_step is not None:
@@ -784,7 +780,7 @@ class MegatronCheckpointLoaderBase:
             '--no-one-logger',
         ]
         if self.args.ckpt_step is not None:
-            my_argv.extend(['--ckpt-step', str(self.args.ckpt_step)]) 
+            my_argv.extend(['--ckpt-step', str(self.args.ckpt_step)])
         return my_argv
 
     def import_model_provider(self):

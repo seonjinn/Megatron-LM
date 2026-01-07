@@ -199,6 +199,7 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
         margs.allow_missing_sound_model_checkpoint = getattr(self.md.checkpoint_args, "allow_missing_sound_model_checkpoint", False)
         margs.recompute_sound = getattr(self.md.checkpoint_args, "recompute_sound", False)
         margs.sound_model_type = getattr(self.md.checkpoint_args, "sound_model_type", None)
+        margs.disable_mtp = getattr(self.md.checkpoint_args, "disable_mtp", False)
 
         return margs
 

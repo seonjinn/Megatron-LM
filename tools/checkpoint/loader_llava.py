@@ -110,6 +110,7 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
         margs.sound_model_type = getattr(checkpoint_args, "sound_model_type", None)
         margs.context_parallel_size = 1
         # margs.use_cpu_initialization = False
+        margs.disable_mtp = getattr(checkpoint_args, "disable_mtp", False)
 
         return margs
 

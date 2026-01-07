@@ -15,7 +15,7 @@ elif [[ $(hostname) == *"oci-nrt"* ]]; then
 elif [[ $(hostname) == *"lbd-lax"* ]]; then
     PARTITIONS="interactive"
     ACCOUNT="llmservice_nemotron_super"
-    MOUNTS="/scratch,/home"
+    MOUNTS="/scratch,/lustre,/home"
 else
     PARTITIONS="interactive"
 fi

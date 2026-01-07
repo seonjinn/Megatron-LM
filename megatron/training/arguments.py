@@ -697,7 +697,7 @@ def validate_args(args, defaults={}):
 
                 assert num_layers % args.transformer_pipeline_model_parallel_size == 0, \
                     'Number of layers should be divisible by the pipeline-model-parallel size'
-    
+
     # Validate MTP hybrid pattern segment count
     if args.mtp_hybrid_override_pattern is not None:
         mtp_segments = len(args.mtp_hybrid_override_pattern.split('|'))
@@ -775,7 +775,7 @@ def validate_args(args, defaults={}):
                 args.rank,
             )
         if args.fp4_param and not is_te_min_version("2.7.0.dev0"):
-            raise ValueError("--fp4-param requires Transformer Engine >= 2.7.0.dev0.")   
+            raise ValueError("--fp4-param requires Transformer Engine >= 2.7.0.dev0.")
 
     if args.overlap_param_gather_with_optimizer_step:
         assert args.use_distributed_optimizer, \
@@ -811,7 +811,7 @@ def validate_args(args, defaults={}):
     # FP4 param requires FP4 mode
     if args.fp4_param and not args.fp4:
         raise ValueError("--fp4-param-gather must be used together with --fp4-format.")
-    
+
     # FP4 requires TE >= 2.7.0.dev0
     if args.fp4 and not is_te_min_version("2.7.0.dev0"):
         raise ValueError("--fp4-format requires Transformer Engine >= 2.7.0.dev0 for NVFP4BlockScaling support.")
@@ -1359,7 +1359,7 @@ def validate_args(args, defaults={}):
         assert (
             args.recompute_granularity != 'full'
         ), 'recompute_granularity must not be full when CUDA Graphs are enabled.'
-    
+
     # MoE latent projections
     if args.moe_latent_size is not None:
         assert args.moe_latent_size > 0, "MoE latent projection dimension has to be greater than zero."
@@ -1474,8 +1474,8 @@ def core_transformer_config_from_args(args, config_class=None):
         kw_args['use_kitchen'] = True
         kw_args['quant_recipe'] = kitchen_quantization_recipe_config(args.kitchen_recipe_number)
 
-    kw_args['moe_latent_size'] = args.moe_latent_size
-    kw_args['apply_per_token_output_grad_clipping'] = args.apply_per_token_output_grad_clipping
+    kw_args['moe_latent_size'] = getattr(args, "moe_latent_size", None)
+    kw_args['apply_per_token_output_grad_clipping'] = getattr(args, "apply_per_token_output_grad_clipping", False)
 
     # Return config.
     return config_class(**kw_args)
@@ -1522,7 +1522,7 @@ def _add_transformer_engine_args(parser):
                        help='Number of layers at start to construct in bf16 when --first-last-layers-bf16 is enabled.')
     group.add_argument('--num-layers-at-end-in-bf16', type=int, default=1,
                        help='Number of layers at end to construct in bf16 when --first-last-layers-bf16 is enabled.')
-    
+
     # FP4 related arguments
     group.add_argument('--fp4-format', default=None,
                        choices=['e2m1'],
@@ -3432,7 +3432,7 @@ def _add_experimental_args(parser):
                        'pattern')
     group.add_argument('--mtp-spec', type=str, default=None, nargs='*',
                        help='Specify the <module_location function_name> pair '
-                       'that returns a spec for mtp layer to customize a model,' 
+                       'that returns a spec for mtp layer to customize a model,'
                        'transformer block, or transformer layer, depending on '
                        'the use case. To use local spec specify local as the argument.'
                        'For more details, see the model class, `transformer_block.py`,'
@@ -3474,7 +3474,7 @@ def _add_experimental_args(parser):
                             'optimizer state in memory during training but does not affect '
                             'the precision in the kernel computation.')
 
-                        
+
     return parser
 
 

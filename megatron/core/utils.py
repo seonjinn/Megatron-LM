@@ -671,7 +671,7 @@ def log_on_each_pipeline_stage(logger: logging.Logger, *args: Any, **kwargs: Any
 
         kwargs (Dict[str, Any]): All logging.Logger.log keyword arguments
     """
-    assert torch.distributed.is_initialized()
+    # assert torch.distributed.is_initialized()
 
     if (
         parallel_state.get_data_parallel_rank(with_context_parallel=True) == 0
