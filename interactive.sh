@@ -23,6 +23,7 @@ fi
 echo "Using container image: ${CONTAINER_IMAGE}"
 echo "Using partitions: ${PARTITIONS}"
 echo "Using account: ${ACCOUNT}"
+echo "Using mounts: ${MOUNTS}"
 
 srun -p ${PARTITIONS} -A ${ACCOUNT} -N 1 --pty \
     --container-image ${CONTAINER_IMAGE} \

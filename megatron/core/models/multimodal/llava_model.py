@@ -207,6 +207,7 @@ class LLaVAModel(MegatronModule):
         self.vision_model = None
         self.vision_projection = None
         self.language_model = None
+        self._mtp_enabled = False  # Will be set to True if add_decoder and mtp_block_spec is not None
 
         self.sound_model = sound_model
         self.sound_projection = sound_projection
@@ -461,6 +462,7 @@ class LLaVAModel(MegatronModule):
             self._language_is_pipeline_parallel = (
                 language_transformer_config.pipeline_model_parallel_size > 1
             )
+            self._mtp_enabled = mtp_block_spec is not None
 
             # Newer Transformer Engine versions add _extra_state keys in state_dict when using FP8.
             # Older models may not have _extra_state and can be ignored.
@@ -1008,6 +1010,47 @@ class LLaVAModel(MegatronModule):
             assert (
                 final_embedding.shape[:2] == final_labels.shape == final_loss_mask.shape
             ), "unexpected shapes after data preprocessing"
+
+        # WORKAROUND: Replace zero-embedding positions with valid embeddings AND mask their loss.
+        #
+        # Why this is needed:
+        # 1. Certain special tokens might have zero embeddings in the checkpoint (never trained) if they were never initialized:
+        # WARNING: this means that these special tokens with zero-embeddings will NOT learn any embeddings if MTP is enabled.
+        # To fix this, we need to initialize the embeddings for these special tokens in the checkpoint.
+        # 2. These zeros cause MoE router instability (uniform softmax → gradient explosion)
+        # 3. The MoE auxiliary loss doesn't use loss_mask, so zeros still cause gradient issues
+        #
+        # This workaround:
+        # - Replaces zero embeddings with the mean of non-zero embeddings (to prevent MoE issues)
+        # - Sets loss_mask=0 for these positions (these are structural tokens, not content)
+        #
+        # NOTE: This only runs when MTP is enabled. Without MTP, zeros don't cause crashes.
+        # The tokens being masked are control/markup tokens that shouldn't contribute to loss anyway.
+        if final_embedding is not None and self._mtp_enabled:
+            # final_embedding shape: [b, s, h] at this point (before transpose)
+            row_norms = final_embedding.norm(dim=-1)  # [b, s]
+            zero_norm_mask = row_norms < 1e-6  # [b, s]
+
+            if zero_norm_mask.any():
+                # Compute fill embedding: mean of non-zero embeddings
+                non_zero_mask = ~zero_norm_mask  # [b, s]
+                if non_zero_mask.any():
+                    non_zero_embeddings = final_embedding[non_zero_mask]  # [num_nonzero, h]
+                    fill_embedding = non_zero_embeddings.mean(dim=0)  # [h]
+                else:
+                    # Fallback: use small random values (shouldn't happen)
+                    fill_embedding = torch.randn(final_embedding.shape[-1],
+                                                  device=final_embedding.device,
+                                                  dtype=final_embedding.dtype) * 0.01
+
+                # Replace zeros with fill embedding
+                final_embedding = final_embedding.clone()  # Avoid in-place modification
+                final_embedding[zero_norm_mask] = fill_embedding
+
+                # Also mask loss for these positions
+                if final_loss_mask is not None:
+                    final_loss_mask = final_loss_mask.clone()
+                    final_loss_mask[zero_norm_mask] = 0
 
         if final_embedding is not None:
             # Truncate if exceeding the language model's max sequence length.

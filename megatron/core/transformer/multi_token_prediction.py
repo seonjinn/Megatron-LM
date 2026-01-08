@@ -137,6 +137,9 @@ def roll_tensor(tensor, shifts=-1, dims=-1, cp_group=None, packed_seq_params=Non
     # Standard rolling behavior when CP is not enabled (cp_group is None or size=1)
     if cp_group is None or cp_group.size() == 1:
         rolled_tensor = torch.roll(tensor, shifts=shifts, dims=dims)
+        # Fill the wrapped positions with zeros
+        # Note: For multimodal models, the caller should replace these zeros with
+        # appropriate embeddings (e.g., embedding of token 0) to prevent MoE router instability
         rolled_tensor.select(dims, shifts).fill_(0)
         return rolled_tensor, rolled_tensor.sum()
 
@@ -204,17 +207,45 @@ def roll_tensor(tensor, shifts=-1, dims=-1, cp_group=None, packed_seq_params=Non
 
 def _roll_tensor_packed_seq(tensor, shifts, dims, packed_seq_params, cp_group=None):
     """Roll tensor with packed sequence support.
-    This function handles rolling for packed sequences by respecting sequence boundaries
+    This function handles rolling for packed sequences by respecting sequence boundaries.
+    
+    Supports both dims=0 (sequence-first tensors like [s, b, h]) and dims=-1 
+    (sequence-last tensors like [b, s]).
     """
 
     # Notice: This is a naive implementation to test the correctness,
     # a better solution will only sync the boundary tokens once.
+    ndim = tensor.dim()
+    # Normalize dims to positive index
+    norm_dims = dims if dims >= 0 else ndim + dims
     assert (
-        dims == -1 or dims == tensor.dim() - 1
-    ), "Packed sequence roll only supports the last dimension."
+        norm_dims == 0 or norm_dims == ndim - 1
+    ), f"Packed sequence roll only supports dim 0 or last dimension, got dims={dims} (normalized={norm_dims})."
     assert shifts == -1, "Packed sequence roll only supports a single-token left shift."
     cu_seqlens = packed_seq_params.cu_seqlens_q
     assert cu_seqlens is not None, "Packed sequence parameters must provide cu_seqlens_q."
+    
+    # Helper to slice tensor along the sequence dimension
+    def slice_seq_dim(t, start, end):
+        """Slice tensor along the sequence dimension (norm_dims)."""
+        if norm_dims == 0:
+            return t[start:end]
+        else:  # norm_dims == ndim - 1 (last dim)
+            return t[..., start:end]
+    
+    def assign_seq_dim(t, start, end, value):
+        """Assign value to a slice along the sequence dimension."""
+        if norm_dims == 0:
+            t[start:end] = value
+        else:
+            t[..., start:end] = value
+    
+    def zero_boundary(t):
+        """Zero out the boundary position after rolling (shifts=-1 means last pos)."""
+        if norm_dims == 0:
+            t[shifts:] = 0  # shifts=-1, so this zeros the last position
+        else:
+            t[..., shifts:] = 0
 
     rolled_tensor = tensor.clone()
 
@@ -224,11 +255,11 @@ def _roll_tensor_packed_seq(tensor, shifts, dims, packed_seq_params, cp_group=No
         for i in range(len(cu_seqlens) - 1):
             start_idx = cu_seqlens[i]
             end_idx = cu_seqlens[i + 1]
-            seq_slice = tensor[..., start_idx:end_idx]
-            rolled_seq = torch.roll(seq_slice, shifts=shifts, dims=dims)
+            seq_slice = slice_seq_dim(tensor, start_idx, end_idx)
+            rolled_seq = torch.roll(seq_slice, shifts=shifts, dims=norm_dims)
             # Zero out the last position(s) that would cross sequence boundaries
-            rolled_seq[..., shifts:] = 0
-            rolled_tensor[..., start_idx:end_idx] = rolled_seq
+            zero_boundary(rolled_seq)
+            assign_seq_dim(rolled_tensor, start_idx, end_idx, rolled_seq)
         return rolled_tensor, rolled_tensor.sum()
 
     # CP enabled: each rank owns two chunks per sequence (front and mirrored tail).
@@ -252,23 +283,23 @@ def _roll_tensor_packed_seq(tensor, shifts, dims, packed_seq_params, cp_group=No
         if local_seq_len == 0:
             continue
             
-        tensor_slice = rolled_tensor[..., local_start_idx:local_end_idx].clone()
+        tensor_slice = slice_seq_dim(rolled_tensor, local_start_idx, local_end_idx).clone()
 
         # The following code is very similar as the code in roll_tensor function
-        local_chunks = tensor_slice.chunk(2, dim=dims)
-        rolled_chunks = [torch.roll(chunk, shifts=shifts, dims=dims) for chunk in local_chunks]
+        local_chunks = tensor_slice.chunk(2, dim=norm_dims)
+        rolled_chunks = [torch.roll(chunk, shifts=shifts, dims=norm_dims) for chunk in local_chunks]
 
         tensor_send_list = []
         tensor_recv_list = []
         for chunk in rolled_chunks:
             # Skip empty chunks that can occur when the sequence slice is very small
-            if chunk.size(dims) == 0:
+            if chunk.size(norm_dims) == 0:
                 empty_shape = list(chunk.shape)
-                empty_shape[dims] = 0
+                empty_shape[norm_dims] = 0
                 tensor_send_list.append(torch.empty(chunk.shape[:-1], dtype=chunk.dtype, device=chunk.device))
                 tensor_recv_list.append(torch.empty(chunk.shape[:-1], dtype=chunk.dtype, device=chunk.device))
                 continue
-            boundary = chunk.select(dims, shifts).contiguous().clone()
+            boundary = chunk.select(norm_dims, shifts).contiguous().clone()
             tensor_send_list.append(boundary)
             tensor_recv_list.append(torch.empty_like(boundary))
 
@@ -289,19 +320,132 @@ def _roll_tensor_packed_seq(tensor, shifts, dims, packed_seq_params, cp_group=No
             op.wait()
 
         index = [slice(None)] * rolled_chunks[0].dim()
-        index[dims] = shifts
+        index[norm_dims] = shifts
         for chunk, recv in zip(rolled_chunks, tensor_recv_list):
             # Skip empty chunks
-            if chunk.size(dims) == 0:
+            if chunk.size(norm_dims) == 0:
                 continue
             chunk[tuple(index)] = recv
 
-        seq_result = torch.cat(rolled_chunks, dim=dims)
+        seq_result = torch.cat(rolled_chunks, dim=norm_dims)
 
         # update the rolled tensor
-        rolled_tensor[..., local_start_idx:local_end_idx] = seq_result
+        assign_seq_dim(rolled_tensor, local_start_idx, local_end_idx, seq_result)
 
     return rolled_tensor, rolled_tensor.sum()
+
+
+# TODO: is this the right way to do this? how costly is introducing another all-gather + scatter?
+def roll_tensor_precomputed_embeddings(
+    tensor, shifts=-1, dims=0, sp_group=None, cp_group=None, packed_seq_params=None
+):
+    """Roll tensor for pre-computed embeddings that may be split by sequence parallelism.
+
+    For multimodal models where decoder_input is pre-computed embeddings already split
+    by sequence parallelism, this function correctly handles the SP boundaries when rolling.
+    Unlike roll_tensor which operates on input_ids (not SP-split), this function accounts
+    for SP boundaries by gathering the full sequence, rolling, and scattering back.
+
+    Args:
+        tensor (Tensor): Input tensor of shape [s/SP, b, h] (if SP enabled) or [s, b, h].
+                        Expected to be sequence-first format.
+        shifts (int): Number of positions to shift (typically -1 for MTP).
+        dims (int): Dimension to roll (typically 0 for sequence dimension in [s, b, h]).
+        sp_group: Sequence parallel process group (typically same as TP group).
+        cp_group: Context parallel process group.
+        packed_seq_params: Parameters for packed sequence processing.
+
+    Returns:
+        tuple: (rolled_tensor, sum_of_rolled_tensor)
+    """
+    # Check if SP is enabled
+    sp_enabled = sp_group is not None and sp_group.size() > 1
+
+    if not sp_enabled:
+        # No SP splitting, delegate to existing roll_tensor
+        return roll_tensor(tensor, shifts, dims, cp_group, packed_seq_params)
+
+    # SP is enabled with pre-computed embeddings
+    # Handle packed sequences separately
+    if packed_seq_params is not None:
+        return _roll_tensor_precomputed_embeddings_packed_seq(
+            tensor, shifts, dims, packed_seq_params, sp_group, cp_group
+        )
+
+    # Non-packed sequence case:
+    # Strategy: gather full sequence across SP ranks, roll, then scatter back
+    sp_size = sp_group.size()
+    sp_rank = torch.distributed.get_rank(group=sp_group)
+
+    # All-gather along sequence dimension (dims)
+    gathered_shape = list(tensor.shape)
+    gathered_shape[dims] = gathered_shape[dims] * sp_size
+    full_tensor = torch.empty(gathered_shape, dtype=tensor.dtype, device=tensor.device)
+
+    dist_all_gather_func(
+        full_tensor,
+        tensor.contiguous(),
+        group=sp_group,
+    )
+
+    # Roll the full tensor (with CP handling if needed)
+    rolled_full, sum_val = roll_tensor(full_tensor, shifts, dims, cp_group, packed_seq_params=None)
+
+    # Scatter back to SP ranks - each rank takes its portion
+    chunks = rolled_full.chunk(sp_size, dim=dims)
+    rolled = chunks[sp_rank].contiguous()
+
+    return rolled, sum_val
+
+
+def _roll_tensor_precomputed_embeddings_packed_seq(
+    tensor, shifts, dims, packed_seq_params, sp_group, cp_group
+):
+    """Roll tensor with packed sequence and SP support for pre-computed embeddings.
+
+    This handles the complex case where the tensor is both SP-split and contains
+    packed sequences with variable lengths.
+
+    For packed sequences, the cu_seqlens defines boundaries of each sequence within
+    the packed tensor. When SP is enabled, we gather the full sequence, apply the
+    packed sequence rolling logic, then scatter back.
+
+    Args:
+        tensor (Tensor): Input tensor of shape [s/SP, b, h] (if SP enabled).
+        shifts (int): Number of positions to shift (typically -1 for MTP).
+        dims (int): Dimension to roll (typically 0 for sequence dimension).
+        packed_seq_params: Parameters for packed sequence processing with cu_seqlens.
+        sp_group: Sequence parallel process group.
+        cp_group: Context parallel process group.
+
+    Returns:
+        tuple: (rolled_tensor, sum_of_rolled_tensor)
+    """
+    sp_size = sp_group.size()
+    sp_rank = torch.distributed.get_rank(group=sp_group)
+
+    # All-gather along sequence dimension to get the full sequence
+    gathered_shape = list(tensor.shape)
+    gathered_shape[dims] = gathered_shape[dims] * sp_size
+    full_tensor = torch.empty(gathered_shape, dtype=tensor.dtype, device=tensor.device)
+
+    dist_all_gather_func(
+        full_tensor,
+        tensor.contiguous(),
+        group=sp_group,
+    )
+
+    # Apply packed sequence rolling on the full tensor
+    # Note: cu_seqlens should be in global indices (not SP-local)
+    rolled_full, sum_val = _roll_tensor_packed_seq(
+        full_tensor, shifts, dims, packed_seq_params, cp_group
+    )
+
+    # Scatter back to SP ranks
+    chunks = rolled_full.chunk(sp_size, dim=dims)
+    rolled = chunks[sp_rank].contiguous()
+
+    return rolled, sum_val
 
 
 class MTPLossLoggingHelper:
@@ -896,18 +1040,22 @@ class MultiTokenPredictionBlock(MegatronModule):
         self._build_layers()
         assert len(self.layers) > 0, "MultiTokenPredictionBlock must have at least one layer."
 
-        # Initialize Context Parallelism (CP) support for MTP
-        # This enables MTP to work with CP > 1 by providing the CP process group
-        # to the roll_tensor function for proper boundary communication
+        # Initialize Context Parallelism (CP) and Sequence Parallelism (SP) support for MTP
+        # CP enables MTP to work with CP > 1 by providing the CP process group
+        # to the roll_tensor function for proper boundary communication.
+        # SP (via TP group) is needed for multimodal models where pre-computed embeddings
+        # are already split by sequence parallelism and need proper boundary handling.
         if model_comm_pgs is None:
             # Use default MPU process groups if not provided
-            model_comm_pgs = ModelCommProcessGroups.use_mpu_process_groups(required_pgs=['cp'])
+            model_comm_pgs = ModelCommProcessGroups.use_mpu_process_groups(required_pgs=['cp', 'tp'])
         else:
             # Ensure the provided process groups include CP
             assert hasattr(
                 model_comm_pgs, 'cp'
             ), "MultiTokenPredictionBlock model_comm_pgs must have cp process group"
         self.cp_group = model_comm_pgs.cp
+        # SP group is the same as TP group in Megatron-LM
+        self.sp_group = getattr(model_comm_pgs, 'tp', None) if self.sequence_parallel else None
 
     def _build_layers(self):
         def build_layer(layer_spec, layer_number):
@@ -990,9 +1138,15 @@ class MultiTokenPredictionBlock(MegatronModule):
             # Calc logits for the current Multi-Token Prediction (MTP) layers.
             if use_precomputed_embeddings:
                 # Multimodal mode: roll pre-computed embeddings directly
-                # decoder_input is [s, b, h], so roll on dim 0 (sequence dimension)
-                decoder_input, _ = roll_tensor(
-                    decoder_input, shifts=-1, dims=0, cp_group=self.cp_group, packed_seq_params=packed_seq_params,
+                # decoder_input is [s, b, h] (or [s/SP, b, h] if SP enabled), roll on dim 0
+                # Use roll_tensor_precomputed_embeddings to handle SP boundaries correctly
+                decoder_input, _ = roll_tensor_precomputed_embeddings(
+                    decoder_input,
+                    shifts=-1,
+                    dims=0,
+                    sp_group=self.sp_group,
+                    cp_group=self.cp_group,
+                    packed_seq_params=packed_seq_params,
                 )
                 layer_decoder_input = decoder_input
             else:
@@ -1080,7 +1234,7 @@ class MultiTokenPredictionBlock(MegatronModule):
                 # For sequence parallel, we need to scatter the predictions and labels/masks
                 # to match the sequence dimension split
                 # TODO: maybe remove it.
-                sp_group = parallel_state.get_context_parallel_group()
+                sp_group = parallel_state.get_tensor_model_parallel_group()
                 if sp_group is not None and sp_group.size() > 1:
                     # Scatter predictions along sequence dimension
                     preds = scatter_to_sequence_parallel_region(preds)  # [s/SP, b]
@@ -1091,7 +1245,7 @@ class MultiTokenPredictionBlock(MegatronModule):
             # Now all tensors have matching shapes for comparison
             correct = ((preds == labels_match) & mask_match.bool()).sum().float()
             total = mask_match.sum().float()
-            
+
             if self.training:
                 MTPLossLoggingHelper.save_metrics_to_tracker(
                     torch.sum(mtp_loss) / num_tokens,
