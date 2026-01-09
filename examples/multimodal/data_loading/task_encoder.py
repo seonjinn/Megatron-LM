@@ -386,6 +386,7 @@ class MultiModalTaskEncoder(
         allow_large_videos = getattr(self.args, "allow_large_videos", False)
         data_augment = sample.__subflavors__.get("data_augment", False) and not self.is_val
         tiling_augment_prob = sample.__subflavors__.get("tiling_augment_prob", self.tiling_augment_prob)
+        train_only_on_last_assistant_turn = sample.__subflavors__.get("train_only_on_last_assistant_turn", False)
         aggregated_num_frames = []
 
         # We tentatively extract the first message if it's a system prompt and use this rather than
@@ -500,7 +501,7 @@ class MultiModalTaskEncoder(
             legacy_conversation.append({"role": message.sender, "content": content})
 
         input_ids, target = self.tokenizer.tokenize_conversation(
-            legacy_conversation, True, False
+            legacy_conversation, True, False, train_only_on_last_assistant_turn=train_only_on_last_assistant_turn
         )
         input_ids = torch.as_tensor(input_ids)
         target = torch.as_tensor(target)

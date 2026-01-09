@@ -382,7 +382,7 @@ class MultimodalTokenizer(MegatronTokenizer):
         return self._tokenizer.encode(text)
 
     def tokenize_conversation(
-        self, conversation: List[Dict], return_target: bool, add_generation_prompt: bool,
+        self, conversation: List[Dict], return_target: bool, add_generation_prompt: bool, train_only_on_last_assistant_turn: bool = False,
         **kwargs
     ):
         """Convert a conversation to tokens.
@@ -396,7 +396,11 @@ class MultimodalTokenizer(MegatronTokenizer):
                 ]
             return_target (bool): Return target tokens with system and assistant masked.
             add_generation_prompt (bool): Add assistant prefix to the end.
+            train_only_on_last_assistant_turn (bool): Train only on the last assistant turn.
         """
+        if train_only_on_last_assistant_turn:
+            assert self._prompt_format in ("nemotron6-moe"), "train_only_on_last_assistant_turn is only supported for nemotron6-moe"
+
         # Skip system message if the tokenizer doesn't have a system role.
         if not self._prompt_config.has_system_role and conversation[0]["role"] == "system":
             conversation = conversation[1:]
@@ -485,6 +489,12 @@ class MultimodalTokenizer(MegatronTokenizer):
             end_idx = np.where(tokens == 11)[0]
 
             # Unmask the assistant turn.
+            # Only unmask the last assistant turn.
+            if train_only_on_last_assistant_turn:   
+                assistant_idx = assistant_idx[-1:]
+            else:
+                assistant_idx = assistant_idx
+
             for i in assistant_idx:
                 # Check for possible mismatches.
                 is_assistant = (tokens[i-1:i+2] == np.array([10, 1503, 19464])).all()
@@ -502,6 +512,17 @@ class MultimodalTokenizer(MegatronTokenizer):
                 assert tokens[ub+1] == 1010, "expected newline ub"
 
                 target[lb+3:ub+1] = tokens[lb+3:ub+1]
+            
+            import os
+            if os.environ.get("DEBUG") == "1":
+                print(f"train_only_on_last_assistant_turn: {train_only_on_last_assistant_turn}")
+                print("#"*50)
+                print(f"input: {self.detokenize(tokens)}")
+                print("#"*50)
+                target_to_print = target.copy()
+                target_to_print[target_to_print == IGNORE_INDEX] = 0
+                print(f"target: {self.detokenize(target_to_print)}")
+                print("#"*50)
 
             return tokens, target
 
