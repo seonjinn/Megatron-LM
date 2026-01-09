@@ -577,6 +577,7 @@ def update_inference_params(config_dict, inference_params):
 
     # Not used in inference.
     updated_config.pop("tensorboard-dir", None)
+    updated_config.pop("loaded_iteration", None)
 
     return updated_config
 
