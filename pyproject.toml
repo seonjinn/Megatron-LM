@@ -19,7 +19,7 @@ dynamic = ["version", "readme"]
 description = "Megatron Core - a library for efficient and scalable training of transformer based models"
 requires-python = ">=3.10"
 license = { text = "Apache 2.0" }
-dependencies = ["torch", "numpy<2.0.0"]
+dependencies = ["torch", "numpy<2.0.0", "packaging>=24.2"]
 authors = [{ name = "NVIDIA", email = "nemo-toolkit@nvidia.com" }]
 maintainers = [{ name = "NVIDIA", email = "nemo-toolkit@nvidia.com" }]
 keywords = [
@@ -65,15 +65,26 @@ Homepage = "https://github.com/NVIDIA/Megatron-LM/megatron/core"
 mlm = ["flask-restful", "sentencepiece", "tiktoken", "wandb"]
 
 dev = [
+    "nvidia-modelopt[torch]>=0.33.0a0,<0.34.0; sys_platform != 'darwin'",
+    "transformer-engine[pytorch]>=2.9.0a0,<2.10.0",
+    "nvidia-resiliency-ext>=0.4.0a0,<0.5.0",
     "tqdm",
-    "einops",
-    "tensorstore!=0.1.46,!=0.1.72",
-    "nvtx",
-    "transformers",
-    "multi-storage-client",
+    "einops~=0.8",
+    "tensorstore~=0.1,!=0.1.46,!=0.1.72",
+    "nvtx~=0.2",
+    "multi-storage-client~=0.27",
+    "opentelemetry-api~=1.33.1",
     "setuptools<80.0.0",
-    "nvidia-modelopt[torch]~=0.31.0; sys_platform != 'darwin'",
-    "megatron-energon[av_decode]<7",
+    "mamba-ssm~=2.2",
+    "causal-conv1d~=1.5",
+    "nv-grouped-gemm~=1.1",
+    "megatron-energon[av_decode]~=6.0",
+    "av<16.0.0",
+    "flashinfer-python",
+    "wget",
+    "onnxscript",
+    "flash-linear-attention~=0.3.2",
+    "emerging_optimizers",
 ]
 
 lts = [
@@ -126,6 +137,9 @@ override-dependencies = [
     "torchvision; sys_platform == 'never'",
     "triton; sys_platform == 'never'",
 ]
+
+[tool.uv.sources]
+emerging_optimizers = { git = "https://github.com/NVIDIA-NeMo/Emerging-Optimizers.git", rev = "v0.1.0" }
 
 [tool.isort]
 profile = "black"                                                          # black-compatible
