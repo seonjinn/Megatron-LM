@@ -7,7 +7,6 @@
 
 from contextlib import nullcontext
 from dataclasses import dataclass
-from functools import partial
 from typing import Optional, Union
 
 import torch
@@ -163,15 +162,6 @@ class MambaStack(MegatronModule):
                 config=self.config,
                 hidden_size=self.config.hidden_size,
                 eps=self.config.layernorm_epsilon,
-            )
-
-        if self.config.perform_initialization:
-            self.apply(
-                partial(
-                    _init_weights,
-                    n_layer=self.config.num_layers,
-                    initializer_range=self.config.init_method_std,
-                )
             )
 
     def _select_layers_for_pipeline_parallel(self, layer_type_list):
