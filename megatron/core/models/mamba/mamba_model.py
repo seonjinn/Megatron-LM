@@ -351,7 +351,10 @@ class MambaModel(LanguageModule):
             packed_seq_params=packed_seq_params,
         )
 
-        if self.mtp_process:
+        # TODO: Skipping MTP during inference as a temporary fix. MTP is a training-only
+        # auxiliary objective and requires labels for loss computation. This may not be
+        # the correct long-term solution depending on if we do speculative decoding etc.
+        if self.mtp_process and not in_inference_mode:
             extra_block_kwargs = None
             import transformer_engine as te
             if self.config.keep_mtp_spec_in_bf16:
