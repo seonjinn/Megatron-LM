@@ -93,11 +93,12 @@ def build_tokenizer(args, **kwargs):
             args.special_tokens,
             args.image_tag_type,
             args.force_system_message,
+            keep_history_thinking=getattr(args, "tokenizer_keep_history_thinking", False),
         )
     elif args.tokenizer_type == "SFTTokenizer":
         tokenizer = SFTTokenizer(
             args.tokenizer_model,
-            args.sft_tokenizer_prompt_format, 
+            args.sft_tokenizer_prompt_format,
         )
     elif args.tokenizer_type == 'NullMultimodalTokenizer':
         assert args.vocab_size is not None

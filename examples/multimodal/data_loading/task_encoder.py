@@ -275,10 +275,10 @@ class MultiModalTaskEncoder(
             self.sound_token_id = self.tokenizer.convert_tokens_to_ids(SOUND_TOKEN)
             if 'parakeet' in self.args.sound_model_type.lower():
                 self.transform_audio = AudioTransformParakeetStrategy(
-                    sound_model_type=self.args.sound_model_type, 
-                    target_freq=self.args.sound_target_rate, 
-                    embedding_size=self.args.sound_embedding_size, 
-                    clip_duration=self.args.sound_clip_duration, 
+                    sound_model_type=self.args.sound_model_type,
+                    target_freq=self.args.sound_target_rate,
+                    embedding_size=self.args.sound_embedding_size,
+                    clip_duration=self.args.sound_clip_duration,
                     min_duration=self.args.sound_min_duration,
                     pad_to_clip_duration=self.args.sound_pad_to_clip_duration
                 )
@@ -465,7 +465,7 @@ class MultiModalTaskEncoder(
 
                     content += "<so_start>" + SOUND_TOKEN * audio_params[0].num_embeddings + "<so_end>"
                     audio_media_params.append(audio_params[0])
-            
+
             if self.args.only_keep_samples_with_img and len(image_media) == 0:
                 raise ValueError(f"Sample has no image: {sample.__key__}")
 
@@ -573,7 +573,7 @@ class MultiModalTaskEncoder(
             # Debug: Save images if DEBUG environment variable is set to 1
             if os.environ.get("DEBUG_DATALOADER", "0") == "1":
                 self._debug_save_image(media, media_idx, sample.__key__, data_augment)
-            
+
             image_tiles.extend(self.image_tiling_strategy.apply_params(media, data_augment=data_augment))
 
         sound_clips = []
@@ -613,63 +613,63 @@ class MultiModalTaskEncoder(
         import matplotlib.pyplot as plt
         import matplotlib.patches as patches
         from datetime import datetime
-        
+
         # Create debug directory if it doesn't exist
         debug_dir = os.path.join(os.getcwd(), "debug_images")
         os.makedirs(debug_dir, exist_ok=True)
-        
+
         # Get original image and size
         original_image = media.media.value
-        
+
         if isinstance(media.media, ImageMedia):
             orig_width, orig_height = media.media.width, media.media.height
         elif isinstance(media.media, VideoFrameMedia):
             orig_width, orig_height = media.media.video_width, media.media.video_height
         else:
             return  # Skip if not a supported media type
-        
+
         # Apply the transformation to get the processed tiles
         transformed_tiles = self.image_tiling_strategy.apply_params(media, data_augment=data_augment)
-        
+
         # Get the normalization stats for denormalization
         from .image_processing import pixel_statistics
         pixel_mean, pixel_std = pixel_statistics.get(
-            self.args.vision_model_type, 
+            self.args.vision_model_type,
             ([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
         )
-        
+
         # Convert lists to tensors for denormalization
         mean = torch.tensor(pixel_mean).view(3, 1, 1)
         std = torch.tensor(pixel_std).view(3, 1, 1)
-        
+
         # Create a figure with subplots
         num_tiles = len(transformed_tiles)
         fig, axes = plt.subplots(1, num_tiles + 1, figsize=(5 * (num_tiles + 1), 5))
         if num_tiles == 0:
             axes = [axes]
-        
+
         # Plot original image
         ax = axes[0] if num_tiles > 0 else axes
         ax.imshow(original_image)
         ax.set_title(f"Original Image\nSize: {orig_width}x{orig_height}", fontsize=10, fontweight='bold')
         ax.axis('off')
-        
+
         # Plot transformed tiles
         for tile_idx, tile_tensor in enumerate(transformed_tiles):
             ax = axes[tile_idx + 1]
-            
+
             # Denormalize the tensor: img = img * std + mean
             denormalized = tile_tensor * std + mean
-            
+
             # Clamp to [0, 1] range
             denormalized = torch.clamp(denormalized, 0, 1)
-            
+
             # Convert to numpy and transpose from CxHxW to HxWxC
             tile_image = denormalized.permute(1, 2, 0).cpu().numpy()
-            
+
             # Get the new size
             new_height, new_width = tile_image.shape[:2]
-            
+
             ax.imshow(tile_image)
             ax.set_title(
                 f"Tile {tile_idx + 1}/{num_tiles}\n"
@@ -679,7 +679,7 @@ class MultiModalTaskEncoder(
                 fontweight='bold'
             )
             ax.axis('off')
-        
+
         # Create a unique filename with timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         safe_key = str(sample_key).replace("/", "_").replace("\\", "_")[:50]
@@ -687,7 +687,7 @@ class MultiModalTaskEncoder(
         filepath = os.path.join(debug_dir, filename)
 
         print(f"[DEBUG] Saved debug image to: {filepath}")
-        
+
         plt.tight_layout()
         plt.savefig(filepath, dpi=150, bbox_inches='tight')
         plt.close(fig)

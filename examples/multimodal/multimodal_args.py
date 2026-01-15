@@ -301,5 +301,9 @@ def add_multimodal_extra_args(parser):
         "--no-load-balancing-sequence-scaling", action="store_true", default=False,
         help="Disable scaling the load balancing gradient by the number of tokens."
     )
+    group.add_argument(
+        "--tokenizer-keep-history-thinking", action="store_true", default=False,
+        help="Keep the history thinking in the tokenizer."
+    )
 
     return parser

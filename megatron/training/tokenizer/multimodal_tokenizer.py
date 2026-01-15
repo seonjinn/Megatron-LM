@@ -165,6 +165,7 @@ class MultimodalTokenizer(MegatronTokenizer):
         special_tokens: List[str],
         image_tag_type: str,
         force_system_message: bool = False,
+        keep_history_thinking: bool = False,
     ):
         """Tokenizer with a support for non-text inputs.
 
@@ -336,6 +337,7 @@ class MultimodalTokenizer(MegatronTokenizer):
 
         self._prompt_format = prompt_format
         self._image_tag = IMAGE_TAGS[image_tag_type]
+        self._keep_history_thinking = keep_history_thinking
 
     def offsets(self, ids: list[int], text: str) -> list[int]:
         """
@@ -420,6 +422,9 @@ class MultimodalTokenizer(MegatronTokenizer):
         # Apply possible image tag.
         conversation = self._apply_image_tag(conversation)
 
+        if self._keep_history_thinking:
+            kwargs["truncate_history_thinking"] = False
+
         tokens = self._tokenizer.apply_chat_template(
             conversation,
             tokenize=True,
@@ -472,7 +477,7 @@ class MultimodalTokenizer(MegatronTokenizer):
                     np.where(tokens == 11)[0],
                     np.where(tokens == 12)[0]
                 ]))
-                
+
                 # For each system token, mask until the next special token
                 for sys_pos in idx_system[1:]:  # Skip the first system message (already masked above)
                     # Find the next special token position
@@ -490,7 +495,7 @@ class MultimodalTokenizer(MegatronTokenizer):
 
             # Unmask the assistant turn.
             # Only unmask the last assistant turn.
-            if train_only_on_last_assistant_turn:   
+            if train_only_on_last_assistant_turn:
                 assistant_idx = assistant_idx[-1:]
             else:
                 assistant_idx = assistant_idx
@@ -512,7 +517,7 @@ class MultimodalTokenizer(MegatronTokenizer):
                 assert tokens[ub+1] == 1010, "expected newline ub"
 
                 target[lb+3:ub+1] = tokens[lb+3:ub+1]
-            
+
             import os
             if os.environ.get("DEBUG") == "1":
                 print(f"train_only_on_last_assistant_turn: {train_only_on_last_assistant_turn}")
