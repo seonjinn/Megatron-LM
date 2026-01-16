@@ -9,7 +9,7 @@ from pathlib import Path
 from collections import defaultdict
 
 from megatron.energon.av import AVDecoder
-from megatron.energon import CachePool, FileStore, basic_sample_keys, cooker, stateless
+from megatron.energon import CachePool, FileStore, basic_sample_keys, cooker, stateless, SourceInfo
 
 from .misc import retrieve_media_source
 
@@ -276,10 +276,13 @@ def conversation_post_processing(
                                         warn_about_slow_media_loading[current_media_source.get_path()] = False
                             if frag.metadata is None:
                                 val = cache.get(current_media_source, m_path)
+                            sample['__sources__'] = (*sample['__sources__'], SourceInfo(dataset_path=current_media_source.get_path(), index=m_path, shard_name=None, file_names=(m_path,)))
                             frag.value = cache.get_lazy(current_media_source, m_path)
                         else:
                             # load and cache the media file on the fly
                             # warning: slow
+                            if isinstance(val, str):
+                                sample['__sources__'] = (*sample['__sources__'], SourceInfo(dataset_path=Path(val).parent, index=Path(val).name, shard_name=None, file_names=(Path(val).name,)))
                             val_opened = conversation_open_medias(
                                 ConversationSample.__MEDIA_TYPES_REVERSE__[type(frag)],
                                 val,
