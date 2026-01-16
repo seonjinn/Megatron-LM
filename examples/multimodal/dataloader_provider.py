@@ -1,5 +1,6 @@
 # Copyright (c) 2024, NVIDIA CORPORATION.  All rights reserved.
 import os
+from typing import Any
 
 import torch
 from dataset_helpers import TaskEncoder
@@ -21,6 +22,7 @@ from megatron.energon import (
     get_savable_loader,
     get_train_dataset,
     get_val_datasets,
+    SourceInfo,
 )
 from megatron.energon.errors import log_exception
 from megatron.training import get_args
@@ -138,8 +140,8 @@ def train_valid_test_dataloaders_provider(train_val_test_num_samples, task_encod
         worker_debug_path=worker_debug_path,
         worker_log_level=worker_log_level,
         seed_offset=args.dataloader_seed,
-        global_error_handler=log_exception,
-        restore_error_handler=log_exception,
+        global_error_handler=compact_sample_error_handler,
+        restore_error_handler=compact_sample_error_handler,
     )
     train_ds, valid_ds1, test_ds = datasets_provider(task_encoder, worker_config)
 
@@ -220,3 +222,46 @@ def cyclic_iter(iter):
     while True:
         for x in iter:
             yield x
+
+
+FIRST_TIME_EXCEPTION_INFO = False
+
+
+def compact_sample_error_handler(
+    exception: Exception,
+    sample: Any | list[Any],
+    sources: list[SourceInfo] | None = None,
+) -> None:
+    """Compact sample error handler."""
+    global FIRST_TIME_EXCEPTION_INFO
+
+    if sources is not None:
+        import urllib.parse
+        import json
+
+        # Create an energon viewer url:
+        # vscode://nvidia.energon-sample-viewer/open?data=<URL-encoded-JSON>
+        data_obj = [
+            {
+                "dataset_path": str(source.dataset_path),
+                "index": source.index,
+                "shard_name": source.shard_name,
+                "file_names": list(source.file_names),
+            }
+            for source in sources
+        ]
+        url = f"vscode://nvidia.energon-sample-viewer/open?data={urllib.parse.quote(json.dumps(data_obj))}"
+    if isinstance(exception, AssertionError):
+        if sources is None:
+            print(f"Assertion error in sample {str(sample)[:100]}: {exception}")
+        else:
+            print(f"Assertion error: {exception}")
+            print(f"(Ctrl+)Click to view sample in energon viewer: {url}")
+            if FIRST_TIME_EXCEPTION_INFO:
+                print("If not installed yet, install energon sample viewer from https://gitlab-master.nvidia.com/lvoegtle/vscode-energon-sample-viewer")
+                FIRST_TIME_EXCEPTION_INFO = False
+    else:
+        import traceback
+
+        print(f"Ignoring error processing sample:")
+        traceback.print_exc()
