@@ -1023,40 +1023,6 @@ class LLaVAModel(MegatronModule):
                       f"Zero embeddings can cause MoE router instability and gradient explosion with MTP. "
                       f"Consider using examples/multimodal/tools/fix_zero_embeddings.py to initialize them.")
 
-                # Apply fix only when MTP is enabled
-                # WORKAROUND: Replace zero-embedding positions with valid embeddings AND mask their loss.
-                #
-                # Why this is needed:
-                # 1. Certain special tokens might have zero embeddings in the checkpoint (never trained) if they were never initialized:
-                # WARNING: this means that these special tokens with zero-embeddings will NOT learn any embeddings if MTP is enabled.
-                # To fix this, we need to initialize the embeddings for these special tokens in the checkpoint.
-                # 2. These zeros cause MoE router instability (uniform softmax → gradient explosion)
-                # 3. The MoE auxiliary loss doesn't use loss_mask, so zeros still cause gradient issues
-                #
-                # This workaround:
-                # - Replaces zero embeddings with the mean of non-zero embeddings (to prevent MoE issues)
-                # - Sets loss_mask=0 for these positions (these are structural tokens, not content)
-                if self._mtp_enabled:
-                    # Compute fill embedding: mean of non-zero embeddings
-                    non_zero_mask = ~zero_norm_mask  # [b, s]
-                    if non_zero_mask.any():
-                        non_zero_embeddings = final_embedding[non_zero_mask]  # [num_nonzero, h]
-                        fill_embedding = non_zero_embeddings.mean(dim=0)  # [h]
-                    else:
-                        # Fallback: use small random values (shouldn't happen)
-                        fill_embedding = torch.randn(final_embedding.shape[-1],
-                                                      device=final_embedding.device,
-                                                      dtype=final_embedding.dtype) * 0.01
-
-                    # Replace zeros with fill embedding
-                    final_embedding = final_embedding.clone()  # Avoid in-place modification
-                    final_embedding[zero_norm_mask] = fill_embedding
-
-                    # Also mask loss for these positions
-                    if final_loss_mask is not None:
-                        final_loss_mask = final_loss_mask.clone()
-                        final_loss_mask[zero_norm_mask] = 0
-
         if final_embedding is not None:
             # Truncate if exceeding the language model's max sequence length.
             if inference_context is not None and final_embedding.shape[1] > self._language_max_sequence_length:
