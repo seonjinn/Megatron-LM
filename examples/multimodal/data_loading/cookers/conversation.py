@@ -2,7 +2,7 @@
 import dataclasses
 from collections import defaultdict
 
-from megatron.energon import CachePool, FileStore, basic_sample_keys, cooker, stateless
+from megatron.energon import CachePool, FileStore, SourceInfo, basic_sample_keys, cooker, stateless
 
 from ..conversation_sample import (
     AudioMedia,
