@@ -1148,6 +1148,26 @@ class MultiTokenPredictionBlock(MegatronModule):
                     cp_group=self.cp_group,
                     packed_seq_params=packed_seq_params,
                 )
+
+                # Handle zeros introduced by rolling to prevent MoE router instability.
+                # Rolling fills boundary positions with zeros. Unlike standard mode where
+                # rolling input_ids and then embedding produces learned embeddings for token 0,
+                # multimodal mode directly rolls pre-computed embeddings, leaving actual zero
+                # vectors at boundary positions. These zeros can cause MoE router instability
+                # (uniform softmax distribution -> gradient explosion through aux loss).
+                # Fix: Replace zero embeddings with mean of non-zero embeddings.
+                row_norms = decoder_input.norm(dim=-1)  # [s, b] or [s/SP, b]
+                zero_norm_mask = row_norms < 1e-6
+                if zero_norm_mask.any():
+                    non_zero_mask = ~zero_norm_mask
+                    if non_zero_mask.any():
+                        # Compute fill embedding as mean of non-zero embeddings
+                        non_zero_embeddings = decoder_input[non_zero_mask]
+                        fill_embedding = non_zero_embeddings.mean(dim=0)
+                        # Clone to avoid in-place modification issues with autograd
+                        decoder_input = decoder_input.clone()
+                        decoder_input[zero_norm_mask] = fill_embedding
+
                 layer_decoder_input = decoder_input
             else:
                 # Standard mode: roll input_ids and embed
