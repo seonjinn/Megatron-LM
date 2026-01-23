@@ -733,8 +733,7 @@ class MambaMixer(MegatronModule):
         conv_state = torch.zeros(
             batch_size, self.conv1d.weight.shape[0], self.d_conv, device=device, dtype=conv_dtype
         )
-        ssm_dtype = self.in_proj.weight.dtype if dtype is None else dtype
-        # ssm_dtype = torch.float32
+        ssm_dtype = torch.float32 if dtype is None else dtype
         ssm_state = torch.zeros(
             batch_size,
             self.nheads_local_tp,
@@ -774,7 +773,7 @@ class MambaMixer(MegatronModule):
                 self.headdim,
                 self.d_state,
                 device=self.in_proj.weight.device,
-                dtype=self.in_proj.weight.dtype,
+                dtype=torch.float32,
             )
             inference_context.key_value_memory_dict[self.layer_number] = (conv_state, ssm_state)
             self.cached_batch_size = batch_size
