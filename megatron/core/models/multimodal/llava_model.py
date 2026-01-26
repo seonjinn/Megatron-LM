@@ -648,14 +648,24 @@ class LLaVAModel(MegatronModule):
             # plus text sequence length.
             if self._dynamic_resolution:
                 # Currently makes assumption that mbz is length 1
-                assert (
-                    inference_context is not None or num_images_per_sample.shape[0] == 1
-                ), "Dynamic resolution only works for mbz=1"
+                # assert (
+                #     inference_context is not None or num_images_per_sample.shape[0] == 1
+                # ), "Dynamic resolution only works for mbz=1"
                 packed_length_per_batch = torch.sum(img_seq_len, dim=-1)
 
                 # In inference, we assume mbz > 1 implies that we're using padding (e.g. for fp8)
                 # so we spoof the number of images per sample to be the same as the max,
                 # which we assume is the "real" batch.
+                # For mbz > 1 with padding (e.g., chosen/rejected pairs in preference learning,
+                # or FP8 calibration), we require all samples to have the same number of images.
+                # This allows batching while maintaining consistent sequence structure.
+                if num_images_per_sample.shape[0] > 1:
+                    # Check that all samples have the same number of images (required for batching)
+                    assert torch.all(num_images_per_sample == num_images_per_sample[0]), (
+                        f"Dynamic resolution with mbz > 1 requires all samples to have the same "
+                        f"number of images, got: {num_images_per_sample.tolist()}"
+                    )
+
                 if inference_context is not None and num_images_per_sample.shape[0] > 1:
                     num_images_per_sample = num_images_per_sample[0]
                 seq_lens = packed_length_per_batch - num_images_per_sample + text_seq_len
