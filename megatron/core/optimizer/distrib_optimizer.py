@@ -1553,6 +1553,9 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
                             if key == 'padding':
                                 tensors[key] = LocalNonpersistentObject(tensors[key])
                                 continue
+                            elif key == 'step':
+                                # Note that step is a 0-dim tensor, unlike other states.
+                                continue
                             assert tensors[key].shape == (gbuf_local_end - gbuf_local_start,), (
                                 tensors[key].shape,
                                 gbuf_local_start,
