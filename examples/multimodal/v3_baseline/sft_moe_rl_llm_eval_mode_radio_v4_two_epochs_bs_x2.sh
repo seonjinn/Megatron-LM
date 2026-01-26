@@ -10,7 +10,7 @@
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=sft_moe_rl_llm_eval_mode_radio_v4_two_epochs_bs_x2_1212
+#SBATCH --job-name=sft_moe_rl_llm_eval_mode_radio_v4_two_epochs_bs_x2_1363.qwensub.allava
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
@@ -49,7 +49,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="sft_moe_rl_llm_eval_mode_radio_v4_two_epochs_bs_x2_1212"
+    MODEL_NAME="sft_moe_rl_llm_eval_mode_radio_v4_two_epochs_bs_x2_1363.qwensub.allava"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -89,14 +89,14 @@ fi
 
 TP=2
 EP=32
-CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/pretrain_moe_rl_llm_vision_eval_mode_radio_v4_1212/checkpoints"
+
+CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/pretrain_vision_adaptor_packing_lower_bs_0114/checkpoints/"
 
 # New tokenizer 10/20.
 TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--Nemotron-Nano-3-30B-A3.5B-dev-1016/snapshots/bb271274159f07461e919379311e32802e5ec36b/"
 TOKENIZER_PROMPT_FORMAT="nemotron6-moe"
 
-# DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/eagle_sft_v13.52.no.text.yaml"
-DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/eagle_sft_v13.52.no.text.2x.yaml"
+DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/kchumachenko/eagle_recipe/eagle_sft_v13.63.qwensub.allava.yaml"
 
 if [[ $DEBUG -eq 1 ]]; then
     MBZ=1
@@ -198,7 +198,7 @@ OPTIONS=" \
     --moe-grouped-gemm \
     --num-experts 128 \
     --moe-router-topk 6 \
-    --moe-aux-loss-coeff 1e-6 \
+    --moe-aux-loss-coeff 1e-8 \
     --moe-router-topk-scaling-factor 2.5 \
     --moe-router-enable-expert-bias \
     --moe-router-dtype fp32 \
