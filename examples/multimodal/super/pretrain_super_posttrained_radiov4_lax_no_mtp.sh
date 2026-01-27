@@ -10,7 +10,7 @@
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=pretrain_super_posttrained_radiov4_no_mtp_0114
+#SBATCH --job-name=pretrain_super_posttrained_radiov4_no_mtp_0127
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/scratch/fsw/portfolios/llmservice/users/trintamaki/msc_config/msc_config.yaml"
@@ -38,7 +38,7 @@ USE_DYNAMIC_RES=1
 USE_IMAGE_BREAK=0   # Only used if USE_DYNAMIC_RES is 1.
 USE_CONV_MERGE=0    # Only used if USE_DYNAMIC_RES is 1.
 USE_FP8=0
-USE_VISION_ENCODER_EVAL_MODE=0
+USE_CPE_EVAL_MODE=1
 USE_MTP=0
 
 
@@ -49,7 +49,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="pretrain_super_posttrained_radiov4_no_mtp_0114"
+    MODEL_NAME="pretrain_super_posttrained_radiov4_no_mtp_0127"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -147,7 +147,7 @@ if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
     EXTRA_ARGS+=" --dynamic-resolution --dynamic-resolution-min-patches 1024 --dynamic-resolution-max-patches 13312 --apply-data-augment"
 fi
 
-if [[ $USE_VISION_ENCODER_EVAL_MODE -eq 1 ]]; then
+if [[ $USE_CPE_EVAL_MODE -eq 1 ]]; then
     EXTRA_ARGS+=" --radio-force-eval-mode"  # Entire vision encoder in eval mode (eval CPE, no dropout)
 fi
 
