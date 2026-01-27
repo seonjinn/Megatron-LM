@@ -61,8 +61,8 @@ from .knapsacks import (
 )
 
 
-AUDIO_MAX_DURATION_SECONDS = 900
 AUDIO_MIN_DURATION_SECONDS = 0.1
+AUDIO_MAX_DURATION_SECONDS = 1200
 
 
 def _clean_think(match: re.Match) -> str:
