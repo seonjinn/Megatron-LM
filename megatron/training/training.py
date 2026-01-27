@@ -2465,7 +2465,7 @@ def train(
         batch_size = (
             mpu.get_data_parallel_world_size() * args.micro_batch_size * get_num_microbatches()
         )
-        args.consumed_train_samples += batch_size
+        args.consumed_train_samples += samples_seen_in_iteration
 
         if skipped_iter:
             num_skipped_samples_in_batch = batch_size
