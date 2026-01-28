@@ -1445,11 +1445,12 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
         unwrapped_model.update_momentum(args.curr_iteration)
 
     # Update learning rate.
-    # Updates lr even when iteration is skipped.
-    increment = samples_seen_in_iteration
-    opt_param_scheduler.step(increment=increment)
-
-    skipped_iter = 0 if update_successful else 1
+    if update_successful:
+        increment = samples_seen_in_iteration
+        opt_param_scheduler.step(increment=increment)
+        skipped_iter = 0
+    else:
+        skipped_iter = 1
 
     # Empty unused memory.
     if args.empty_unused_memory_level >= 2:
