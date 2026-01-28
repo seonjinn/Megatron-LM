@@ -10,7 +10,7 @@
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=pretrain_moe_rl_llm_vision_eval_mode_radio_v4_1212
+#SBATCH --job-name=pretrain_vision_adaptor_packing_lower_bs_0114
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
@@ -22,6 +22,7 @@ export NVTE_BWD_LAYERNORM_SM_MARGIN=16
 export NCCL_P2P_NET_CHUNKSIZE=2097152
 export NCCL_DEBUG=WARN
 export TORCHINDUCTOR_WORKER_START=fork
+#export TORCH_NCCL_AVOID_RECORD_STREAMS=0
 export TRITON_CACHE_DIR=${TRITON_CACHE_DIR:-"/tmp/triton_cache_\${SLURM_NODEID}"}
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
@@ -44,11 +45,11 @@ USE_VISION_ENCODER_EVAL_MODE=1
 # Remember to update model and job name if running in batch mode!!
 if [[ $BATCH -eq 0 ]]; then
     DATETIME=`date +'%y-%m-%d-%H-%M-%S'`
-    MODEL_NAME="interactive_pretrain_moe_${DATETIME}"
+    MODEL_NAME="interactive_pretrain_vision_adaptor_packing_lower_bs_${DATETIME}"
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="pretrain_moe_rl_llm_vision_eval_mode_radio_v4_1212"
+    MODEL_NAME="pretrain_vision_adaptor_packing_lower_bs_0114"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -76,7 +77,7 @@ CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/outp
 TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--Nemotron-Nano-3-30B-A3.5B-dev-1016/snapshots/bb271274159f07461e919379311e32802e5ec36b/"
 TOKENIZER_PROMPT_FORMAT="nemotron6-moe"
 
-DATA_TRAIN="${SOURCE}/examples/multimodal/v2/data_config/pretrain_dataset_commercial_sft_extended.yaml"
+DATA_TRAIN="${SOURCE}/examples/multimodal/v3_baseline/pretrain_vision_adaptor_recipe.yaml"
 
 if [[ $DEBUG -eq 1 ]]; then
     MBZ=1
@@ -91,8 +92,8 @@ if [[ $DEBUG -eq 1 ]]; then
     NUM_GPU=8
 else
     MBZ=1
-    BZ=512
-    NW=8
+    BZ=128
+    NW=4
     AD=0.0
     HD=0.0
     LI=5
@@ -144,6 +145,9 @@ if [[ $USE_VISION_ENCODER_EVAL_MODE -eq 1 ]]; then
     EXTRA_ARGS+=" --radio-force-eval-mode"  # Entire vision encoder in eval mode (eval CPE, no dropout)
 fi
 
+
+EXTRA_ARGS+=" --packing-buffer-size 4000 --packing-seq-length ${DECODER_SEQ_LEN} --packing-knapsack-algorithm balanced_greedy_knapsack "
+
 OPTIONS=" \
     --use-checkpoint-args \
     --transformer-impl transformer_engine \
@@ -173,13 +177,12 @@ OPTIONS=" \
     --moe-grouped-gemm \
     --num-experts 128 \
     --moe-router-topk 6 \
-    --moe-aux-loss-coeff 1e-6 \
+    --moe-aux-loss-coeff 1e-9 \
     --moe-router-topk-scaling-factor 2.5 \
     --moe-router-enable-expert-bias \
     --moe-router-dtype fp32 \
     --moe-router-load-balancing-type seq_aux_loss \
     --moe-shared-expert-intermediate-size 3712 \
-    --attention-backend flash \
     --is-hybrid-model \
     --mamba-num-heads 64 \
     --mamba-head-dim 64 \
@@ -232,26 +235,18 @@ OPTIONS=" \
     --dataloader-save ${FINETUNE_DIR}/dataloader \
     --save-interval 10000 \
     --ckpt-format torch \
-    --log-progress  \
-    --timing-log-option minmax \
-    --log-params-norm \
-    --log-num-zeros-in-grad \
-    --log-throughput \
-    --logging-level 20 \
-    --log-memory-interval 500 \
     --bf16 \
     --adam-beta1 0.9 \
     --adam-beta2 0.999 \
     --use-distributed-optimizer \
-    --ddp-num-buckets 8 \
-    --ddp-pad-buckets-for-high-nccl-busbw \
-    --overlap-grad-reduce \
-    --overlap-param-gather \
-    --manual-gc \
     --num-workers ${NW} \
     --tensorboard-dir ${TENSORBOARD_DIR} \
     --sequence-parallel \
+    --allow-large-videos \
     --class-token-len 10 \
+    --prompt-path ${SOURCE}/examples/multimodal/manual_prompts.json \
+    --only-keep-samples-with-img \
+    --use-new-dataloader-path \
 "
 
 export WANDB_ENTITY=$WANDB_ENTITY  # Not passed in via command line args, only env vars
@@ -267,7 +262,7 @@ else
     DATETIME=`date +'date_%y-%m-%d_time_%H-%M-%S'`
 
     srun -l --verbose \
-    --container-image /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/containers/pytorch25.06-moe-avlm-editable-energon.sqsh \
+    --container-image /lustre/fsw/portfolios/llmservice/users/matthieul/docker/pytorch25.06-moe-avlm-editable-energon-mamba-fix.sqsh \
     --container-mounts "/lustre" \
     --output=${LOGS_DIR}/%x_%j_$DATETIME.log \
     sh -c "echo ${run_cmd}; ${run_cmd}"
