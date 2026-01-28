@@ -1446,7 +1446,7 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
 
     # Update learning rate.
     # Updates lr even when iteration is skipped.
-    increment = get_num_microbatches() * args.micro_batch_size * args.data_parallel_size
+    increment = samples_seen_in_iteration
     opt_param_scheduler.step(increment=increment)
 
     skipped_iter = 0 if update_successful else 1
