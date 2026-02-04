@@ -161,24 +161,40 @@ def is_chat_completion_request(prompt: str) -> bool:
 def get_audio_samples(data: dict, sample_rate: int, audio_feature_duration: float, audio_pad_duration: float = None, audio_file_field: str = "path") -> np.ndarray:
     """
     Get the audio samples from the data.
+    Supports both file paths and base64-encoded audio (OpenAI format).
     """
     audio_file = data.get(audio_file_field, None)
-    if audio_file is not None:
+    
+    # Support base64-encoded audio: {"data": "<base64>", "format": "wav"}
+    if audio_file is None and "data" in data:
+        import base64
+        import io
+        import soundfile as sf
+        try:
+            audio_bytes = base64.b64decode(data["data"])
+            wav, orig_sr = sf.read(io.BytesIO(audio_bytes))
+            if orig_sr != sample_rate:
+                wav = librosa.resample(wav, orig_sr=orig_sr, target_sr=sample_rate)
+        except Exception as e:
+            print(f"Error decoding base64 audio: {e}")
+            return None, 0, 0
+    elif audio_file is not None:
         wav, _ = librosa.load(audio_file, sr=sample_rate)
-        wav_len = len(wav)
-        dur = librosa.get_duration(y=wav, sr=sample_rate)
-        num_audio_embeddings = int(dur / audio_feature_duration) + 1
-        if audio_pad_duration is not None and audio_pad_duration > 0:
-            num_audio_embeddings = int(audio_pad_duration / audio_feature_duration) + 1
-            # pad or trim audio to the target duration
-            max_audio_samples = int(audio_pad_duration * sample_rate)
-            if dur < audio_pad_duration:
-                wav = np.pad(wav, (0, max_audio_samples - len(wav)))
-            elif dur > audio_pad_duration:
-                wav = wav[:max_audio_samples]
-                wav_len = max_audio_samples
-        return wav, wav_len, num_audio_embeddings
-    return None, 0, 0
+    else:
+        return None, 0, 0
+    
+    wav_len = len(wav)
+    dur = librosa.get_duration(y=wav, sr=sample_rate)
+    num_audio_embeddings = int(dur / audio_feature_duration) + 1
+    if audio_pad_duration is not None and audio_pad_duration > 0:
+        num_audio_embeddings = int(audio_pad_duration / audio_feature_duration) + 1
+        max_audio_samples = int(audio_pad_duration * sample_rate)
+        if dur < audio_pad_duration:
+            wav = np.pad(wav, (0, max_audio_samples - len(wav)))
+        elif dur > audio_pad_duration:
+            wav = wav[:max_audio_samples]
+            wav_len = max_audio_samples
+    return wav, wav_len, num_audio_embeddings
 
 
 def collate_audio_wav_list(audio_wav_list: List[np.ndarray]) -> np.ndarray:
@@ -204,12 +220,37 @@ def parse_avlm_chat_completion_request_from_prompt(prompt: str, tokenizer, sampl
     total_num_sound_embeddings = 0
     for message in messages:
         if message["role"] == "user":
+            content = message.get("content", "")
+            audio_data = None
+            
+            # Handle OpenAI multimodal format where content is a list
+            # e.g. [{"type": "text", "text": "..."}, {"type": "input_audio", "input_audio": {...}}]
+            if isinstance(content, list):
+                text_parts = []
+                for item in content:
+                    if isinstance(item, dict):
+                        if item.get("type") == "text":
+                            text_parts.append(item.get("text", ""))
+                        elif item.get("type") == "input_audio":
+                            audio_data = item.get("input_audio", {})
+                        elif item.get("type") == "audio_url":
+                            audio_data = item.get("audio_url", {})
+                    elif isinstance(item, str):
+                        text_parts.append(item)
+                content = " ".join(text_parts)
+                message["content"] = content
+            
+            # Check for audio in separate "audio" field (original format)
             if "audio" in message:
+                audio_data = message["audio"]
+            
+            # Process audio if found
+            if audio_data:
                 audio_wav, audio_len, num_audio_embed = get_audio_samples(
-                    data = message["audio"], 
-                    sample_rate = args.audio_sample_rate, 
-                    audio_feature_duration = args.audio_feature_duration,
-                    audio_pad_duration = args.audio_pad_duration
+                    data=audio_data,
+                    sample_rate=args.audio_sample_rate,
+                    audio_feature_duration=args.audio_feature_duration,
+                    audio_pad_duration=args.audio_pad_duration
                 )
                 if audio_wav is not None:
                     audio_wav_list.append(audio_wav)
