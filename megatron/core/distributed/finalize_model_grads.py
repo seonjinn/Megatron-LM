@@ -215,6 +215,9 @@ def _update_router_expert_bias(model: List[torch.nn.Module], config: Transformer
     for router_module, tokens_per_expert, expert_bias, updated_expert_bias in zip(
         router_modules, tokens_per_expert_list, expert_bias_list, stacked_updated_expert_bias
     ):
+        # Save token counts for logging before zeroing
+        if hasattr(router_module, 'tokens_per_expert_for_logging') and router_module.tokens_per_expert_for_logging is not None:
+            router_module.tokens_per_expert_for_logging.copy_(tokens_per_expert)
         tokens_per_expert.zero_()
         # Only update expert_bias if the router is not frozen
         # Check if router parameters require gradients (i.e., not frozen)

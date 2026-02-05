@@ -261,6 +261,11 @@ def add_multimodal_extra_args(parser):
         "--unfreeze-router", action="store_true", default=False, help="Unfreeze MoE router weights."
     )
     group.add_argument(
+        "--log-moe-routing-diagnostics", action="store_true", default=False,
+        help="Log MoE routing diagnostics (expert utilization, dead experts, bias stats) "
+             "to tensorboard. Logged at tensorboard_log_interval."
+    )
+    group.add_argument(
         "--apply-data-augment", action="store_true", default=False, help="Apply data augmentation to the image."
     )
     group.add_argument(

@@ -138,9 +138,16 @@ class TopKRouter(Router):
             self.register_buffer(
                 'expert_bias', torch.zeros(self.config.num_moe_experts, dtype=torch.float32)
             )
+            # Buffer to store token counts for logging (saved before zeroing in bias update)
+            self.register_buffer(
+                'tokens_per_expert_for_logging',
+                torch.zeros(self.config.num_moe_experts, dtype=torch.float32),
+                persistent=False,
+            )
         else:
             self.local_tokens_per_expert = None
             self.expert_bias = None
+            self.tokens_per_expert_for_logging = None
 
     def _maintain_float32_expert_bias(self):
         """

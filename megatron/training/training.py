@@ -86,6 +86,7 @@ from megatron.legacy.data.data_samplers import build_pretraining_data_loader
 from megatron.core.optimizer_param_scheduler import OptimizerParamScheduler
 from megatron.core.transformer.moe import upcycling_utils
 from megatron.core.transformer.moe.moe_utils import track_moe_metrics
+from megatron.core.transformer.moe.routing_diagnostics import log_routing_diagnostics
 from megatron.core.transformer.multi_token_prediction import MTPLossLoggingHelper
 from megatron.core.parallel_state import (
     destroy_global_memory_buffer,
@@ -2602,6 +2603,14 @@ def train(
             params_norm,
             num_zeros_in_grad,
         )
+
+        # Log MoE routing diagnostics if enabled (for VLM training).
+        if getattr(args, 'log_moe_routing_diagnostics', False) and iteration % args.tensorboard_log_interval == 0:
+            writer = get_tensorboard_writer()
+            if writer is not None:
+                # Verbose on first call to help debug model structure issues
+                verbose = (iteration <= args.tensorboard_log_interval)
+                log_routing_diagnostics(model, writer, iteration, verbose=verbose)
 
         # Evaluation.
         if args.eval_interval and iteration % args.eval_interval == 0 and args.do_valid:
