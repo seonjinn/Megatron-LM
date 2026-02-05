@@ -450,6 +450,7 @@ class MultiModalTaskEncoder(
                 if isinstance(fragment, str):
                     content += fragment
                     assert IMAGE_TOKEN not in fragment, f"{IMAGE_TOKEN!r} in sample with key: {sample.__key__} and subflavors: {sample.__subflavors__}"
+                    assert SOUND_TOKEN not in fragment, f"{SOUND_TOKEN!r} in sample with key: {sample.__key__} and subflavors: {sample.__subflavors__}"
                 elif isinstance(fragment, ImageMedia):
                     content += IMAGE_TOKEN
                     image_media.append(fragment)
