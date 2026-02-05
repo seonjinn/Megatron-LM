@@ -2,6 +2,10 @@
 
 """Multimodal tokenizer."""
 from dataclasses import dataclass
+import json
+import os
+import time
+import uuid
 from typing import Dict, List, Union, Optional
 
 import numpy as np
@@ -339,6 +343,49 @@ class MultimodalTokenizer(MegatronTokenizer):
         self._image_tag = IMAGE_TAGS[image_tag_type]
         self._keep_history_thinking = keep_history_thinking
 
+    def _write_debug_snapshot(
+        self,
+        conversation: List[Dict],
+        tokens: np.ndarray,
+        target: np.ndarray,
+        train_only_on_last_assistant_turn: bool,
+        has_nonempty_thinking_trace: bool,
+    ) -> None:
+        """Write debug artifacts to disk when DEBUG=1."""
+        if os.environ.get("DEBUG") != "1":
+            return
+
+        log_dir = os.environ.get("MM_TOKENIZER_DEBUG_DIR", "multimodal_tokenizer_logs")
+        os.makedirs(log_dir, exist_ok=True)
+
+        unique_key = f"{int(time.time())}_{os.getpid()}_{uuid.uuid4().hex[:8]}"
+        base_path = os.path.join(log_dir, unique_key)
+
+        # Prepare target for easier reading by collapsing consecutive IGNORE_INDEX.
+        target_to_print = target.copy()
+        is_ignore = target_to_print == IGNORE_INDEX
+        prev_is_ignore = np.roll(is_ignore, 1)
+        prev_is_ignore[0] = False  # First element has no previous.
+        keep_mask = ~is_ignore | (is_ignore & ~prev_is_ignore)
+        target_to_print = target_to_print[keep_mask]
+        target_to_print[target_to_print == IGNORE_INDEX] = 0
+
+        with open(f"{base_path}_conversation.json", "w", encoding="utf-8") as handle:
+            json.dump(
+                {
+                    "train_only_on_last_assistant_turn": train_only_on_last_assistant_turn,
+                    "conversation": conversation,
+                    "has_nonempty_thinking_trace": has_nonempty_thinking_trace,
+                },
+                handle,
+                ensure_ascii=True,
+                indent=2,
+            )
+        with open(f"{base_path}_input.txt", "w", encoding="utf-8") as handle:
+            handle.write(self.detokenize(tokens))
+        with open(f"{base_path}_target.txt", "w", encoding="utf-8") as handle:
+            handle.write(self.detokenize(target_to_print))
+
     def offsets(self, ids: list[int], text: str) -> list[int]:
         """
         Assume that the tokenizer is a HuggingFaceTokenizer.
@@ -354,6 +401,19 @@ class MultimodalTokenizer(MegatronTokenizer):
             else:
                 offsets.append(next_start_idx)
         return offsets
+
+    def _has_nonempty_thinking_trace(self, conversation: List[Dict]) -> bool:
+        """Return True if any assistant message has a non-empty <think> trace."""
+        for turn in conversation:
+            if turn.get("role") != "assistant":
+                continue
+            content = turn.get("content") or ""
+            if "<think>" not in content or "</think>" not in content:
+                continue
+            inner = content.split("<think>", 1)[1].split("</think>", 1)[0]
+            if inner.strip():
+                return True
+        return False
 
     def _apply_image_tag(self, text: Union[str, List[Dict]]):
         """Surround <image> with image tags such as <img> and </img>."""
@@ -421,6 +481,8 @@ class MultimodalTokenizer(MegatronTokenizer):
 
         # Apply possible image tag.
         conversation = self._apply_image_tag(conversation)
+
+        has_nonempty_thinking_trace = self._has_nonempty_thinking_trace(conversation)
 
         if self._keep_history_thinking:
             kwargs["truncate_history_thinking"] = False
@@ -490,22 +552,36 @@ class MultimodalTokenizer(MegatronTokenizer):
             # Mask everything.
 
             target = np.full_like(tokens, IGNORE_INDEX)
-            assistant_idx = np.where(tokens == 1503)[0]
+            # Find positions where the pattern [10, 1503, 19464] occurs (true assistant message starts)
+            # tokens[i] == 10, tokens[i+1] == 1503, tokens[i+2] == 19464
+            pattern_matches = np.where(
+                (tokens[:-2] == 10) & (tokens[1:-1] == 1503) & (tokens[2:] == 19464)
+            )[0]
+            assistant_idx = pattern_matches + 1  # +1 to get the position of token 1503
             end_idx = np.where(tokens == 11)[0]
 
-            # Unmask the assistant turn.
-            # Only unmask the last assistant turn.
-            if train_only_on_last_assistant_turn:
-                assistant_idx = assistant_idx[-1:]
-            else:
-                assistant_idx = assistant_idx
+            # If the conversation has thinking traces and train_only_on_last_assistant_turn is True,
+            # only train on the assistant turns after the last non-tool user message.
+            if train_only_on_last_assistant_turn and has_nonempty_thinking_trace:
+                # User message starts with [10, 3263], tool-call user message starts with [10, 3263, 1010, 16].
+                user_start_positions = np.where((tokens[:-1] == 10) & (tokens[1:] == 3263))[0]
+                if len(user_start_positions) > 0:
+                    # Filter out tool-call user messages.
+                    is_tool_call = np.zeros_like(user_start_positions, dtype=bool)
+                    # Need 2 extra tokens to compare [1010, 16].
+                    valid_tool_check = user_start_positions + 3 < len(tokens)
+                    tool_check_positions = user_start_positions[valid_tool_check]
+                    is_tool_call[valid_tool_check] = (
+                        (tokens[tool_check_positions + 2] == 1010)
+                        & (tokens[tool_check_positions + 3] == 16)
+                    )
+                    non_tool_user_positions = user_start_positions[~is_tool_call]
+                    if len(non_tool_user_positions) > 0:
+                        last_user_pos = non_tool_user_positions[-1]
+                        # Keep assistant turns that start after the last non-tool user message.
+                        assistant_idx = assistant_idx[assistant_idx > last_user_pos]
 
             for i in assistant_idx:
-                # Check for possible mismatches.
-                is_assistant = (tokens[i-1:i+2] == np.array([10, 1503, 19464])).all()
-                if not is_assistant:
-                    continue
-
                 assert tokens[i+2] == 1010, "expected newline lb"
 
                 lb = i
@@ -518,16 +594,15 @@ class MultimodalTokenizer(MegatronTokenizer):
 
                 target[lb+3:ub+1] = tokens[lb+3:ub+1]
 
-            import os
-            if os.environ.get("DEBUG") == "1":
-                print(f"train_only_on_last_assistant_turn: {train_only_on_last_assistant_turn}")
-                print("#"*50)
-                print(f"input: {self.detokenize(tokens)}")
-                print("#"*50)
-                target_to_print = target.copy()
-                target_to_print[target_to_print == IGNORE_INDEX] = 0
-                print(f"target: {self.detokenize(target_to_print)}")
-                print("#"*50)
+            # import os
+            # if os.environ.get("DEBUG") == "1":
+            #     self._write_debug_snapshot(
+            #         conversation=conversation,
+            #         tokens=tokens,
+            #         target=target,
+            #         train_only_on_last_assistant_turn=train_only_on_last_assistant_turn,
+            #         has_nonempty_thinking_trace=has_nonempty_thinking_trace,
+            #     )
 
             return tokens, target
 
