@@ -10,7 +10,7 @@
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=pretrain_super_posttrained_radiov4_0114
+#SBATCH --job-name=pretrain_super_posttrained_radiov4_0206
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/scratch/fsw/portfolios/llmservice/users/trintamaki/msc_config/msc_config.yaml"
@@ -38,7 +38,7 @@ USE_DYNAMIC_RES=1
 USE_IMAGE_BREAK=0   # Only used if USE_DYNAMIC_RES is 1.
 USE_CONV_MERGE=0    # Only used if USE_DYNAMIC_RES is 1.
 USE_FP8=0
-USE_VISION_ENCODER_EVAL_MODE=0
+USE_VISION_ENCODER_EVAL_MODE=1
 USE_MTP=1
 
 
@@ -49,7 +49,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="pretrain_super_posttrained_radiov4_0114"
+    MODEL_NAME="pretrain_super_posttrained_radiov4_0205"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -155,7 +155,7 @@ if [[ $USE_MTP -eq 1 ]]; then
     EXTRA_ARGS+=" --mtp-spec megatron.core.models.mamba.mamba_layer_specs mamba_stack_spec"
     EXTRA_ARGS+=" --mtp-num-layers 2"
     EXTRA_ARGS+=" --mtp-hybrid-override-pattern *E"
-    EXTRA_ARGS+=" --mtp-loss-scaling-factor 0.3"
+    EXTRA_ARGS+=" --mtp-loss-scaling-factor 0.03"
     EXTRA_ARGS+=" --mtp-use-repeated-layer"
     EXTRA_ARGS+=" --keep-mtp-spec-in-bf16"
 else
@@ -191,7 +191,7 @@ OPTIONS=" \
     --moe-grouped-gemm \
     --num-experts 512 \
     --moe-router-topk 22 \
-    --moe-aux-loss-coeff 1e-6 \
+    --moe-aux-loss-coeff 1e-8 \
     --moe-router-topk-scaling-factor 5.0 \
     --moe-router-enable-expert-bias \
     --moe-router-dtype fp32 \

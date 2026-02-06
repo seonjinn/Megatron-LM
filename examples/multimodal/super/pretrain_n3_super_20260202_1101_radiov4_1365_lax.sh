@@ -10,7 +10,7 @@
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=sft_super_posttrained_radiov4_0205
+#SBATCH --job-name=pretrain_n3_super_20260202_1101_radiov4_1365_0206
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/scratch/fsw/portfolios/llmservice/users/trintamaki/msc_config/msc_config.yaml"
@@ -22,7 +22,6 @@ export NVTE_BWD_LAYERNORM_SM_MARGIN=16
 export NCCL_P2P_NET_CHUNKSIZE=2097152
 export NCCL_DEBUG=WARN
 export TORCHINDUCTOR_WORKER_START=fork
-#export TORCH_NCCL_AVOID_RECORD_STREAMS=0
 export TRITON_CACHE_DIR=${TRITON_CACHE_DIR:-"/tmp/triton_cache_\${SLURM_NODEID}"}
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
@@ -39,18 +38,18 @@ USE_DYNAMIC_RES=1
 USE_IMAGE_BREAK=0   # Only used if USE_DYNAMIC_RES is 1.
 USE_CONV_MERGE=0    # Only used if USE_DYNAMIC_RES is 1.
 USE_FP8=0
-USE_CPE_EVAL_MODE=1
+USE_VISION_ENCODER_EVAL_MODE=1
 USE_MTP=1
 
 
 # Remember to update model and job name if running in batch mode!!
 if [[ $BATCH -eq 0 ]]; then
     DATETIME=`date +'%y-%m-%d-%H-%M-%S'`
-    MODEL_NAME="interactive_sft_super_12b_${DATETIME}"
+    MODEL_NAME="interactive_pretrain_super_12b_${DATETIME}"
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="sft_super_posttrained_radiov4_0205"
+    MODEL_NAME="pretrain_n3_super_20260202_1101_radiov4_1365_0206"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -71,24 +70,19 @@ LOGS_DIR="${OUTPUT}/logs"
 TENSORBOARD_DIR="${OUTPUT}/tensorboard"
 WANDB_DIR="${OUTPUT}/wandb"
 
-# Ensure output directories exist
-mkdir -p "${FINETUNE_DIR}" "${LOGS_DIR}" "${TENSORBOARD_DIR}" "${WANDB_DIR}"
-
-CODE_DIR="${SOURCE}"
-
 TP=2
 EP=64
 
-CHECKPOINT_DIR="/scratch/fsw/portfolios/llmservice/users/tpoon/workspace/output/pretrain_super_posttrained_radiov4_0205/checkpoints"
+CHECKPOINT_DIR="/scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/users/tpoon/checkpoints/n3-super-20260202-1101-radio-v4-tp2-ep64"
 
 # TODO: Update this path to point to the correct tokenizer for the 12B model
 TOKENIZER_MODEL="/scratch/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--Nemotron-Nano-3-30B-A3.5B-dev-1016/snapshots/bb271274159f07461e919379311e32802e5ec36b/"
 TOKENIZER_PROMPT_FORMAT="nemotron6-moe"
 
-DATA_TRAIN="/scratch/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/eagle_sft_v13.52.no.text.yaml"
+DATA_TRAIN="${SOURCE}/examples/multimodal/v3_baseline/pretrain_vision_adaptor_recipe.yaml"
 if [[ $SLURM_SUBMIT_HOST == *"lbd-lax"* ]]; then
     echo "Using lax dataset"
-    DATA_TRAIN="/scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/datasets/eagle-next/online_packing/eagle_sft_v13.52.no.text.yaml"
+    DATA_TRAIN="${SOURCE}/examples/multimodal/super/data_config/1365_pretraining_yamls/pretrain_vision_adaptor_recipe_lax.yaml"
 fi
 
 if [[ $DEBUG -eq 1 ]]; then
@@ -104,6 +98,7 @@ if [[ $DEBUG -eq 1 ]]; then
     NUM_GPU=8
 else
     MBZ=1
+    # BZ=512
     BZ=128
     NW=8
     AD=0.0
@@ -146,52 +141,49 @@ if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
         fi
     fi
     if [[ $USE_CONV_MERGE -eq 1 ]]; then
-        EXTRA_ARGS+=" --conv-merging"
+        EXTRA_ARGS+=" --conv-merging --allow-missing-conv-merge-checkpoint"
     else
         EXTRA_ARGS+=" --pixel-shuffle"
     fi
     EXTRA_ARGS+=" --dynamic-resolution --dynamic-resolution-min-patches 1024 --dynamic-resolution-max-patches 13312 --apply-data-augment"
 fi
 
-if [[ $USE_CPE_EVAL_MODE -eq 1 ]]; then
-    EXTRA_ARGS+=" --radio-force-cpe-eval-mode"  # Only CPE in eval mode (not entire vision encoder)
+if [[ $USE_VISION_ENCODER_EVAL_MODE -eq 1 ]]; then
+    EXTRA_ARGS+=" --radio-force-eval-mode"  # Entire vision encoder in eval mode (eval CPE, no dropout)
 fi
 
 if [[ $USE_MTP -eq 1 ]]; then
     EXTRA_ARGS+=" --mtp-spec megatron.core.models.mamba.mamba_layer_specs mamba_stack_spec"
     EXTRA_ARGS+=" --mtp-num-layers 2"
     EXTRA_ARGS+=" --mtp-hybrid-override-pattern *E"
-    EXTRA_ARGS+=" --mtp-loss-scaling-factor 1.5e-4"
+    EXTRA_ARGS+=" --mtp-loss-scaling-factor 0.03"
     EXTRA_ARGS+=" --mtp-use-repeated-layer"
     EXTRA_ARGS+=" --keep-mtp-spec-in-bf16"
 else
     EXTRA_ARGS+=" --disable-mtp"
 fi
 
-EXTRA_ARGS+=" --packing-buffer-size 3247 --packing-seq-length ${DECODER_SEQ_LEN} --packing-knapsack-algorithm balanced_greedy_knapsack "
-# LM (Mamba block) recompute
-EXTRA_ARGS+=" --recompute-granularity selective --recompute-modules core_attn mlp layernorm moe_act moe "
-# core_attn moe_act layernorm mlp moe
-# Vision (GPT block) recompute
-EXTRA_ARGS+=" --recompute-vision --recompute-method-vision block --recompute-granularity-vision full --recompute-vision-num-layers 32 "
+EXTRA_ARGS+=" --packing-buffer-size 4000 --packing-seq-length ${DECODER_SEQ_LEN} --packing-knapsack-algorithm balanced_greedy_knapsack "
 
 OPTIONS=" \
     --use-checkpoint-args \
     --transformer-impl transformer_engine \
     --use-te \
     --data-path ${DATA_TRAIN} \
+    --freeze-ViT \
+    --freeze-LM \
     --patch-dim 16 \
     --img-h 512 \
     --img-w 512 \
     --dataloader-type external \
     --language-model-type nemotron6-super \
     ${EXTRA_ARGS} \
+    --allow-missing-vision-projection-checkpoint \
     --vision-model-type radio \
     --class-token-len 10 \
     --use-loss-scaling \
     ${SPECIAL_TOKENS} \
     --disable-vision-class-token \
-    --prompt-path ${CODE_DIR}/examples/multimodal/manual_prompts.json \
     --eod-mask-loss \
     --image-tag-type internvl \
     --moe-token-dispatcher-type alltoall \
@@ -202,7 +194,7 @@ OPTIONS=" \
     --moe-grouped-gemm \
     --num-experts 512 \
     --moe-router-topk 22 \
-    --moe-aux-loss-coeff 1e-8 \
+    --moe-aux-loss-coeff 1e-9 \
     --moe-router-topk-scaling-factor 5.0 \
     --moe-router-enable-expert-bias \
     --moe-router-dtype fp32 \
@@ -244,11 +236,11 @@ OPTIONS=" \
     --global-batch-size ${BZ} \
     --train-full-dataset \
     --lr-warmup-fraction 0.1 \
-    --lr 5e-5 \
-    --min-lr 0.0 \
-    --lr-decay-style cosine \
-    --weight-decay 0.05 \
+    --lr 1e-3 \
+    --min-lr 1e-5 \
+    --weight-decay 0.01 \
     --clip-grad 1.0 \
+    --lr-decay-style cosine \
     --log-interval ${LI} \
     --eval-iters 0 \
     --eval-interval 99999999999 \
@@ -261,13 +253,28 @@ OPTIONS=" \
     --dataloader-save ${FINETUNE_DIR}/dataloader \
     --save-interval 10000 \
     --ckpt-format torch \
+    --log-progress  \
+    --timing-log-option minmax \
+    --log-params-norm \
+    --log-num-zeros-in-grad \
+    --log-throughput \
+    --logging-level 20 \
+    --log-memory-interval 500 \
     --bf16 \
     --adam-beta1 0.9 \
     --adam-beta2 0.999 \
     --use-distributed-optimizer \
+    --ddp-num-buckets 8 \
+    --ddp-pad-buckets-for-high-nccl-busbw \
+    --overlap-grad-reduce \
+    --overlap-param-gather \
+    --manual-gc \
     --num-workers ${NW} \
     --tensorboard-dir ${TENSORBOARD_DIR} \
     --sequence-parallel \
+    --prompt-path ${SOURCE}/examples/multimodal/manual_prompts.json \
+    --only-keep-samples-with-img \
+    --use-new-dataloader-path \
     --allow-large-videos \
 "
 
@@ -277,10 +284,9 @@ export NVTE_ALLOW_NONDETERMINISTIC_ALGO=1
 
 # Interactive or batch mode
 if [[ $BATCH -eq 0 ]]; then
-    cd ${CODE_DIR}
     torchrun --nproc_per_node ${NUM_GPU} examples/multimodal/train.py ${OPTIONS}
 else
-    run_cmd="python -u ${CODE_DIR}/examples/multimodal/train.py ${OPTIONS}"
+    run_cmd="python -u ${SOURCE}/examples/multimodal/train.py ${OPTIONS}"
 
     DATETIME=`date +'date_%y-%m-%d_time_%H-%M-%S'`
 

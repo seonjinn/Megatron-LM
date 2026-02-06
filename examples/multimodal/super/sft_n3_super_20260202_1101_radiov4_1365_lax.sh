@@ -10,7 +10,7 @@
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=sft_super_posttrained_radiov4_0205
+#SBATCH --job-name=sft_n3_super_20260202_1101_radiov4_1365_0206
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/scratch/fsw/portfolios/llmservice/users/trintamaki/msc_config/msc_config.yaml"
@@ -50,7 +50,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="sft_super_posttrained_radiov4_0205"
+    MODEL_NAME="sft_n3_super_20260202_1101_radiov4_1365_0206"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -79,16 +79,16 @@ CODE_DIR="${SOURCE}"
 TP=2
 EP=64
 
-CHECKPOINT_DIR="/scratch/fsw/portfolios/llmservice/users/tpoon/workspace/output/pretrain_super_posttrained_radiov4_0205/checkpoints"
+CHECKPOINT_DIR="/scratch/fsw/portfolios/llmservice/users/tpoon/workspace/output/pretrain_n3_super_20260202_1101_radiov4_1365_0206/checkpoints"
 
 # TODO: Update this path to point to the correct tokenizer for the 12B model
 TOKENIZER_MODEL="/scratch/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--Nemotron-Nano-3-30B-A3.5B-dev-1016/snapshots/bb271274159f07461e919379311e32802e5ec36b/"
 TOKENIZER_PROMPT_FORMAT="nemotron6-moe"
 
-DATA_TRAIN="/scratch/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/eagle_sft_v13.52.no.text.yaml"
+DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/eagle_sft_v13.65.yaml"
 if [[ $SLURM_SUBMIT_HOST == *"lbd-lax"* ]]; then
     echo "Using lax dataset"
-    DATA_TRAIN="/scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/datasets/eagle-next/online_packing/eagle_sft_v13.52.no.text.yaml"
+    DATA_TRAIN="/scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/datasets/eagle-next/eagle_sft_v13.65_lax_absolute.yaml"
 fi
 
 if [[ $DEBUG -eq 1 ]]; then
@@ -104,7 +104,8 @@ if [[ $DEBUG -eq 1 ]]; then
     NUM_GPU=8
 else
     MBZ=1
-    BZ=128
+    # BZ=128
+    BZ=256
     NW=8
     AD=0.0
     HD=0.0
