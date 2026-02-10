@@ -398,9 +398,6 @@ class MultiModalTaskEncoder(
             system_prompt = sample.conversation[0].fragments[0]
             sample.conversation = sample.conversation[1:]
 
-        if system_prompt == "" and self.args.tokenizer_prompt_format == "nemotron6-moe":
-            system_prompt = "Answer the questions."
-
         legacy_conversation: list[LegacyConversation] = [
             {"role": "system", "content": system_prompt}
         ]
