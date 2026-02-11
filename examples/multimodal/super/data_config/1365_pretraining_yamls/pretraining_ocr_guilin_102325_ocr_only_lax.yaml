@@ -4,7 +4,7 @@ splits:
   train:
     blend_epochized:
     - repetitions: 1.0
-      path: /scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/1365_personal/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/NVCLIP/commercial_sft_jsonl/NVCLIP_OCR_Qwen
+      path: /scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/1365_pretrain/llmservice/projects/llmservice_fm_vision/users/matthieul/eagle_recipe_online_packing/final_recipe/NVCLIP/commercial_sft_jsonl/NVCLIP_OCR_Qwen
       subflavors:
         name: NVCLIP_OCR
         cook: conversation
@@ -13,4 +13,4 @@ splits:
         orig_length: 29680
         category: General
       aux:
-        media_source: filesystem:///scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/1365_media_sources/llmservice/projects/llmservice_nlp_fm/datasets/NVCLIP/NVCLIP_tar
+        media_source: filesystem:///scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/1365_pretrain_media/llmservice/projects/llmservice_nlp_fm/datasets/NVCLIP/NVCLIP_tar
