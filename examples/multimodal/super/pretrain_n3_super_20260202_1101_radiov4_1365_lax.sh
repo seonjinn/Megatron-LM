@@ -10,7 +10,7 @@
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=pretrain_n3_super_20260202_1101_radiov4_1365_0206
+#SBATCH --job-name=pretrain_n3_super_20260202_1101_radiov4_1365_0211
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/scratch/fsw/portfolios/llmservice/users/trintamaki/msc_config/msc_config.yaml"
@@ -49,7 +49,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="pretrain_n3_super_20260202_1101_radiov4_1365_0206"
+    MODEL_NAME="pretrain_n3_super_20260202_1101_radiov4_1365_0211"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -100,7 +100,7 @@ else
     MBZ=1
     # BZ=512
     BZ=128
-    NW=8
+    NW=4
     AD=0.0
     HD=0.0
     LI=5
@@ -156,7 +156,7 @@ if [[ $USE_MTP -eq 1 ]]; then
     EXTRA_ARGS+=" --mtp-spec megatron.core.models.mamba.mamba_layer_specs mamba_stack_spec"
     EXTRA_ARGS+=" --mtp-num-layers 2"
     EXTRA_ARGS+=" --mtp-hybrid-override-pattern *E"
-    EXTRA_ARGS+=" --mtp-loss-scaling-factor 0.03"
+    EXTRA_ARGS+=" --mtp-loss-scaling-factor 1e-4"
     EXTRA_ARGS+=" --mtp-use-repeated-layer"
     EXTRA_ARGS+=" --keep-mtp-spec-in-bf16"
 else
