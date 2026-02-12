@@ -24,4 +24,4 @@ python tools/checkpoint/convert.py \
 touch $HF_BASE_PATH/mcore_to_hf_info.txt
 echo "original mcore path: $MCORE_PATH at iteration $CKPT_STEP" >> $HF_BASE_PATH/mcore_to_hf_info.txt
 
-cp /lustre/fsw/portfolios/llmservice/users/kchumachenko/workspace/output/moe_hf_config/* $HF_PATH
+cp /lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/moe_hf_config/* $HF_PATH
