@@ -10,7 +10,7 @@
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=sft_moe_rl_llm_eval_mode_radio_v4_v1365_0126
+#SBATCH --job-name=sft_moe_rl_llm_eval_mode_radio_v4_v1368_0209
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
@@ -49,7 +49,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="sft_moe_rl_llm_eval_mode_radio_v4_v1365_0126"
+    MODEL_NAME="sft_moe_rl_llm_eval_mode_radio_v4_v1368_0209"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -96,7 +96,7 @@ CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/outp
 TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--Nemotron-Nano-3-30B-A3.5B-dev-1016/snapshots/bb271274159f07461e919379311e32802e5ec36b/"
 TOKENIZER_PROMPT_FORMAT="nemotron6-moe"
 
-DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/eagle_sft_v13.65.yaml"
+DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/eagle_sft_v13.68.yaml"
 
 if [[ $DEBUG -eq 1 ]]; then
     MBZ=1
