@@ -6,11 +6,11 @@
 #SBATCH --mem=0
 #SBATCH --ntasks-per-node=8
 #SBATCH --dependency=singleton
-#SBATCH --nodes=32
+#SBATCH --nodes=64
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=pretrain_vision_adaptor_packing_lower_bs_0114
+#SBATCH --job-name=pretrain_moe_a1_0210
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
@@ -35,49 +35,14 @@ BATCH=$((1-$?))
 
 DEBUG=0
 USE_TILING=0
-USE_DYNAMIC_RES=1
+USE_DYNAMIC_RES=1   
 USE_IMAGE_BREAK=0   # Only used if USE_DYNAMIC_RES is 1.
 USE_CONV_MERGE=0    # Only used if USE_DYNAMIC_RES is 1.
 USE_FP8=0
 USE_VISION_ENCODER_EVAL_MODE=1
-
-
-# Remember to update model and job name if running in batch mode!!
-if [[ $BATCH -eq 0 ]]; then
-    DATETIME=`date +'%y-%m-%d-%H-%M-%S'`
-    MODEL_NAME="interactive_pretrain_vision_adaptor_packing_lower_bs_${DATETIME}"
-    SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
-    DEBUG=1
-else
-    MODEL_NAME="pretrain_vision_adaptor_packing_lower_bs_0114"
-    SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
-fi
-
-WANDB_API_KEY=${WANDB_API_KEY}
-WANDB_PROJECT=${WANDB_PROJECT:-"megatron-vlm-v3"}
-WANDB_ENTITY=${WANDB_ENTITY:-"adlr"}
-WANDB_NAME=${MODEL_NAME}
-
-WORKSPACE="/lustre/fsw/portfolios/llmservice/users/${USER}/workspace"
-SOURCE=`pwd`
-OUTPUT_BASE="${WORKSPACE}/output"
-OUTPUT="${OUTPUT_BASE}/${MODEL_NAME}"
-
-FINETUNE_DIR=${OUTPUT}/checkpoints
-LOGS_DIR="${OUTPUT}/logs"
-TENSORBOARD_DIR="${OUTPUT}/tensorboard"
-WANDB_DIR="${OUTPUT}/wandb"
-
-TP=2
-EP=32
-
-CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/nano-v3-rc2-12-03-25-7-15-pm-c-radio_v4-vlm-h-tp2-ep32/checkpoints"
-
-# New tokenizer 10/20.
-TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--Nemotron-Nano-3-30B-A3.5B-dev-1016/snapshots/bb271274159f07461e919379311e32802e5ec36b/"
-TOKENIZER_PROMPT_FORMAT="nemotron6-moe"
-
-DATA_TRAIN="${SOURCE}/examples/multimodal/v3_omni_staged_baseline/pretrain_vision_adaptor_recipe.yaml"
+USE_PACKING=1
+USE_BUCKETING=0 
+USE_PRECISION_AWARE_OPTIMIZER=1
 
 if [[ $DEBUG -eq 1 ]]; then
     MBZ=1
@@ -90,23 +55,67 @@ if [[ $DEBUG -eq 1 ]]; then
     EXTRA_ARGS=""
 
     NUM_GPU=8
+    PBS=128
 else
     MBZ=1
-    BZ=128
-    NW=4
+    BZ=512 #2048 #128
+    NW=8 #4
     AD=0.0
     HD=0.0
     LI=5
     EXTRA_ARGS=""
     NUM_GPU=8
+    PBS=1000 #4000
+    LR=1e-3
+    MIN_LR=1e-5
+    WD=0.01 # weight decay
+    CG=1.0 # clip grad
+    LR_DECAY_STYLE="cosine" # lr decay style
+    INIT_METHOD_STD=0.02
 fi
 
 SEQ_LEN=256
 DECODER_SEQ_LEN=16384
 
+# Remember to update model and job name if running in batch mode!!
+if [[ $BATCH -eq 0 ]]; then
+    DATETIME=`date +'%y-%m-%d-%H-%M-%S'`
+    MODEL_NAME="interactive_pretrain_moe_a1_${DATETIME}"
+    SPECIAL_TOKENS=" --special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box> <so_embedding> <so_start> <so_end> "
+    DEBUG=1
+else
+    MODEL_NAME="pretrain_moe_a1_0210"
+    SPECIAL_TOKENS=" --special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\> \<so_embedding\> \<so_start\> \<so_end\> "
+fi
+
+WORKSPACE="/lustre/fsw/portfolios/llmservice/users/${USER}/workspace"
+SOURCE=`pwd`
+OUTPUT_BASE="${WORKSPACE}/output"
+OUTPUT="${OUTPUT_BASE}/${MODEL_NAME}"
+
+FINETUNE_DIR=${OUTPUT}/checkpoints
+LOGS_DIR="${OUTPUT}/logs"
+TENSORBOARD_DIR="${OUTPUT}/tensorboard"
+WANDB_DIR="${OUTPUT}/wandb"
+
+WANDB_API_KEY=${WANDB_API_KEY}
+WANDB_PROJECT=${WANDB_PROJECT:-"megatron-vlm-v3"}
+WANDB_ENTITY=${WANDB_ENTITY:-"adlr"}
+WANDB_NAME=${MODEL_NAME}
+
 if [ -n "${WANDB_API_KEY}" ]; then
     EXTRA_ARGS+=" --wandb-project ${WANDB_PROJECT} --wandb-exp-name ${MODEL_NAME} --wandb-save-dir ${WANDB_DIR} --wandb-resume-same-run"
 fi
+
+TP=2
+EP=32
+
+CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/sft_moe_rl_llm_eval_mode_radio_v4_v1367_0205/checkpoints"
+
+TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/nemotron_3_nano_30b_a3b_tokenizer"
+TOKENIZER_PROMPT_FORMAT="nemotron6-moe"
+
+DATA_TRAIN="${SOURCE}/examples/multimodal/v3_omni_staged_baseline/pretrain_moe_a1.yaml"
 
 if [[ $USE_TILING -eq 1 ]]; then
     EXTRA_ARGS+=" --pixel-shuffle --use-tiling --max-num-tiles 12 --use-thumbnail"
@@ -145,16 +154,25 @@ if [[ $USE_VISION_ENCODER_EVAL_MODE -eq 1 ]]; then
     EXTRA_ARGS+=" --radio-force-eval-mode"  # Entire vision encoder in eval mode (eval CPE, no dropout)
 fi
 
+# online packing & bucketing
+if [[ $USE_PACKING -eq 1 ]]; then
+    EXTRA_ARGS+=" --packing-buffer-size ${PBS} --packing-seq-length ${DECODER_SEQ_LEN}"
+    if [[ $USE_BUCKETING -eq 1 ]]; then
+        EXTRA_ARGS+=" --packing-knapsack-algorithm bucketing_greedy_knapsack "
+    else
+        EXTRA_ARGS+=" --packing-knapsack-algorithm balanced_greedy_knapsack "
+    fi
+fi
 
-EXTRA_ARGS+=" --packing-buffer-size 4000 --packing-seq-length ${DECODER_SEQ_LEN} --packing-knapsack-algorithm balanced_greedy_knapsack "
+EXTRA_ARGS+=" --recompute-sound "
+
+SOUND_MODEL_TYPE="nemo://nvidia/parakeet-tdt-0.6b-v2"
 
 OPTIONS=" \
     --use-checkpoint-args \
     --transformer-impl transformer_engine \
     --use-te \
     --data-path ${DATA_TRAIN} \
-    --freeze-ViT \
-    --freeze-LM \
     --patch-dim 16 \
     --img-h 512 \
     --img-w 512 \
@@ -166,6 +184,7 @@ OPTIONS=" \
     --use-loss-scaling \
     ${SPECIAL_TOKENS} \
     --disable-vision-class-token \
+    --prompt-path ${SOURCE}/examples/multimodal/manual_prompts.json \
     --eod-mask-loss \
     --image-tag-type internvl \
     --moe-token-dispatcher-type alltoall \
@@ -177,12 +196,13 @@ OPTIONS=" \
     --moe-grouped-gemm \
     --num-experts 128 \
     --moe-router-topk 6 \
-    --moe-aux-loss-coeff 1e-9 \
+    --moe-aux-loss-coeff 1e-6 \
     --moe-router-topk-scaling-factor 2.5 \
     --moe-router-enable-expert-bias \
     --moe-router-dtype fp32 \
     --moe-router-load-balancing-type seq_aux_loss \
     --moe-shared-expert-intermediate-size 3712 \
+    --attention-backend flash \
     --is-hybrid-model \
     --mamba-num-heads 64 \
     --mamba-head-dim 64 \
@@ -193,7 +213,7 @@ OPTIONS=" \
     --use-mcore-models \
     --untie-embeddings-and-output-weights \
     --disable-bias-linear \
-    --init-method-std 0.02 \
+    --init-method-std ${INIT_METHOD_STD} \
     --position-embedding-type none \
     --squared-relu \
     --num-layers 52 \
@@ -218,11 +238,11 @@ OPTIONS=" \
     --global-batch-size ${BZ} \
     --train-full-dataset \
     --lr-warmup-fraction 0.1 \
-    --lr 1e-3 \
-    --min-lr 1e-5 \
-    --weight-decay 0.01 \
-    --clip-grad 1.0 \
-    --lr-decay-style cosine \
+    --lr ${LR} \
+    --min-lr ${MIN_LR} \
+    --lr-decay-style ${LR_DECAY_STYLE} \
+    --weight-decay ${WD} \
+    --clip-grad ${CG} \
     --log-interval ${LI} \
     --eval-iters 0 \
     --eval-interval 99999999999 \
@@ -233,8 +253,15 @@ OPTIONS=" \
     --load ${FINETUNE_DIR} \
     --save ${FINETUNE_DIR} \
     --dataloader-save ${FINETUNE_DIR}/dataloader \
-    --save-interval 10000 \
+    --save-interval 2000 \
     --ckpt-format torch \
+    --log-progress  \
+    --timing-log-option minmax \
+    --log-params-norm \
+    --log-num-zeros-in-grad \
+    --log-throughput \
+    --logging-level 20 \
+    --log-memory-interval 500 \
     --bf16 \
     --adam-beta1 0.9 \
     --adam-beta2 0.999 \
@@ -242,14 +269,21 @@ OPTIONS=" \
     --num-workers ${NW} \
     --tensorboard-dir ${TENSORBOARD_DIR} \
     --sequence-parallel \
-    --allow-large-videos \
     --class-token-len 10 \
-    --prompt-path ${SOURCE}/examples/multimodal/manual_prompts.json \
-    --only-keep-samples-with-img \
-    --use-new-dataloader-path \
+    --allow-large-videos \
+    --sound-model-type ${SOUND_MODEL_TYPE}  \
+    --sound-target-rate 16000 \
+    --allow-missing-sound-projection-checkpoint \
+    --allow-missing-sound-model-checkpoint \
+    --sound-embedding-size 751 \
+    --freeze-LM \
+    --freeze-ViT \
+    --freeze-sound-model \
 "
 
+
 export WANDB_ENTITY=$WANDB_ENTITY  # Not passed in via command line args, only env vars
+
 export NVTE_APPLY_QK_LAYER_SCALING=0
 export NVTE_ALLOW_NONDETERMINISTIC_ALGO=1
 
@@ -262,7 +296,7 @@ else
     DATETIME=`date +'date_%y-%m-%d_time_%H-%M-%S'`
 
     srun -l --verbose \
-    --container-image /lustre/fsw/portfolios/llmservice/users/matthieul/docker/pytorch25.06-moe-avlm-editable-energon-mamba-fix.sqsh \
+    --container-image /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/containers/pytorch25.06-moe-avlm-editable-energon.sqsh \
     --container-mounts "/lustre" \
     --output=${LOGS_DIR}/%x_%j_$DATETIME.log \
     sh -c "echo ${run_cmd}; ${run_cmd}"
