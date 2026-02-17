@@ -10,7 +10,7 @@
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=sft_moe_rl_llm_eval_mode_radio_v4_v1368_0209
+#SBATCH --job-name=sft_moe_rl_llm_eval_mode_radio_v4_v1369_keephist_0215
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
@@ -49,7 +49,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="sft_moe_rl_llm_eval_mode_radio_v4_v1368_0209"
+    MODEL_NAME="sft_moe_rl_llm_eval_mode_radio_v4_v1369_keephist_0215"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -93,10 +93,11 @@ EP=32
 CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/pretrain_vision_adaptor_packing_lower_bs_0114/checkpoints/"
 
 # New tokenizer 10/20.
-TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--Nemotron-Nano-3-30B-A3.5B-dev-1016/snapshots/bb271274159f07461e919379311e32802e5ec36b/"
+# TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--Nemotron-Nano-3-30B-A3.5B-dev-1016/snapshots/bb271274159f07461e919379311e32802e5ec36b/"
+TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/megatron-lm/nano-tokenizer"
 TOKENIZER_PROMPT_FORMAT="nemotron6-moe"
 
-DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/eagle_sft_v13.68.yaml"
+DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/eagle_sft_v13.69.yaml"
 
 if [[ $DEBUG -eq 1 ]]; then
     MBZ=1
@@ -265,6 +266,7 @@ OPTIONS=" \
     --sequence-parallel \
     --allow-large-videos \
     --class-token-len 10 \
+    --tokenizer-keep-history-thinking \
 "
 
 export WANDB_ENTITY=$WANDB_ENTITY  # Not passed in via command line args, only env vars
