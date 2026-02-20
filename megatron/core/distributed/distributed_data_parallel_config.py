@@ -58,7 +58,7 @@ class DistributedDataParallelConfig:
        perform the param all-gather in fp8."""
 
     reuse_grad_buf_for_mxfp8_param_ag: bool = False
-    """If true, reuse the grad buffer for param AG when using mxfp8 recipe. Should be 
+    """If true, reuse the grad buffer for param AG when using mxfp8 recipe. Should be
        set to True only when fp8_recipe is mxfp8 and fp8_param_gather is True."""
 
     use_megatron_fsdp: bool = False
@@ -75,7 +75,7 @@ class DistributedDataParallelConfig:
 
     suggested_communication_unit_size: int = None
     """Specifies the number of elements to communicate at once during
-      FSDP (Fully Sharded Data Parallel) operations. 
+      FSDP (Fully Sharded Data Parallel) operations.
       This flag also affects FSDP all-gather prefetch behavior. Setting a larger
       value increases the communication buffer size, while a smaller value
       disables prefetching and may degrade performance. Adjust this value
@@ -91,9 +91,9 @@ class DistributedDataParallelConfig:
     """If true, allocate and register NCCL userbuffer for param and grad buffer.
       This flag enables SM efficient nccl algorithm that could improve the performance
       of FSDP and DP with comm_overlap. This flag will be much more effective when used
-      together with sharp. 
+      together with sharp.
       The follwoing will be the expected number of SM usage for various cases.
-      (Note that this is just a reference number and the number of SM usage could vary 
+      (Note that this is just a reference number and the number of SM usage could vary
       on message size, communication domain size and nccl version.)
       ----------------------------------------------------------
       | Communication domain | use_sharp | SM usage of "AG/RS" |
@@ -107,10 +107,10 @@ class DistributedDataParallelConfig:
     """
 
     fsdp_double_buffer: bool = False
-    """If true, use persistently allocated double buffers for the 
+    """If true, use persistently allocated double buffers for the
       temporary memory needed in the custom FSDP communications.
       This option will cause additional memory overhead, however, it is necessary for
-      to register user buffer (nccl_ub=True) for the custom FSDP. 
+      to register user buffer (nccl_ub=True) for the custom FSDP.
       This option will be automatically set to True when nccl_ub=True.
    """
 

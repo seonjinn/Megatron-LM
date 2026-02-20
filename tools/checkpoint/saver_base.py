@@ -132,11 +132,11 @@ class MegatronCheckpointSaverBase:
         margs.transformer_impl = self.args.saver_transformer_impl
         if self.args.saver_transformer_impl == "local" and margs.normalization == "RMSNorm":
             margs.no_persist_layer_norm = True
-        
+
         if self.args.ckpt_step is not None:
             margs.ckpt_step = self.args.ckpt_step
             margs.iteration = self.args.ckpt_step
-        
+
         self.margs = margs
 
     def initialize_megatron_env(self):
@@ -175,7 +175,7 @@ class MegatronCheckpointSaverBase:
         mpu.set_tensor_model_parallel_rank(0)
         mpu.set_pipeline_model_parallel_rank(0)
         mpu.set_expert_model_parallel_rank(0)
-        
+
         # For backward compatibility during local parallel states refactoring
         fake_tp_group = _ConverterFakeProcessGroup(size=self.args.target_tensor_parallel_size)
         fake_ep_group = _ConverterFakeProcessGroup(size=self.args.target_expert_parallel_size)
@@ -200,7 +200,7 @@ class MegatronCheckpointSaverBase:
         get_cuda_rng_tracker().add('expert-parallel-rng', self.margs.seed + 1024)
 
         fused_kernels.load(self.margs)
-        
+
         try:
             import torch_llm_debug_tools
             torch_llm_debug_tools.vscode_debugger_local_init()
@@ -237,7 +237,7 @@ class MegatronCheckpointSaverBase:
             print(f"Exiting. If you want to ignore this, use the argument --no-checking.")
             exit(1)
 
-    def build_sys_argv(self): 
+    def build_sys_argv(self):
         """
         Construct a sys.argv list for Megatron's argument parser.
         This centralizes the hack of overwriting sys.argv.
@@ -247,7 +247,8 @@ class MegatronCheckpointSaverBase:
                     '--num-layers', str(self.md.num_layers),
                     '--hidden-size', str(self.md.hidden_size),
                     '--seq-length', str(self.md.seq_length),
-                    '--num-experts', str(getattr(self.md, "num_experts", 0)),
+                    # Some checkpoints set num_experts=None; argparse expects an int.
+                    '--num-experts', str(getattr(self.md, "num_experts", None) or 0),
                     '--num-attention-heads', str(self.md.num_attention_heads),
                     '--max-position-embeddings', str(self.md.max_position_embeddings),
                     '--position-embedding-type', str(self.md.position_embedding_type),
@@ -260,7 +261,6 @@ class MegatronCheckpointSaverBase:
                     '--no-bias-gelu-fusion',
                     '--no-bias-dropout-fusion',
                     '--no-async-tensor-model-parallel-allreduce',
-                    '--use-cpu-initialization',
                     '--micro-batch-size', '1',
                     '--no-load-optim',
                     '--no-load-rng',
@@ -272,7 +272,15 @@ class MegatronCheckpointSaverBase:
                     '--ckpt-format', 'torch', # only 'torch' supported for conversion
                     '--no-one-logger',
                     ]
-        
+
+        # NOTE: For conversion, we generally don't need deterministic CPU weight init
+        # (weights are overwritten from the source checkpoint). And forcing
+        # CPU initialization can break Transformer-Engine when FP8/quantized
+        # parameter tensors are used (illegal memory access during quantization).
+        # Keep CPU init only for the local (non-TE) transformer implementation.
+        if getattr(self.args, "saver_transformer_impl", None) != "transformer_engine":
+            my_argv.append('--use-cpu-initialization')
+
         if self.args.ckpt_step is not None:
             my_argv.extend(['--ckpt-step', str(self.args.ckpt_step)])
         if getattr(self.args, "make_vocab_size_divisible_by", None) is not None:
@@ -631,7 +639,7 @@ class MegatronCheckpointSaverBase:
                                 "mlp_fc1_bias" : mlp_l0_bias[tp_rank],
                                 "mlp_fc2_bias" : mlp_l1_bias
                             })
-                    
+
                     if self.margs.num_experts:
                         params_dict.update({
                             "router_weight": router
@@ -739,7 +747,7 @@ class MegatronCheckpointSaverBase:
         except ModuleNotFoundError as e:
             print(f"Unable to import required Megatron modules: {e}")
             sys.exit(1)
-            
+
         if true_vocab_size is not None:
             # figure out what our padded vocab size is
             orig_vocab_size = orig_word_embed.shape[0]
@@ -799,7 +807,7 @@ class MegatronCheckpointSaverBase:
             if not hasattr(pp_local_models[0] if prefix is None else getattr(pp_local_models[0], prefix), 'output_layer'):
                 print("ERROR: got an output layer, but model does not have one")
                 exit(1)
-            
+
             output_layer_weight = self._pad_weight(msg.pop("weight"), self.md.true_vocab_size)
             output_layer_weight = torch.chunk(output_layer_weight, self.args.target_tensor_parallel_size, dim=0)
             for eptp_rank, model in enumerate(pp_local_models):

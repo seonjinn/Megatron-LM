@@ -13,6 +13,7 @@ Usage:
 """
 
 import argparse
+import json
 import os
 import torch
 import yaml
@@ -29,6 +30,31 @@ sys.path.append(
 # Define the inference parameters that will overwrite the checkpoint args
 # =============================================================================
 
+# Checkpoint args -> config.json entry (dot path). Value from checkpoint is written at the given entry.
+# Example: "vision_config.args.min_num_patches" writes to json config["vision_config"]["args"]["min_num_patches"].
+HF_OVERRIDES = {
+    "dynamic_resolution_min_patches": "vision_config.min_num_patches",
+    "dynamic_resolution_max_patches": "vision_config.max_num_patches",
+    "video_target_num_patches": "vision_config.video_target_num_patches",
+    "video_target_img_size": "vision_config.video_target_img_size",
+    "video_maintain_aspect_ratio": "vision_config.video_maintain_aspect_ratio",
+    "video_temporal_patch_size": "vision_config.video_temporal_patch_size",
+    "video_prompt_version": "vision_config.video_prompt_version",
+    "separate_video_embedder": "vision_config.separate_video_embedder",
+}
+
+
+def _set_config_at_path(config, path, value):
+    """Set config[path] = value where path is dot-separated (e.g. 'vision_config.args.min_num_patches')."""
+    parts = path.split(".")
+    obj = config
+    for part in parts[:-1]:
+        if part not in obj or not isinstance(obj[part], dict):
+            obj[part] = {}
+        obj = obj[part]
+    obj[parts[-1]] = value
+
+
 INFERENCE_PARAMS = {
     # Sampling parameters
     "temperature": 1.0,              # Sampling temperature
@@ -36,10 +62,10 @@ INFERENCE_PARAMS = {
 
     # Sequence length parameters
     "out_seq_length": 1024,             # Output sequence length (will become out-seq-length)
-    "inference_max_seq_length": 65536,  # Maximum sequence length for inference
-    "max_tokens_to_oom": 65536,         # Maximum tokens before OOM
-    "decoder_seq_length": 65536,        # Decoder sequence length
-    "max_position_embeddings": 65536,   # Maximum position embeddings
+    "inference_max_seq_length": 131072,  # Maximum sequence length for inference
+    "max_tokens_to_oom": 131072,         # Maximum tokens before OOM
+    "decoder_seq_length": 131072,        # Decoder sequence length
+    "max_position_embeddings": 131072,   # Maximum position embeddings
 
     # Dropout parameters
     "attention_dropout": 0.0,        # Attention dropout for inference
@@ -589,6 +615,14 @@ def main():
         help="Show all parameters that will be included in the config"
     )
 
+    parser.add_argument(
+        "--update_hf_config",
+        type=str,
+        default=None,
+        metavar="HF_PATH",
+        help="Path to HF model dir (containing config.json). Generate config.yaml there and add/overwrite params from checkpoint into config.json (see HF_OVERRIDES)."
+    )
+
     args = parser.parse_args()
 
     if args.model_name is not None:
@@ -636,6 +670,24 @@ def main():
     print(f"\nSaving configuration to: {args.output_config}")
     inference_keys = list(INFERENCE_PARAMS.keys()) + ['tokenizer_prompt_format', 'eos_id']
     save_yaml_config(final_config, args.output_config, inference_keys)
+
+    # Step 6: If --update_hf_config, add/overwrite params from checkpoint into config.json
+    if args.update_hf_config is not None:
+        config_json_path = os.path.join(args.update_hf_config, "config.json")
+        if not Path(config_json_path).exists():
+            print(f"Error: config.json not found at {config_json_path}")
+            sys.exit(1)
+        with open(config_json_path) as f:
+            hf_config = json.load(f)
+        for args_name, config_path in HF_OVERRIDES.items():
+            val = getattr(checkpoint_args, args_name, None)
+            if val is None:
+                continue
+            _set_config_at_path(hf_config, config_path, val)
+            print(f"  Set config.json {config_path!r} = {val!r} (from checkpoint {args_name!r})")
+        with open(config_json_path, "w") as f:
+            json.dump(hf_config, f, indent=2)
+        print(f"Updated {config_json_path} with checkpoint params.")
 
     print("\n" + "=" * 60)
     print("Configuration creation completed successfully!")

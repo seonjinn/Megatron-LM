@@ -240,6 +240,7 @@ class HFRADIOSchema(HFSchema):
     def __init__(self, prefix, layer_prefix, use_swiglu=False):
         schema = {
             "embedder_weight": f"{prefix}model.patch_generator.embedder.weight",
+            "video_embedder_weight": f"{prefix}model.patch_generator.video_embedder.weight",  # OK if doesn't exist
             "class_token": f"{prefix}model.patch_generator.cls_token.token",
             "position_embeddings": f"{prefix}model.patch_generator.pos_embed",
             "input_conditioner_norm_mean": f"{prefix}input_conditioner.norm_mean",

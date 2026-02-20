@@ -240,8 +240,26 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
             thumbnail_area_threshold=self.args.thumbnail_area_threshold,
         )
 
+    def _verify_no_temporal_compression(self):
+        """
+        This TaskEncoder is not updated to support these features, but we still construct it during
+        training setup even when using MultiModalTaskEncoder, enen though we don't use it. So we
+        have to check this during runtime.
+        """
+        # For tiling only, need a fixed number of embeddings for num_image_embeddings_per_tile
+        # We don't pass in `is_video` to calculate `self.num_image_embeddings_per_tile`,
+        # so we currently require no temporal compression because we can't verify the number of frames
+        video_temporal_patch_size = getattr(self.args, 'video_temporal_patch_size', 1)
+        if video_temporal_patch_size != 1:
+            raise NotImplementedError(
+                f"When using TaskEncoder, temporal compression is not supported."
+                f" Found video_temporal_patch_size={video_temporal_patch_size}."
+            )
+
     def _get_total_seq_length(self, input_ids, num_tiles, imgs=None):
         """Calculate expected sequence length given text tokens length and number of tiles."""
+        self._verify_no_temporal_compression()
+
         if self.args.dynamic_resolution:
             assert imgs is not None
 
@@ -267,6 +285,8 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
 
     def _truncate_for_packing(self, input_ids, target, num_tiles, imgs):
         """Truncate tokens and labels if they exceed packing sequence length."""
+        self._verify_no_temporal_compression()
+
         total_num_images = len(num_tiles)
         total_num_tiles = sum(num_tiles)
         if self.args.dynamic_resolution:
@@ -414,6 +434,8 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
 
     def encode_llava_sft(self, sample: Union[SimilarityInterleavedSample, OfflineTargetAspectRatioSample], truncate_for_sample_list_packing=False):
         """Encode SFT sample."""
+        self._verify_no_temporal_compression()
+
         augment = sample.__subflavors__['augmentation'] if 'augmentation' in sample.__subflavors__ else False
         has_video = sample.__subflavors__['has_video'] if 'has_video' in sample.__subflavors__ else False
 
@@ -617,6 +639,8 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
         )
 
     def target_has_trainable_tokens(self, input_ids, num_tiles, target, imgs):
+        self._verify_no_temporal_compression()
+
         # Compute the loss mask based on extending the image tags with the proper
         # number of image tokens, extracting the first self.args.decoder_seq_length tokens, and
         # ensuring that some of these tokens have a loss mask > 0.
@@ -776,9 +800,9 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
             sample, cur_prompt, cur_answer = self.encode_ocr_prompt(sample)
 
         imgs = self.transform_img(
-                sample.image, self.img_h, self.img_w, self.args.use_tiling, self.args.max_num_tiles,
-                self.args.use_thumbnail, augment, find_closest_aspect_ratio_fn=self.find_closest_aspect_ratio_fn
-            )
+            sample.image, self.img_h, self.img_w, self.args.use_tiling, self.args.max_num_tiles,
+            self.args.use_thumbnail, augment, find_closest_aspect_ratio_fn=self.find_closest_aspect_ratio_fn
+        )
         num_tiles = [len(imgs)]
 
         conversation = [

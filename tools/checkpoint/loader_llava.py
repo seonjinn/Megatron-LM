@@ -99,6 +99,10 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
         margs.radio_interpolate_only_cpe = getattr(checkpoint_args, "radio_interpolate_only_cpe", False)
         margs.radio_cpe_aspect_ratio_select = getattr(checkpoint_args, "radio_cpe_aspect_ratio_select", False)
         margs.radio_disable_cpe = getattr(checkpoint_args, "radio_disable_cpe", False)
+        # Temporal compression args
+        margs.video_temporal_patch_size = getattr(checkpoint_args, "video_temporal_patch_size", 1)
+        margs.allow_checkpoint_without_temporal_compression = getattr(checkpoint_args, "allow_checkpoint_without_temporal_compression", False)
+        margs.separate_video_embedder = getattr(checkpoint_args, "separate_video_embedder", False)
         # Sound/audio specific
         margs.allow_missing_sound_projection_checkpoint = getattr(checkpoint_args, "allow_missing_sound_projection_checkpoint", False)
         margs.allow_missing_sound_model_checkpoint = getattr(checkpoint_args, "allow_missing_sound_model_checkpoint", False)
@@ -193,6 +197,7 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
         md.vision_qkv_bias = vision_config.add_qkv_bias
         md.padded_vocab_size = self.margs.padded_vocab_size
         md.conv_merging = self.margs.conv_merging
+        md.separate_video_embedder = getattr(self.margs, 'separate_video_embedder', False)
         # Sound metadata (if present)
         md.sound_model_type = getattr(self.margs, 'sound_model_type', None)
         if getattr(self.margs, 'sound_model_type', None) is not None:
@@ -232,6 +237,10 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
             if self.md.vision_model_type == "radio-g":
                 message["embedder bias"] = torch.cat([self.get_local_model(tp_rank=tp_rank).vision_model.embedder.bias.data for tp_rank in range(encoder_tp_size)], dim=0)
             message["position embeddings"] = self.get_local_model().vision_model.position_embeddings.data
+            # Send video_embedder weights if separate_video_embedder is enabled
+            if self.md.separate_video_embedder:
+                assert hasattr(self.get_local_model().vision_model, 'video_embedder'), "video_embedder not found in vision model when separate_video_embedder=True"
+                message["video_embedder weight"] = torch.cat([self.get_local_model(tp_rank=tp_rank).vision_model.video_embedder.weight.data for tp_rank in range(encoder_tp_size)], dim=0)
 
         if self.md.vision_model_type in ("siglip", "radio-g"):
             message["ln post weight"] = self.get_local_model().vision_model.ln_post.weight.data

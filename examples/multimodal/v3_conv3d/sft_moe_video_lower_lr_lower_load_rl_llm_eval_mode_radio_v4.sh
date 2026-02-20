@@ -6,10 +6,18 @@
 #SBATCH --mem=0
 #SBATCH --ntasks-per-node=8
 #SBATCH --dependency=singleton
-#SBATCH --nodes=32
+#SBATCH --nodes=64
 #SBATCH --exclusive
+#SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=sft_nm_5p5_h_9b_radio_v4_so400m_rc3_tiling_1230
+#SBATCH --job-name=sft_moe_video_radio_v4_h_rc2_v1365_conv3d_vf256a_sep_lr1e5_aux1e9_0203
+
+# !! Example launch command !! (Note: Setting CHECKPOINT_DIR is only necessary to override value below)
+# CHECKPOINT_DIR=/lustre/fsw/portfolios/llmservice/users/cmccarthy/workspace/output/sft_moe_rl_llm_2e_bs_x2_radio_v4_h_rc2_v1365_conv3d_vf64a_sep_0126/checkpoints \
+# examples/multimodal/launch.sh \
+# --name sft_moe_video_radio_v4_h_rc2_v1365_conv3d_vf256a_sep_lr1e5_aux1e9_0203 \
+# --sbatch examples/multimodal/v3_baseline/sft_moe_video_lower_lr_lower_load_rl_llm_eval_mode_radio_v4.sh \
+# --num-jobs 5
 
 # Strict mode: exit immediately on failure (-e), treat unset vars as error (-u), mark any failures as whole pipeline (-o pipefail)
 # Combined these ensure that the job is reliably marked as failed so we can use `--dependency afterok:<jobid>`
@@ -24,34 +32,32 @@ export NVTE_BWD_LAYERNORM_SM_MARGIN=16
 export NCCL_P2P_NET_CHUNKSIZE=2097152
 export NCCL_DEBUG=WARN
 export TORCHINDUCTOR_WORKER_START=fork
+#export TORCH_NCCL_AVOID_RECORD_STREAMS=0
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 USER=${SLURM_JOB_USER:-${USER}}
 
 # Hard-coded
+USE_TILING=0
+USE_DYNAMIC_RES=1
 USE_IMAGE_BREAK=0   # Only used if USE_DYNAMIC_RES is 1.
 USE_CONV_MERGE=0    # Only used if USE_DYNAMIC_RES is 1.
-USE_PRECISION_AWARE_OPTIMIZER=1
-USE_CP=0
+USE_FP8=0
+USE_CPE_EVAL_MODE=1
+USE_CP=1
+VIDEO_MAX_NUM_FRAMES=256  # Using conv3d w/ 2-frame compression
+SEPARATE_VIDEO_EMBEDDER=1
+VIDEO_MAINTAIN_ASPECT_RATIO=1
 
-# Can be overridden via exports
-# NOTE: To run RADIO-H (not So400m), export modified MODEL_NAME, VISION_MODEL_TYPE, CHECKPOINT_DIR
-#   export MODEL_NAME=sft_nm_5p5_h_9b_radio_v4_h_rc3_tiling_1230
-#   export CHECKPOINT_DIR=/lustre/fsw/portfolios/llmservice/users/cmccarthy/workspace/output/pretrain_nm_5p5_h_9b_radio_v4_h_rc3_tiling_1230
-#   export VISION_MODEL_TYPE=radio
-#   export USE_FP8=1
-MODEL_NAME=${MODEL_NAME:-"sft_nm_5p5_h_9b_radio_v4_so400m_rc3_tiling_1230"}
-CHECKPOINT_DIR=${CHECKPOINT_DIR:-"/lustre/fsw/portfolios/llmservice/users/cmccarthy/workspace/output/pretrain_nm_5p5_h_9b_radio_v4_so400m_rc3_tiling_1230"}
-VISION_MODEL_TYPE=${VISION_MODEL_TYPE:-"radio-so400m"}
-USE_TILING=${USE_TILING:-1}
-USE_DYNAMIC_RES=${USE_DYNAMIC_RES:-0}
-USE_CPE_EVAL_MODE=${USE_CPE_EVAL_MODE:-0}
-OVERWRITE_CODE_SNAPSHOT=${OVERWRITE_CODE_SNAPSHOT:-0}
-USE_FP8=${USE_FP8:-0}  # Not supported for So400m-RC3
+# Used by examples/multimodal/launch.sh (or can be overridden via exports)
+DEBUG=${DEBUG:-0}  # Sets DEBUG_RANK, megatron attaches debugger and waits; requires interactive session
 DRY_RUN=${DRY_RUN:-0}  # Prints launch command and exits
-DEBUG=${DEBUG:-0}  # Sets DEBUG_RANK, requires interactive session
-EARLY_EXIT_ITERS=${EARLY_EXIT_ITERS:-0}
+EARLY_EXIT_ITERS=${EARLY_EXIT_ITERS:-0}  # Exit early for testing
+
+# Remember to update model name if running in batch mode!!
+MODEL_NAME=${MODEL_NAME:-"sft_moe_video_radio_v4_h_rc2_v1365_conv3d_vf256a_sep_lr1e5_aux1e9_0203"}
+CHECKPOINT_DIR=${CHECKPOINT_DIR:-"/lustre/fsw/portfolios/llmservice/users/cmccarthy/workspace/output/sft_moe_rl_llm_2e_bs_x2_radio_v4_h_rc2_v1365_conv3d_vf64a_sep_0126/checkpoints"}
 
 if [[ $DEBUG -eq 1 ]]; then
     # Debugging launches the debugger, so it's a non-interactive launch in terms of escaping "<>"
@@ -62,7 +68,6 @@ if [[ $DEBUG -eq 1 ]]; then
     WORKSPACE="/lustre/fsw/portfolios/llmservice/users/${USER}/workspace/debug"
 
 else
-    # Auto-detect interactive mode (if srun is not defined, we're interactive)
     # If we've SSH'd into the allocation from a new terminal, `srun` will be on path still,
     #   so need to explicitly pass in `INTERACTIVE=1 <script>` (allow override here)
     INTERACTIVE=${INTERACTIVE:-$(which srun >/dev/null 2>&1 && echo 0 || echo 1)}
@@ -96,9 +101,11 @@ WANDB_DIR="${OUTPUT}/wandb"
 mkdir -p "${FINETUNE_DIR}" "${LOGS_DIR}" "${TENSORBOARD_DIR}" "${WANDB_DIR}"
 
 # Snapshot the source code into the OUTPUT directory on first run, and always run from the snapshot thereafter
+# NOTE: Don't recommend this method anymore, code isn't copied until run executes (after queuing)
+#       See examples/multimodal/launch.sh instead, which copies when the run is launched
 if [[ $INTERACTIVE -eq 0 && $DEBUG -eq 0 && $DRY_RUN -eq 0 ]]; then
     CODE_SNAPSHOT_DIR="${OUTPUT}/code_snapshot"
-    if [[ ! -d "${CODE_SNAPSHOT_DIR}" || $OVERWRITE_CODE_SNAPSHOT -eq 1 ]]; then
+    if [[ ! -d "${CODE_SNAPSHOT_DIR}" ]]; then
         echo "[info] Creating code snapshot at ${CODE_SNAPSHOT_DIR} from ${SOURCE}"
         rsync -a --delete \
             --exclude "__pycache__" \
@@ -111,13 +118,20 @@ else
     CODE_DIR="${SOURCE}"
 fi
 
-TP=4
+TP=2
+EP=32
 
-DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/eagle_sft_v13.52.no.text.yaml"
+# New tokenizer 10/20.
+TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--Nemotron-Nano-3-30B-A3.5B-dev-1016/snapshots/bb271274159f07461e919379311e32802e5ec36b/"
+TOKENIZER_PROMPT_FORMAT="nemotron6-moe"
+
+# DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/eagle_sft_v13.52.no.text.yaml"
+# DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/25pct.13.52.25pct.txt.multi.img.video.yaml"
+DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/cmccarthy/eagle_recipe_online_packing/final_recipe/25pct.13.52.25pct.txt.multi.img.video.improved2x_updated_0203.yaml"
 
 if [[ $DEBUG -eq 1 || $INTERACTIVE -eq 1 ]]; then
     MBZ=1
-    BZ=8
+    BZ=16
     NW=0
     AD=0.0
     HD=0.0
@@ -137,34 +151,25 @@ else
     NUM_GPU=8
 fi
 
-SEQ_LEN=1024
-DECODER_SEQ_LEN=16384
+SEQ_LEN=256
+DECODER_SEQ_LEN=49152
 
 if [ -n "${WANDB_API_KEY}" ]; then
     EXTRA_ARGS+=" --wandb-project ${WANDB_PROJECT} --wandb-exp-name ${MODEL_NAME} --wandb-save-dir ${WANDB_DIR} --wandb-resume-same-run"
 fi
 
 if [[ $USE_TILING -eq 1 ]]; then
-    EXTRA_ARGS+=" --pixel-shuffle --use-tiling --max-num-tiles 12 --use-thumbnail "
+    EXTRA_ARGS+=" --pixel-shuffle --use-tiling --max-num-tiles 12 --use-thumbnail"
     SEQ_LEN=256
 fi
 
 if [[ $USE_FP8 -eq 1 ]]; then
     # Recipe 1: More accurate but not the fastest.
-    EXTRA_ARGS+=" --fp8-recipe blockwise --fp8-format e4m3 --first-last-layers-bf16 --num-layers-at-start-in-bf16 1 --num-layers-at-end-in-bf16 1 "
+    EXTRA_ARGS+=" --fp8-recipe blockwise --fp8-format e4m3 --first-last-layers-bf16 --num-layers-at-start-in-bf16 1 --num-layers-at-end-in-bf16 1"
     # Recipes 2 and 3: Faster but metrics can become a bit noisier. Still the difference to bf16 should be small < 1%.
     #EXTRA_ARGS+=" --fp8-recipe blockwise --fp8-format e4m3 "
     #EXTRA_ARGS+=" --fp8-recipe blocwise --fp8-format e4m3 --fp8-param-gather "
     EXTRA_ARGS+=" --use-vision-backbone-fp8-arch "
-fi
-
-if [[ $USE_PRECISION_AWARE_OPTIMIZER -eq 1 ]]; then
-    EXTRA_ARGS+=" --use-precision-aware-optimizer --main-grads-dtype bf16 --main-params-dtype fp16 --exp-avg-dtype fp16 --exp-avg-sq-dtype fp16 "
-fi
-
-if [[ $USE_CP -eq 1 ]]; then
-    # TODO: Loss scaling is not enabled for context parallel yet. Implementation exists but not committed yet.
-    EXTRA_ARGS+=" --context-parallel-size 2 --sequence-parallel "
 fi
 
 if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
@@ -180,10 +185,10 @@ if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
     fi
     if [[ $USE_CONV_MERGE -eq 1 ]]; then
         EXTRA_ARGS+=" --conv-merging --allow-missing-conv-merge-checkpoint"
-    elif [[ $NO_PIXEL_SHUFFLE -eq 0 ]]; then
+    else
         EXTRA_ARGS+=" --pixel-shuffle"
     fi
-    EXTRA_ARGS+=" --dynamic-resolution --dynamic-resolution-min-patches 1024 --dynamic-resolution-max-patches 13312 --apply-data-augment"
+    EXTRA_ARGS+=" --dynamic-resolution --dynamic-resolution-min-patches 1024 --dynamic-resolution-max-patches 13312"
 fi
 
 if [[ $USE_CPE_EVAL_MODE -eq 1 ]]; then
@@ -194,103 +199,139 @@ if [[ $EARLY_EXIT_ITERS -gt 0 ]]; then
     EXTRA_ARGS+=" --early-exit-iters ${EARLY_EXIT_ITERS} "
 fi
 
+if [[ "$VIDEO_MAINTAIN_ASPECT_RATIO" -eq 1 ]]; then
+    EXTRA_ARGS+=" --video-maintain-aspect-ratio "
+fi
+
+if [[ $SEPARATE_VIDEO_EMBEDDER -eq 1 ]]; then
+    EXTRA_ARGS+=" --separate-video-embedder "
+fi
+
+if [[ $USE_CP -eq 1 ]]; then
+    EXTRA_ARGS+=" --context-parallel-size 2"
+fi
+
 EXTRA_ARGS+=" --packing-buffer-size 3247 --packing-seq-length ${DECODER_SEQ_LEN} --packing-knapsack-algorithm balanced_greedy_knapsack "
-
-EXTRA_ARGS+=" --recompute-granularity full --recompute-method block --recompute-num-layers 56 --recompute-vision "
-
 # LM (Mamba block) recompute
-# EXTRA_ARGS+=" --recompute-granularity selective --recompute-modules core_attn mlp layernorm "
+EXTRA_ARGS+=" --recompute-granularity selective --recompute-modules core_attn mlp layernorm moe_act moe "
+# core_attn moe_act layernorm mlp moe
 # Vision (GPT block) recompute
-# EXTRA_ARGS+=" --recompute-vision --recompute-method-vision block --recompute-granularity-vision full --recompute-vision-num-layers 32 "
+EXTRA_ARGS+=" --recompute-vision --recompute-method-vision block --recompute-granularity-vision full --recompute-vision-num-layers 32 "
 
-
+# NOTE: Don't want `--allow-checkpoint-without-temporal-compression` for video stage, SFT checkpoint
+#       should have correct embedder weights for temporal compression
 OPTIONS=" \
     --use-checkpoint-args \
-    --disable-bias-linear \
-    --tokenizer-type MultimodalTokenizer \
-    --tokenizer-model /lustre/fsw/portfolios/llmservice/users/ksapra/checkpoints/prunedmodel/first_9b_sft_pruned_v0 \
-    --make-vocab-size-divisible-by 16512 \
     --transformer-impl transformer_engine \
-    --normalization RMSNorm \
-    --group-query-attention \
-    --num-query-groups 8 \
-    --no-masked-softmax-fusion \
-    --attention-softmax-in-fp32 \
-    --attention-dropout ${AD} \
-    --hidden-dropout ${HD} \
-    --untie-embeddings-and-output-weights \
-    --position-embedding-type none \
-    --hybrid-override-pattern M-M-M-MM-M-M-M*-M-M-M*-M-M-M-M*-M-M-M-M*-M-MM-M-M-M-M-M- \
-    --spec megatron.core.models.mamba.mamba_layer_specs mamba_stack_spec \
-    --squared-relu \
-    --norm-epsilon 1e-05 \
-    --tensor-model-parallel-size ${TP} \
-    --pipeline-model-parallel-size 1 \
-    --num-layers 56 \
-    --hidden-size 4480 \
-    --ffn-hidden-size 15680 \
-    --kv-channels 128 \
-    --num-attention-heads 40 \
-    --use-distributed-optimizer \
     --use-te \
-    --num-workers ${NW} \
-    --exit-duration-in-mins 230 \
-    --seq-length ${SEQ_LEN} \
-    --decoder-seq-length ${DECODER_SEQ_LEN} \
-    --max-position-embeddings ${DECODER_SEQ_LEN} \
-    --train-full-dataset \
-    --lr-warmup-fraction 0.1 \
-    --micro-batch-size ${MBZ} \
-    --global-batch-size ${BZ} \
-    --lr 2e-5 \
-    --min-lr 0.0 \
-    --lr-decay-style cosine \
-    --log-interval ${LI} \
-    --eval-iters 0 \
-    --eval-interval 100000 \
     --data-path ${DATA_TRAIN} \
-    --prompt-path ${SOURCE}/examples/multimodal/manual_prompts.json \
-    --save-interval 2000 \
-    --save ${FINETUNE_DIR} \
-    --load ${FINETUNE_DIR} \
-    --pretrained-checkpoint ${CHECKPOINT_DIR} \
-    --dataloader-save ${FINETUNE_DIR}/dataloader \
-    --split 100,0,0 \
-    --clip-grad 1.0 \
-    --weight-decay 0.05 \
-    --adam-beta1 0.9 \
-    --adam-beta2 0.999 \
-    --init-method-std 0.014 \
-    --bf16 \
-    --eod-mask-loss \
     --patch-dim 16 \
     --img-h 512 \
     --img-w 512 \
     --dataloader-type external \
-    --tensorboard-dir ${TENSORBOARD_DIR} \
-    --language-model-type nemotron5-hybrid-9b \
+    --language-model-type nemotron6-moe \
     ${EXTRA_ARGS} \
-    --distributed-timeout-minutes 60 \
     --vision-model-type radio \
-    --tokenizer-prompt-format nemotron-h-5p5-reasoning \
     --use-loss-scaling \
-    --packing-seq-length ${DECODER_SEQ_LEN} \
     ${SPECIAL_TOKENS} \
-    --ckpt-format torch \
-    --image-tag-type internvl \
-    --eos-id 15 \
     --disable-vision-class-token \
-    --use-vision-backbone-fp8-arch \
+    --prompt-path ${CODE_DIR}/examples/multimodal/manual_prompts.json \
+    --eod-mask-loss \
+    --image-tag-type internvl \
+    --moe-token-dispatcher-type alltoall \
+    --moe-shared-expert-overlap \
+    --enable-experimental \
+    --moe-permute-fusion \
+    --use-fused-weighted-squared-relu \
+    --moe-router-score-function sigmoid \
+    --moe-grouped-gemm \
+    --num-experts 128 \
+    --moe-router-topk 6 \
+    --moe-aux-loss-coeff 1e-9 \
+    --moe-router-topk-scaling-factor 2.5 \
+    --moe-router-enable-expert-bias \
+    --moe-router-dtype fp32 \
+    --moe-router-load-balancing-type seq_aux_loss \
+    --moe-shared-expert-intermediate-size 3712 \
     --is-hybrid-model \
-    --mamba-head-dim 80 \
-    --mamba-num-heads 128 \
-    --mamba-state-dim 128 \
-    --use-loss-scaling \
+    --mamba-num-heads 64 \
+    --mamba-head-dim 64 \
+    --hybrid-override-pattern MEMEM*EMEMEM*EMEMEM*EMEMEM*EMEMEM*EMEMEMEM*EMEMEMEME \
+    --spec megatron.core.models.mamba.mamba_layer_specs mamba_stack_spec \
+    --tiktoken-pattern v2 \
+    --distributed-timeout-minutes 20 \
+    --use-mcore-models \
+    --untie-embeddings-and-output-weights \
+    --disable-bias-linear \
+    --init-method-std 0.014 \
+    --position-embedding-type none \
+    --squared-relu \
+    --num-layers 52 \
+    --hidden-size 2688 \
+    --num-attention-heads 32 \
+    --group-query-attention \
+    --num-query-groups 2 \
+    --ffn-hidden-size 1856 \
+    --kv-channels 128 \
+    --normalization RMSNorm \
+    --attention-dropout ${AD} \
+    --hidden-dropout ${HD} \
+    --exit-duration-in-mins 230 \
+    --tensor-model-parallel-size ${TP} \
+    --expert-model-parallel-size ${EP} \
+    --expert-tensor-parallel-size 1 \
+    --pipeline-model-parallel-size 1 \
+    --seq-length ${SEQ_LEN} \
+    --decoder-seq-length ${DECODER_SEQ_LEN} \
+    --max-position-embeddings ${DECODER_SEQ_LEN} \
+    --micro-batch-size ${MBZ} \
+    --global-batch-size ${BZ} \
+    --train-full-dataset \
+    --lr-warmup-fraction 0.1 \
+    --lr 1e-5 \
+    --min-lr 0.0 \
+    --lr-decay-style cosine \
+    --weight-decay 0.05 \
+    --clip-grad 1.0 \
+    --log-interval ${LI} \
+    --eval-iters 0 \
+    --eval-interval 99999999999 \
+    --tokenizer-type MultimodalTokenizer \
+    --tokenizer-model ${TOKENIZER_MODEL} \
+    --tokenizer-prompt-format ${TOKENIZER_PROMPT_FORMAT} \
+    --pretrained-checkpoint ${CHECKPOINT_DIR} \
+    --load ${FINETUNE_DIR} \
+    --save ${FINETUNE_DIR} \
+    --dataloader-save ${FINETUNE_DIR}/dataloader \
+    --save-interval 5000 \
+    --ckpt-format torch \
+    --bf16 \
+    --adam-beta1 0.9 \
+    --adam-beta2 0.999 \
+    --use-distributed-optimizer \
+    --num-workers ${NW} \
+    --tensorboard-dir ${TENSORBOARD_DIR} \
+    --sequence-parallel \
+    --allow-large-videos \
+    --class-token-len 10 \
+    --log-model-grad-norms \
+    --log-model-act-norms \
+    --video-target-num-patches 1024 \
+    --video-min-num-frames 8 \
+    --video-max-num-frames ${VIDEO_MAX_NUM_FRAMES} \
+    --video-temporal-patch-size 2 \
+    --video-prompt-version 2 \
 "
 
 export WANDB_ENTITY=$WANDB_ENTITY  # Not passed in via command line args, only env vars
 export NVTE_APPLY_QK_LAYER_SCALING=0
 export NVTE_ALLOW_NONDETERMINISTIC_ALGO=1
+
+if [[ $DRY_RUN -eq 1 ]]; then
+    run_cmd="python -u ${CODE_DIR}/examples/multimodal/train.py ${OPTIONS}"
+    echo "${run_cmd}"
+    exit 0
+fi
 
 # Debug, interactive, or submit_job mode
 if [[ $DEBUG -eq 1 ]]; then
@@ -307,7 +348,7 @@ if [[ $DEBUG -eq 1 ]]; then
     python -Xfrozen_modules=off \
     -m torch.distributed.run \
     --nproc_per_node=$SLURM_GPUS_ON_NODE \
-    ${SOURCE}/examples/multimodal/train.py ${OPTIONS}"
+    ${CODE_DIR}/examples/multimodal/train.py ${OPTIONS}"
 
     echo -e "Debugging with options: $OPTIONS\n"
     eval "$DEBUG_CMD"
@@ -318,18 +359,13 @@ elif [[ $INTERACTIVE -eq 1 ]]; then
 else
     run_cmd="python -u ${CODE_DIR}/examples/multimodal/train.py ${OPTIONS}"
 
-    if [[ $DRY_RUN -eq 1 ]]; then
-        echo "${run_cmd}"
-        exit 0
-    fi
-
     DATETIME=`date +'date_%y-%m-%d_time_%H-%M-%S'`
 
     # Need TRITON_CACHE_DIR expanded inside srun b/c sbatch runs on node 0
     srun -l --verbose \
     --container-image /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/containers/pytorch25.06-moe-avlm-editable-energon.sqsh \
     --container-mounts "/lustre,/home" \
-    --output=${LOGS_DIR}/%x_%j_$DATETIME.log \
+    --output=${LOGS_DIR}/%x_%j_srun_$DATETIME.log \
     sh -c "export TRITON_CACHE_DIR=/tmp/triton_cache_\${SLURM_NODEID}; echo ${run_cmd}; ${run_cmd}"
 
     set +x

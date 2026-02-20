@@ -190,6 +190,10 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
         margs.radio_interpolate_only_cpe = getattr(self.md.checkpoint_args, "radio_interpolate_only_cpe", False)
         margs.radio_cpe_aspect_ratio_select = getattr(self.md.checkpoint_args, "radio_cpe_aspect_ratio_select", False)
         margs.radio_disable_cpe = getattr(self.md.checkpoint_args, "radio_disable_cpe", False)
+        # Temporal compression args
+        margs.video_temporal_patch_size = getattr(self.md.checkpoint_args, "video_temporal_patch_size", 1)
+        margs.allow_checkpoint_without_temporal_compression = getattr(self.md.checkpoint_args, "allow_checkpoint_without_temporal_compression", False)
+        margs.separate_video_embedder = getattr(self.md.checkpoint_args, "separate_video_embedder", False)
         # Sound/audio specific args
         margs.allow_missing_sound_projection_checkpoint = getattr(self.md.checkpoint_args, "allow_missing_sound_projection_checkpoint", False)
         margs.allow_missing_sound_model_checkpoint = getattr(self.md.checkpoint_args, "allow_missing_sound_model_checkpoint", False)
@@ -229,6 +233,11 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
             embedder_weight = chunk_weight(vit_embeddings_msg["embedder weight"], "column", self.args.target_tensor_parallel_size, self.args.target_expert_parallel_size)
             if self.md.vision_model_type == "radio-g":
                 embedder_bias = chunk_bias(vit_embeddings_msg["embedder bias"], "column", self.args.target_tensor_parallel_size, self.args.target_expert_parallel_size)
+            # Handle video_embedder weights if separate_video_embedder is enabled
+            video_embedder_weight = None
+            if self.md.separate_video_embedder:
+                assert "video_embedder weight" in vit_embeddings_msg, "Missing video_embedder weight when separate_video_embedder=True"
+                video_embedder_weight = chunk_weight(vit_embeddings_msg["video_embedder weight"], "column", self.args.target_tensor_parallel_size, self.args.target_expert_parallel_size)
 
         for ep_rank in range(self.args.target_expert_parallel_size):
             for tp_rank in range(self.args.target_tensor_parallel_size):
@@ -247,6 +256,11 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
                     if self.md.vision_model_type == "radio-g":
                         model.vision_model.embedder.bias.data.copy_(embedder_bias[tp_rank])
                     model.vision_model.position_embeddings.data.copy_(vit_embeddings_msg["position embeddings"])
+                    # Load video_embedder weights if present
+                    if self.md.separate_video_embedder:
+                        assert video_embedder_weight is not None, "Missing video_embedder weight when separate_video_embedder=True"
+                        assert hasattr(model.vision_model, 'video_embedder'), "Missing video_embedder in vision model when separate_video_embedder=True"
+                        model.vision_model.video_embedder.weight.data.copy_(video_embedder_weight[tp_rank])
 
                 if self.md.vision_model_type in ("clip"):
                     model.vision_model.ln_pre.weight.data.copy_(vit_embeddings_msg["ln pre weight"])

@@ -167,6 +167,11 @@ class LLaVAModel(MegatronModule):
         radio_cpe_aspect_ratio_select: bool = False,
         radio_disable_cpe: bool = False,
         use_loss_scaling: bool = False,
+        log_model_grad_norms: bool = False,
+        log_model_act_norms: bool = False,
+        video_temporal_patch_size: int = 1,  # Default 1 = no temporal compression
+        allow_checkpoint_without_temporal_compression: bool = False,
+        separate_video_embedder: bool = False,  # Use separate embedders for images (C*P*P) and videos (C*T*P*P)
     ) -> None:
         super().__init__(config=language_transformer_config)
         if has_config_logger_enabled(language_transformer_config):
@@ -195,6 +200,14 @@ class LLaVAModel(MegatronModule):
         self.use_loss_scaling = use_loss_scaling
 
         language_model_type = getattr(language_transformer_config, "language_model_type", "")
+
+        # Output gradient/activation norms are set dynamically during forward/backward pass
+        # if using --log-model-grad-norms. See get_model_grad_norms() and get_model_act_norms().
+        self.log_model_grad_norms = log_model_grad_norms
+        self.log_model_act_norms = log_model_act_norms
+        self._grad_norms: dict = {}
+        self._act_norms: dict = {}
+
         self.sequence_parallel_lm = language_transformer_config.sequence_parallel
         self.tp_comm_overlap_lm = language_transformer_config.tp_comm_overlap
         self.context_parallel_lm = language_transformer_config.context_parallel_size
@@ -312,6 +325,9 @@ class LLaVAModel(MegatronModule):
                     interpolate_only_cpe=radio_interpolate_only_cpe,
                     cpe_aspect_ratio_select=radio_cpe_aspect_ratio_select,
                     has_cpe=not radio_disable_cpe,
+                    temporal_patch_dim=video_temporal_patch_size,
+                    allow_checkpoint_without_temporal_compression=allow_checkpoint_without_temporal_compression,
+                    separate_video_embedder=separate_video_embedder,
                 )
             elif vision_transformer_config.vision_model_type.startswith("hf://"):
                 from megatron.core.models.huggingface.module import build_hf_model
@@ -463,6 +479,7 @@ class LLaVAModel(MegatronModule):
         self._dynamic_resolution = dynamic_resolution
         self._img_h = img_h
         self._img_w = img_w
+        self._video_temporal_patch_size = video_temporal_patch_size
         self.efficient_video_sampler: EVSVariant = self._init_efficient_video_sampling(efficient_video_sampling_variant)
 
     def _init_efficient_video_sampling(self, evs_variant: str) -> EVSVariant | None:
@@ -511,6 +528,9 @@ class LLaVAModel(MegatronModule):
             freeze_language_model (bool): Freeze the language model module.
             freeze_vision_model (bool): Freeze the vision model module.
             freeze_vision_projection (bool): Freeze the vision projection module.
+            freeze_sound_model (bool): Freeze the sound model module.
+            freeze_sound_projection (bool): Freeze the sound projection module.
+            unfreeze_router (bool): Keep router weights trainable even if LLM is frozen.
         """
         modules = []
         if freeze_language_model and self.language_model is not None:
@@ -949,20 +969,30 @@ class LLaVAModel(MegatronModule):
 
         return final_embedding, final_labels, final_loss_mask, final_position_ids, packed_seq_params
 
+    @staticmethod
+    def calc_shard_factor_and_seq_dim_for_preprocessing(context_parallel_lm, sequence_parallel_lm, tensor_model_parallel_size_lm):
+        shard_factor = seq_dim = None
+        if context_parallel_lm > 1 and sequence_parallel_lm:
+            shard_factor = max(tensor_model_parallel_size_lm * context_parallel_lm, context_parallel_lm * 2)
+            seq_dim = 1
+        elif context_parallel_lm > 1:
+            shard_factor = context_parallel_lm * 2
+            seq_dim = 1
+        elif sequence_parallel_lm:
+            shard_factor = tensor_model_parallel_size_lm
+            seq_dim = 0
+        return shard_factor, seq_dim
+
     def _calc_shard_factor(self, *, validate_with_combined_embeddings=None):
         shard_factor = seq_dim = None
         if not self.pre_process:
             return None
 
-        if self.context_parallel_lm > 1 and self.sequence_parallel_lm:
-            shard_factor = max(self.tensor_model_parallel_size_lm * self.context_parallel_lm, self.context_parallel_lm * 2)
-            seq_dim = 1
-        elif self.context_parallel_lm > 1:
-            shard_factor = self.context_parallel_lm * 2
-            seq_dim = 1
-        elif self.sequence_parallel_lm:
-            shard_factor = self.tensor_model_parallel_size_lm
-            seq_dim = 0
+        shard_factor, seq_dim = self.calc_shard_factor_and_seq_dim_for_preprocessing(
+            context_parallel_lm=self.context_parallel_lm,
+            sequence_parallel_lm=self.sequence_parallel_lm,
+            tensor_model_parallel_size_lm=self.tensor_model_parallel_size_lm,
+        )
 
         if validate_with_combined_embeddings is not None and shard_factor is not None:
             assert (
@@ -1153,6 +1183,51 @@ class LLaVAModel(MegatronModule):
 
         return images, imgs_sizes, vision_packed_seq_params, has_pad_img
 
+    def _register_grad_norm_hook(self, output: torch.Tensor, name: str) -> None:
+        """Create a backward hook that stores the gradient norm for a given component."""
+        if not isinstance(output, torch.Tensor):
+            raise ValueError(
+                f"Output variable {name} has type {type(output)}, expected torch.Tensor"
+                f" for _register_grad_norm_hook()."
+            )
+
+        if not output.requires_grad:
+            return
+
+        def _hook(grad: torch.Tensor) -> None:
+            self._grad_norms[name] = grad.norm().item()
+        output.register_hook(_hook)
+
+    def _store_activation_norm(self, activation: torch.Tensor, name: str) -> None:
+        """Store the activation norm for a given component."""
+        if not isinstance(activation, torch.Tensor):
+            return
+        self._act_norms[name] = activation.norm().item()
+
+    def get_model_grad_norms(self) -> dict:
+        """Get output grad norms for available components.
+
+        Returns dict with norms for components that had hooks registered during forward pass.
+        Possible components (depending on config and PP rank):
+        - vision_model: after class token removal, before conv_merge/pixel_shuffle
+        - conv_merge: after conv_merge (only if conv_merge enabled)
+        - vision_projection: after projection
+        - language_model: language model output
+
+        Returns empty dict if no grads are available (e.g., on PP ranks without these components).
+        """
+        return self._grad_norms.copy()
+
+    def get_model_act_norms(self) -> dict:
+        """Get output activation norms for available components.
+
+        Returns dict with norms for components that were recorded during forward pass.
+        Same components as get_model_grad_norms().
+
+        Returns empty dict if no activations are available.
+        """
+        return self._act_norms.copy()
+
     def forward(
         self,
         images: torch.Tensor,
@@ -1210,8 +1285,14 @@ class LLaVAModel(MegatronModule):
         """
         inference_context = deprecate_inference_params(inference_context, inference_params)
 
-        # Keep a copy of the original imgs_sizes in case we split to context parallel ranks later.
+        # Keep a copy of the original imgs_sizes and num_frames in case we split to context parallel ranks later.
         global_imgs_sizes = imgs_sizes.clone() if imgs_sizes is not None else None
+        if num_frames is not None:
+            if not isinstance(num_frames, torch.Tensor):
+                num_frames = torch.tensor(num_frames, dtype=torch.int32, device=imgs_sizes.device)
+            global_num_frames = num_frames.clone()
+        else:
+            global_num_frames = None
 
         use_inference_kv_cache = (
             inference_context is not None
@@ -1249,8 +1330,18 @@ class LLaVAModel(MegatronModule):
                         dummy_img_size = dummy_img_size * 2
                     if self.conv_merge is not None:
                         dummy_img_size = dummy_img_size * 2
-                    images, imgs_sizes, vision_packed_seq_params, has_pad_img, num_padded_imgs = split_to_context_parallel_ranks_dynamic_res(
-                        images, imgs_sizes, vision_packed_seq_params, self._vision_fp8, dummy_img_size)
+
+                    # Split images and imgs_sizes across context parallel ranks
+                    # When using temporal compression, split on tubelet boundaries to avoid mid-tubelet splits
+                    images, imgs_sizes, vision_packed_seq_params, has_pad_img, num_padded_imgs, local_num_frames = \
+                        split_to_context_parallel_ranks_dynamic_res(
+                            images, imgs_sizes, vision_packed_seq_params, self._vision_fp8, dummy_img_size,
+                            num_frames=num_frames, temporal_patch_size=self._video_temporal_patch_size
+                        )
+
+                    # Update num_frames if it was split
+                    if local_num_frames is not None:
+                        num_frames = local_num_frames
                 else:
                     num_padded_imgs = 0  # No CP padding when not using context parallelism
                     # TODO: should we replace the dataset_helper/task_encoder code in training that adds the padding image with this?
@@ -1260,11 +1351,26 @@ class LLaVAModel(MegatronModule):
                             images, imgs_sizes, vision_packed_seq_params, has_pad_img
                         )
 
-                image_embeddings = self.vision_model(
-                    images, imgs_sizes=imgs_sizes, packed_seq_params=vision_packed_seq_params
-                )  # [num_tiles, img_seq_len, h_vision]
+                if self._video_temporal_patch_size > 1:
+                    image_embeddings, imgs_sizes, num_frames = self.vision_model(
+                        images, imgs_sizes=imgs_sizes, packed_seq_params=vision_packed_seq_params,
+                        num_frames=num_frames,
+                    )  # [num_tiles, img_seq_len, h_vision]
+
+                    # Because we only support dynamic res, num_image_tiles is a list of all ones
+                    #   with length equal to len(imgs_sizes) == sum(num_frames), where each entry
+                    #   in num_frames is 1 for images, and >1 for videos. We must update this after
+                    #   updating imgs_sizes and num_frames
+                    num_image_tiles = torch.ones(
+                        len(imgs_sizes), dtype=torch.int, device=images.device
+                    )
+                else:
+                    image_embeddings = self.vision_model(
+                        images, imgs_sizes=imgs_sizes, packed_seq_params=vision_packed_seq_params,
+                    )  # [num_tiles, img_seq_len, h_vision]
 
             else:
+                assert self._video_temporal_patch_size == 1, "Temporal compression is not supported for tiling"
                 if self.context_parallel_lm > 1 and images.shape[0] >= 2:
                     cp_images, pad = split_to_context_parallel_ranks(images)
                     image_embeddings = self.vision_model(cp_images)
@@ -1295,6 +1401,12 @@ class LLaVAModel(MegatronModule):
                 image_embeddings = image_embeddings[:, :-pad_len, :]
                 imgs_sizes = imgs_sizes[:-1]
 
+            # Track norms for vision model output (after class token removal, before conv_merge/pixel_shuffle)
+            if self.log_model_act_norms and self.training:
+                self._store_activation_norm(image_embeddings, name="vision_model")
+            if self.log_model_grad_norms and self.training:
+                self._register_grad_norm_hook(image_embeddings, name="vision_model")
+
             # Apply conv-merge before pixel-shuffle to keep ConvTokenMerge input dims consistent
             if self.conv_merge is not None:
                 if self._dynamic_resolution:
@@ -1312,6 +1424,12 @@ class LLaVAModel(MegatronModule):
                         ],
                     )
 
+                # Track norms for conv_merge output (after conv_merge, before pixel_shuffle)
+                if self.log_model_act_norms and self.training:
+                    self._store_activation_norm(image_embeddings, name="conv_merge")
+                if self.log_model_grad_norms and self.training:
+                    self._register_grad_norm_hook(image_embeddings, name="conv_merge")
+
             if self._pixel_shuffle:
                 if self._dynamic_resolution:
                     # After conv-merge, the effective patch size doubles for token layout
@@ -1325,6 +1443,8 @@ class LLaVAModel(MegatronModule):
                     image_embeddings = pixel_shuffle(
                         image_embeddings
                     )  # [num_tiles, img_seq_len_shuffled, h_vision_shuffled]
+
+                # NOTE: Pixel shuffle has no params, act/grad norm is same as prev embeddings
 
             # contiguous() required as `permute` can sparsify the tensor and this breaks pipelining
             image_embeddings = image_embeddings.permute(
@@ -1343,13 +1463,34 @@ class LLaVAModel(MegatronModule):
                 image_embeddings
             )  # [img_seq_len, num_tiles, h_language]
 
+            # Track norms for vision_projection output
+            if self.log_model_act_norms and self.training:
+                self._store_activation_norm(image_embeddings, name="vision_projection")
+            if self.log_model_grad_norms and self.training:
+                self._register_grad_norm_hook(image_embeddings, name="vision_projection")
+
             if vision_projection_padding_needed > 0:
                 image_embeddings = image_embeddings[:-vision_projection_padding_needed, :, :]
 
             if self.context_parallel_lm > 1 and self._dynamic_resolution:
                 image_embeddings = gather_from_context_parallel_ranks_dynamic_res(image_embeddings, num_padded_imgs)
-                # Go back from local imgs_sizes to global imgs_sizes.
-                imgs_sizes = global_imgs_sizes
+                # For temporal compression, gather the post-compression imgs_sizes and num_frames
+                # For non-temporal, use the saved global values for backwards compatibility
+                if self._video_temporal_patch_size > 1:
+                    imgs_sizes = gather_from_context_parallel_ranks_dynamic_res(imgs_sizes, num_padded_imgs)
+                    if num_frames is not None:
+                        # Convert to tensor if it's a list
+                        if not isinstance(num_frames, torch.Tensor):
+                            num_frames = torch.tensor(num_frames, dtype=torch.int, device=imgs_sizes.device)
+                        num_frames = gather_from_context_parallel_ranks_dynamic_res(
+                            num_frames.unsqueeze(-1) if num_frames.dim() == 1 else num_frames, num_padded_imgs
+                        ).squeeze(-1)
+                else:
+                    imgs_sizes = global_imgs_sizes
+                    if global_num_frames is not None:
+                        num_frames = global_num_frames
+                # num_image_tiles: one entry per frame/tubelet, all 1s (no tiling for dynamic res)
+                num_image_tiles = torch.ones(len(imgs_sizes), dtype=torch.int, device=imgs_sizes.device)
 
             if self.image_break_token is not None:
                 patch_sizes = imgs_sizes // self.vision_model.patch_dim
@@ -1549,6 +1690,11 @@ class LLaVAModel(MegatronModule):
             runtime_gather_output=runtime_gather_output,
             packed_seq_params=packed_seq_params,
         )
+        # Track norms for language_model output
+        if self.log_model_act_norms and self.training:
+            self._store_activation_norm(output, name="language_model")
+        if self.log_model_grad_norms and self.training:
+            self._register_grad_norm_hook(output, name="language_model")
 
         return output, new_loss_mask
 
