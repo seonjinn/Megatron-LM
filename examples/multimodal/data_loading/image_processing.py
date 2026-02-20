@@ -7,6 +7,7 @@ import numpy as np
 import random
 from PIL import Image
 import albumentations as A
+import warnings
 
 import einops
 import torch
@@ -648,7 +649,7 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
         thumbnail_area_threshold: float = 0.8,
         max_num_patches: int = 0,
         apply_data_augment: bool = False,
-        video_target_img_size: int = 512,
+        video_target_img_size: int | None = None,
         video_target_num_patches: int | None = None,
         video_maintain_aspect_ratio: bool = False,
         video_temporal_patch_size: int = 1,
@@ -684,15 +685,15 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
         )
 
         if apply_data_augment:
-            raise NotImplementedError(
+            warnings.warn(
                 "Found apply_data_augment=True. This has no effect and has been deprecated. To toggle"
                 " data augmentation on/off, directly modify the dataset yaml file."
             )
 
         # Validate exactly one of video_target_img_size or video_target_num_patches is provided
-        if ((video_target_img_size is None and video_target_num_patches is None) or
-            (video_target_img_size is not None and video_target_num_patches is not None)
-        ):
+        if (video_target_img_size is None and video_target_num_patches is None):
+            video_target_img_size = 512  # For backward compatibility
+        elif (video_target_img_size is not None and video_target_num_patches is not None):
             raise ValueError("Exactly one of video_target_img_size or video_target_num_patches must be provided")
 
         self._vision_model_type = vision_model_type
