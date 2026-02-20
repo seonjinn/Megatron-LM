@@ -82,7 +82,7 @@ class VLMInferenceRequest(InferenceRequest):
     imgs_sizes: torch.Tensor
     vision_packed_seq_params: Optional[PackedSeqParams] = None
     decoder_seq_length: int
-
+    num_frames: Optional[List[int]] = None
 
 @dataclass(kw_only=True)
 class AVLMInferenceRequest(InferenceRequest):
@@ -97,3 +97,4 @@ class AVLMInferenceRequest(InferenceRequest):
     num_sound_embeddings: int
     sound_clips: torch.Tensor
     sound_length: torch.Tensor
+    num_frames: Optional[List[int]] = None

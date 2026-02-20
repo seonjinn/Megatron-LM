@@ -19,6 +19,8 @@ from data_loading.conversation_sample import (
     VideoFrameMedia,
 )
 
+from megatron.core.models.multimodal.utils import patchify_image
+
 IMAGENET_PIXEL_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_PIXEL_STD = [0.229, 0.224, 0.225]
 SIGLIP_PIXEL_MEAN = [0.5, 0.5, 0.5]
@@ -646,6 +648,10 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
         thumbnail_area_threshold: float = 0.8,
         max_num_patches: int = 0,
         apply_data_augment: bool = False,
+        video_target_img_size: int = 512,
+        video_target_num_patches: int | None = None,
+        video_maintain_aspect_ratio: bool = False,
+        video_temporal_patch_size: int = 1,
     ):
         """
         Args:
@@ -666,11 +672,29 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
             thumbnail_area_threshold: Maximum area percentage (0.0-1.0) of the resized image relative to thumbnail area
                 for which to add a thumbnail. If the resized image area is larger than this threshold of the thumbnail
                 area, no thumbnail will be added. Defaults to 0.8 (80%).
-            apply_data_augment: Whether to apply data augmentation to the image. Defaults to False.
+
+            video_target_img_size: Target image size (pixels) for video frames. Default None, must specify this or video_target_num_patches.
+            video_target_num_patches: Target number of patches for video frames. Default None, must specify this or video_target_img_size.
+            video_maintain_aspect_ratio: If True, match video native aspect ratio while respecting target
+                patch budget. Default False.
+            video_temporal_patch_size: Temporal patch size for video frame compression. Default 1, no temporal compression.
         """
         assert "radio" in vision_model_type, (
             "Dynamic resolution is only supported for radio models"
         )
+
+        if apply_data_augment:
+            raise NotImplementedError(
+                "Found apply_data_augment=True. This has no effect and has been deprecated. To toggle"
+                " data augmentation on/off, directly modify the dataset yaml file."
+            )
+
+        # Validate exactly one of video_target_img_size or video_target_num_patches is provided
+        if ((video_target_img_size is None and video_target_num_patches is None) or
+            (video_target_img_size is not None and video_target_num_patches is not None)
+        ):
+            raise ValueError("Exactly one of video_target_img_size or video_target_num_patches must be provided")
+
         self._vision_model_type = vision_model_type
         self._min_num_patches = min_num_patches
         self._max_num_patches = max_num_patches if max_num_patches > 0 else float("inf")
@@ -683,6 +707,13 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
         self._use_thumbnail = use_thumbnail
         self._thumbnail_size = thumbnail_size
         self._thumbnail_area_threshold = thumbnail_area_threshold
+
+        # Video frame resolution control
+        self._video_target_img_size = video_target_img_size
+        self._video_target_patches = video_target_num_patches
+        self._video_maintain_aspect_ratio = video_maintain_aspect_ratio
+        self._video_temporal_patch_size = video_temporal_patch_size
+
         pixel_mean, pixel_std = pixel_statistics[self._vision_model_type]
         self._transform = T.Compose(
             [
@@ -691,7 +722,6 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
                 T.Normalize(mean=pixel_mean, std=pixel_std),
             ]
         )
-        self._apply_data_augment = apply_data_augment
 
     def apply_params(self, params: DynamicResolutionParams, **kwargs) -> list[torch.Tensor]:
         # resize the image
@@ -736,100 +766,92 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
         current_num_tokens_available = num_tokens_available
         if isinstance(media, ImageMedia):
             orig_width, orig_height = media.width, media.height
+            is_video = False
         elif isinstance(media, VideoFrameMedia):
             orig_width, orig_height = media.video_width, media.video_height
-            # current_num_tokens_available = 1024 #TEMP: hack for video
+            is_video = True
         else:
             raise ValueError(f"Unsupported media type: {type(media)}")
 
+        # NOTE: With python this rounds down if even, e.g. 512/16 = 32 + 0.5 = 32.5 -> 32
         closest_patch_height = round(orig_height / self._patch_size + 0.5)
         closest_patch_width = round(orig_width / self._patch_size + 0.5)
         patches = closest_patch_height * closest_patch_width
 
+        # Calculate the max scaling factor that we could apply to stay within budget
+        # e.g. solve for factor: (patch_height * factor) * (patch_width * factor) == num_tokens_avail
+        #      gives: factor = sqrt((num_tokens_avail / (patch_height * patch_width))
+        #      then take the min of this and factor_max to never scale too high (default: factor_max = 1)
+        # If factor_max == 1, we can only reduce the H/W to stay within budget, never increase it
         factor = min(math.sqrt(current_num_tokens_available / patches), self._factor_max)
         target_patch_height = math.floor(factor * closest_patch_height)
         target_patch_width = math.floor(factor * closest_patch_width)
 
-        # We only consider self._min_num_patches if it is greater than current_num_tokens_available.
+        # Scale up (possibly > factor_max) if we're less than min_num_patches and this is > num tokens avail
         if current_num_tokens_available > self._min_num_patches and target_patch_height * target_patch_width < self._min_num_patches:
             up_factor = math.sqrt(
                 self._min_num_patches / (target_patch_height * target_patch_width)
             )
-            target_patch_height = math.ceil(up_factor * target_patch_height)
-            target_patch_width = math.ceil(up_factor * target_patch_width)
+            up_target_patch_height = math.ceil(up_factor * target_patch_height)
+            up_target_patch_width = math.ceil(up_factor * target_patch_width)
+
+            # Only apply this if within budget (need to re-check due to rounding)
+            if current_num_tokens_available > up_target_patch_height * up_target_patch_width:
+                target_patch_height = up_target_patch_height
+                target_patch_width = up_target_patch_width
 
         if (
             self._min_side is not None
             and min(target_patch_width, target_patch_height) * self._patch_size
             < self._min_side
         ):
+            # Identify short and long sides
             if target_patch_width <= target_patch_height:
-                up_factor = self._min_side / (target_patch_width * self._patch_size)
-                new_patch_height = math.ceil(up_factor * target_patch_height)
-                new_patch_width = math.ceil(up_factor * target_patch_width)
-
-                if new_patch_height * new_patch_width > current_num_tokens_available:
-                    # If only one side can be min_side, make as big as possible at native aspect ratio while staying below max_patches
-                    if (
-                        max(current_num_tokens_available // new_patch_width, 1)
-                        * self._patch_size
-                        < self._min_side
-                    ):
-                        up_factor = math.sqrt(
-                            current_num_tokens_available
-                            / (target_patch_height * target_patch_width)
-                        )
-                        target_patch_height = math.floor(
-                            up_factor * target_patch_height
-                        )
-                        target_patch_width = math.floor(
-                            up_factor * target_patch_width
-                        )
-                    target_patch_width = new_patch_width
-                    target_patch_height = max(
-                        current_num_tokens_available // new_patch_width, 1
-                    )
-                else:
-                    target_patch_height = new_patch_height
-                    target_patch_width = new_patch_width
+                short, long = target_patch_width, target_patch_height
+                width_is_short = True
             else:
-                up_factor = self._min_side / (
-                    target_patch_height * self._patch_size
-                )
-                new_patch_height = math.ceil(up_factor * target_patch_height)
-                new_patch_width = math.ceil(up_factor * target_patch_width)
+                short, long = target_patch_height, target_patch_width
+                width_is_short = False
 
-                if new_patch_height * new_patch_width > current_num_tokens_available:
-                    # If only one side can be min_side, make as big as possible at native aspect ratio while staying below max_patches
-                    if (
-                        max(current_num_tokens_available // new_patch_height, 1)
-                        * self._patch_size
-                        < self._min_side
-                    ):
-                        up_factor = math.sqrt(
-                            current_num_tokens_available
-                            / (target_patch_height * target_patch_width)
-                        )
-                        target_patch_height = math.floor(
-                            up_factor * target_patch_height
-                        )
-                        target_patch_width = math.floor(
-                            up_factor * target_patch_width
-                        )
-                    else:
-                        target_patch_height = new_patch_height
-                        target_patch_width = max(
-                            current_num_tokens_available // new_patch_height, 1
-                        )
+            # Scale to make short side meet min_side
+            up_factor = self._min_side / (short * self._patch_size)
+            new_short = math.ceil(up_factor * short)
+            new_long = math.ceil(up_factor * long)
+
+            if new_short * new_long <= current_num_tokens_available:
+                # Scaled size fits in budget
+                short, long = new_short, new_long
+            else:
+                # Check what the long side would have to be to stay within budget w/ this scaled up short side
+                constrained_long = max(current_num_tokens_available // new_short, 1)
+                if constrained_long * self._patch_size < self._min_side:
+                    # Long side would be less than min side w/ increased short side
+                    # So instead, just rescale both to be as large as possible (will be <= min_side)
+                    up_factor = math.sqrt(current_num_tokens_available / (short * long))
+                    short = math.floor(up_factor * short)
+                    long = math.floor(up_factor * long)
                 else:
-                    target_patch_height = new_patch_height
-                    target_patch_width = new_patch_width
+                    # Long side can still be >= min_side w/ increased short side
+                    # Use this reduced long side that doesn't maintain aspect ratio, to meet min side req.
+                    short, long = new_short, constrained_long
+
+            # Map back to width/height
+            if width_is_short:
+                target_patch_width, target_patch_height = short, long
+            else:
+                target_patch_width, target_patch_height = long, short
 
         # Round patch grid to be divisible by 2 (pixel-shuffle OR conv-merging)
         # or by 4 when BOTH are enabled (two successive 2x reductions)
+        required_divisor = 1
         if self._pixel_shuffle or self._conv_merging:
             required_divisor = 4 if (self._pixel_shuffle and self._conv_merging) else 2
 
+        # Augment before handling required divisors
+        if data_augment and random.random() < tiling_augment_prob:
+            target_patch_width, target_patch_height = self.augment_resolution(target_patch_width, target_patch_height, current_num_tokens_available)
+
+        if required_divisor > 1:
             rem_h = target_patch_height % required_divisor
             if rem_h != 0:
                 inc_h = required_divisor - rem_h
@@ -846,18 +868,70 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
                 else:
                     target_patch_width = max(required_divisor, target_patch_width - rem_w)
 
-        if data_augment and self._apply_data_augment and random.random() < tiling_augment_prob:
-            target_patch_width, target_patch_height = self.augment_resolution(target_patch_width, target_patch_height, current_num_tokens_available)
+        # Video frame resolution handling, overrides code above
+        if is_video:
+            # Compute base target patches from target image size
+            if self._video_target_patches is not None:
+                assert self._video_target_img_size is None, "Expected video_target_num_patches = None"
+                target_patches = self._video_target_patches
+            else:
+                assert self._video_target_img_size > self._patch_size, \
+                    f"Expected video_target_img_size={self._video_target_img_size} to be greater than patch_size={self._patch_size}"
 
-        #TEMP: hack for video
-        if isinstance(media, VideoFrameMedia):
-            target_patch_width = 32
-            target_patch_height = 32
+                # NOTE: With python this rounds down if even, e.g. 512/16 = 32 + 0.5 = 32.5 -> 32
+                #       Only doing it like this to follow the convention above
+                base_patches = round(self._video_target_img_size / self._patch_size + 0.5)
+                target_patches = base_patches * base_patches
 
-        # Calculate embeddings for the main dynamic resolution image
+            if self._video_maintain_aspect_ratio:
+                # Resize to matching aspect ratio, while preserving target area
+                video_aspect_wh = media.video_width / media.video_height
+                # Solve for h,w -> h * w = area,  w / h = aspect
+                #         gives -> h * (h * aspect) = area -> h = sqrt(area / aspect)
+                #           and -> w * (w / aspect) = area -> w = sqrt(area * aspect)
+                target_patch_height = round(math.sqrt(target_patches / video_aspect_wh))
+                target_patch_width = round(math.sqrt(target_patches * video_aspect_wh))
+                # Ensure minimum of 1
+                target_patch_height = max(1, target_patch_height)
+                target_patch_width = max(1, target_patch_width)
+            else:
+                # Resize to square, not maintaining aspect ratio
+                side = int(math.sqrt(target_patches))
+                if side * side != target_patches:
+                    raise ValueError(
+                        f"Expected target_patches={target_patches} to be a perfect square if not"
+                        f" using --video-maintain-aspect-ratio, got {side} * {side}"
+                    )
+                target_patch_height = max(1, side)
+                target_patch_width = max(1, side)
+
+            # Apply divisibility constraints for video, only rounding down if we're over target
+            over_target = target_patch_height * target_patch_width > target_patches
+            if required_divisor > 1:
+                rem_h = target_patch_height % required_divisor
+                if rem_h != 0:
+                    inc_h = required_divisor - rem_h
+                    if over_target:
+                        target_patch_height -= rem_h  # Over target, round down
+                    else:
+                        target_patch_height += inc_h  # Round up
+
+                rem_w = target_patch_width % required_divisor
+                if rem_w != 0:
+                    inc_w = required_divisor - rem_w
+                    if over_target:
+                        target_patch_width -= rem_w  # Over target, round down
+                    else:
+                        target_patch_width += inc_w  # Round up
+
+        # Calculate spatial embeddings for this frame/tile (E)
+        # Note: Temporal compression is handled externally in task_encoder.py
+        # via _group_video_frame_params_into_tubelets, which groups T frames
+        # into tubelets (each tubelet has E embeddings, not T × E)
         num_embeddings = self._get_num_embeddings(
-            target_patch_width * self._patch_size,
-            target_patch_height * self._patch_size,
+            width=target_patch_width * self._patch_size,
+            height=target_patch_height * self._patch_size,
+            is_video=is_video,
         )
 
         token_count = target_patch_width * target_patch_height
@@ -874,7 +948,7 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
             if area_ratio < self._thumbnail_area_threshold:
                 num_tiles += 1  # Add 1 for thumbnail
                 # Add embeddings for thumbnail (thumbnail_size x thumbnail_size)
-                num_embeddings += self._get_num_embeddings(self._thumbnail_size, self._thumbnail_size)
+                num_embeddings += self._get_num_embeddings(width=self._thumbnail_size, height=self._thumbnail_size, is_video=False)
                 token_count += self._thumbnail_size // self._patch_size * self._thumbnail_size // self._patch_size
 
         return DynamicResolutionParams(
@@ -928,12 +1002,31 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
         Returns:
             List of ImageTilingParams for each media item
         """
+        # Expand token budget by reduction factors (tokens available before reduction)
         num_tokens_available = num_tokens_available * (4 if self._pixel_shuffle else 1) * (4 if self._conv_merging else 1)
-        # When the number of available token is too small, allow self._min_num_patches per media and
-        # let the sample be truncated.
+        num_images = sum(1 for m in media_list if isinstance(m, ImageMedia))
+        num_video_frames = sum(1 for m in media_list if isinstance(m, VideoFrameMedia))
+        assert num_images + num_video_frames == len(media_list), "Expected all media to be either image or video"
+
+        # For temporal compression, video frames get grouped (T frames → 1 output), so we can
+        # process more patches within the same LLM token budget. Scale the video frame portion.
+        if self._video_temporal_patch_size > 1 and num_video_frames > 0:
+            if num_images == 0:
+                # All videos: scale entire budget
+                num_tokens_available *= self._video_temporal_patch_size
+            else:
+                # Mixed: scale only the video portion (uncommon, may never happen)
+                imgs_fraction = num_images / len(media_list)
+                video_fraction = num_video_frames / len(media_list)
+                scale_factor = (imgs_fraction * 1) + (video_fraction * self._video_temporal_patch_size)
+                num_tokens_available = int(num_tokens_available * scale_factor)
+
+        # Always allow at least min_num_patches per media; if this is > num_tokens_avail, update
+        #   num_tokens_avail to this, which will end up truncating the sample but keeping img sizes
+        #   reasonable enough (>= min_num_patches)
         num_tokens_available = max(num_tokens_available, self._min_num_patches * len(media_list))
 
-        # Clip the number of tokens available per media to be between min and max patches.
+        # Initialize the number of tokens available per media to be between min and max patches.
         num_tokens_available_per_media = [
             max(min(num_tokens_available, self._max_num_patches), self._min_num_patches)
             for _ in range(len(media_list))]
@@ -985,21 +1078,9 @@ class DynamicResolutionImageTilingStrategy(ImageTilingStrategy):
             [[img.shape[1], img.shape[2]] for img in images], dtype=torch.int32
         )
 
-        def rearrange_img(x):
-            py = x.shape[-2] // self._patch_size
-            px = x.shape[-1] // self._patch_size
-            x = einops.rearrange(
-                x,
-                "c (py yy) (px xx) -> (py px) (c yy xx)",
-                py=py,
-                yy=self._patch_size,
-                px=px,
-                xx=self._patch_size,
-            )
-            return x
-
         if len(images) > 0:
-            imgs = [rearrange_img(img) for img in images]
+            # Patchify: (3,H,W) -> (L,3*patch_dim*patch_dim)
+            imgs = [patchify_image(img, self._patch_size) for img in images]
 
             current_length = 0
             max_length = 0
@@ -1199,7 +1280,7 @@ class MatchTilingDynamicResolutionStrategy(ImageTilingStrategy):
                     # Calculate target dimensions for dynamic resolution processing
                     target_width = self._tile_size * tiling[0]
                     target_height = self._tile_size * tiling[1]
-                    num_embeddings = self._get_num_embeddings(target_width, target_height)
+                    num_embeddings = self._get_num_embeddings(target_width, target_height, is_video=False)
 
                     # Account for thumbnail (same logic as ImageTilingStrategyV1)
                     num_tiles = 1  # Base dynamic resolution image
@@ -1207,7 +1288,7 @@ class MatchTilingDynamicResolutionStrategy(ImageTilingStrategy):
                     if self._use_thumbnail and blocks != 1:
                         num_tiles += 1  # Add 1 for thumbnail
                         # Add embeddings for thumbnail (tile_size x tile_size)
-                        num_embeddings += self._get_num_embeddings(self._tile_size, self._tile_size)
+                        num_embeddings += self._get_num_embeddings(self._tile_size, self._tile_size, is_video=False)
 
                     media_params = MatchTilingDynamicResolutionParams(
                         media=media,
@@ -1462,13 +1543,13 @@ class MaskedTilingDynamicResolutionStrategy(ImageTilingStrategy):
 
                     blocks = tiling[0] * tiling[1]
                     # Each tile is tile_size x tile_size
-                    per_tile_emb = self._get_num_embeddings(self._tile_size, self._tile_size)
+                    per_tile_emb = self._get_num_embeddings(self._tile_size, self._tile_size, is_video=False)
                     num_embeddings = blocks * per_tile_emb
 
                     num_tiles = blocks
                     if self._use_thumbnail and blocks != 1:
                         num_tiles += 1
-                        num_embeddings += self._get_num_embeddings(self._tile_size, self._tile_size)
+                        num_embeddings += self._get_num_embeddings(self._tile_size, self._tile_size, is_video=False)
 
                     media_params = MaskedTilingDynamicResolutionParams(
                         media=media,
@@ -1659,8 +1740,40 @@ def create_image_tiling_strategy(args):
         assert not use_tiling, "cannot use --use-tiling and --masked-tiling-dynamic-resolution together"
         assert not match_tiling_dynamic_resolution, "cannot combine --masked-tiling-dynamic-resolution with --match-tiling-dynamic-resolution"
 
+    video_temporal_patch_size = getattr(args, 'video_temporal_patch_size', 1)
+
     if dynamic_resolution:
+        # The version of `get_num_image_embeddings()` passed to the tiling strategy is used per-frame
+        #   via `process_media()`. To support temporal compression the `compute_params()` method must
+        #   aggregate this, and the tiling strategy must handle any temporal patch size adjustments
+        #   from there. This is a limitation of calling `process_media()` on each individual video
+        #   frame instead of the whole sequence, and thus cannot be avoided without a larger refactor.
+        # During eval, we call get_num_video_embeddings() directly for video sequences
+        dynamic_get_num_embeddings = lambda width, height, is_video=False: (
+            get_num_image_embeddings(
+                img_h=height,
+                img_w=width,
+                patch_dim=args.patch_dim,
+                vision_model_type=args.vision_model_type,
+                disable_vision_class_token=args.disable_vision_class_token,
+                class_token_len=1,
+                pixel_shuffle=args.pixel_shuffle,
+                use_tile_tags=args.use_tile_tags,
+                max_num_tiles=args.max_num_tiles,
+                tokenizer_type=args.tokenizer_prompt_format,
+                use_image_break_token=args.image_break_token is not None,
+                conv_merging=args.conv_merging,
+                allow_non_spatial_embeddings=False if is_video else True,
+            )
+        )
+
         if masked_tiling_dynamic_resolution:
+            if video_temporal_patch_size != 1:
+                raise NotImplementedError(
+                    f"When using tiling, temporal compression is not supported."
+                    f" Found video_temporal_patch_size={video_temporal_patch_size}."
+                )
+
             num_image_embeddings_per_tile = get_num_image_embeddings(
                 img_h=args.img_h,
                 img_w=args.img_w,
@@ -1683,20 +1796,7 @@ def create_image_tiling_strategy(args):
                 max_num_tiles=args.max_num_tiles,
                 embeddings_per_tile=num_image_embeddings_per_tile,
                 patch_size=args.patch_dim,
-                get_num_embeddings=lambda width, height: get_num_image_embeddings(
-                    img_h=height,
-                    img_w=width,
-                    patch_dim=args.patch_dim,
-                    vision_model_type=args.vision_model_type,
-                    disable_vision_class_token=args.disable_vision_class_token,
-                    class_token_len=1,
-                    pixel_shuffle=args.pixel_shuffle,
-                    use_tile_tags=args.use_tile_tags,
-                    max_num_tiles=args.max_num_tiles,
-                    tokenizer_type=args.tokenizer_prompt_format,
-                    use_image_break_token=args.image_break_token is not None,
-                    conv_merging=args.conv_merging,
-                ),
+                get_num_embeddings=dynamic_get_num_embeddings,
                 find_closest_aspect_ratio_fn=(
                     find_closest_area_weighted_aspect_ratio
                     if use_area_weighted_aspect_ratio
@@ -1706,6 +1806,12 @@ def create_image_tiling_strategy(args):
                 conv_merging=args.conv_merging,
             )
         elif match_tiling_dynamic_resolution:
+            if video_temporal_patch_size != 1:
+                raise NotImplementedError(
+                    f"When using tiling, temporal compression is not supported."
+                    f" Found video_temporal_patch_size={video_temporal_patch_size}."
+                )
+
             num_image_embeddings_per_tile = get_num_image_embeddings(
                 img_h=args.img_h,
                 img_w=args.img_w,
@@ -1728,20 +1834,7 @@ def create_image_tiling_strategy(args):
                 max_num_tiles=args.max_num_tiles,
                 embeddings_per_tile=num_image_embeddings_per_tile,
                 patch_size=args.patch_dim,
-                get_num_embeddings=lambda width, height: get_num_image_embeddings(
-                    img_h=height,
-                    img_w=width,
-                    patch_dim=args.patch_dim,
-                    vision_model_type=args.vision_model_type,
-                    disable_vision_class_token=args.disable_vision_class_token,
-                    class_token_len=1,
-                    pixel_shuffle=args.pixel_shuffle,
-                    use_tile_tags=args.use_tile_tags,
-                    max_num_tiles=args.max_num_tiles,
-                    tokenizer_type=args.tokenizer_prompt_format,
-                    use_image_break_token=args.image_break_token is not None,
-                    conv_merging=args.conv_merging,
-                ),
+                get_num_embeddings=dynamic_get_num_embeddings,
                 find_closest_aspect_ratio_fn=(
                     find_closest_area_weighted_aspect_ratio
                     if use_area_weighted_aspect_ratio
@@ -1755,20 +1848,7 @@ def create_image_tiling_strategy(args):
                 vision_model_type=args.vision_model_type,
                 min_num_patches=args.dynamic_resolution_min_patches,
                 patch_size=args.patch_dim,
-                get_num_embeddings=lambda width, height: get_num_image_embeddings(
-                    img_h=height,
-                    img_w=width,
-                    patch_dim=args.patch_dim,
-                    vision_model_type=args.vision_model_type,
-                    disable_vision_class_token=args.disable_vision_class_token,
-                    class_token_len=1,
-                    pixel_shuffle=args.pixel_shuffle,
-                    use_tile_tags=args.use_tile_tags,
-                    max_num_tiles=args.max_num_tiles,
-                    tokenizer_type=args.tokenizer_prompt_format,
-                    use_image_break_token=args.image_break_token is not None,
-                    conv_merging=args.conv_merging,
-                ),
+                get_num_embeddings=dynamic_get_num_embeddings,
                 pixel_shuffle=args.pixel_shuffle,
                 min_side=args.dynamic_resolution_min_side,
                 conv_merging=args.conv_merging,
@@ -1777,8 +1857,18 @@ def create_image_tiling_strategy(args):
                 thumbnail_area_threshold=args.thumbnail_area_threshold,
                 max_num_patches=args.dynamic_resolution_max_patches,
                 apply_data_augment=args.apply_data_augment,
+                video_target_img_size=getattr(args, 'video_target_img_size', 512),
+                video_target_num_patches=getattr(args, 'video_target_num_patches', None),
+                video_maintain_aspect_ratio=getattr(args, 'video_maintain_aspect_ratio', False),
+                video_temporal_patch_size=video_temporal_patch_size,
             )
     else:
+        if video_temporal_patch_size != 1:
+            raise NotImplementedError(
+                f"When using tiling, temporal compression is not supported."
+                f" Found video_temporal_patch_size={video_temporal_patch_size}."
+            )
+
         num_image_embeddings_per_tile = get_num_image_embeddings(
             img_h=args.img_h,
             img_w=args.img_w,

@@ -45,6 +45,7 @@ class VLMTextGenerationController(TextGenerationController):
             request.imgs_sizes,
             request.decoder_seq_length,
             vision_packed_seq_params=request.vision_packed_seq_params,
+            num_frames=request.num_frames,
         )
 
         if use_attention_mask and (

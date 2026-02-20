@@ -10,7 +10,7 @@ import logging
 import math
 import os
 import sys
-from typing import List, Optional
+from typing import Callable, Optional, Union
 
 import torch.distributed
 from .log_handler import CustomHandler
@@ -734,6 +734,7 @@ def pretrain(
     non_loss_data_func=None,
     store=None,
     inprocess_call_wrapper: Optional[CallWrapper] = None,
+    post_init_func: Optional[Callable] = None,
 ):
     """Main training program.
 
@@ -784,6 +785,9 @@ def pretrain(
         get_position_embedding_ranks=get_position_embedding_ranks,
         store=store,
     )
+
+    if post_init_func is not None:
+        post_init_func()
 
     args = get_args()
     timers = get_timers()
@@ -1628,6 +1632,8 @@ def training_log(
     grad_norm,
     params_norm,
     num_zeros_in_grad,
+    model_grad_norms,
+    model_act_norms,
 ):
     """Log training information such as losses, timing, ...."""
     args = get_args()
@@ -1744,6 +1750,18 @@ def training_log(
             writer.add_scalar('grad-norm vs samples', grad_norm, args.consumed_train_samples)
             if wandb_writer:
                 wandb_writer.log({'grad-norm': grad_norm}, iteration)
+        if model_grad_norms is not None:
+            for key in model_grad_norms:
+                writer.add_scalar(f"model_grad_norms/{key}", model_grad_norms[key], iteration)
+                writer.add_scalar(f"model_grad_norms/{key} vs samples", model_grad_norms[key], args.consumed_train_samples)
+                if wandb_writer:
+                    wandb_writer.log({f"model_grad_norms/{key}": model_grad_norms[key]}, iteration)
+        if model_act_norms is not None:
+            for key in model_act_norms:
+                writer.add_scalar(f"model_act_norms/{key}", model_act_norms[key], iteration)
+                writer.add_scalar(f"model_act_norms/{key} vs samples", model_act_norms[key], args.consumed_train_samples)
+                if wandb_writer:
+                    wandb_writer.log({f"model_act_norms/{key}": model_act_norms[key]}, iteration)
         if num_zeros_in_grad is not None:
             writer.add_scalar('num-zeros', num_zeros_in_grad, iteration)
             writer.add_scalar(
@@ -2453,6 +2471,20 @@ def train(
                 decoupled_learning_rate = param_group['lr']
             else:
                 learning_rate = param_group['lr']
+
+        model_grad_norms = None
+        model_act_norms = None
+        if args.log_model_grad_norms or args.log_model_act_norms:
+            unwrapped_model = unwrap_model(model[0])
+            if args.log_model_grad_norms:
+                if not hasattr(unwrapped_model, 'get_model_grad_norms'):
+                    raise ValueError("Model does not have get_model_grad_norms method")
+                model_grad_norms = unwrapped_model.get_model_grad_norms()
+            if args.log_model_act_norms:
+                if not hasattr(unwrapped_model, 'get_model_act_norms'):
+                    raise ValueError("Model does not have get_model_act_norms method")
+                model_act_norms = unwrapped_model.get_model_act_norms()
+
         report_memory_flag = training_log(
             loss_dict,
             total_loss_dict,
@@ -2465,6 +2497,8 @@ def train(
             grad_norm,
             params_norm,
             num_zeros_in_grad,
+            model_grad_norms,
+            model_act_norms,
         )
 
         # Evaluation.

@@ -69,6 +69,7 @@ class VLMInferenceWrapper(GPTInferenceWrapper):
         imgs_sizes: torch.Tensor,
         decoder_seq_length: int,
         vision_packed_seq_params: Optional[PackedSeqParams] = None,
+        num_frames: Optional[list] = None,
     ):
         """Prepares the inference input data.
 
@@ -80,6 +81,7 @@ class VLMInferenceWrapper(GPTInferenceWrapper):
             imgs_sizes (torch.Tensor): The image sizes
             decoder_seq_length (int): The decoder sequence length
             vision_packed_seq_params (Optional[PackedSeqParams]): Vision packed sequence parameters
+            num_frames (Optional[list]): Number of frames per video/image for dynamic pooling
         """
         inference_input = super().prep_inference_input(prompts_tokens)
 
@@ -94,6 +96,7 @@ class VLMInferenceWrapper(GPTInferenceWrapper):
         inference_input["imgs_sizes"] = imgs_sizes
         inference_input["vision_packed_seq_params"] = vision_packed_seq_params
         inference_input["decoder_seq_length"] = decoder_seq_length
+        inference_input["num_frames"] = num_frames
 
         return inference_input
 
@@ -123,6 +126,7 @@ class VLMInferenceWrapper(GPTInferenceWrapper):
         imgs_sizes = inference_input["imgs_sizes"]
         vision_packed_seq_params = inference_input["vision_packed_seq_params"]
         decoder_seq_length = inference_input["decoder_seq_length"]
+        num_frames = inference_input["num_frames"]
 
         tokens2use = tokens[:, context_start_position:context_end_position]
         positions2use = position_ids[:, context_start_position:context_end_position]
@@ -136,6 +140,7 @@ class VLMInferenceWrapper(GPTInferenceWrapper):
             "imgs_sizes": imgs_sizes,
             "vision_packed_seq_params": vision_packed_seq_params,
             "decoder_seq_length": decoder_seq_length,
+            "num_frames": num_frames,
         }
 
     def _forward(self, inference_input: Dict[str, Any]):
@@ -153,6 +158,7 @@ class VLMInferenceWrapper(GPTInferenceWrapper):
         num_image_tiles = inference_input["num_tiles"]
         imgs_sizes = inference_input["imgs_sizes"]
         vision_packed_seq_params = inference_input["vision_packed_seq_params"]
+        num_frames = inference_input["num_frames"]
 
         output = self.model(
             images,
@@ -161,6 +167,7 @@ class VLMInferenceWrapper(GPTInferenceWrapper):
             attention_mask=None,
             inference_context=self.inference_context,
             num_image_tiles=num_image_tiles,
+            num_frames=num_frames,
             imgs_sizes=imgs_sizes,
             vision_packed_seq_params=vision_packed_seq_params,
             runtime_gather_output=True,
