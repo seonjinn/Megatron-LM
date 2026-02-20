@@ -7,7 +7,7 @@ splits:
       - path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/eagle_sft_v13.67.yaml
         repetitions: 1
       # Text data 18.9M samples -> 3786 tokens per sample -> 71B tokens
-      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/nickel_capybara_0_16k.yaml
+      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/nickel_capybara_0_16k_absolute_paths.yaml
         repetitions: 0.5
       # Short video data 2M samples -> 6846 tokens per sample with 32 frames -> 13.7B tokens
       - path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/video.arushi.0130.short.yaml
