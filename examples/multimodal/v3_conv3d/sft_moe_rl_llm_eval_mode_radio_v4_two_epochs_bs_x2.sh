@@ -10,13 +10,13 @@
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=sft_moe_rl_llm_2e_bs_x2_radio_v4_h_rc2_v1370vid_conv3d_vf32a_sep_0217
+#SBATCH --job-name=sft_moe_rl_llm_2e_bs_x2_radio_v4_h_rc2_v1370vid_conv3d_vf32a_sep_notxt_0220
 
 # !! Example launch command !!
 # examples/multimodal/launch.sh \
-# --name sft_moe_rl_llm_2e_bs_x2_radio_v4_h_rc2_v1370vid_conv3d_vf32a_sep_0217 \
-# --sbatch examples/multimodal/v3_baseline/sft_moe_rl_llm_eval_mode_radio_v4_two_epochs_bs_x2.sh \
-# --num-jobs 9
+# --name sft_moe_rl_llm_2e_bs_x2_radio_v4_h_rc2_v1370vid_conv3d_vf32a_sep_notxt_0220 \
+# --sbatch examples/multimodal/v3_conv3d/sft_moe_rl_llm_eval_mode_radio_v4_two_epochs_bs_x2.sh \
+# --num-jobs 10
 
 # Strict mode: exit immediately on failure (-e), treat unset vars as error (-u), mark any failures as whole pipeline (-o pipefail)
 # Combined these ensure that the job is reliably marked as failed so we can use `--dependency afterok:<jobid>`
@@ -46,8 +46,8 @@ USE_FP8=0
 USE_CPE_EVAL_MODE=1
 
 # Remember to update model and job name if running in batch mode!!
-MODEL_NAME=${MODEL_NAME:-"sft_moe_rl_llm_2e_bs_x2_radio_v4_h_rc2_v1370vid_conv3d_vf32a_sep_0217"}
-DATA_TRAIN=${DATA_TRAIN:-"/lustre/fsw/portfolios/llmservice/users/cmccarthy/eagle_recipe_online_packing/final_recipe/eagle_sft_v13.70_extra_video_0217.yaml"}
+MODEL_NAME=${MODEL_NAME:-"sft_moe_rl_llm_2e_bs_x2_radio_v4_h_rc2_v1370vid_conv3d_vf32a_sep_notxt_0220"}
+DATA_TRAIN=${DATA_TRAIN:-"/lustre/fsw/portfolios/llmservice/users/cmccarthy/eagle_recipe_online_packing/final_recipe/eagle_sft_v13.70_extra_video_notxt_0220.yaml"}
 
 # Defaults, w/ allowed overrides (via env vars)
 VIDEO_MAX_NUM_FRAMES=${VIDEO_MAX_NUM_FRAMES:-32}  # Using conv3d w/ 2-frame compression
