@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH -A llmservice_nemotron_super
+#SBATCH -A llmservice_fm_vision
 #SBATCH -p batch,batch_large,batch_large_long,batch_long
 #SBATCH -t 04:00:00
 #SBATCH --mem=0

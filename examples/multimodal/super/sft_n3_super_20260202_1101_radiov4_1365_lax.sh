@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH -A llmservice_nemotron_super
+#SBATCH -A llmservice_fm_vision
 #SBATCH -p batch,batch_large,batch_large_long,batch_long
 #SBATCH -t 04:00:00
 #SBATCH --mem=0
@@ -10,7 +10,7 @@
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=sft_n3_super_20260202_1101_radiov4_1365_0206
+#SBATCH --job-name=sft_n3_super_20260202_1101_radiov4_1365_0211
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/scratch/fsw/portfolios/llmservice/users/trintamaki/msc_config/msc_config.yaml"
@@ -50,7 +50,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="sft_n3_super_20260202_1101_radiov4_1365_0206"
+    MODEL_NAME="sft_n3_super_20260202_1101_radiov4_1365_0211"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -79,7 +79,7 @@ CODE_DIR="${SOURCE}"
 TP=2
 EP=64
 
-CHECKPOINT_DIR="/scratch/fsw/portfolios/llmservice/users/tpoon/workspace/output/pretrain_n3_super_20260202_1101_radiov4_1365_0206/checkpoints"
+CHECKPOINT_DIR="/scratch/fsw/portfolios/llmservice/users/tpoon/workspace/output/pretrain_n3_super_20260202_1101_radiov4_1365_0211/checkpoints"
 
 # TODO: Update this path to point to the correct tokenizer for the 12B model
 TOKENIZER_MODEL="/scratch/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--Nemotron-Nano-3-30B-A3.5B-dev-1016/snapshots/bb271274159f07461e919379311e32802e5ec36b/"
