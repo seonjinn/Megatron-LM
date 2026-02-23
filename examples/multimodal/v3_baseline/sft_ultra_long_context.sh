@@ -10,7 +10,7 @@
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=ultra_long_context_0206
+#SBATCH --job-name=ultra_long_context_0222
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
@@ -34,7 +34,6 @@ which srun
 BATCH=$((1-$?))
 
 DEBUG=0
-USE_TILING=0
 USE_DYNAMIC_RES=1
 USE_IMAGE_BREAK=0   # Only used if USE_DYNAMIC_RES is 1.
 USE_CONV_MERGE=0    # Only used if USE_DYNAMIC_RES is 1.
@@ -57,7 +56,7 @@ if [[ $BATCH -eq 0 ]]; then
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="ultra_long_context_0206"
+    MODEL_NAME="ultra_long_context_0222"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -100,13 +99,15 @@ EP=32
 CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/sft_moe_video_lower_lr_lower_load_rl_llm_eval_mode_radio_v4_1214/checkpoints"
 CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/amalasanjayd/workspace/output/sft_moe_rl_llm_eval_mode_radio_v4_v1365_0126/checkpoints/"
 CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/amalasanjayd/workspace/output/sft_moe_rl_llm_eval_mode_radio_v4_v1365_text_0129/checkpoints/"
+#CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/amalasanjayd/workspace/output/sft_moe_rl_llm_eval_mode_radio_v4_v1369_keephist_0215/checkpoints"
+#CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/amalasanjayd/workspace/output/sft_moe_rl_llm_eval_mode_radio_v4_v1367_0205/checkpoints/"
 
 # New tokenizer 10/20.
 TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/megatron-lm/nano-v3-tokenizer-vlm" # "/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--Nemotron-Nano-3-30B-A3.5B-dev-1016/snapshots/bb271274159f07461e919379311e32802e5ec36b/"
 TOKENIZER_PROMPT_FORMAT="nemotron6-moe"
 
 # DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/eagle_sft_v13.52.no.text.yaml"
-DATA_TRAIN="${SOURCE}/examples/multimodal/v3/data_config/mmlongbench_nabin.yaml"
+DATA_TRAIN="${SOURCE}/examples/multimodal/v3_baseline/ultra_long_context.yaml"
 
 if [[ $DEBUG -eq 1 ]]; then
     MBZ=1
@@ -122,6 +123,11 @@ if [[ $DEBUG -eq 1 ]]; then
 else
     MBZ=1
     BZ=128
+
+    if [[ $USE_ULTRA_LONG_MODE -eq 1 ]]; then
+        BZ=$((BZ/2))
+    fi
+
     NW=4
     AD=0.0
     HD=0.0
@@ -135,18 +141,13 @@ PBS=1024
 SEQ_LEN=256
 DECODER_SEQ_LEN=49152
 if [[ $USE_MEGA_LONG_MODE -eq 1 ]]; then
-    DECODER_SEQ_LEN=114688
+    DECODER_SEQ_LEN=122880
 elif [[ $USE_ULTRA_LONG_MODE -eq 1 ]]; then
-    DECODER_SEQ_LEN=237568
+    DECODER_SEQ_LEN=245760
 fi
 
 if [ -n "${WANDB_API_KEY}" ]; then
     EXTRA_ARGS+=" --wandb-project ${WANDB_PROJECT} --wandb-exp-name ${MODEL_NAME} --wandb-save-dir ${WANDB_DIR} --wandb-resume-same-run"
-fi
-
-if [[ $USE_TILING -eq 1 ]]; then
-    EXTRA_ARGS+=" --pixel-shuffle --use-tiling --max-num-tiles 12 --use-thumbnail"
-    SEQ_LEN=256
 fi
 
 if [[ $USE_FP8 -eq 1 ]]; then
