@@ -138,7 +138,8 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
         num_frames = torch.tensor([], dtype=torch.int, device=data_text.device)
 
     # TODO: Sound encoder from HF/Nemo can hang with text-only samples. Find a better way to handle this.
-    if getattr(args, "sound_model_type", None) and sound_clips is not None and sound_clips.shape == torch.Size([1, 1]):
+    is_sound_frozen = args.freeze_sound_model and args.freeze_sound_projection
+    if getattr(args, "sound_model_type", None) and sound_clips is not None and sound_clips.shape == torch.Size([1, 1]) and not is_sound_frozen:
         sound_clips = torch.zeros((1, 1600), dtype=sound_clips.dtype, device=sound_clips.device)
         sound_length = torch.tensor([1600], dtype=sound_length.dtype, device=sound_length.device)
         sound_timestamps = torch.tensor([], dtype=sound_timestamps.dtype, device=sound_timestamps.device)
