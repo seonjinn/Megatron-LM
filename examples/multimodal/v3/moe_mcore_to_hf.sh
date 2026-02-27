@@ -29,8 +29,12 @@ python tools/checkpoint/convert.py \
 touch $HF_BASE_PATH/mcore_to_hf_info.txt
 echo "original mcore path: $MCORE_PATH at iteration $CKPT_STEP" >> $HF_BASE_PATH/mcore_to_hf_info.txt
 
-# Step 3: Copy the "default" hf config
-cp /lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/moe_hf_config/* $HF_PATH
+# Step 3: Copy the "default" hf config from the template directory.
+# IMPORTANT: Do NOT copy model.safetensors.index.json -- the converter just generated
+#   one with the correct weight map (including sound model keys, etc.). Overwriting it
+#   with the template's stale copy would make those weights invisible to torch / HF loaders.
+HF_CONFIG_SRC=/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/moe_hf_config
+rsync -a --exclude='model.safetensors.index.json' "$HF_CONFIG_SRC/" "$HF_PATH/"
 
 # Step 4: Overwrite a few model-specific params using create_yaml_inference_config.py --update_hf_config
 python examples/multimodal/tools/create_yaml_inference_config.py --model_name $MODEL_NAME --update_hf_config $HF_PATH
