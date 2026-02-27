@@ -2,7 +2,11 @@
 
 """ Utilities for transforming state_dict."""
 
+import os
+import time as _time
 from typing import Callable, Union
+
+import torch
 
 from .dict_utils import dict_list_map_inplace, extract_matching_values
 from .mapping import (
@@ -15,6 +19,24 @@ from .mapping import (
 )
 from .utils import extract_nonpersistent, extract_sharded_base
 from .validation import determine_global_metadata, validate_sharding_integrity
+
+_NRL_DEBUG = os.environ.get("NRL_DEBUG", "0") == "1"
+
+
+def _nrl_sdu_debug(stage: str, **kwargs) -> None:
+    if not _NRL_DEBUG:
+        return
+    rank = -1
+    world = -1
+    try:
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            rank = torch.distributed.get_rank()
+            world = torch.distributed.get_world_size()
+    except Exception:
+        pass
+    details = " ".join(f"{k}={v}" for k, v in kwargs.items())
+    ts = _time.strftime("%Y-%m-%d %H:%M:%S", _time.localtime())
+    print(f"[NCCL_SDU_DEBUG] ts={ts} stage={stage} rank={rank}/{world} {details}", flush=True)
 
 
 def save_preprocess(
@@ -37,20 +59,41 @@ def save_preprocess(
         Tuple[ShardedStateDict, dict]:
             The preprocessed sharded state dictionary and the common state dictionary.
     """
+    _nrl_sdu_debug("save_preprocess:enter", validate_access_integrity=validate_access_integrity)
+    _nrl_sdu_debug("save_preprocess:apply_factories:before")
     apply_factories(sharded_state_dict)
+    _nrl_sdu_debug("save_preprocess:apply_factories:after")
+
+    _nrl_sdu_debug("save_preprocess:extract_nonpersistent:before")
     _, sharded_state_dict = extract_nonpersistent(sharded_state_dict)
+    _nrl_sdu_debug("save_preprocess:extract_nonpersistent:after")
+
+    _nrl_sdu_debug("save_preprocess:extract_sharded_base:before")
     sharded_part, common_state_dict = extract_sharded_base(sharded_state_dict)
+    _nrl_sdu_debug("save_preprocess:extract_sharded_base:after")
+
+    _nrl_sdu_debug("save_preprocess:filter_empty_flatten:before")
     sharded_part = filter_out_empty_flatten_tensor(sharded_part)
+    _nrl_sdu_debug("save_preprocess:filter_empty_flatten:after")
+
     if validate_access_integrity:
         preprocessed_common_state_dict = common_state_dict
         if preprocess_common_before_consistancy_check:
+            _nrl_sdu_debug("save_preprocess:preprocess_common:before")
             preprocessed_common_state_dict = preprocess_common_before_consistancy_check(
                 common_state_dict
             )
+            _nrl_sdu_debug("save_preprocess:preprocess_common:after")
+        _nrl_sdu_debug("save_preprocess:determine_global_metadata:before")
+        global_metadata = determine_global_metadata(sharded_part)[1]
+        _nrl_sdu_debug("save_preprocess:determine_global_metadata:after")
+        _nrl_sdu_debug("save_preprocess:validate_sharding_integrity:before")
         validate_sharding_integrity(
-            determine_global_metadata(sharded_part)[1],
+            global_metadata,
             common_state_dict=preprocessed_common_state_dict,
         )
+        _nrl_sdu_debug("save_preprocess:validate_sharding_integrity:after")
+    _nrl_sdu_debug("save_preprocess:exit")
     return sharded_part, common_state_dict
 
 

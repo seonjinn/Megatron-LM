@@ -9,6 +9,8 @@ loading the sharded tensors.
 """
 
 import logging
+import os
+import time as _time
 from pathlib import Path
 from typing import Callable, Dict, Optional, Set, Tuple, Union
 
@@ -49,6 +51,23 @@ from .validation import (
 )
 
 logger = logging.getLogger(__name__)
+_NRL_DEBUG = os.environ.get("NRL_DEBUG", "0") == "1"
+
+
+def _nrl_serial_debug(stage: str, **kwargs) -> None:
+    if not _NRL_DEBUG:
+        return
+    rank = -1
+    world = -1
+    try:
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            rank = torch.distributed.get_rank()
+            world = torch.distributed.get_world_size()
+    except Exception:
+        pass
+    details = " ".join(f"{k}={v}" for k, v in kwargs.items())
+    ts = _time.strftime("%Y-%m-%d %H:%M:%S", _time.localtime())
+    print(f"[NCCL_SERIAL_DEBUG] ts={ts} stage={stage} rank={rank}/{world} {details}", flush=True)
 
 
 # flat state dict with sharded objects without any data
@@ -369,6 +388,10 @@ def save(
             async request that should be scheduled by the caller of this function.
             None otherwise.
     """
+    _nrl_serial_debug("save:enter", checkpoint_dir=checkpoint_dir,
+                       validate_access_integrity=validate_access_integrity,
+                       async_sharded_save=async_sharded_save)
+
     if torch.distributed.get_rank() == 0:
         if MultiStorageClientFeature.is_enabled():
             msc = MultiStorageClientFeature.import_package()
@@ -382,6 +405,7 @@ def save(
             if torch.distributed.get_rank() == 0:
                 logger.warning("Overwriting old incomplete / corrupted checkpoint...")
 
+    _nrl_serial_debug("save:strategies_resolve:before")
     if common_strategy is not None:
         raise NotImplementedError('The only supported common strategy is torch')
 
@@ -396,34 +420,52 @@ def save(
     if not isinstance(common_strategy, SaveCommonStrategy):
         assert isinstance(common_strategy, tuple), type(common_strategy)
         common_strategy = get_default_strategy(StrategyAction.SAVE_COMMON, *common_strategy)
+    _nrl_serial_debug("save:strategies_resolve:after",
+                       sharded_type=type(sharded_strategy).__name__,
+                       common_type=type(common_strategy).__name__)
 
     if content_metadata is not None:
         sharded_state_dict[_CONTENT_METADATA_KEY] = content_metadata
 
+    _nrl_serial_debug("save:save_preprocess:before",
+                       validate_access_integrity=validate_access_integrity)
     sharded_state_dict, state_dict = save_preprocess(
         sharded_state_dict, validate_access_integrity, preprocess_common_before_consistancy_check
     )
+    _nrl_serial_debug("save:save_preprocess:after")
 
+    _nrl_serial_debug("save:save_common:before")
     common_strategy.save_common(state_dict, checkpoint_dir)
+    _nrl_serial_debug("save:save_common:after")
 
     if not sharded_strategy.can_handle_sharded_objects:
+        _nrl_serial_debug("save:save_sharded_objects:before")
         validate_sharded_objects_handling(sharded_strategy, common_strategy)
         sharded_objects_state_dict, sharded_state_dict = extract_matching_values(
             sharded_state_dict, lambda v: isinstance(v, ShardedObject)
         )
         common_strategy.save_sharded_objects(sharded_objects_state_dict, checkpoint_dir)
+        _nrl_serial_debug("save:save_sharded_objects:after")
 
     def metadata_finalize_fn():
+        _nrl_serial_debug("save:metadata_finalize:enter")
         if torch.distributed.get_rank() == 0:
             save_config(
                 CheckpointingConfig(sharded_strategy.backend, sharded_strategy.version),
                 checkpoint_dir,
             )
+        _nrl_serial_debug("save:metadata_finalize:barrier:before")
         torch.distributed.barrier()
+        _nrl_serial_debug("save:metadata_finalize:barrier:after")
 
     if not async_sharded_save:
+        _nrl_serial_debug("save:sharded_strategy.save:before",
+                           strategy_type=type(sharded_strategy).__name__)
         sharded_strategy.save(sharded_state_dict, checkpoint_dir)
+        _nrl_serial_debug("save:sharded_strategy.save:after")
+        _nrl_serial_debug("save:metadata_finalize_fn:before")
         metadata_finalize_fn()
+        _nrl_serial_debug("save:metadata_finalize_fn:after")
         return None
 
     if not isinstance(sharded_strategy, AsyncSaveShardedStrategy):
@@ -432,6 +474,7 @@ def save(
         )
     async_request = sharded_strategy.async_save(sharded_state_dict, checkpoint_dir)
     async_request.finalize_fns.append(metadata_finalize_fn)
+    _nrl_serial_debug("save:async_request_created")
     return async_request
 
 

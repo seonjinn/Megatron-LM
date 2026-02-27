@@ -1,5 +1,7 @@
 # Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
 import logging
+import os
+import time as _time
 from pathlib import Path
 from time import time
 from typing import Any, Callable, Dict, Optional, Tuple, TypeVar
@@ -41,6 +43,24 @@ from megatron.core.dist_checkpointing.validation import (
 from megatron.core.utils import get_pg_rank, get_pg_size
 
 logger = logging.getLogger(__name__)
+_NRL_DEBUG = os.environ.get("NRL_DEBUG", "0") == "1"
+
+
+def _nrl_fp_debug(stage: str, **kwargs) -> None:
+    """Best-effort debug logger for fully-parallel save/load rendezvous."""
+    if not _NRL_DEBUG:
+        return
+    rank = -1
+    world = -1
+    try:
+        if dist.is_available() and dist.is_initialized():
+            rank = dist.get_rank()
+            world = dist.get_world_size()
+    except Exception:
+        pass
+    details = " ".join(f"{k}={v}" for k, v in kwargs.items())
+    ts = _time.strftime("%Y-%m-%d %H:%M:%S", _time.localtime())
+    print(f"[NCCL_FP_DEBUG] ts={ts} stage={stage} rank={rank}/{world} {details}")
 
 T = TypeVar('T', ShardedObject, ShardedTensor)
 
@@ -86,16 +106,29 @@ class FullyParallelSaveStrategyWrapper(AsyncSaveShardedStrategy):
         self.cached_distribution: Optional[ShardDistribution] = None
 
     def async_save(self, sharded_state_dict: ShardedStateDict, checkpoint_dir: Path):
+        _nrl_fp_debug("FPWrapper.async_save:enter")
         if not isinstance(self.base_strategy, AsyncSaveShardedStrategy):
             raise CheckpointingException(
                 f'Cannot apply async_save to non-async base strategy {self.base_strategy}'
             )
+        _nrl_fp_debug("FPWrapper.async_save:apply_saving_parallelization:before")
         self.apply_saving_parallelization(sharded_state_dict)
-        return self.base_strategy.async_save(sharded_state_dict, checkpoint_dir)
+        _nrl_fp_debug("FPWrapper.async_save:apply_saving_parallelization:after")
+        _nrl_fp_debug("FPWrapper.async_save:base_strategy.async_save:before")
+        result = self.base_strategy.async_save(sharded_state_dict, checkpoint_dir)
+        _nrl_fp_debug("FPWrapper.async_save:base_strategy.async_save:after")
+        return result
 
     def save(self, sharded_state_dict: ShardedStateDict, checkpoint_dir: Path):
+        _nrl_fp_debug("FPWrapper.save:enter")
+        _nrl_fp_debug("FPWrapper.save:apply_saving_parallelization:before")
         self.apply_saving_parallelization(sharded_state_dict)
-        return self.base_strategy.save(sharded_state_dict, checkpoint_dir)
+        _nrl_fp_debug("FPWrapper.save:apply_saving_parallelization:after")
+        _nrl_fp_debug("FPWrapper.save:base_strategy.save:before",
+                       base_type=type(self.base_strategy).__name__)
+        result = self.base_strategy.save(sharded_state_dict, checkpoint_dir)
+        _nrl_fp_debug("FPWrapper.save:base_strategy.save:after")
+        return result
 
     def apply_saving_parallelization(self, sharded_state_dict: ShardedStateDict) -> None:
         """Distributes the save across ranks by exchanging metadata.
@@ -113,24 +146,40 @@ class FullyParallelSaveStrategyWrapper(AsyncSaveShardedStrategy):
         Returns: None
         """
         start = time()
+        _nrl_fp_debug(
+            "apply_saving_parallelization:start",
+            cache_enabled=self.do_cache_distribution,
+            has_cached=self.cached_distribution is not None,
+            group_size=get_pg_size(group=self.parallelization_group),
+            group_rank=get_pg_rank(group=self.parallelization_group),
+        )
         if self.do_cache_distribution and self.cached_distribution is not None:
             logger.debug(f'Apply *cached* save parallelization')
             precomputed_distribution = self.cached_distribution
         else:
             logger.debug(f'Apply save parallelization')
+            _nrl_fp_debug("apply_saving_parallelization:determine_distribution:before")
             precomputed_distribution = determine_main_replica_uniform_distribution(
                 sharded_state_dict, self.parallelization_group
             )
+            _nrl_fp_debug("apply_saving_parallelization:determine_distribution:after")
 
+        _nrl_fp_debug("apply_saving_parallelization:apply_distribution:before")
         distribute_main_replicas_with_precomputed_distribution(
             sharded_state_dict, self.parallelization_group, precomputed_distribution
         )
+        _nrl_fp_debug("apply_saving_parallelization:apply_distribution:after")
         if self.cached_distribution is None:
-            # First time applying the parallelization
-            validate_sharding_integrity(determine_global_metadata(sharded_state_dict)[1])
+            _nrl_fp_debug("apply_saving_parallelization:validate_integrity:determine_global_metadata:before")
+            global_meta = determine_global_metadata(sharded_state_dict)[1]
+            _nrl_fp_debug("apply_saving_parallelization:validate_integrity:determine_global_metadata:after")
+            _nrl_fp_debug("apply_saving_parallelization:validate_integrity:validate_sharding_integrity:before")
+            validate_sharding_integrity(global_meta)
+            _nrl_fp_debug("apply_saving_parallelization:validate_integrity:validate_sharding_integrity:after")
         if self.do_cache_distribution:
             self.cached_distribution = precomputed_distribution
         end = time()
+        _nrl_fp_debug("apply_saving_parallelization:done", elapsed_s=f"{end-start:.3f}")
         logger.debug(f"parallel save sharding, time: {end - start}")
 
     @property

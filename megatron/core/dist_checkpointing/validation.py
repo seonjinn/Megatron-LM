@@ -553,9 +553,26 @@ def determine_global_metadata(
     Returns:
         Tuple[_LocalMetadata, _GlobalMetadata]: local and global ShardedBase objects with stripped data
     """
+    import time as _time
+    _nrl_val = os.environ.get("NRL_DEBUG", "0") == "1"
+    _rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else -1
+    _world = torch.distributed.get_world_size() if torch.distributed.is_initialized() else -1
+    if _nrl_val:
+        _ts = _time.strftime("%Y-%m-%d %H:%M:%S", _time.localtime())
+        print(f"[NCCL_VAL_DEBUG] ts={_ts} stage=determine_global_metadata:without_data:before rank={_rank}/{_world}", flush=True)
     local_metadata = [ten.without_data() for ten in nested_values(sharded_state_dict)]
+    if _nrl_val:
+        _ts = _time.strftime("%Y-%m-%d %H:%M:%S", _time.localtime())
+        print(f"[NCCL_VAL_DEBUG] ts={_ts} stage=determine_global_metadata:without_data:after rank={_rank}/{_world} num_shards={len(local_metadata)}", flush=True)
     global_metadata = [None] * torch.distributed.get_world_size()
+    if _nrl_val:
+        _ts = _time.strftime("%Y-%m-%d %H:%M:%S", _time.localtime())
+        print(f"[NCCL_VAL_DEBUG] ts={_ts} stage=determine_global_metadata:all_gather_object:before rank={_rank}/{_world}", flush=True)
+    _t0 = _time.time()
     torch.distributed.all_gather_object(global_metadata, local_metadata)
+    if _nrl_val:
+        _ts = _time.strftime("%Y-%m-%d %H:%M:%S", _time.localtime())
+        print(f"[NCCL_VAL_DEBUG] ts={_ts} stage=determine_global_metadata:all_gather_object:after rank={_rank}/{_world} elapsed_s={_time.time()-_t0:.3f}", flush=True)
     return local_metadata, global_metadata  # type: ignore[return-value]
 
 

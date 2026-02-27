@@ -3,6 +3,8 @@
 """Utilities for exchanging data between ranks."""
 
 import logging
+import os
+import time
 from collections import defaultdict
 from functools import reduce
 from itertools import zip_longest
@@ -35,6 +37,24 @@ def is_float8tensor(tensor: torch.Tensor) -> bool:
 
 
 logger = logging.getLogger(__name__)
+_NRL_DEBUG = os.environ.get("NRL_DEBUG", "0") == "1"
+
+
+def _nrl_exchange_debug(stage: str, **kwargs) -> None:
+    """Best-effort debug logger for distributed metadata exchange."""
+    if not _NRL_DEBUG:
+        return
+    rank = -1
+    world = -1
+    try:
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            rank = torch.distributed.get_rank()
+            world = torch.distributed.get_world_size()
+    except Exception:
+        pass
+    details = " ".join(f"{k}={v}" for k, v in kwargs.items())
+    ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    print(f"[NCCL_EXCHANGE_DEBUG] ts={ts} stage={stage} rank={rank}/{world} {details}")
 
 
 class ShardDistribution(NamedTuple):
@@ -200,23 +220,48 @@ def determine_main_replica_uniform_distribution(
         parallelization. Returns None if the process_group is trivial (1 rank)
 
     """
+    _nrl_exchange_debug("determine_distribution:enter",
+                         ignore_groups=ignore_groups)
     if parallelization_group is None:
         parallelization_group = torch.distributed.group.WORLD
     group_size = get_pg_size(group=parallelization_group)
+    _nrl_exchange_debug("determine_distribution:group_info",
+                         group_size=group_size)
     if group_size <= 1:
+        _nrl_exchange_debug("determine_distribution:trivial_group_returning_None")
         return
+    _nrl_exchange_debug("determine_distribution:nested_values:before")
     local_shards = list(
         sh_base
         for sh_base in nested_values(sharded_state_dict)
         if isinstance(sh_base, ShardedTensor)
     )
+    _nrl_exchange_debug("determine_distribution:nested_values:after",
+                         num_local_shards=len(local_shards))
+    _nrl_exchange_debug("determine_distribution:without_data:before")
     local_shards_no_data = [ten.without_data() for ten in local_shards]
+    _nrl_exchange_debug("determine_distribution:without_data:after")
 
+    group_rank = get_pg_rank(group=parallelization_group)
+    _nrl_exchange_debug(
+        "determine_distribution:before_all_gather_object",
+        group_rank=group_rank,
+        group_size=group_size,
+        local_shards=len(local_shards_no_data),
+    )
     all_shards = [None] * get_pg_size(group=parallelization_group)
+    _t0 = time.time()
     torch.distributed.all_gather_object(
         all_shards, local_shards_no_data, group=parallelization_group
     )
+    _nrl_exchange_debug(
+        "determine_distribution:after_all_gather_object",
+        group_rank=group_rank,
+        elapsed_s=f"{time.time() - _t0:.3f}",
+        received_lists=len(all_shards),
+    )
 
+    _nrl_exchange_debug("determine_distribution:build_shard_maps:before")
     shard_to_ranks = defaultdict(list)
     shard_to_size = {}
     shard_to_metadata = {}
@@ -234,6 +279,10 @@ def determine_main_replica_uniform_distribution(
                 group_has_main_replica.add(shard_id)
             else:
                 group_has_non_main_replica.add(shard_id)
+    _nrl_exchange_debug("determine_distribution:build_shard_maps:after",
+                         num_unique_shards=len(shard_to_ranks),
+                         num_main=len(group_has_main_replica),
+                         num_non_main=len(group_has_non_main_replica))
 
     # we always include all main replicas, and non-main only if `ignore_groups`
     shards_in_this_group: Set[_ShardId] = group_has_main_replica
@@ -246,10 +295,15 @@ def determine_main_replica_uniform_distribution(
     # Filter out shards that don't belong to this group
     shard_to_ranks = {k: v for k, v in shard_to_ranks.items() if k in shards_in_this_group}
 
+    _nrl_exchange_debug("determine_distribution:distribute_shards_to_ranks:before",
+                         num_shards=len(shard_to_ranks),
+                         num_ranks=len(all_shards))
     shard_to_saving_rank = distribute_shards_to_ranks(
         shard_to_ranks, shard_to_size, len(all_shards), cross_parallelization_group_loads
     )
+    _nrl_exchange_debug("determine_distribution:distribute_shards_to_ranks:after")
 
+    _nrl_exchange_debug("determine_distribution:exit")
     return ShardDistribution(
         shard_to_saving_rank, shards_in_this_group, shard_to_metadata, shard_to_ranks
     )
