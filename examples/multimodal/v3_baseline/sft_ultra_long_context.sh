@@ -10,7 +10,7 @@
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=pretrain_moe_rl_llm_vision_eval_mode_radio_v4_1212
+#SBATCH --job-name=ultra_long_context_0222
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
@@ -22,6 +22,7 @@ export NVTE_BWD_LAYERNORM_SM_MARGIN=16
 export NCCL_P2P_NET_CHUNKSIZE=2097152
 export NCCL_DEBUG=WARN
 export TORCHINDUCTOR_WORKER_START=fork
+#export TORCH_NCCL_AVOID_RECORD_STREAMS=0
 export TRITON_CACHE_DIR=${TRITON_CACHE_DIR:-"/tmp/triton_cache_\${SLURM_NODEID}"}
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
@@ -33,28 +34,35 @@ which srun
 BATCH=$((1-$?))
 
 DEBUG=0
-USE_TILING=0
 USE_DYNAMIC_RES=1
 USE_IMAGE_BREAK=0   # Only used if USE_DYNAMIC_RES is 1.
 USE_CONV_MERGE=0    # Only used if USE_DYNAMIC_RES is 1.
 USE_FP8=0
-USE_VISION_ENCODER_EVAL_MODE=1
+USE_CPE_EVAL_MODE=1
+VIDEO_MAX_NUM_FRAMES=128     # Values > 0 enable video max num frames.
+USE_CP=1
+USE_MEGA_LONG_MODE=1
+USE_ULTRA_LONG_MODE=0
 
+if [ $USE_MEGA_LONG_MODE -eq 1 ] && [ $USE_ULTRA_LONG_MODE -eq 1 ]; then
+    echo "Error: USE_MEGA_LONG_MODE and USE_ULTRA_LONG_MODE cannot both be enabled simultaneously."
+    exit 1
+fi
 
 # Remember to update model and job name if running in batch mode!!
 if [[ $BATCH -eq 0 ]]; then
     DATETIME=`date +'%y-%m-%d-%H-%M-%S'`
-    MODEL_NAME="interactive_pretrain_moe_${DATETIME}"
+    MODEL_NAME="interactive_ultra_long_context_${DATETIME}"
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
     DEBUG=1
 else
-    MODEL_NAME="pretrain_moe_rl_llm_vision_eval_mode_radio_v4_1212"
+    MODEL_NAME="ultra_long_context_0222"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
 WANDB_API_KEY=${WANDB_API_KEY}
 WANDB_PROJECT=${WANDB_PROJECT:-"megatron-vlm-v3"}
-WANDB_ENTITY=${WANDB_ENTITY:-"adlr"}
+WANDB_ENTITY=${WANDB_ENTITY:-"hwinf_dcm"}
 WANDB_NAME=${MODEL_NAME}
 
 WORKSPACE="/lustre/fsw/portfolios/llmservice/users/${USER}/workspace"
@@ -67,16 +75,39 @@ LOGS_DIR="${OUTPUT}/logs"
 TENSORBOARD_DIR="${OUTPUT}/tensorboard"
 WANDB_DIR="${OUTPUT}/wandb"
 
+# Ensure output directories exist
+mkdir -p "${FINETUNE_DIR}" "${LOGS_DIR}" "${TENSORBOARD_DIR}" "${WANDB_DIR}"
+
+# Snapshot the source code into the OUTPUT directory on first run, and always run from the snapshot thereafter
+if [[ $DEBUG -eq 0 ]]; then
+    CODE_SNAPSHOT_DIR="${OUTPUT}/code_snapshot"
+    CODE_DIR="${SOURCE}"
+    if [[ ! -d "${CODE_SNAPSHOT_DIR}" ]]; then
+        echo "[info] Creating code snapshot at ${CODE_SNAPSHOT_DIR} from ${SOURCE}"
+        rsync -a --delete \
+            --exclude "__pycache__" \
+            --exclude "*.pyc" \
+            "${SOURCE}/" "${CODE_SNAPSHOT_DIR}/"
+    fi
+    CODE_DIR="${CODE_SNAPSHOT_DIR}"
+else
+    CODE_DIR="${SOURCE}"
+fi
+
 TP=2
 EP=32
-
-CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/nano-v3-rc2-12-03-25-7-15-pm-c-radio_v4-vlm-h-tp2-ep32/checkpoints"
+CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/sft_moe_video_lower_lr_lower_load_rl_llm_eval_mode_radio_v4_1214/checkpoints"
+CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/amalasanjayd/workspace/output/sft_moe_rl_llm_eval_mode_radio_v4_v1365_0126/checkpoints/"
+CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/amalasanjayd/workspace/output/sft_moe_rl_llm_eval_mode_radio_v4_v1365_text_0129/checkpoints/"
+#CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/amalasanjayd/workspace/output/sft_moe_rl_llm_eval_mode_radio_v4_v1369_keephist_0215/checkpoints"
+#CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/amalasanjayd/workspace/output/sft_moe_rl_llm_eval_mode_radio_v4_v1367_0205/checkpoints/"
 
 # New tokenizer 10/20.
-TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--Nemotron-Nano-3-30B-A3.5B-dev-1016/snapshots/bb271274159f07461e919379311e32802e5ec36b/"
+TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/megatron-lm/nano-v3-tokenizer-vlm" # "/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--Nemotron-Nano-3-30B-A3.5B-dev-1016/snapshots/bb271274159f07461e919379311e32802e5ec36b/"
 TOKENIZER_PROMPT_FORMAT="nemotron6-moe"
 
-DATA_TRAIN="${SOURCE}/examples/multimodal/v2/data_config/pretrain_dataset_commercial_sft_extended.yaml"
+# DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/eagle_sft_v13.52.no.text.yaml"
+DATA_TRAIN="${SOURCE}/examples/multimodal/v3_baseline/ultra_long_context.yaml"
 
 if [[ $DEBUG -eq 1 ]]; then
     MBZ=1
@@ -91,8 +122,13 @@ if [[ $DEBUG -eq 1 ]]; then
     NUM_GPU=8
 else
     MBZ=1
-    BZ=512
-    NW=8
+    BZ=128
+
+    if [[ $USE_ULTRA_LONG_MODE -eq 1 ]]; then
+        BZ=$((BZ/2))
+    fi
+
+    NW=4
     AD=0.0
     HD=0.0
     LI=5
@@ -100,16 +136,18 @@ else
     NUM_GPU=8
 fi
 
+PBS=1024
+
 SEQ_LEN=256
-DECODER_SEQ_LEN=16384
+DECODER_SEQ_LEN=49152
+if [[ $USE_MEGA_LONG_MODE -eq 1 ]]; then
+    DECODER_SEQ_LEN=122880
+elif [[ $USE_ULTRA_LONG_MODE -eq 1 ]]; then
+    DECODER_SEQ_LEN=245760
+fi
 
 if [ -n "${WANDB_API_KEY}" ]; then
     EXTRA_ARGS+=" --wandb-project ${WANDB_PROJECT} --wandb-exp-name ${MODEL_NAME} --wandb-save-dir ${WANDB_DIR} --wandb-resume-same-run"
-fi
-
-if [[ $USE_TILING -eq 1 ]]; then
-    EXTRA_ARGS+=" --pixel-shuffle --use-tiling --max-num-tiles 12 --use-thumbnail"
-    SEQ_LEN=256
 fi
 
 if [[ $USE_FP8 -eq 1 ]]; then
@@ -140,28 +178,44 @@ if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
     EXTRA_ARGS+=" --dynamic-resolution --dynamic-resolution-min-patches 1024 --dynamic-resolution-max-patches 13312 --apply-data-augment"
 fi
 
-if [[ $USE_VISION_ENCODER_EVAL_MODE -eq 1 ]]; then
-    EXTRA_ARGS+=" --radio-force-eval-mode"  # Entire vision encoder in eval mode (eval CPE, no dropout)
+if [[ $USE_CPE_EVAL_MODE -eq 1 ]]; then
+    EXTRA_ARGS+=" --radio-force-cpe-eval-mode"  # Only CPE in eval mode (not entire vision encoder)
 fi
+
+if [[ $USE_CP -eq 1 ]]; then
+    CP_SIZE=2
+    if [[ $USE_MEGA_LONG_MODE -eq 1 ]]; then
+        CP_SIZE=8
+    elif [[ $USE_ULTRA_LONG_MODE -eq 1 ]]; then
+        CP_SIZE=16
+    fi
+    EXTRA_ARGS+=" --context-parallel-size ${CP_SIZE}"
+fi
+
+EXTRA_ARGS+=" --packing-buffer-size ${PBS} --packing-seq-length ${DECODER_SEQ_LEN} --packing-knapsack-algorithm balanced_greedy_knapsack "
+# LM (Mamba block) recompute
+EXTRA_ARGS+=" --recompute-granularity selective --recompute-modules core_attn mlp layernorm moe_act moe "
+# core_attn moe_act layernorm mlp moe
+# Vision (GPT block) recompute
+EXTRA_ARGS+=" --recompute-vision --recompute-method-vision block --recompute-granularity-vision full --recompute-vision-num-layers 32 "
+EXTRA_ARGS+=" --video-min-num-frames 8 --video-max-num-frames ${VIDEO_MAX_NUM_FRAMES} "
 
 OPTIONS=" \
     --use-checkpoint-args \
     --transformer-impl transformer_engine \
     --use-te \
     --data-path ${DATA_TRAIN} \
-    --freeze-ViT \
-    --freeze-LM \
     --patch-dim 16 \
     --img-h 512 \
     --img-w 512 \
     --dataloader-type external \
     --language-model-type nemotron6-moe \
     ${EXTRA_ARGS} \
-    --allow-missing-vision-projection-checkpoint \
     --vision-model-type radio \
     --use-loss-scaling \
     ${SPECIAL_TOKENS} \
     --disable-vision-class-token \
+    --prompt-path ${CODE_DIR}/examples/multimodal/manual_prompts.json \
     --eod-mask-loss \
     --image-tag-type internvl \
     --moe-token-dispatcher-type alltoall \
@@ -173,13 +227,12 @@ OPTIONS=" \
     --moe-grouped-gemm \
     --num-experts 128 \
     --moe-router-topk 6 \
-    --moe-aux-loss-coeff 1e-6 \
+    --moe-aux-loss-coeff 1e-8 \
     --moe-router-topk-scaling-factor 2.5 \
     --moe-router-enable-expert-bias \
     --moe-router-dtype fp32 \
     --moe-router-load-balancing-type seq_aux_loss \
     --moe-shared-expert-intermediate-size 3712 \
-    --attention-backend flash \
     --is-hybrid-model \
     --mamba-num-heads 64 \
     --mamba-head-dim 64 \
@@ -190,7 +243,7 @@ OPTIONS=" \
     --use-mcore-models \
     --untie-embeddings-and-output-weights \
     --disable-bias-linear \
-    --init-method-std 0.02 \
+    --init-method-std 0.014 \
     --position-embedding-type none \
     --squared-relu \
     --num-layers 52 \
@@ -215,11 +268,11 @@ OPTIONS=" \
     --global-batch-size ${BZ} \
     --train-full-dataset \
     --lr-warmup-fraction 0.1 \
-    --lr 1e-3 \
-    --min-lr 1e-5 \
-    --weight-decay 0.01 \
-    --clip-grad 1.0 \
+    --lr 5e-6 \
+    --min-lr 0.0 \
     --lr-decay-style cosine \
+    --weight-decay 0.05 \
+    --clip-grad 1.0 \
     --log-interval ${LI} \
     --eval-iters 0 \
     --eval-interval 99999999999 \
@@ -230,29 +283,20 @@ OPTIONS=" \
     --load ${FINETUNE_DIR} \
     --save ${FINETUNE_DIR} \
     --dataloader-save ${FINETUNE_DIR}/dataloader \
-    --save-interval 10000 \
+    --save-interval 5000 \
     --ckpt-format torch \
-    --log-progress  \
-    --timing-log-option minmax \
-    --log-params-norm \
-    --log-num-zeros-in-grad \
-    --log-throughput \
-    --logging-level 20 \
-    --log-memory-interval 500 \
     --bf16 \
     --adam-beta1 0.9 \
     --adam-beta2 0.999 \
     --use-distributed-optimizer \
-    --ddp-num-buckets 8 \
-    --ddp-pad-buckets-for-high-nccl-busbw \
-    --overlap-grad-reduce \
-    --overlap-param-gather \
-    --manual-gc \
     --num-workers ${NW} \
     --tensorboard-dir ${TENSORBOARD_DIR} \
     --sequence-parallel \
+    --allow-large-videos \
     --class-token-len 10 \
 "
+
+# --tokenizer-keep-history-thinking \
 
 export WANDB_ENTITY=$WANDB_ENTITY  # Not passed in via command line args, only env vars
 export NVTE_APPLY_QK_LAYER_SCALING=0
@@ -260,14 +304,15 @@ export NVTE_ALLOW_NONDETERMINISTIC_ALGO=1
 
 # Interactive or batch mode
 if [[ $BATCH -eq 0 ]]; then
+    cd ${CODE_DIR}
     torchrun --nproc_per_node ${NUM_GPU} examples/multimodal/train.py ${OPTIONS}
 else
-    run_cmd="python -u ${SOURCE}/examples/multimodal/train.py ${OPTIONS}"
+    run_cmd="python -u ${CODE_DIR}/examples/multimodal/train.py ${OPTIONS}"
 
     DATETIME=`date +'date_%y-%m-%d_time_%H-%M-%S'`
 
     srun -l --verbose \
-    --container-image /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/containers/pytorch25.06-moe-avlm-editable-energon.sqsh \
+    --container-image /lustre/fsw/portfolios/llmservice/users/matthieul/docker/pytorch25.06-moe-avlm-editable-energon-732-mamba-fix.sqsh \
     --container-mounts "/lustre" \
     --output=${LOGS_DIR}/%x_%j_$DATETIME.log \
     sh -c "echo ${run_cmd}; ${run_cmd}"

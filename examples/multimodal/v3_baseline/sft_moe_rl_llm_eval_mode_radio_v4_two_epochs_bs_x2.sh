@@ -10,28 +10,30 @@
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=sft_moe_rl_llm_2e_bs_x2_radio_so400m_rc3_1230
-
-# Strict mode: exit immediately on failure (-e), treat unset vars as error (-u), mark any failures as whole pipeline (-o pipefail)
-# Combined these ensure that the job is reliably marked as failed so we can use `--dependency afterok:<jobid>`
-set -euo pipefail
+#SBATCH --job-name=sft_moe_rl_llm_eval_mode_radio_v4_v1369_keephist_0215
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
 
 export UB_TIMEOUT=720
+export CUDA_DEVICE_MAX_CONNECTIONS=1
 export NVTE_FWD_LAYERNORM_SM_MARGIN=16
 export NVTE_BWD_LAYERNORM_SM_MARGIN=16
 export NCCL_P2P_NET_CHUNKSIZE=2097152
 export NCCL_DEBUG=WARN
 export TORCHINDUCTOR_WORKER_START=fork
 #export TORCH_NCCL_AVOID_RECORD_STREAMS=0
+export TRITON_CACHE_DIR=${TRITON_CACHE_DIR:-"/tmp/triton_cache_\${SLURM_NODEID}"}
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
-USER=${SLURM_JOB_USER:-${USER}}
+USER=$SLURM_JOB_USER
 
-# Hard-coded
+# Auto-detect batch or interactive mode.
+which srun
+BATCH=$((1-$?))
+
+DEBUG=0
 USE_TILING=0
 USE_DYNAMIC_RES=1
 USE_IMAGE_BREAK=0   # Only used if USE_DYNAMIC_RES is 1.
@@ -39,34 +41,15 @@ USE_CONV_MERGE=0    # Only used if USE_DYNAMIC_RES is 1.
 USE_FP8=0
 USE_CPE_EVAL_MODE=1
 
-# Can be overridden via exports
-# NOTE: Debug doesn't work with >TP8 currently, but leaving it here for completeness
-DRY_RUN=${DRY_RUN:-0}  # Prints launch command and exits
-DEBUG=${DEBUG:-0}  # Sets DEBUG_RANK, requires interactive session
-MODEL_NAME=${MODEL_NAME:-"sft_moe_rl_llm_2e_bs_x2_radio_so400m_rc3_1230"}
-CHECKPOINT_DIR=${CHECKPOINT_DIR:-"/lustre/fsw/portfolios/llmservice/users/cmccarthy/workspace/output/pretrain_moe_rl_llm_vision_eval_mode_radio_v4_so400m_rc3_1230/checkpoints"}
-VISION_MODEL_TYPE=${VISION_MODEL_TYPE:-"radio-so400m"}
 
-if [[ $DEBUG -eq 1 ]]; then
-    # Debugging launches the debugger, so it's a non-interactive launch in terms of escaping "<>"
-    INTERACTIVE=0
-
-    # Append _debug to MODEL_NAME and WORKSPACE to more easily delete all debug runs
-    MODEL_NAME="${MODEL_NAME}_debug"
-    WORKSPACE="/lustre/fsw/portfolios/llmservice/users/${USER}/workspace/debug"
-
-else
-    # Auto-detect interactive mode (if srun is not defined, we're interactive)
-    INTERACTIVE=$(which srun >/dev/null 2>&1 && echo 0 || echo 1)
-
-    # Normal workspace
-    WORKSPACE="/lustre/fsw/portfolios/llmservice/users/${USER}/workspace"
-fi
-
-if [[ $INTERACTIVE -eq 1 ]]; then
-    MODEL_NAME="interactive_${MODEL_NAME}"
+# Remember to update model and job name if running in batch mode!!
+if [[ $BATCH -eq 0 ]]; then
+    DATETIME=`date +'%y-%m-%d-%H-%M-%S'`
+    MODEL_NAME="interactive_sft_moe_rl_llm_eval_mode_radio_v4_two_epochs_bs_x2_${DATETIME}"
     SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
+    DEBUG=1
 else
+    MODEL_NAME="sft_moe_rl_llm_eval_mode_radio_v4_v1369_keephist_0215"
     SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
 fi
 
@@ -75,6 +58,7 @@ WANDB_PROJECT=${WANDB_PROJECT:-"megatron-vlm-v3"}
 WANDB_ENTITY=${WANDB_ENTITY:-"adlr"}
 WANDB_NAME=${MODEL_NAME}
 
+WORKSPACE="/lustre/fsw/portfolios/llmservice/users/${USER}/workspace"
 SOURCE=`pwd`
 OUTPUT_BASE="${WORKSPACE}/output"
 OUTPUT="${OUTPUT_BASE}/${MODEL_NAME}"
@@ -88,16 +72,14 @@ WANDB_DIR="${OUTPUT}/wandb"
 mkdir -p "${FINETUNE_DIR}" "${LOGS_DIR}" "${TENSORBOARD_DIR}" "${WANDB_DIR}"
 
 # Snapshot the source code into the OUTPUT directory on first run, and always run from the snapshot thereafter
-# NOTE: Don't recommend this method anymore, code isn't copied until run executes (after queuing)
-#       See examples/multimodal/launch.sh instead, which copies when the run is launched
 if [[ $DEBUG -eq 0 ]]; then
     CODE_SNAPSHOT_DIR="${OUTPUT}/code_snapshot"
+    CODE_DIR="${SOURCE}"
     if [[ ! -d "${CODE_SNAPSHOT_DIR}" ]]; then
         echo "[info] Creating code snapshot at ${CODE_SNAPSHOT_DIR} from ${SOURCE}"
         rsync -a --delete \
             --exclude "__pycache__" \
             --exclude "*.pyc" \
-            --exclude "wandb/" \
             "${SOURCE}/" "${CODE_SNAPSHOT_DIR}/"
     fi
     CODE_DIR="${CODE_SNAPSHOT_DIR}"
@@ -108,14 +90,16 @@ fi
 TP=2
 EP=32
 
+CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/pretrain_vision_adaptor_packing_lower_bs_0114/checkpoints/"
+
 # New tokenizer 10/20.
-TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--Nemotron-Nano-3-30B-A3.5B-dev-1016/snapshots/bb271274159f07461e919379311e32802e5ec36b/"
+# TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--Nemotron-Nano-3-30B-A3.5B-dev-1016/snapshots/bb271274159f07461e919379311e32802e5ec36b/"
+TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/megatron-lm/nano-tokenizer"
 TOKENIZER_PROMPT_FORMAT="nemotron6-moe"
 
-# DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/eagle_sft_v13.52.no.text.yaml"
-DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/eagle_sft_v13.52.no.text.2x.yaml"
+DATA_TRAIN="/lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/eagle_sft_v13.69.yaml"
 
-if [[ $DEBUG -eq 1 || $INTERACTIVE -eq 1 ]]; then
+if [[ $DEBUG -eq 1 ]]; then
     MBZ=1
     BZ=8
     NW=0
@@ -125,11 +109,11 @@ if [[ $DEBUG -eq 1 || $INTERACTIVE -eq 1 ]]; then
 
     EXTRA_ARGS=""
 
-    NUM_GPU=$SLURM_GPUS_ON_NODE
+    NUM_GPU=8
 else
     MBZ=1
     BZ=256
-    NW=4
+    NW=8
     AD=0.0
     HD=0.0
     LI=5
@@ -161,7 +145,7 @@ fi
 if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
     SEQ_LEN=12288
     if [[ $USE_IMAGE_BREAK -eq 1 ]]; then
-        if [[ $INTERACTIVE -eq 1 ]]; then
+        if [[ $BATCH -eq 0 ]]; then
             EXTRA_ARGS+=" --image-break-token <image_break>"
             SPECIAL_TOKENS+=" <image_break>"
         else
@@ -183,10 +167,10 @@ fi
 
 EXTRA_ARGS+=" --packing-buffer-size 3247 --packing-seq-length ${DECODER_SEQ_LEN} --packing-knapsack-algorithm balanced_greedy_knapsack "
 # LM (Mamba block) recompute
-EXTRA_ARGS+=" --recompute-granularity selective --recompute-modules core_attn mlp layernorm moe_act moe "
+EXTRA_ARGS+=" --recompute-granularity selective --recompute-modules core_attn layernorm moe_act "
 # core_attn moe_act layernorm mlp moe
 # Vision (GPT block) recompute
-EXTRA_ARGS+=" --recompute-vision --recompute-method-vision block --recompute-granularity-vision full --recompute-vision-num-layers 32 "
+EXTRA_ARGS+=" --recompute-vision --recompute-method-vision block --recompute-granularity-vision full --recompute-vision-num-layers 28 "
 
 OPTIONS=" \
     --use-checkpoint-args \
@@ -199,7 +183,7 @@ OPTIONS=" \
     --dataloader-type external \
     --language-model-type nemotron6-moe \
     ${EXTRA_ARGS} \
-    --vision-model-type ${VISION_MODEL_TYPE} \
+    --vision-model-type radio \
     --use-loss-scaling \
     ${SPECIAL_TOKENS} \
     --disable-vision-class-token \
@@ -215,7 +199,7 @@ OPTIONS=" \
     --moe-grouped-gemm \
     --num-experts 128 \
     --moe-router-topk 6 \
-    --moe-aux-loss-coeff 1e-6 \
+    --moe-aux-loss-coeff 1e-8 \
     --moe-router-topk-scaling-factor 2.5 \
     --moe-router-enable-expert-bias \
     --moe-router-dtype fp32 \
@@ -282,51 +266,27 @@ OPTIONS=" \
     --sequence-parallel \
     --allow-large-videos \
     --class-token-len 10 \
+    --tokenizer-keep-history-thinking \
 "
 
 export WANDB_ENTITY=$WANDB_ENTITY  # Not passed in via command line args, only env vars
 export NVTE_APPLY_QK_LAYER_SCALING=0
 export NVTE_ALLOW_NONDETERMINISTIC_ALGO=1
 
-# Debug, interactive, or submit_job mode
-if [[ $DEBUG -eq 1 ]]; then
-    if [[ $SLURM_NNODES -gt 1 ]]; then
-        echo "ERROR: Expected single-node debugging when using DEBUG_RANK environment variable."
-        exit 1
-    fi
-
-    DEBUG_RANK=${DEBUG_RANK:-0}  # Default to rank 0
-    DEBUG_CMD="ONE_LOGGER_JOB_CATEGORY=test \
-    CUDA_LAUNCH_BLOCKING=1 \
-    DEBUG_RANK=${DEBUG_RANK} \
-    WANDB_MODE=disabled \
-    python -Xfrozen_modules=off \
-    -m torch.distributed.run \
-    --nproc_per_node=$SLURM_GPUS_ON_NODE \
-    ${CODE_DIR}/examples/multimodal/train.py ${OPTIONS}"
-
-    echo -e "Debugging with options: $OPTIONS\n"
-    eval "$DEBUG_CMD"
-
-elif [[ $INTERACTIVE -eq 1 ]]; then
-    torchrun --nproc_per_node ${NUM_GPU} ${CODE_DIR}/examples/multimodal/train.py ${OPTIONS}
-
+# Interactive or batch mode
+if [[ $BATCH -eq 0 ]]; then
+    cd ${CODE_DIR}
+    torchrun --nproc_per_node ${NUM_GPU} examples/multimodal/train.py ${OPTIONS}
 else
     run_cmd="python -u ${CODE_DIR}/examples/multimodal/train.py ${OPTIONS}"
 
-    if [[ $DRY_RUN -eq 1 ]]; then
-        echo "${run_cmd}"
-        exit 0
-    fi
-
     DATETIME=`date +'date_%y-%m-%d_time_%H-%M-%S'`
 
-    # Need TRITON_CACHE_DIR expanded inside srun b/c sbatch runs on node 0
     srun -l --verbose \
     --container-image /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/containers/pytorch25.06-moe-avlm-editable-energon.sqsh \
-    --container-mounts "/lustre,/home" \
-    --output=${LOGS_DIR}/%x_%j_srun_$DATETIME.log \
-    sh -c "export TRITON_CACHE_DIR=/tmp/triton_cache_\${SLURM_NODEID}; echo ${run_cmd}; ${run_cmd}"
+    --container-mounts "/lustre" \
+    --output=${LOGS_DIR}/%x_%j_$DATETIME.log \
+    sh -c "echo ${run_cmd}; ${run_cmd}"
 
     set +x
 fi

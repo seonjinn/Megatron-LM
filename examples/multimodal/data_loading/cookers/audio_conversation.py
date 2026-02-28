@@ -4,7 +4,7 @@ import dataclasses
 from pathlib import Path
 import re
 
-from megatron.energon import CachePool, FileStore, basic_sample_keys, cooker, stateless
+from megatron.energon import CachePool, FileStore, basic_sample_keys, cooker, stateless, SourceInfo
 from megatron.energon.av import AVDecoder
 from PIL import Image
 
@@ -147,7 +147,11 @@ def cook_audio_conversation(
                                 print(f"WARNING: Dataset {media_source.get_path()} not prepared with media metadata, slow metadata for {frag.value}: {e!r}")
                                 warn_about_slow_media_loading[media_source.get_path()] = False
                     if frag.metadata is None:
-                        val = cache.get(media_source, frag.value)
+                        val = cache.get(media_source, frag.value, cs)
+                    cs.__sources__ = (
+                        *cs.__sources__,
+                        SourceInfo(dataset_path=media_source.get_path(), index=frag.value, shard_name=None, file_names=(frag.value,)),
+                    )
                     frag.value = cache.get_lazy(media_source, frag.value)
                     # frag.value = media_source.get(frag.value, cs)
                     # if isinstance(frag, ImageMedia):
@@ -173,7 +177,11 @@ def cook_audio_conversation(
                                         print(f"WARNING: Dataset {media_sources[aux_key].get_path()} not prepared with media metadata, slow metadata for {path[len(prefix):]}: {e!r}")
                                         warn_about_slow_media_loading[media_sources[aux_key].get_path()] = False
                             if frag.metadata is None:
-                                val = cache.get(media_sources[aux_key], path[len(prefix):])
+                                val = cache.get(media_sources[aux_key], path[len(prefix):], cs)
+                            cs.__sources__ = (
+                                *cs.__sources__,
+                                SourceInfo(dataset_path=media_sources[aux_key].get_path(), index=path[len(prefix):], shard_name=None, file_names=(path[len(prefix):],)),
+                            )
                             frag.value = cache.get_lazy(media_sources[aux_key], path[len(prefix):])
                             # frag.value = media_sources[aux_key].get(path[len(prefix):], cs)
                             break

@@ -170,7 +170,10 @@ class AudioTransformParakeetStrategy(_ResampleAudioTransformStrategy):
             audio_length = seconds_to_samples(audio_duration)
 
             num_clips = math.ceil(audio_length / self._clip_samples)
-            clip_samples = [self._clip_samples] * (num_clips - 1) + [max(audio_length % self._clip_samples, self.min_audio_samples)]
+            
+            remainder = audio_length % self._clip_samples
+            last_clip_size = self._clip_samples if remainder == 0 else max(remainder, self.min_audio_samples)
+            clip_samples = [self._clip_samples] * (num_clips - 1) + [last_clip_size]
             if (tot := sum(clip_samples)) > audio_length:  # we applied some padding to the very short last clip
                 audio_length = tot
                 audio_duration = audio_length / self._target_freq

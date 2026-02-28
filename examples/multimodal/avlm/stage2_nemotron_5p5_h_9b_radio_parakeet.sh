@@ -32,7 +32,7 @@ USE_TILING=1
 USE_DYNAMIC_RES=0
 USE_FP8=0
 USE_PRECISION_AWARE_OPTIMIZER=1
-USE_CP=0
+USE_CP=1
 USE_NEMO=1
 
 # Remember to update model and job name if running in batch mode!!
@@ -62,7 +62,7 @@ CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/out
 DATA_TRAIN="${SOURCE}/examples/multimodal/avlm/data_config/stage2_commercial_alm_blend_nrt.yaml"
 
 SEQ_LEN=1024
-DECODER_SEQ_LEN=16384
+DECODER_SEQ_LEN=32768
 
 if [[ $DEBUG -eq 1 ]]; then
     MBZ=1
@@ -78,7 +78,7 @@ if [[ $DEBUG -eq 1 ]]; then
     NUM_GPU=8
 else
     MBZ=1
-    BZ=2048
+    BZ=256
     NW=8
     LI=5
     AD=0.0
@@ -88,6 +88,7 @@ else
     PBS=4000
 
     NUM_GPU=8
+    TP=4
 fi
 
 if [[ $USE_TILING -eq 1 ]]; then
@@ -138,7 +139,7 @@ fi
 # LM (Mamba block) recompute
 EXTRA_ARGS+=" --recompute-granularity selective --recompute-modules core_attn mlp layernorm "
 # Vision (GPT block) recompute
-EXTRA_ARGS+=" --recompute-vision --recompute-method-vision block --recompute-granularity-vision full --recompute-vision-num-layers 32 "
+EXTRA_ARGS+=" --recompute-method-vision block --recompute-granularity-vision full --recompute-vision-num-layers 32 "
 # Sound model.
 EXTRA_ARGS+=" --recompute-sound "
 
@@ -236,6 +237,7 @@ OPTIONS=" \
 
 export NVTE_APPLY_QK_LAYER_SCALING=0
 export NVTE_ALLOW_NONDETERMINISTIC_ALGO=${NONDETERMINISTIC_ATTN}
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 # Interactive or batch mode
 if [[ $BATCH -eq 0 ]]; then

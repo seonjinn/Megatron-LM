@@ -1,0 +1,47 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+      # Vision data 66.5M samples -> 1960 tokens per sample -> 130B tokens
+      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/eagle_sft_v13.67.yaml
+        repetitions: 1
+      # Text data 18.9M samples -> 3786 tokens per sample -> 71B tokens
+      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/nickel_capybara_0_16k_absolute_paths.yaml
+        repetitions: 0.5
+      # Short video data 2M samples -> 6846 tokens per sample with 32 frames -> 13.7B tokens
+      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/video.arushi.0130.short.yaml
+        repetitions: 1
+      # 4k samples -> 3681 tokens per sample with 32 frames -> 14.7M tokens
+      - path: /lustre/fsw/portfolios/llmservice/users/ehosseiniasl/github_repos/ehosseiniasl_vlm2_unified_training/megatron-lm/examples/multimodal/avlm/data_config/sft.commercial_video_v1_and_v2_0919_filtered.yaml
+        repetitions: 1
+      # Short omni data 20M samples -> 9225 tokens per sample with 32 frames -> 184.5B tokens
+      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/omni.arushi.0130.short.yaml
+        repetitions: 0.1
+      # ASR: Granary Small 10M samples -> 260 tokens per sample -> 2.6B tokens
+      - path: /lustre/fsw/portfolios/llmservice/users/ehosseiniasl/github_repos/ehosseiniasl_vlm2_unified_training/megatron-lm/examples/multimodal/avlm/data_config/granary_v1.1_small.yaml
+        repetitions: 1.0
+      # Audio reasoning data 1.2M samples -> 3515 tokens per sample -> 4.2B tokens
+      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/avlm_data_yaml/audio_reasoning_sft_nano3_filtered_rep1.yaml
+        repetitions: 2
+      #########################################################
+      # Audio-SFT
+      #########################################################      
+      # Sound 1.1M samples -> 167 tokens per sample -> 183.7M tokens
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/users/ltavabi/omcat/data_icfg/quality_filtered/audio_sound_sft.yaml
+        repetitions: 1
+      # Sound SDG 16M samples -> 448 tokens per sample -> 7.2B tokens
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/users/ltavabi/omcat/data_icfg/quality_filtered/audio_sound_sft_sdg.yaml
+        repetitions: 1
+      # Music 870k samples -> 98 tokens per sample -> 85.3M tokens
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/users/ltavabi/omcat/data_icfg/quality_filtered/audio_music_sft.yaml
+        repetitions: 1
+      # Music SDG 17.4M samples -> 2225 tokens per sample -> 38.7B tokens
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/users/ltavabi/omcat/data_icfg/quality_filtered/audio_music_sft_sdg.yaml
+        repetitions: 1
+      # Speech 4.6M samples -> 230 tokens per sample -> 1B tokens
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/users/ltavabi/omcat/data_icfg/quality_filtered/audio_speech_sft.yaml
+        repetitions: 1
+      # Speech SDG 4.4M -> 146 tokens per sample -> 642M tokens
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/users/ltavabi/omcat/data_icfg/quality_filtered/audio_speech_sft_sdg.yaml
+        repetitions: 1

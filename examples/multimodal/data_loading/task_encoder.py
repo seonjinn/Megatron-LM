@@ -61,8 +61,8 @@ from .knapsacks import (
 )
 
 
-AUDIO_MAX_DURATION_SECONDS = 900
 AUDIO_MIN_DURATION_SECONDS = 0.1
+AUDIO_MAX_DURATION_SECONDS = 1200
 
 
 def _clean_think(match: re.Match) -> str:
@@ -261,6 +261,20 @@ class MultiModalTaskEncoder(
         # Create the image tiling strategy using the refactored function
         self.image_tiling_strategy = create_image_tiling_strategy(self.args)
 
+        # Validate temporal compression settings
+        temporal_patch_size = getattr(self.args, 'video_temporal_patch_size', 1)
+        if temporal_patch_size > 1:
+            # video_min_num_frames must be at least temporal_patch_size
+            assert self.args.video_min_num_frames >= temporal_patch_size, (
+                f"video_min_num_frames ({self.args.video_min_num_frames}) must be >= "
+                f"video_temporal_patch_size ({temporal_patch_size})"
+            )
+            # video_max_num_frames should be a multiple of temporal_patch_size
+            assert self.args.video_max_num_frames % temporal_patch_size == 0, (
+                f"video_max_num_frames ({self.args.video_max_num_frames}) must be a multiple of "
+                f"video_temporal_patch_size ({temporal_patch_size})"
+            )
+
         if self.args.packing_knapsack_algorithm == "greedy_knapsack":
             self.packing_knapsack_algorithm = greedy_knapsack
         elif self.args.packing_knapsack_algorithm == "balanced_greedy_knapsack":
@@ -275,10 +289,10 @@ class MultiModalTaskEncoder(
             self.sound_token_id = self.tokenizer.convert_tokens_to_ids(SOUND_TOKEN)
             if 'parakeet' in self.args.sound_model_type.lower():
                 self.transform_audio = AudioTransformParakeetStrategy(
-                    sound_model_type=self.args.sound_model_type, 
-                    target_freq=self.args.sound_target_rate, 
-                    embedding_size=self.args.sound_embedding_size, 
-                    clip_duration=self.args.sound_clip_duration, 
+                    sound_model_type=self.args.sound_model_type,
+                    target_freq=self.args.sound_target_rate,
+                    embedding_size=self.args.sound_embedding_size,
+                    clip_duration=self.args.sound_clip_duration,
                     min_duration=self.args.sound_min_duration,
                     pad_to_clip_duration=self.args.sound_pad_to_clip_duration
                 )
@@ -331,6 +345,12 @@ class MultiModalTaskEncoder(
         """Convert a video to a list of video frame and text according to the settings."""
         video_duration = video.metadata["video_duration"]
         video_num_frames = video.metadata["video_num_frames"]
+
+        if video_num_frames is None or video_duration is None:
+            raise ValueError(
+                f"Missing video metadata (num_frames={video_num_frames}, duration={video_duration}) for {video.value}"
+            )
+
         start_time = 0
         if video.start_time is not None:
             if video.end_time is not None:
@@ -340,6 +360,8 @@ class MultiModalTaskEncoder(
             start_time = video.start_time
         elif video.end_time is not None:
             video_duration = video.end_time
+
+        temporal_patch_size = getattr(self.args, 'video_temporal_patch_size', 1)
 
         if video_num_frames < self.args.video_min_num_frames:
             # some videos are too short or low-fps, just use the whole video, like sthv2, smit, llava-hound (2fps)
@@ -353,29 +375,125 @@ class MultiModalTaskEncoder(
                 self.args.video_max_num_frames,
             )
 
+        # Round to multiple of temporal patch size for temporal compression
+        # Round up if we will stay within both video_num_frames and video_max_num_frames, else round down
+        if temporal_patch_size > 1:
+            rounded_down = (sample_num_frames // temporal_patch_size) * temporal_patch_size
+            rounded_up = rounded_down + temporal_patch_size
+            # Prefer rounding up if it doesn't exceed limits
+            if rounded_up <= video_num_frames and rounded_up <= self.args.video_max_num_frames:
+                sample_num_frames = rounded_up
+            else:
+                sample_num_frames = max(temporal_patch_size, rounded_down)
+
+            # Verify the result is valid
+            assert sample_num_frames % temporal_patch_size == 0, (
+                f"sample_num_frames ({sample_num_frames}) must be a multiple of "
+                f"temporal_patch_size ({temporal_patch_size})"
+            )
+            assert sample_num_frames >= temporal_patch_size, (
+                f"sample_num_frames ({sample_num_frames}) must be at least "
+                f"temporal_patch_size ({temporal_patch_size})"
+            )
+            assert sample_num_frames <= self.args.video_max_num_frames, (
+                f"sample_num_frames ({sample_num_frames}) exceeds "
+                f"video_max_num_frames ({self.args.video_max_num_frames})"
+            )
+
         frame_timestamps = self.get_seq_frames_v3(
             video_duration, sample_num_frames, self.args.video_frame_temporal_jitter
         )
         frame_timestamps += start_time
 
-        return ["This is a video:\n"] + [
-            media
-            for i, timestamp in enumerate(frame_timestamps)
-            for media in (
-                f"Frame {i + 1} sampled at {timestamp:.2f} seconds: ",
-                # TODO: Orginal eagle repro
-                # f"Frame {i + 1} sampled at {timestamp:.2f} seconds: <image-{i}>",
-                VideoFrameMedia(
-                    value=video.value,
-                    timestamp=float(timestamp),
-                    metadata={
-                        "video_width": video.video_width,
-                        "video_height": video.video_height
-                    },
-                ),
-                "\n",
+        video_fps = video.video_fps
+        video_prompt_version = getattr(self.args, 'video_prompt_version', 2)
+
+        def make_video_frame_media(i, timestamp):
+            return VideoFrameMedia(
+                value=video.value,
+                timestamp=float(timestamp),
+                frame_index=float(timestamp * video_fps),  # Original frame index in source video
+                sample_index=i,  # Consecutive index within sampled frames (0, 1, 2, ...) for temporal compression
+                metadata={
+                    "video_width": video.video_width,
+                    "video_height": video.video_height
+                },
             )
-        ], len(frame_timestamps)
+
+        if video_prompt_version == 1 or temporal_patch_size == 1:
+            # Version 1 (previous): Each frame on its own line.
+            #
+            # This returns a list like:
+            #   ["This is a video:\n", "Frame 1 sampled at 0.00 seconds: ", VideoFrameMedia(0), "\n",
+            #    "Frame 2 sampled at 0.88 seconds: ", VideoFrameMedia(1), "\n", ...]
+            #
+            # During preencode_sample(), each VideoFrameMedia is processed:
+            #   - If (sample_index + 1) % temporal_patch_size == 0: adds IMAGE_TOKEN to text
+            #   - Always appends to image_media list (for image processing)
+            #   - This works because we ensure len(frame_timestamps) % temporal_patch_size == 0
+            #
+            # So with temporal_patch_size=2, the final TEXT prompt becomes:
+            #   "This is a video:\n"
+            #   "Frame 1 sampled at 0.00 seconds: <image>\n"  <- token added (0 % 2 == 0)
+            #   "Frame 2 sampled at 0.88 seconds: \n"         <- no token (1 % 2 != 0)
+            #   "Frame 3 sampled at 1.76 seconds: <image>\n"  <- token added (2 % 2 == 0)
+            #   "Frame 4 sampled at 2.64 seconds: \n"         <- no token (3 % 2 != 0)
+            #   "Frame 5 sampled at 3.52 seconds: <image>\n"  <- token added (4 % 2 == 0)
+            #
+            # All 5 frames' image data is still processed; frames 0+1 are combined into tubelet 0,
+            # frames 2+3 into tubelet 1, etc. Each tubelet embedding replaces one <image> token.
+            return ["This is a video:\n"] + [
+                media
+                for i, timestamp in enumerate(frame_timestamps)
+                for media in (
+                    f"Frame {i + 1} sampled at {timestamp:.2f} seconds: ",
+                    # TODO: Orginal eagle repro
+                    # f"Frame {i + 1} sampled at {timestamp:.2f} seconds: <image-{i}>",
+                    make_video_frame_media(i, timestamp),
+                    "\n",
+                )
+            ], len(frame_timestamps)
+        elif video_prompt_version == 2 and temporal_patch_size > 1:
+            # Version 2 (new default): Group T frames with "and", one <image> per group.
+            # This also produces the same output as version 1 if temporal_patch_size == 1
+
+            # This returns a list like:
+            #   ["This is a video:\n",
+            #    "Frame 1 sampled at 0.00 seconds and frame 2 sampled at 0.88 seconds: ",
+            #    VideoFrameMedia(0), VideoFrameMedia(1), "\n",
+            #    "Frame 3 sampled at 1.76 seconds and frame 4 sampled at 2.64 seconds: ",
+            #    VideoFrameMedia(2), VideoFrameMedia(3), "\n",
+            #    "Frame 5 sampled at 3.52 seconds: ", VideoFrameMedia(4), "\n"]
+            #
+            # Same processing as version 1: IMAGE_TOKEN added only when sample_index % T == 0.
+            # Final TEXT prompt becomes:
+            #   "This is a video:\n"
+            #   "Frame 1 sampled at 0.00 seconds and frame 2 sampled at 0.88 seconds: <image>\n"
+            #   "Frame 3 sampled at 1.76 seconds and frame 4 sampled at 2.64 seconds: <image>\n"
+            #   "Frame 5 sampled at 3.52 seconds: <image>\n"
+            result = ["This is a video:\n"]
+            T = temporal_patch_size
+            for group_start in range(0, len(frame_timestamps), T):
+                # Build text for this group
+                group_text_parts = []
+                group_media = []
+                for j in range(T):
+                    sample_idx = group_start + j
+                    if sample_idx < len(frame_timestamps):
+                        timestamp = frame_timestamps[sample_idx]
+                        frame_str = "Frame" if j == 0 else "frame"
+                        group_text_parts.append(f"{frame_str} {sample_idx + 1} sampled at {timestamp:.2f} seconds")
+                        group_media.append(make_video_frame_media(sample_idx, timestamp))
+                if group_text_parts:
+                    result.append(" and ".join(group_text_parts) + ": ")
+                    result.extend(group_media)
+                    result.append("\n")
+            return result, len(frame_timestamps)
+        else:
+            raise NotImplementedError(
+                f"Video prompt version {video_prompt_version} with"
+                f" temporal patch size {temporal_patch_size} is not implemented"
+            )
 
     @stateless(restore_seeds=True)
     def preencode_sample(self, sample: ConversationSample) -> PreEncodedTaskSample:
@@ -386,6 +504,7 @@ class MultiModalTaskEncoder(
         allow_large_videos = getattr(self.args, "allow_large_videos", False)
         data_augment = sample.__subflavors__.get("data_augment", False) and not self.is_val
         tiling_augment_prob = sample.__subflavors__.get("tiling_augment_prob", self.tiling_augment_prob)
+        train_only_on_last_assistant_turn = sample.__subflavors__.get("train_only_on_last_assistant_turn", False)
         aggregated_num_frames = []
 
         # We tentatively extract the first message if it's a system prompt and use this rather than
@@ -396,9 +515,6 @@ class MultiModalTaskEncoder(
         if has_system_message:
             system_prompt = sample.conversation[0].fragments[0]
             sample.conversation = sample.conversation[1:]
-
-        if system_prompt == "" and self.args.tokenizer_prompt_format == "nemotron6-moe":
-            system_prompt = "Answer the questions."
 
         legacy_conversation: list[LegacyConversation] = [
             {"role": "system", "content": system_prompt}
@@ -437,6 +553,9 @@ class MultiModalTaskEncoder(
         image_media: list[ImageMedia | VideoFrameMedia] = []
         audio_media_params: list[AudioMedia] = []
 
+        # For temporal compression: track video frame count to emit one IMAGE_TOKEN per tubelet
+        temporal_patch_size = getattr(self.args, 'video_temporal_patch_size', 1)
+
         # Format the conversation as a list of "user" / "assistant" turns.
         for message in sample.conversation:
             if not self.args.relax_sender_check:
@@ -448,12 +567,31 @@ class MultiModalTaskEncoder(
             for fragment in message.fragments:
                 if isinstance(fragment, str):
                     content += fragment
+                    # Ensure IMAGE_TOKEN e.g. "<image>" is not in the prompt or the number of
+                    #   IMAGE_TOKENs in the final prompt will not be equal to the number of images
+                    #   or frames, leading to issues in LLaVAModel's `image_token_mask`
                     assert IMAGE_TOKEN not in fragment, f"{IMAGE_TOKEN!r} in sample with key: {sample.__key__} and subflavors: {sample.__subflavors__}"
+                    assert SOUND_TOKEN not in fragment, f"{SOUND_TOKEN!r} in sample with key: {sample.__key__} and subflavors: {sample.__subflavors__}"
                 elif isinstance(fragment, ImageMedia):
                     content += IMAGE_TOKEN
                     image_media.append(fragment)
                 elif isinstance(fragment, VideoFrameMedia):
-                    content += IMAGE_TOKEN
+                    # With temporal compression, only add IMAGE_TOKEN at tubelet boundaries
+                    #   (every T frames). Use sample_index which is the consecutive index within
+                    #   sampled frames (0, 1, 2, ...) and resets to 0 for each video.
+                    # This works because:
+                    #   1) _group_video_frame_params_into_tubelets() groups per-frame params to match IMAGE_TOKEN count
+                    #   2) Grouped params used for sequence length calculations and padding
+                    #   3) All frames (un-grouped) are passed as pixels to RADIO.forward()
+                    #   4) RADIO._apply_temporal_grouping() combines every T frames
+                    #   5) RADIO returns updated imgs_sizes/num_frames for LLaVAModel
+                    if temporal_patch_size > 1:
+                        # Add the image token for last frame in every group of T
+                        if (fragment.sample_index + 1) % temporal_patch_size == 0:  # Next frame == new group
+                            content += IMAGE_TOKEN
+                    else:
+                        # Add the image token for every frame
+                        content += IMAGE_TOKEN
                     image_media.append(fragment)
                 elif isinstance(fragment, VideoMedia):
                     raise ValueError(
@@ -464,7 +602,7 @@ class MultiModalTaskEncoder(
 
                     content += "<so_start>" + SOUND_TOKEN * audio_params[0].num_embeddings + "<so_end>"
                     audio_media_params.append(audio_params[0])
-            
+
             if self.args.only_keep_samples_with_img and len(image_media) == 0:
                 raise ValueError(f"Sample has no image: {sample.__key__}")
 
@@ -500,7 +638,7 @@ class MultiModalTaskEncoder(
             legacy_conversation.append({"role": message.sender, "content": content})
 
         input_ids, target = self.tokenizer.tokenize_conversation(
-            legacy_conversation, True, False
+            legacy_conversation, True, False, train_only_on_last_assistant_turn=train_only_on_last_assistant_turn
         )
         input_ids = torch.as_tensor(input_ids)
         target = torch.as_tensor(target)
@@ -517,6 +655,18 @@ class MultiModalTaskEncoder(
             tiling_augment_prob=tiling_augment_prob
         )
 
+        # With temporal compression, we emit one IMAGE_TOKEN per tubelet (grouped frame), not per frame.
+        # Create grouped params for token counting (one per IMAGE_TOKEN), but keep
+        #   ungrouped params for storage (one per frame, needed for frame loading).
+        # This is necessary to get accurate token / embedding / image counts when we're calling
+        #   compute_params() and process_media() on individual video frames, rather than entire videos
+        if temporal_patch_size > 1:
+            grouped_params_for_tokens = self._group_video_frame_params_into_tubelets(
+                image_media, image_media_params, temporal_patch_size
+            )
+        else:
+            grouped_params_for_tokens = image_media_params
+
         # We need to compare the number of sound tokens before and after truncation
         # If the numbers are different, raise an error to skip this sample
         if self.sound_token_id is not None:
@@ -525,7 +675,7 @@ class MultiModalTaskEncoder(
             num_sound_tokens_before_truncation = 0
 
         input_ids, target = self._truncate_to_decoder_seq_len(
-            input_ids, target, image_media_params, audio_media_params
+            input_ids, target, grouped_params_for_tokens, audio_media_params
         )
 
         if self.sound_token_id is not None:
@@ -540,24 +690,35 @@ class MultiModalTaskEncoder(
 
         # We need to ensure that there are at least some trainable tokens in the sample.
         has_trainable_tokens = self._target_has_trainable_tokens(
-            input_ids, target, image_media_params, audio_media_params
+            input_ids, target, grouped_params_for_tokens, audio_media_params
         )
 
         assert has_trainable_tokens, f"Sample has no trainable tokens: {self.tokenizer.detokenize(input_ids)}"
 
         total_len, total_len_padded, input_ids, target = self._pad_for_context_parallel_and_fp8(
-            input_ids, target, image_media_params, audio_media_params
+            input_ids, target, grouped_params_for_tokens, audio_media_params
         )
 
+        # Store UNGROUPED params (one per frame) for frame loading in _load_media()
+        # The reason we must use ungrouped params for `images` here is that if we used the
+        #   grouped params, the line `frame_clips = media_value.get_clips(` in _load_media() would
+        #   only load one of the frames in the group (the last one) instead of both, breaking things
+        # The reason we must use grouped params for `sample` and the other metadata is that those
+        #   are used for the LLM's packed seq params and thus must reflect the sequence lengths and
+        #   other metadata that will come out of the vision encoder, post temporal compression
+        # This whole metadata tracking for grouped vs. ungrouped params is unfortunate, and only
+        #   necessary because we're passing single frames to RADIO and doing the temporal grouping
+        #   there. In the near-future we should refactor this so we always pass (T,B,C,H,W) tensors
+        #   to the vision encoder, to simplify everything.
         return PreEncodedTaskSample.derive_from(
-            sample,
-            tokens=input_ids,
-            labels=target,
-            images=image_media_params,
-            audio=audio_media_params,
-            total_len=total_len,
-            total_len_padded=total_len_padded,
-            num_frames=aggregated_num_frames,
+            sample,  # UNGROUPED (need per-image metadata for vision encoder)
+            tokens=input_ids,  # Grouped
+            labels=target,  # Grouped
+            images=image_media_params,  # UNGROUPED (need per-image metadata for vision encoder)
+            audio=audio_media_params,  # UNGROUPED (no audio-based temporal compression)
+            total_len=total_len,  # Grouped
+            total_len_padded=total_len_padded,  # Grouped
+            num_frames=aggregated_num_frames,  # UNGROUPED (need per-image metadata for vision encoder)
         )
 
     @stateless(restore_seeds=True)
@@ -571,8 +732,11 @@ class MultiModalTaskEncoder(
         for media_idx, media in enumerate(sample.images):
             # Debug: Save images if DEBUG environment variable is set to 1
             if os.environ.get("DEBUG_DATALOADER", "0") == "1":
-                self._debug_save_image(media, media_idx, sample.__key__, data_augment)
-            
+                try:
+                    self._debug_save_image(media, media_idx, sample.__key__, data_augment)
+                except Exception as e:
+                    print(f"[DEBUG] Failed to save debug image: {e}")
+
             image_tiles.extend(self.image_tiling_strategy.apply_params(media, data_augment=data_augment))
 
         sound_clips = []
@@ -612,63 +776,69 @@ class MultiModalTaskEncoder(
         import matplotlib.pyplot as plt
         import matplotlib.patches as patches
         from datetime import datetime
-        
+
         # Create debug directory if it doesn't exist
-        debug_dir = os.path.join(os.getcwd(), "debug_images")
+        debug_dir = os.environ.get("DEBUG_DATALOADER_DIR", os.path.join(os.getcwd(), "debug_images"))
         os.makedirs(debug_dir, exist_ok=True)
-        
+
         # Get original image and size
         original_image = media.media.value
-        
+
         if isinstance(media.media, ImageMedia):
             orig_width, orig_height = media.media.width, media.media.height
+            media_type = "image"
+            if os.environ.get("DEBUG_DATALOADER_VIDEO_ONLY", "0") == "1":
+                return
         elif isinstance(media.media, VideoFrameMedia):
             orig_width, orig_height = media.media.video_width, media.media.video_height
+            media_type = "video"
+            if os.environ.get("DEBUG_DATALOADER_IMAGE_ONLY", "0") == "1":
+                return
         else:
             return  # Skip if not a supported media type
-        
+
         # Apply the transformation to get the processed tiles
         transformed_tiles = self.image_tiling_strategy.apply_params(media, data_augment=data_augment)
-        
+
         # Get the normalization stats for denormalization
         from .image_processing import pixel_statistics
         pixel_mean, pixel_std = pixel_statistics.get(
-            self.args.vision_model_type, 
+            self.args.vision_model_type,
             ([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
         )
-        
+
         # Convert lists to tensors for denormalization
         mean = torch.tensor(pixel_mean).view(3, 1, 1)
         std = torch.tensor(pixel_std).view(3, 1, 1)
-        
+
         # Create a figure with subplots
         num_tiles = len(transformed_tiles)
         fig, axes = plt.subplots(1, num_tiles + 1, figsize=(5 * (num_tiles + 1), 5))
         if num_tiles == 0:
             axes = [axes]
-        
+
         # Plot original image
         ax = axes[0] if num_tiles > 0 else axes
         ax.imshow(original_image)
         ax.set_title(f"Original Image\nSize: {orig_width}x{orig_height}", fontsize=10, fontweight='bold')
         ax.axis('off')
-        
+
         # Plot transformed tiles
         for tile_idx, tile_tensor in enumerate(transformed_tiles):
             ax = axes[tile_idx + 1]
-            
+
             # Denormalize the tensor: img = img * std + mean
             denormalized = tile_tensor * std + mean
-            
+
             # Clamp to [0, 1] range
             denormalized = torch.clamp(denormalized, 0, 1)
-            
+
             # Convert to numpy and transpose from CxHxW to HxWxC
             tile_image = denormalized.permute(1, 2, 0).cpu().numpy()
-            
+
             # Get the new size
             new_height, new_width = tile_image.shape[:2]
-            
+
             ax.imshow(tile_image)
             ax.set_title(
                 f"Tile {tile_idx + 1}/{num_tiles}\n"
@@ -678,18 +848,18 @@ class MultiModalTaskEncoder(
                 fontweight='bold'
             )
             ax.axis('off')
-        
+
         # Create a unique filename with timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         safe_key = str(sample_key).replace("/", "_").replace("\\", "_")[:50]
-        filename = f"{safe_key}_media{media_idx}_{timestamp}.png"
+        filename = f"{safe_key}_{media_type}_media{media_idx}_{timestamp}.png"
         filepath = os.path.join(debug_dir, filename)
 
-        print(f"[DEBUG] Saved debug image to: {filepath}")
-        
         plt.tight_layout()
         plt.savefig(filepath, dpi=150, bbox_inches='tight')
         plt.close(fig)
+
+        print(f"[DEBUG] Saved debug image to: {filepath}")
 
     @stateless(restore_seeds=True)
     def select_samples_to_pack(
@@ -1026,6 +1196,76 @@ class MultiModalTaskEncoder(
             if isinstance(val, tuple) or isinstance(val, list):
                 val = val[0]
             media.media.value = val
+
+    def _group_video_frame_params_into_tubelets(
+        self,
+        image_media: list,
+        image_media_params: list,
+        temporal_patch_size: int,
+    ) -> list:
+        """
+        Group video frame params into tubelet params to match the number of IMAGE_TOKENs.
+
+        With temporal compression, we emit one IMAGE_TOKEN per tubelet (every T frames),
+        not per frame. This function groups the params accordingly, summing num_embeddings
+        for each tubelet.
+
+        Note: Because we ensure that the number of video frames is a multiple of T, it each group
+        is guaranteed to be from a unique video, even if there are multiple videos in the sample.
+
+        Args:
+            image_media: List of ImageMedia and VideoFrameMedia objects.
+            image_media_params: List of params, one per media item.
+            temporal_patch_size: Number of frames per tubelet (T).
+
+        Returns:
+            List of params with video frames grouped into tubelets.
+        """
+        # Phase 1: Build groups - map each index i in image_media to a group ID
+        # Images get their own group, video frames are grouped by tubelet (every T frames)
+        groups: list[list[int]] = []  # List of index lists, one per group
+
+        for i, media in enumerate(image_media):
+            if isinstance(media, VideoFrameMedia):
+                # Video frame: group by tubelet (every T frames)
+                if media.sample_index % temporal_patch_size == 0:
+                    # Start of a new tubelet
+                    groups.append([i])
+                else:
+                    # Continue current tubelet (add to last group)
+                    groups[-1].append(i)
+            else:
+                # Image: each gets its own group
+                groups.append([i])
+
+        # Phase 2: Create grouped params
+        # For video tubelets: use first frame's embeddings (E), NOT sum (T × E)
+        # Model groups T frames into 1 tubelet with E patches (features are T× larger, count is same)
+        grouped_params = []
+        for group_indices in groups:
+            # Use first item's params as base
+            base_params = image_media_params[group_indices[0]]
+
+            # Verify all items in the group have the same embeddings and tiles
+            # (all video frames in a tubelet should have same spatial size)
+            assert all([
+                image_media_params[idx].num_embeddings == base_params.num_embeddings
+                for idx in group_indices
+            ]), (
+                f"All items in the group must have the same num_embeddings: {group_indices}, "
+                f"got {[image_media_params[idx].num_embeddings for idx in group_indices]}"
+            )
+            assert all([
+                image_media_params[idx].num_tiles == base_params.num_tiles
+                for idx in group_indices
+            ]), (
+                f"All items in the group must have the same num_tiles: {group_indices}"
+            )
+
+            # Use first frame's embeddings (model produces E patches per tubelet, not T × E)
+            grouped_params.append(base_params)
+
+        return grouped_params
 
     def _target_has_trainable_tokens(
         self,

@@ -85,13 +85,13 @@ def model_provider(
         )
 
     num_image_embeddings = get_num_image_embeddings(
-        img_h=args.img_h, 
-        img_w=args.img_w, 
-        patch_dim=args.patch_dim, 
-        vision_model_type=vision_model_type, 
+        img_h=args.img_h,
+        img_w=args.img_w,
+        patch_dim=args.patch_dim,
+        vision_model_type=vision_model_type,
         disable_vision_class_token=args.disable_vision_class_token,
-        class_token_len=1, 
-        pixel_shuffle=False, 
+        class_token_len=1,
+        pixel_shuffle=False,
         use_tile_tags=False,
         use_image_break_token=args.image_break_token is not None,
         conv_merging=args.conv_merging,
@@ -227,18 +227,21 @@ def model_provider(
         language_rotary_percent=args.rotary_percent,
         language_rope_scaling=args.use_rope_scaling,
         pre_process=(
-            parallel_state.is_pipeline_first_stage() or 
+            parallel_state.is_pipeline_first_stage() or
             parallel_state.get_pipeline_model_parallel_rank() == args.encoder_pipeline_model_parallel_size
         ),
         post_process=parallel_state.is_pipeline_last_stage(),
         add_encoder=parallel_state.is_pipeline_first_stage(),
         add_decoder=(
-            parallel_state.is_pipeline_last_stage() or 
+            parallel_state.is_pipeline_last_stage() or
             parallel_state.get_pipeline_model_parallel_rank() >= args.encoder_pipeline_model_parallel_size
         ),
         img_h=args.img_h,
         img_w=args.img_w,
         patch_dim=args.patch_dim,
+        video_temporal_patch_size=getattr(args, "video_temporal_patch_size", 1),
+        allow_checkpoint_without_temporal_compression=getattr(args, "allow_checkpoint_without_temporal_compression", False),
+        separate_video_embedder=getattr(args, "separate_video_embedder", False),
     )
 
     model.freeze(
@@ -359,12 +362,12 @@ def get_batch(data_iterator):
         vision_model_type = "clip"
         # Calculate the number of image embedding tokens will be added to text tokens
         num_image_embeddings_per_tile = get_num_image_embeddings(
-            img_h=args.img_h, 
-            img_w=args.img_w, 
-            patch_dim=args.patch_dim, 
+            img_h=args.img_h,
+            img_w=args.img_w,
+            patch_dim=args.patch_dim,
             vision_model_type=vision_model_type,
-            disable_vision_class_token=args.disable_vision_class_token, 
-            class_token_len=1, 
+            disable_vision_class_token=args.disable_vision_class_token,
+            class_token_len=1,
             pixel_shuffle=False,
             use_image_break_token=args.image_break_token is not None,
             conv_merging=args.conv_merging,

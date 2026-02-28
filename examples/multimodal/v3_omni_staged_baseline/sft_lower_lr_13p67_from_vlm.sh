@@ -6,74 +6,51 @@
 #SBATCH --mem=0
 #SBATCH --ntasks-per-node=8
 #SBATCH --dependency=singleton
-#SBATCH --nodes=32
+#SBATCH --nodes=64
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
-#SBATCH --job-name=pretrain_moe_rl_llm_vision_eval_mode_radio_v4_so400m_rc3_1230
-
-# Strict mode: exit immediately on failure (-e), treat unset vars as error (-u), mark any failures as whole pipeline (-o pipefail)
-# Combined these ensure that the job is reliably marked as failed so we can use `--dependency afterok:<jobid>`
-set -euo pipefail
+#SBATCH --job-name=sft_omni_staged_lower_lr_13p67_from_vlm_0213
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export MSC_CONFIG="/lustre/fsw/portfolios/llmservice/users/matthieul/msc_config/msc_config.yaml"
 
 export UB_TIMEOUT=720
+export CUDA_DEVICE_MAX_CONNECTIONS=1
 export NVTE_FWD_LAYERNORM_SM_MARGIN=16
 export NVTE_BWD_LAYERNORM_SM_MARGIN=16
 export NCCL_P2P_NET_CHUNKSIZE=2097152
 export NCCL_DEBUG=WARN
 export TORCHINDUCTOR_WORKER_START=fork
+#export TORCH_NCCL_AVOID_RECORD_STREAMS=0
+export TRITON_CACHE_DIR=${TRITON_CACHE_DIR:-"/tmp/triton_cache_\${SLURM_NODEID}"}
+
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
-USER=${SLURM_JOB_USER:-${USER}}
+USER=$SLURM_JOB_USER
 
-# Hard-coded
-USE_TILING=0
-USE_DYNAMIC_RES=1
+# Auto-detect batch or interactive mode.
+which srun
+BATCH=$((1-$?))
+
+DEBUG=0
+USE_DYNAMIC_RES=1   #1 not used in A1-A2 pretraining
 USE_IMAGE_BREAK=0   # Only used if USE_DYNAMIC_RES is 1.
 USE_CONV_MERGE=0    # Only used if USE_DYNAMIC_RES is 1.
-USE_FP8=0  # Not supported with current RC3 checkpoint
-USE_VISION_ENCODER_EVAL_MODE=1
+USE_FP8=0
+USE_CPE_EVAL_MODE=1
+USE_PACKING=1
+USE_BUCKETING=0 
 
-# Can be overridden via exports
-# NOTE: Debug doesn't work with >TP8 currently, but leaving it here for completeness
-# NOTE: To run RADIO-H (not So400m), export modified MODEL_NAME, VISION_MODEL_TYPE, CHECKPOINT_DIR
-#   export MODEL_NAME=pretrain_moe_rl_llm_vision_eval_mode_radio_v4_h_rc3_1230
-#   export CHECKPOINT_DIR=/lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/artifacts/mcore/vlm_checkpoints/nano-v3-rc2-12-03-25-7-15-pm-c-radio_v4-h-rc3-tp2-ep32
-#   export VISION_MODEL_TYPE=radio
-MODEL_NAME=${MODEL_NAME:-"pretrain_moe_rl_llm_vision_eval_mode_radio_v4_so400m_rc3_1230"}
-CHECKPOINT_DIR=${CHECKPOINT_DIR:-"/lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/artifacts/mcore/vlm_checkpoints/nano-v3-rc2-12-03-25-7-15-pm-c-radio_v4-so400m-rc3-tp2-ep32"}
-VISION_MODEL_TYPE=${VISION_MODEL_TYPE:-"radio-so400m"}
-DRY_RUN=${DRY_RUN:-0}  # Prints launch command and exits
-DEBUG=${DEBUG:-0}  # Sets DEBUG_RANK, requires interactive session
-SAVE_INTERVAL=${SAVE_INTERVAL:-2000}
-BASE_LR=${BASE_LR:-"1e-3"}
-MIN_LR=${MIN_LR:-"1e-5"}
-DYNAMIC_RES_DATA_AUG=${DYNAMIC_RES_DATA_AUG:-1}
-
-if [[ $DEBUG -eq 1 ]]; then
-    # Debugging launches the debugger, so it's a non-interactive launch in terms of escaping "<>"
-    INTERACTIVE=0
-
-    # Append _debug to MODEL_NAME and WORKSPACE to more easily delete all debug runs
-    MODEL_NAME="${MODEL_NAME}_debug"
-    WORKSPACE="/lustre/fsw/portfolios/llmservice/users/${USER}/workspace/debug"
-
+# Remember to update model and job name if running in batch mode!!
+if [[ $BATCH -eq 0 ]]; then
+    DATETIME=`date +'%y-%m-%d-%H-%M-%S'`
+    MODEL_NAME="interactive_sft_omni_staged_lower_lr_13p67_from_vlm_${DATETIME}"
+    SPECIAL_TOKENS=" --special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box> <so_embedding> <so_start> <so_end> "
+    DEBUG=1
 else
-    # Auto-detect interactive mode (if srun is not defined, we're interactive)
-    INTERACTIVE=$(which srun >/dev/null 2>&1 && echo 0 || echo 1)
-
-    # Normal workspace
-    WORKSPACE="/lustre/fsw/portfolios/llmservice/users/${USER}/workspace"
-fi
-
-if [[ $INTERACTIVE -eq 1 ]]; then
-    MODEL_NAME="interactive_${MODEL_NAME}"
-    SPECIAL_TOKENS="--special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
-else
-    SPECIAL_TOKENS="--special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\>"
+    MODEL_NAME="sft_omni_staged_lower_lr_13p67_from_vlm_0213"
+    SPECIAL_TOKENS=" --special-tokens \<image\> \<img\> \</img\> \<quad\> \</quad\> \<ref\> \</ref\> \<box\> \</box\> \<so_embedding\> \<so_start\> \<so_end\> "
 fi
 
 WANDB_API_KEY=${WANDB_API_KEY}
@@ -81,6 +58,7 @@ WANDB_PROJECT=${WANDB_PROJECT:-"megatron-vlm-v3"}
 WANDB_ENTITY=${WANDB_ENTITY:-"adlr"}
 WANDB_NAME=${MODEL_NAME}
 
+WORKSPACE="/lustre/fsw/portfolios/llmservice/users/${USER}/workspace"
 SOURCE=`pwd`
 OUTPUT_BASE="${WORKSPACE}/output"
 OUTPUT="${OUTPUT_BASE}/${MODEL_NAME}"
@@ -94,16 +72,14 @@ WANDB_DIR="${OUTPUT}/wandb"
 mkdir -p "${FINETUNE_DIR}" "${LOGS_DIR}" "${TENSORBOARD_DIR}" "${WANDB_DIR}"
 
 # Snapshot the source code into the OUTPUT directory on first run, and always run from the snapshot thereafter
-# NOTE: Don't recommend this method anymore, code isn't copied until run executes (after queuing)
-#       See examples/multimodal/launch.sh instead, which copies when the run is launched
 if [[ $DEBUG -eq 0 ]]; then
     CODE_SNAPSHOT_DIR="${OUTPUT}/code_snapshot"
+    CODE_DIR="${SOURCE}"
     if [[ ! -d "${CODE_SNAPSHOT_DIR}" ]]; then
         echo "[info] Creating code snapshot at ${CODE_SNAPSHOT_DIR} from ${SOURCE}"
         rsync -a --delete \
             --exclude "__pycache__" \
             --exclude "*.pyc" \
-            --exclude "wandb/" \
             "${SOURCE}/" "${CODE_SNAPSHOT_DIR}/"
     fi
     CODE_DIR="${CODE_SNAPSHOT_DIR}"
@@ -114,13 +90,16 @@ fi
 TP=2
 EP=32
 
-# New tokenizer 10/20.
-TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--Nemotron-Nano-3-30B-A3.5B-dev-1016/snapshots/bb271274159f07461e919379311e32802e5ec36b/"
+CHECKPOINT_DIR=/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/pretrain_moe_a2_full_blend_0212/checkpoints
+
+# New tokenizer.
+# TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/nano-tokenizer"
+TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/nemotron_3_nano_30b_a3b_tokenizer"
 TOKENIZER_PROMPT_FORMAT="nemotron6-moe"
 
-DATA_TRAIN="${CODE_DIR}/examples/multimodal/v2/data_config/pretrain_dataset_commercial_sft_extended.yaml"
+DATA_TRAIN="${CODE_DIR}/examples/multimodal/v3_omni_staged_baseline/sft_recipe_13p67_from_vlm.yaml"
 
-if [[ $DEBUG -eq 1 || $INTERACTIVE -eq 1 ]]; then
+if [[ $DEBUG -eq 1 ]]; then
     MBZ=1
     BZ=8
     NW=0
@@ -130,16 +109,18 @@ if [[ $DEBUG -eq 1 || $INTERACTIVE -eq 1 ]]; then
 
     EXTRA_ARGS=""
 
-    NUM_GPU=$SLURM_GPUS_ON_NODE
+    NUM_GPU=8
+    PBS=128
 else
     MBZ=1
     BZ=512
-    NW=8
+    NW=8 
     AD=0.0
     HD=0.0
     LI=5
     EXTRA_ARGS=""
     NUM_GPU=8
+    PBS=5000 
 fi
 
 SEQ_LEN=256
@@ -147,11 +128,6 @@ DECODER_SEQ_LEN=16384
 
 if [ -n "${WANDB_API_KEY}" ]; then
     EXTRA_ARGS+=" --wandb-project ${WANDB_PROJECT} --wandb-exp-name ${MODEL_NAME} --wandb-save-dir ${WANDB_DIR} --wandb-resume-same-run"
-fi
-
-if [[ $USE_TILING -eq 1 ]]; then
-    EXTRA_ARGS+=" --pixel-shuffle --use-tiling --max-num-tiles 12 --use-thumbnail"
-    SEQ_LEN=256
 fi
 
 if [[ $USE_FP8 -eq 1 ]]; then
@@ -166,7 +142,7 @@ fi
 if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
     SEQ_LEN=12288
     if [[ $USE_IMAGE_BREAK -eq 1 ]]; then
-        if [[ $INTERACTIVE -eq 1 ]]; then
+        if [[ $BATCH -eq 0 ]]; then
             EXTRA_ARGS+=" --image-break-token <image_break>"
             SPECIAL_TOKENS+=" <image_break>"
         else
@@ -179,35 +155,54 @@ if [[ $USE_DYNAMIC_RES -eq 1 ]]; then
     else
         EXTRA_ARGS+=" --pixel-shuffle"
     fi
-    EXTRA_ARGS+=" --dynamic-resolution --dynamic-resolution-min-patches 1024 --dynamic-resolution-max-patches 13312"
-    if [[ $DYNAMIC_RES_DATA_AUG -eq 1 ]]; then
-        EXTRA_ARGS+=" --apply-data-augment"
+    EXTRA_ARGS+=" --dynamic-resolution --dynamic-resolution-min-patches 1024 --dynamic-resolution-max-patches 13312 --apply-data-augment"
+fi
+
+if [[ $USE_CPE_EVAL_MODE -eq 1 ]]; then
+    EXTRA_ARGS+=" --radio-force-cpe-eval-mode"  # Only CPE in eval mode (not entire vision encoder)
+fi
+
+# online packing & bucketing
+if [[ $USE_PACKING -eq 1 ]]; then
+    EXTRA_ARGS+=" --packing-buffer-size ${PBS} --packing-seq-length ${DECODER_SEQ_LEN}"
+    if [[ $USE_BUCKETING -eq 1 ]]; then
+        EXTRA_ARGS+=" --packing-knapsack-algorithm bucketing_greedy_knapsack "
+    else
+        EXTRA_ARGS+=" --packing-knapsack-algorithm balanced_greedy_knapsack "
     fi
 fi
 
-if [[ $USE_VISION_ENCODER_EVAL_MODE -eq 1 ]]; then
-    EXTRA_ARGS+=" --radio-force-eval-mode"  # Entire vision encoder in eval mode (eval CPE, no dropout)
-fi
+# LM (Mamba block) recompute
+# EXTRA_ARGS+=" --recompute-granularity selective --recompute-modules core_attn mlp layernorm moe_act moe "
+EXTRA_ARGS+=" --recompute-granularity selective --recompute-modules core_attn layernorm moe_act "
 
+# Vision (GPT block) recompute
+# EXTRA_ARGS+=" --recompute-vision --recompute-method-vision block --recompute-granularity-vision full --recompute-vision-num-layers 32 "
+EXTRA_ARGS+=" --recompute-vision --recompute-method-vision block --recompute-granularity-vision full --recompute-vision-num-layers 28 "
+
+# Sound model
+EXTRA_ARGS+=" --recompute-sound "
+
+SOUND_MODEL_TYPE="nemo://nvidia/parakeet-tdt-0.6b-v2"
+
+EXTRA_ARGS+=" --video-min-num-frames 8 --video-max-num-frames 32 "
 
 OPTIONS=" \
     --use-checkpoint-args \
     --transformer-impl transformer_engine \
     --use-te \
     --data-path ${DATA_TRAIN} \
-    --freeze-ViT \
-    --freeze-LM \
     --patch-dim 16 \
     --img-h 512 \
     --img-w 512 \
     --dataloader-type external \
     --language-model-type nemotron6-moe \
     ${EXTRA_ARGS} \
-    --allow-missing-vision-projection-checkpoint \
-    --vision-model-type ${VISION_MODEL_TYPE} \
+    --vision-model-type radio \
     --use-loss-scaling \
     ${SPECIAL_TOKENS} \
     --disable-vision-class-token \
+    --prompt-path ${CODE_DIR}/examples/multimodal/manual_prompts.json \
     --eod-mask-loss \
     --image-tag-type internvl \
     --moe-token-dispatcher-type alltoall \
@@ -219,13 +214,12 @@ OPTIONS=" \
     --moe-grouped-gemm \
     --num-experts 128 \
     --moe-router-topk 6 \
-    --moe-aux-loss-coeff 1e-6 \
+    --moe-aux-loss-coeff 1e-9 \
     --moe-router-topk-scaling-factor 2.5 \
     --moe-router-enable-expert-bias \
     --moe-router-dtype fp32 \
     --moe-router-load-balancing-type seq_aux_loss \
     --moe-shared-expert-intermediate-size 3712 \
-    --attention-backend flash \
     --is-hybrid-model \
     --mamba-num-heads 64 \
     --mamba-head-dim 64 \
@@ -260,10 +254,10 @@ OPTIONS=" \
     --micro-batch-size ${MBZ} \
     --global-batch-size ${BZ} \
     --train-full-dataset \
-    --lr ${BASE_LR} \
-    --min-lr ${MIN_LR} \
-    --lr-warmup-fraction 0.1 \
-    --weight-decay 0.01 \
+    --lr-warmup-fraction 0.05 \
+    --lr 1e-5 \
+    --min-lr 1e-7 \
+    --weight-decay 0.05 \
     --clip-grad 1.0 \
     --lr-decay-style cosine \
     --log-interval ${LI} \
@@ -276,73 +270,41 @@ OPTIONS=" \
     --load ${FINETUNE_DIR} \
     --save ${FINETUNE_DIR} \
     --dataloader-save ${FINETUNE_DIR}/dataloader \
-    --save-interval ${SAVE_INTERVAL} \
+    --save-interval 10000 \
     --ckpt-format torch \
-    --log-progress  \
-    --timing-log-option minmax \
-    --log-params-norm \
-    --log-num-zeros-in-grad \
-    --log-throughput \
-    --logging-level 20 \
-    --log-memory-interval 500 \
     --bf16 \
     --adam-beta1 0.9 \
     --adam-beta2 0.999 \
     --use-distributed-optimizer \
-    --ddp-num-buckets 8 \
-    --ddp-pad-buckets-for-high-nccl-busbw \
-    --overlap-grad-reduce \
-    --overlap-param-gather \
-    --manual-gc \
     --num-workers ${NW} \
     --tensorboard-dir ${TENSORBOARD_DIR} \
     --sequence-parallel \
     --class-token-len 10 \
+    --allow-large-videos \
+    --sound-model-type ${SOUND_MODEL_TYPE}  \
+    --sound-target-rate 16000 \
+    --sound-embedding-size 751 \
+    --tokenizer-keep-history-thinking \
 "
 
 export WANDB_ENTITY=$WANDB_ENTITY  # Not passed in via command line args, only env vars
 export NVTE_APPLY_QK_LAYER_SCALING=0
 export NVTE_ALLOW_NONDETERMINISTIC_ALGO=1
 
-# Debug, interactive, or submit_job mode
-if [[ $DEBUG -eq 1 ]]; then
-    if [[ $SLURM_NNODES -gt 1 ]]; then
-        echo "ERROR: Expected single-node debugging when using DEBUG_RANK environment variable."
-        exit 1
-    fi
-
-    DEBUG_RANK=${DEBUG_RANK:-0}  # Default to rank 0
-    DEBUG_CMD="ONE_LOGGER_JOB_CATEGORY=test \
-    CUDA_LAUNCH_BLOCKING=1 \
-    DEBUG_RANK=${DEBUG_RANK} \
-    WANDB_MODE=disabled \
-    python -Xfrozen_modules=off \
-    -m torch.distributed.run \
-    --nproc_per_node=$SLURM_GPUS_ON_NODE \
-    ${CODE_DIR}/examples/multimodal/train.py ${OPTIONS}"
-
-    echo -e "Debugging with options: $OPTIONS\n"
-    eval "$DEBUG_CMD"
-
-elif [[ $INTERACTIVE -eq 1 ]]; then
-    torchrun --nproc_per_node ${NUM_GPU} ${CODE_DIR}/examples/multimodal/train.py ${OPTIONS}
-
+# Interactive or batch mode
+if [[ $BATCH -eq 0 ]]; then
+    cd ${CODE_DIR}
+    torchrun --nproc_per_node ${NUM_GPU} examples/multimodal/train.py ${OPTIONS}
 else
     run_cmd="python -u ${CODE_DIR}/examples/multimodal/train.py ${OPTIONS}"
 
-    if [[ $DRY_RUN -eq 1 ]]; then
-        echo "${run_cmd}"
-        exit 0
-    fi
-
     DATETIME=`date +'date_%y-%m-%d_time_%H-%M-%S'`
 
-    # Need TRITON_CACHE_DIR expanded inside srun b/c sbatch runs on node 0
     srun -l --verbose \
-    --container-image /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/containers/pytorch25.06-moe-avlm-editable-energon.sqsh \
-    --container-mounts "/lustre,/home" \
-    --output=${LOGS_DIR}/%x_%j_srun_$DATETIME.log \
-    sh -c "export TRITON_CACHE_DIR=/tmp/triton_cache_\${SLURM_NODEID}; echo ${run_cmd}; ${run_cmd}"
+    --container-image /lustre/fsw/portfolios/llmservice/users/matthieul/docker/pytorch25.06-moe-avlm-editable-energon-mamba-fix.sqsh \
+    --container-mounts "/lustre" \
+    --output=${LOGS_DIR}/%x_%j_$DATETIME.log \
+    sh -c "echo ${run_cmd}; ${run_cmd}"
 
     set +x
 fi

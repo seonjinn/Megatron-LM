@@ -2,7 +2,7 @@
 import dataclasses
 from collections import defaultdict
 
-from megatron.energon import CachePool, FileStore, basic_sample_keys, cooker, stateless
+from megatron.energon import CachePool, FileStore, SourceInfo, basic_sample_keys, cooker, stateless
 
 from ..conversation_sample import (
     AudioMedia,
@@ -43,6 +43,10 @@ def cook_conversation(
                         if warn_about_slow_media_loading[media_source.get_path()]:
                             print(f"WARNING: Dataset {media_source.get_path()} not prepared with media metadata, slow metadata for {frag.value}: {e!r}")
                             warn_about_slow_media_loading[media_source.get_path()] = False
+                cs.__sources__ = (
+                    *cs.__sources__,
+                    SourceInfo(dataset_path=media_source.get_path(), index=frag.value, shard_name=None, file_names=(frag.value,)),
+                )
                 frag.value = cache.get_lazy(media_source, frag.value)
             elif isinstance(frag, str):
                 # No source

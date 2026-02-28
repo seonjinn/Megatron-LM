@@ -62,8 +62,9 @@ if [[ $DEBUG -eq 1 ]]; then
     WORKSPACE="/lustre/fsw/portfolios/llmservice/users/${USER}/workspace/debug"
 
 else
-    # Auto-detect interactive mode (if srun is not defined, we're interactive)
-    INTERACTIVE=$(which srun >/dev/null 2>&1 && echo 0 || echo 1)
+    # If we've SSH'd into the allocation from a new terminal, `srun` will be on path still,
+    #   so need to explicitly pass in `INTERACTIVE=1 <script>` (allow override here)
+    INTERACTIVE=${INTERACTIVE:-$(which srun >/dev/null 2>&1 && echo 0 || echo 1)}
 
     # Normal workspace
     WORKSPACE="/lustre/fsw/portfolios/llmservice/users/${USER}/workspace"

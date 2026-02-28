@@ -6,7 +6,13 @@ from copy import deepcopy
 
 import torch
 
-from config import get_language_model_config, get_vision_model_config, get_vision_projection_config, get_sound_model_config, get_sound_projection_config
+from config import (
+    get_language_model_config,
+    get_vision_model_config,
+    get_vision_projection_config,
+    get_sound_model_config,
+    get_sound_projection_config,
+)
 from layer_specs import (get_layer_spec, get_layer_spec_te, get_mlp_module_spec, get_norm_mlp_module_spec_te,
                          get_mamba_layer_spec_te)
 
@@ -73,6 +79,16 @@ def model_provider(
             max_num_image_embeddings //= 4
             num_image_embeddings //= 4
     else:
+        # For tiling only, need a fixed number of embeddings for num_image_embeddings_per_tile
+        # We don't pass in `is_video` to calculate `self.num_image_embeddings_per_tile`,
+        #   so we currently require no temporal compression because we can't verify the number of frames
+        video_temporal_patch_size=getattr(args, 'video_temporal_patch_size', 1)
+        if video_temporal_patch_size != 1:
+            raise NotImplementedError(
+                f"When using tiling, temporal compression is not supported."
+                f" Found video_temporal_patch_size={video_temporal_patch_size}."
+            )
+
         num_image_embeddings = get_num_image_embeddings(
             img_h=args.img_h,
             img_w=args.img_w,
@@ -312,6 +328,11 @@ def model_provider(
         radio_cpe_aspect_ratio_select=getattr(args, "radio_cpe_aspect_ratio_select", False),
         radio_disable_cpe=getattr(args, "radio_disable_cpe", False),
         use_loss_scaling=getattr(args, "use_loss_scaling", False),
+        log_model_grad_norms=getattr(args, "log_model_grad_norms", False),
+        log_model_act_norms=getattr(args, "log_model_act_norms", False),
+        video_temporal_patch_size=getattr(args, "video_temporal_patch_size", 1),
+        allow_checkpoint_without_temporal_compression=getattr(args, "allow_checkpoint_without_temporal_compression", False),
+        separate_video_embedder=getattr(args, "separate_video_embedder", False),
     )
 
     model.freeze(

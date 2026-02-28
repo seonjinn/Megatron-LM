@@ -1,0 +1,29 @@
+[project]
+name = "megatron-multimodal-validate"
+version = "0.1.0"
+requires-python = ">=3.13"
+
+dependencies = [
+    "torch>=2",
+    "megatron-energon[av_decode]",
+    "torchvision>=0.24.1",
+    "einops>=0.8.1",
+    "scipy>=1.17.0",
+    "transformer-engine[core]>=2.11.0",
+    "regex>=2026.1.15",
+    "transformers>=4.57.6",
+    "albumentations>=2.0.8",
+]
+
+[tool.hatch.build.targets.wheel]
+
+
+[project.scripts]
+validate-dataset = "megatron_multimodal_validate:main"
+
+[tool.uv]
+package = true
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

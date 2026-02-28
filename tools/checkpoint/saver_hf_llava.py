@@ -82,6 +82,8 @@ class HFCheckpointSaverLLaVA(HFCheckpointSaver):
 
         if self.md.vision_model_type == "radio":
             params_dict["embedder_weight"] = vision_embeddings_msg["embedder weight"]
+            if getattr(self.md, 'separate_video_embedder', False):
+                params_dict["video_embedder_weight"] = vision_embeddings_msg["video_embedder weight"]
             params_dict["class_token"] = vision_embeddings_msg["class token"]
             params_dict["position_embeddings"] = vision_embeddings_msg["position embeddings"]
             params_dict["input_conditioner_norm_mean"] = torch.tensor([0.48145466, 0.4578275, 0.40821073]).unsqueeze(-1).unsqueeze(-1)

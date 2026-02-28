@@ -4,6 +4,16 @@ splits:
   train:
     blend:
 
+    # ########################################################
+    # # YTC Longform dataset
+    # ########################################################
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/longform_ytc/flac_clean_max1200s
+      dataset_config: dataset.yaml
+      subflavors:
+        cook: granary_english_webdataset
+      weight: 1
+
     #########################################################
     # Granary datasets (ASR)
     #########################################################

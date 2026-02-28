@@ -75,11 +75,11 @@ class VideoMedia(Media):
     @property
     def video_duration(self) -> float:
         return self.metadata["video_duration"]
-    
+
     @property
     def video_num_frames(self) -> int:
         return self.metadata["video_num_frames"]
-    
+
     @property
     def video_fps(self) -> float:
         return self.metadata["video_fps"]
@@ -92,7 +92,11 @@ class VideoFrameMedia(Media):
     value: Union[AVDecoder, torch.Tensor, Lazy[AVDecoder], str]
 
     timestamp: Optional[float] = None
-    frame_index: Optional[int] = None
+
+    # Frame index: original frame index in source video; non-integer means we're interpolating
+    # Sample index: consecutive index (0, 1, 2, ...) within the sampled frames for the video media
+    frame_index: Optional[Union[int, float]] = None
+    sample_index: Optional[int] = None
 
     metadata: dict[str, Union[str, int, float, bool]] | None = None
 

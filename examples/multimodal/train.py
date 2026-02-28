@@ -138,7 +138,8 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
         num_frames = torch.tensor([], dtype=torch.int, device=data_text.device)
 
     # TODO: Sound encoder from HF/Nemo can hang with text-only samples. Find a better way to handle this.
-    if getattr(args, "sound_model_type", None) and sound_clips is not None and sound_clips.shape == torch.Size([1, 1]):
+    is_sound_frozen = args.freeze_sound_model and args.freeze_sound_projection
+    if getattr(args, "sound_model_type", None) and sound_clips is not None and sound_clips.shape == torch.Size([1, 1]) and not is_sound_frozen:
         sound_clips = torch.zeros((1, 1600), dtype=sound_clips.dtype, device=sound_clips.device)
         sound_length = torch.tensor([1600], dtype=sound_length.dtype, device=sound_length.device)
         sound_timestamps = torch.tensor([], dtype=sound_timestamps.dtype, device=sound_timestamps.device)
@@ -496,18 +497,57 @@ def write_online_eval_to_tensorboard(data, iteration, writer, walltime=None):
     write_eval_to_tensorboard(data, iteration, writer, walltime)
 
 
+def post_init_func():
+    # Debug only a specific rank (set DEBUG_RANK env var)
+    # Assumes the job was launched with torch.distributed.run (which sets LOCAL_RANK)
+    debug_rank = os.environ.get('DEBUG_RANK', None)
+    if debug_rank is not None:
+        local_rank = os.environ.get('LOCAL_RANK', None)
+        if local_rank is None:
+            raise ValueError("Expected LOCAL_RANK to be set from torch.distributed.run when using DEBUG_RANK")
+
+        if int(local_rank) == int(debug_rank):
+            import debugpy
+            import socket
+            hostname = socket.gethostname()
+            debug_port = int(os.environ.get('DEBUG_PORT', 3009))
+            debugpy.listen(("0.0.0.0", debug_port))
+            print(f"[Rank {local_rank}] Waiting for debugger. Attach to host: {hostname}, port: {debug_port}...")
+            debugpy.wait_for_client()
+        else:
+            print(f"[Rank {local_rank}] Waiting for rank {debug_rank}...")
+
+        torch.distributed.barrier()
+        print(f"[Rank {local_rank}] Debugger attached, continuing training...")
+
 if __name__ == "__main__":
     train_valid_test_dataloaders_provider.is_distributed = True
 
-    pretrain(
-        train_valid_test_dataloaders_provider,
-        model_provider,
-        ModelType.encoder_and_decoder,
-        forward_step,
-        args_defaults={'tokenizer_type': 'GPT2BPETokenizer'},
-        extra_args_provider=add_multimodal_extra_args,
-        process_non_loss_data_func=write_online_eval_to_tensorboard,
-        get_embedding_ranks=llava_embedding_ranks,
-        get_position_embedding_ranks=llava_position_embedding_ranks,
-        non_loss_data_func=run_online_eval,
-    )
+    try:
+        pretrain(
+            train_valid_test_dataloaders_provider,
+            model_provider,
+            ModelType.encoder_and_decoder,
+            forward_step,
+            args_defaults={'tokenizer_type': 'GPT2BPETokenizer'},
+            extra_args_provider=add_multimodal_extra_args,
+            process_non_loss_data_func=write_online_eval_to_tensorboard,
+            get_embedding_ranks=llava_embedding_ranks,
+            get_position_embedding_ranks=llava_position_embedding_ranks,
+            non_loss_data_func=run_online_eval,
+            post_init_func=post_init_func,
+        )
+    except Exception as e:
+        # If using DEBUG_RANK to debug, don't exit on failure (or torchrun will kill all ranks)
+        debug_rank = os.environ.get('DEBUG_RANK', None)
+        local_rank = int(os.environ.get('LOCAL_RANK', 0))
+
+        if debug_rank is not None and local_rank != int(debug_rank):
+            import time
+            import traceback
+            print(f"\n[Rank {local_rank}] Caught exception during debugging (pausing to keep DEBUG_RANK alive):")
+            traceback.print_exc()
+            while True:
+                time.sleep(60)
+
+        raise

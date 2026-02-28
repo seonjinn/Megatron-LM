@@ -7,6 +7,7 @@ from torchvision import transforms as T
 from torchvision.transforms import Compose
 from torchvision.transforms.functional import InterpolationMode
 
+from megatron.core.models.multimodal.utils import patchify_image
 
 IMAGENET_PIXEL_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_PIXEL_STD = [0.229, 0.224, 0.225]
@@ -91,7 +92,7 @@ def process_images(sample_imgs, patch_dim, dynamic_resolution, batch_mode=False)
                                        or shape (1, total_patches, patch_features) if batch_mode=True
                 For static resolution: shape (batch_size, C, H, W)
             - imgs_sizes (torch.Tensor): Image sizes tensor with shape (N, 2)
-                containing [width, height] for each image, or [[0,0]] if no images.
+                containing [height, width] for each image, or [[0,0]] if no images.
             - vision_cu_lengths (torch.Tensor or None): Cumulative sequence lengths
                 for dynamic resolution. Shape (batch_size + 1,) for evaluation mode,
                 or shape (1, batch_size + 1) for batch mode. None for static resolution.
@@ -108,15 +109,8 @@ def process_images(sample_imgs, patch_dim, dynamic_resolution, batch_mode=False)
     if len(sample_imgs) > 0:
         imgs_sizes = torch.tensor([[img.shape[1], img.shape[2]] for img in sample_imgs], dtype=torch.int32)
         if dynamic_resolution:
-            def rearrange_img(x):
-                py = x.shape[-2] // patch_dim
-                px = x.shape[-1] // patch_dim
-                x = rearrange(x, 'c (py yy) (px xx) -> (py px) (c yy xx)',
-                                    py=py, yy=patch_dim,
-                                    px=px, xx=patch_dim,
-                )
-                return x
-            imgs = [rearrange_img(img) for img in sample_imgs]
+            # Patchify: (3,H,W) -> (L,3*patch_dim*patch_dim)
+            imgs = [patchify_image(img, patch_dim) for img in sample_imgs]
 
             current_length = 0
             max_length = 0
@@ -271,7 +265,16 @@ class ImageTransform:
                 T.ToTensor(),
                 T.Normalize(mean=pixel_mean, std=pixel_std),
             ])
-            processed_img = dynamic_res_preprocess(img, min_patches=self._min_num_patches, max_patches=self._max_num_patches, res_step=self._res_step, pixel_shuffle=self._pixel_shuffle, min_side=self._min_side, conv_merging=self._conv_merging, is_video=is_video)
+            processed_img = dynamic_res_preprocess(
+                img,
+                min_patches=self._min_num_patches,
+                max_patches=self._max_num_patches,
+                res_step=self._res_step,
+                pixel_shuffle=self._pixel_shuffle,
+                min_side=self._min_side,
+                conv_merging=self._conv_merging,
+                is_video=is_video,
+            )
             processed_images = [processed_img]
 
             # Add thumbnail if enabled and image area is below threshold
@@ -337,7 +340,17 @@ def dynamic_preprocess(
     return processed_images
 
 
-def dynamic_res_preprocess(image, min_patches=1, max_patches=128, res_step=16, factor_max=1., pixel_shuffle=False, min_side=None, conv_merging=False, is_video=False):
+def dynamic_res_preprocess(
+    image,
+    min_patches=1,
+    max_patches=128,
+    res_step=16,
+    factor_max=1.,
+    pixel_shuffle=False,
+    min_side=None,
+    conv_merging=False,
+    is_video=False,
+):
     """Preprocess an image with dynamic resolution for vision transformers.
 
     This function resizes an image to optimize the number of patches while respecting
@@ -364,6 +377,8 @@ def dynamic_res_preprocess(image, min_patches=1, max_patches=128, res_step=16, f
             at least one side meets this constraint. Defaults to None.
         conv_merging (bool, optional): Whether to ensure compatibility with convolution
             merging by rounding to even patch dimensions. Defaults to False.
+        is_video (bool, optional): Whether this is a video frame. When True and video-specific
+            pooling args are provided, uses those for divisibility. Defaults to False.
 
     Returns:
         PIL.Image: Resized image with dimensions optimized for patch-based processing.

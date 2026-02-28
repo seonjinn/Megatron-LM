@@ -169,6 +169,45 @@ def add_multimodal_extra_args(parser):
         "--video-frame-temporal-jitter", action="store_true", default=False, help="Enable temporal jittering of the frames to sample from the video as input to the model.",
     )
     group.add_argument(
+        "--video-target-img-size", type=int, default=None,
+        help="Target image size (pixels) for video frames with dynamic resolution. "
+             "Default None, must specify this or video_target_num_patches."
+    )
+    group.add_argument(
+        "--video-target-num-patches", type=int, default=None,
+        help=(
+            "Target number of patches for video frames. Default None, must specify this or video_target_img_size."
+        )
+    )
+    group.add_argument(
+        "--video-maintain-aspect-ratio", action="store_true", default=False,
+        help="Match video native aspect ratio while respecting target patch budget."
+    )
+    # Temporal compression arguments
+    group.add_argument(
+        "--video-temporal-patch-size", type=int, default=1,
+        help="Temporal patch size for video frames. Default 1 (no temporal compression). "
+             "Set to 2 to group pairs of frames into 3D tubelets for temporal compression."
+    )
+    group.add_argument(
+        "--allow-checkpoint-without-temporal-compression", action="store_true", default=False,
+        help="Allow loading a checkpoint without temporal compression into a model with temporal compression. "
+             "When set, the embedder weights will be duplicated along the temporal dimension if needed."
+    )
+    group.add_argument(
+        "--separate-video-embedder", action="store_true", default=False,
+        help="Use separate embedders for images and videos. When set, the image embedder (self.embedder) "
+             "expects C*P*P input, and a separate video embedder (self.video_embedder) expects C*T*P*P input. "
+             "This avoids duplicating image patches along the temporal dimension. "
+             "Only relevant when --video-temporal-patch-size > 1."
+    )
+    group.add_argument(
+        "--video-prompt-version", type=int, default=2,
+        help="Video prompt format version."
+             "1 = each frame on its own line, <image> at tubelet boundaries. "
+             "2 = group T frames with 'and', one <image> per group (generalization of 1 to support temporal compression)"
+    )
+    group.add_argument(
         "--enable-fusions", action="store_true", default=True, help="Enable fusions in the model."
     )
     group.add_argument(
@@ -266,7 +305,8 @@ def add_multimodal_extra_args(parser):
              "to tensorboard. Logged at tensorboard_log_interval."
     )
     group.add_argument(
-        "--apply-data-augment", action="store_true", default=False, help="Apply data augmentation to the image."
+        "--apply-data-augment", action="store_true", default=False,
+        help="Apply data augmentation to the image. DEPRECATED, will throw NotImplementedError if set to True."
     )
     group.add_argument(
         "--radio-force-eval-mode",
@@ -305,6 +345,16 @@ def add_multimodal_extra_args(parser):
     group.add_argument(
         "--no-load-balancing-sequence-scaling", action="store_true", default=False,
         help="Disable scaling the load balancing gradient by the number of tokens."
+    )
+    group.add_argument(
+        "--tokenizer-keep-history-thinking", action="store_true", default=False,
+        help="Keep the history thinking in the tokenizer."
+    )
+    group.add_argument(
+        "--log-model-grad-norms", action="store_true", default=False, help="Log the gradient norms of the model components."
+    )
+    group.add_argument(
+        "--log-model-act-norms", action="store_true", default=False, help="Log the activation norms of the model components."
     )
 
     return parser
