@@ -173,7 +173,7 @@ def main():
     gc.collect()
     gc.freeze()
     for dataset, dataset_factory in tqdm.tqdm(datasets, desc="Datasets of recipe"):
-        ds_name = dataset_factory.subflavors["name"]
+        ds_name = str(dataset_factory.subflavors.get("name", getattr(dataset_factory, 'path', f'dataset_{total_samples_iterated}')))
         dataloader = get_savable_loader(
             dataset,
             gc_collect_every_n_steps=100000,
