@@ -1,0 +1,57 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+      # TOTAL: 4920186 samples - 51374 tokens per sample - 253B tokens
+      # MMLongBench
+      # 437156 samples - 58204 tokens per sample - 25B tokens
+      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/mmlongbench_nabin_multi_page.yaml
+        repetitions: 1
+      # Long Form audio
+      # 122880 samples - 6622 tokens per sample - 0.8B tokens
+      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/ytc_longform_dataset.yaml
+        repetitions: 3
+      # Text
+      # 647872 samples - 25287 tokens per samples - 16B tokens
+      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/nickel_capybara_16k_49k_absolute_paths.yaml
+        repetitions: 0.2
+      # 132986 samples - 83711 tokens per sample - 11B tokens
+      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/nickel_capybara_49k_plus_absolute_paths.yaml
+        repetitions: 0.2
+      # Short video
+      # 355229 samples - 9188 tokens per sample - 3B tokens
+      - path: /lustre/fsw/portfolios/llmservice/users/cmccarthy/eagle_recipe_online_packing/final_recipe/short_video_qa_0220.yaml
+        repetitions: 0.01
+      # 141010 samples - 7763 tokens per sample - 1B tokens
+      - path: /lustre/fsw/portfolios/llmservice/users/cmccarthy/eagle_recipe_online_packing/final_recipe/video_qa_v1_v2_all_0217.yaml
+        repetitions: 0.01
+      # Medium video
+      # 1239207 samples - 38662 tokens per sample - 48B tokens
+      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/medium_video_qa_all_0220_rebalanced.yaml
+        repetitions: 0.1
+      # Long video
+      # 599152 samples - 117163 tokens per sample - 70 tokens
+      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/long_video_qa_all_0227_rebalanced.yaml
+        repetitions: 0.1
+      # Short omni data
+      # 45212 samples - 15653 tokens per sample - 0.7B tokens
+      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/arushi_short16k_omni_qa_0220.yaml
+        repetitions: 0.01
+      # 62061 samples - 32503 tokens per sample - 2B tokens
+      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/gemini_filtered_omni_qa_short16k_0222.yaml
+        repetitions: 0.01
+      # 49024 samples - 26675 tokens per sample - 1.3B tokens
+      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/omni_caption_short16k_0220.yaml
+        repetitions: 0.01
+      # Medium omni
+      # 587872 samples - 36079 tokens per sample - 21B tokens
+      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/arushi_medium49k_omni_qa_0220.yaml
+        repetitions: 0.1
+      # 94530 samples - 76576 tokens per sample - 7B tokens
+      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/gemini_filtered_omni_qa_medium49k_0222.yaml
+        repetitions: 0.1
+      # # Long omni
+      # # 406024 samples - 115280 tokens per sample - 47B tokens
+      # - path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/arushi_long128k_omni_qa_0227_rebalanced.yaml
+      #   repetitions: 0.1
