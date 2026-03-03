@@ -12,3 +12,5 @@ All scripts are compatible with examples/multimodal/launch.sh. Example:
       --name pretrain_moe_a1_conv3d_0220 \
       --sbatch examples/multimodal/v3_omni_staged_conv3d/pretrain_moe_a1.sh \
       --num-jobs 5
+
+I'm keeping track of the current results [here](https://docs.google.com/spreadsheets/d/1N9I5fpyF2xSy9kL6pTGndpL70WRKlyV6jFqjb2e_4Pg/edit?gid=1490930823#gid=1490930823)
