@@ -703,6 +703,11 @@ class LLaVAModel(MegatronModule):
             ):
                 max_seq_len = self._language_max_sequence_length
 
+            # Pad combined sequence length to be divisible by shard_factor for SP/CP.
+            shard_factor = self._calc_shard_factor()
+            if shard_factor is not None and max_seq_len % shard_factor != 0:
+                max_seq_len = ((max_seq_len + shard_factor - 1) // shard_factor) * shard_factor
+
             batch_indices, non_image_indices = torch.where(image_token_mask != True)
 
             # New position ids for the text tokens, shifted by the image sequence length.
@@ -997,7 +1002,7 @@ class LLaVAModel(MegatronModule):
         if validate_with_combined_embeddings is not None and shard_factor is not None:
             assert (
                     validate_with_combined_embeddings.shape[seq_dim] % shard_factor == 0
-            ), f"Sequence length should be divisible by {shard_factor} for \
+            ), f"Sequence length {validate_with_combined_embeddings.shape[seq_dim]} should be divisible by {shard_factor} for \
                         Sequence/Context parallelism"
             if self.sequence_parallel_lm and self.tp_comm_overlap_lm:
                 assert (
