@@ -1365,6 +1365,20 @@ class LLaVAModel(MegatronModule):
                             images, imgs_sizes, vision_packed_seq_params, has_pad_img
                         )
 
+                if os.environ.get("NRL_DEBUG", "0") == "1" and images.numel() > 0:
+                    _img_f = images.float()
+                    _flat5 = _img_f.reshape(-1)[:5].tolist()
+                    print(
+                        f"[PIXEL_FINGERPRINT_MEGATRON] forward (pre-encoder): "
+                        f"shape={tuple(images.shape)} "
+                        f"mean={_img_f.mean():.6f} std={_img_f.std():.6f} "
+                        f"min={_img_f.min():.6f} max={_img_f.max():.6f} "
+                        f"flat[:5]={[f'{v:.6f}' for v in _flat5]} "
+                        f"temporal_patch_size={self._video_temporal_patch_size} "
+                        f"num_frames={num_frames}",
+                        flush=True,
+                    )
+
                 if self._video_temporal_patch_size > 1:
                     image_embeddings, imgs_sizes, num_frames = self.vision_model(
                         images, imgs_sizes=imgs_sizes, packed_seq_params=vision_packed_seq_params,
@@ -1477,6 +1491,18 @@ class LLaVAModel(MegatronModule):
                 image_embeddings
             )  # [img_seq_len, num_tiles, h_language]
 
+            if os.environ.get("NRL_DEBUG", "0") == "1" and image_embeddings.numel() > 0:
+                _ie = image_embeddings.float()
+                _flat5 = _ie.reshape(-1)[:5].tolist()
+                print(
+                    f"[ENCODER_FINGERPRINT_MEGATRON] forward (post-projection): "
+                    f"shape={tuple(image_embeddings.shape)} "
+                    f"mean={_ie.mean():.6f} std={_ie.std():.6f} "
+                    f"min={_ie.min():.6f} max={_ie.max():.6f} "
+                    f"flat[:5]={[f'{v:.6f}' for v in _flat5]}",
+                    flush=True,
+                )
+
             # Track norms for vision_projection output
             if self.log_model_act_norms and self.training:
                 self._store_activation_norm(image_embeddings, name="vision_projection")
@@ -1585,6 +1611,20 @@ class LLaVAModel(MegatronModule):
                     sound_length, sound_pad2 = split_to_context_parallel_ranks(sound_length, pad_value=1600)
                     assert sound_pad == sound_pad2, "something went wrong with splitting to context parallel ranks"
 
+            if os.environ.get("NRL_DEBUG", "0") == "1" and sound_clips.numel() > 0:
+                _sc = sound_clips.float()
+                _flat5 = _sc.reshape(-1)[:5].tolist()
+                print(
+                    f"[AUDIO_FINGERPRINT_MEGATRON] forward (pre-sound-model): "
+                    f"shape={tuple(sound_clips.shape)} "
+                    f"mean={_sc.mean():.6f} std={_sc.std():.6f} "
+                    f"min={_sc.min():.6f} max={_sc.max():.6f} "
+                    f"flat[:5]={[f'{v:.6f}' for v in _flat5]} "
+                    f"sound_length={sound_length.tolist() if sound_length is not None else None} "
+                    f"is_parakeet={is_parakeet}",
+                    flush=True,
+                )
+
             if is_parakeet:
                 # note(pzelasko): With dynamic shapes we are getting much larger batch sizes (throughput ~2.5x) but still dominated by padding.
                 #                 Unless bucketing is enabled, set this to 2 or higher to avoid OOMs.
@@ -1618,6 +1658,19 @@ class LLaVAModel(MegatronModule):
             sound_embeddings = self.sound_projection(
                 sound_embeddings
             ).contiguous()  # [sound_seq_len, num_clips, h_language]
+
+            if os.environ.get("NRL_DEBUG", "0") == "1" and sound_embeddings.numel() > 0:
+                _se = sound_embeddings.float()
+                _flat5 = _se.reshape(-1)[:5].tolist()
+                print(
+                    f"[ENCODER_FINGERPRINT_MEGATRON] forward (post-sound-projection): "
+                    f"shape={tuple(sound_embeddings.shape)} "
+                    f"mean={_se.mean():.6f} std={_se.std():.6f} "
+                    f"min={_se.min():.6f} max={_se.max():.6f} "
+                    f"flat[:5]={[f'{v:.6f}' for v in _flat5]} "
+                    f"sound_embeddings_len={sound_embeddings_len.tolist() if sound_embeddings_len is not None else None}",
+                    flush=True,
+                )
 
             if self.context_parallel_lm > 1 and sound_pad is not None:
                 sound_embeddings = gather_from_context_parallel_ranks(sound_embeddings, sound_pad)
