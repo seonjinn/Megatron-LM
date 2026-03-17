@@ -629,12 +629,21 @@ class RADIOViTModel(VisionModule):
                         else (imgs_sizes[0][0].item(), imgs_sizes[0][1].item()))
             _first_tubelet_patches = (_h0 // self.patch_dim) * (_w0 // self.patch_dim)
 
-        if isinstance(x, list):
-            _vit_debug_stats_mega("patch_gen input", torch.cat(x, dim=1),
-                                  first_n=_first_tubelet_patches)
-        else:
-            _vit_debug_stats_mega("patch_gen input", x,
-                                  first_n=_first_tubelet_patches)
+        if _NRL_DEBUG_MEGA:
+            if isinstance(x, list):
+                if len(set(t.shape[-1] for t in x)) == 1:
+                    _vit_debug_stats_mega("patch_gen input", torch.cat(x, dim=1),
+                                          first_n=_first_tubelet_patches)
+                else:
+                    for group_dim, group_label in [(max(t.shape[-1] for t in x), "video"),
+                                                   (min(t.shape[-1] for t in x), "image")]:
+                        group = [t for t in x if t.shape[-1] == group_dim]
+                        if group:
+                            _vit_debug_stats_mega(f"patch_gen input ({group_label}, n={len(group)})",
+                                                  torch.cat(group, dim=1))
+            else:
+                _vit_debug_stats_mega("patch_gen input", x,
+                                      first_n=_first_tubelet_patches)
 
         # Apply embedder(s)
         if self.separate_video_embedder and self.temporal_patch_dim > 1:
