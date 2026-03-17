@@ -19,6 +19,49 @@ from megatron.core.transformer.transformer_config import TransformerConfig
 
 # RADIO reference code: https://github.com/NVlabs/RADIO
 
+import os as _os
+
+_NRL_DEBUG_MEGA = _os.environ.get("NRL_DEBUG", "0") == "1"
+_mega_vit_layer_debug_done = False
+
+
+def _vit_debug_stats_mega(tag: str, t: torch.Tensor, extra: str = "",
+                          first_n: int | None = None) -> None:
+    """Print shape/mean/std/min/max/numel/flat[:5] for a tensor, gated on NRL_DEBUG.
+    
+    If first_n is given, also print stats for the first first_n tokens along
+    the sequence dimension (dim=1 for [b,s,h] or dim=0 for [s,b,h]).
+    """
+    if not _NRL_DEBUG_MEGA:
+        return
+    f = t.float()
+    flat5 = f.reshape(-1)[:5].tolist()
+    print(
+        f"[VIT_LAYER_DEBUG_MEGATRON] {tag}: shape={tuple(t.shape)} "
+        f"numel={f.numel()} "
+        f"mean={f.mean():.6f} std={f.std():.6f} "
+        f"min={f.min():.6f} max={f.max():.6f} "
+        f"flat[:5]={[f'{v:.6f}' for v in flat5]}"
+        f"{' ' + extra if extra else ''}",
+        flush=True,
+    )
+    if first_n is not None and first_n > 0:
+        if t.dim() == 3 and t.shape[0] == 1:
+            sub = t[:, :first_n, :].float()
+        elif t.dim() == 3:
+            sub = t[:first_n, :, :].float()
+        else:
+            sub = t.reshape(-1)[:first_n].float()
+        sf5 = sub.reshape(-1)[:5].tolist()
+        print(
+            f"[VIT_LAYER_DEBUG_MEGATRON] {tag} (first_tubelet n={first_n}): "
+            f"numel={sub.numel()} "
+            f"mean={sub.mean():.6f} std={sub.std():.6f} "
+            f"min={sub.min():.6f} max={sub.max():.6f} "
+            f"flat[:5]={[f'{v:.6f}' for v in sf5]}",
+            flush=True,
+        )
+
 try:
     from einops import rearrange
 
@@ -580,22 +623,33 @@ class RADIOViTModel(VisionModule):
                 skip_image_duplication=self.separate_video_embedder,
             )
 
+        _first_tubelet_patches = None
+        if _NRL_DEBUG_MEGA and imgs_sizes is not None:
+            _h0, _w0 = (imgs_sizes[0] if not torch.is_tensor(imgs_sizes)
+                        else (imgs_sizes[0][0].item(), imgs_sizes[0][1].item()))
+            _first_tubelet_patches = (_h0 // self.patch_dim) * (_w0 // self.patch_dim)
+
+        if isinstance(x, list):
+            _vit_debug_stats_mega("patch_gen input", torch.cat(x, dim=1),
+                                  first_n=_first_tubelet_patches)
+        else:
+            _vit_debug_stats_mega("patch_gen input", x,
+                                  first_n=_first_tubelet_patches)
+
         # Apply embedder(s)
         if self.separate_video_embedder and self.temporal_patch_dim > 1:
-            # x is a list of chunks with different feature dimensions
-            # Apply appropriate embedder to each chunk
             embedded_chunks = []
             for chunk, is_img in zip(x, is_image):
                 if is_img:
-                    # Image: use image embedder (C*P*P -> hidden)
                     emb, _ = self.embedder(chunk)
                 else:
-                    # Video tubelet: use video embedder (C*T*P*P -> hidden)
                     emb, _ = self.video_embedder(chunk)
                 embedded_chunks.append(emb)
-            x = torch.cat(embedded_chunks, dim=1)  # [batch, total_seq_length, hidden_size]
+            x = torch.cat(embedded_chunks, dim=1)
         else:
-            x, _ = self.embedder(x)  # [batch, seq_length, hidden_size]
+            x, _ = self.embedder(x)
+
+        _vit_debug_stats_mega("post_embedder", x, first_n=_first_tubelet_patches)
 
         # in radio pos embedding added before class token
         if self.dynamic_resolution:
@@ -616,6 +670,8 @@ class RADIOViTModel(VisionModule):
             x = torch.cat(chunks, dim=1)
         else:
             x, pos_enc = self.apply_pos_enc(x, input_size=input_size)
+
+        _vit_debug_stats_mega("post_pos_enc", x, first_n=_first_tubelet_patches)
 
         if self.add_class_token:
             class_token = self.class_token.expand(
@@ -654,11 +710,32 @@ class RADIOViTModel(VisionModule):
         if not self.dynamic_resolution:
             assert x.shape[1] == self.seq_length, f"{x.shape[1]} != {self.seq_length}"
 
+        _first_tubelet_with_cls = (
+            (_first_tubelet_patches + self.class_token_len)
+            if _first_tubelet_patches is not None and self.add_class_token
+            else _first_tubelet_patches
+        )
+        _vit_debug_stats_mega("post_cls_token", x, first_n=_first_tubelet_with_cls)
+
         if self.ln_pre:
             x = self.ln_pre(x)
 
         x = x.permute(1, 0, 2)  # [b, s, h] -> [s, b, h]
         x = x.contiguous()
+
+        _vit_debug_stats_mega("encoder_input (s,b,h)", x, first_n=_first_tubelet_with_cls)
+
+        if _NRL_DEBUG_MEGA and packed_seq_params is not None:
+            _cu_q = packed_seq_params.cu_seqlens_q
+            _cu_list = _cu_q.tolist() if _cu_q.numel() <= 20 else _cu_q[:10].tolist() + ["..."] + _cu_q[-2:].tolist()
+            print(
+                f"[CU_SEQLENS_MEGATRON] cu_seqlens_q={_cu_list} "
+                f"max_seqlen_q={packed_seq_params.max_seqlen_q} "
+                f"n_seqs={len(_cu_q)-1} "
+                f"qkv_format={packed_seq_params.qkv_format} "
+                f"x.shape={list(x.shape)}",
+                flush=True,
+            )
 
         x = self.decoder(x, attention_mask=attention_mask, packed_seq_params=packed_seq_params)
 

@@ -3,9 +3,13 @@
 from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import List, Optional, Union
+import os as _os
 
 import torch
 from torch import Tensor
+
+_NRL_DEBUG_TB = _os.environ.get("NRL_DEBUG", "0") == "1"
+_tb_vit_layer_debug_done = False
 
 from megatron.core import parallel_state, tensor_parallel
 from megatron.core.dist_checkpointing.mapping import ShardedStateDict
@@ -560,6 +564,9 @@ class TransformerBlock(MegatronModule):
                     use_inner_fp8_context=use_inner_fp8_context,
                 )
             else:
+                global _tb_vit_layer_debug_done
+                _do_tb_debug = _NRL_DEBUG_TB and not _tb_vit_layer_debug_done
+
                 for l_no, layer in enumerate(self.layers):
                     inner_fp8_context = (
                         get_fp8_context(self.config, layer.layer_number - 1)
@@ -581,12 +588,37 @@ class TransformerBlock(MegatronModule):
                             sequence_len_offset=sequence_len_offset,
                         )
 
+                    if _do_tb_debug:
+                        _f = hidden_states.float()
+                        _flat5 = _f.reshape(-1)[:5].tolist()
+                        _s0 = min(1018, hidden_states.shape[0])
+                        _sub = hidden_states[:_s0, :, :].float()
+                        _sf5 = _sub.reshape(-1)[:5].tolist()
+                        print(
+                            f"[VIT_LAYER_DEBUG_MEGATRON] layer={l_no} output: "
+                            f"shape={tuple(hidden_states.shape)} "
+                            f"numel={_f.numel()} "
+                            f"mean={_f.mean():.6f} std={_f.std():.6f} "
+                            f"min={_f.min():.6f} max={_f.max():.6f} "
+                            f"flat[:5]={[f'{v:.6f}' for v in _flat5]} "
+                            f"| first_tubelet(n={_s0}): "
+                            f"mean={_sub.mean():.6f} std={_sub.std():.6f} "
+                            f"min={_sub.min():.6f} max={_sub.max():.6f}",
+                            flush=True,
+                        )
+
                     if (
                         torch.is_grad_enabled()
                         and self.config.cpu_offloading
                         and self.group_prefetch_offload_commit_async is not None
                     ):
                         hidden_states = self.group_prefetch_offload_commit_async(hidden_states)
+
+                if _do_tb_debug:
+                    _tb_vit_layer_debug_done = True
+                    from megatron.core.transformer.transformer_layer import _tl_vit_detail_done
+                    import megatron.core.transformer.transformer_layer as _tl_mod
+                    _tl_mod._tl_vit_detail_done = True
 
         # Final layer norm.
         if self.final_layernorm is not None:

@@ -880,6 +880,41 @@ class LLaVAModel(MegatronModule):
                     assert sound_embeddings.shape[:2] == torch.Size([2, 1]) and sound_timestamps.shape == torch.Size([0])
                     final_embedding[:1, :1, :1] += 0 * sound_embeddings[:1, :1, :1]
 
+        import os as _os_llava
+        if _os_llava.environ.get("NRL_DEBUG", "0") == "1" and final_embedding is not None:
+            if not hasattr(self, "_mm_struct_debug_done"):
+                self._mm_struct_debug_done = True
+                _ids = input_ids[0].tolist()
+                _img_mask = (input_ids[0] == self.image_token_index)
+                _img_positions = _img_mask.nonzero(as_tuple=True)[0].tolist()
+                _snd_mask = (input_ids[0] == self.sound_token_index) if hasattr(self, 'sound_token_index') and self.sound_token_index is not None else None
+                _snd_positions = _snd_mask.nonzero(as_tuple=True)[0].tolist() if _snd_mask is not None and _snd_mask.any() else []
+                _fe = final_embedding[0].float()
+                _img_mask_expanded = images_mask[0] if images_mask is not None else None
+                print(
+                    f"[MM_STRUCT_MEGATRON] _preprocess_data: "
+                    f"input_ids_shape={tuple(input_ids.shape)} "
+                    f"collapsed_seq_len={len(_ids)} "
+                    f"image_token_count={len(_img_positions)} "
+                    f"image_token_positions_first5={_img_positions[:5]} "
+                    f"image_token_positions_last5={_img_positions[-5:] if len(_img_positions) > 5 else _img_positions} "
+                    f"sound_token_count={len(_snd_positions)} "
+                    f"sound_token_positions_first3={_snd_positions[:3]} "
+                    f"input_ids_first50={_ids[:50]} "
+                    f"input_ids_last20={_ids[-20:]}",
+                    flush=True,
+                )
+                print(
+                    f"[MM_STRUCT_MEGATRON] final_embedding: "
+                    f"shape={tuple(final_embedding.shape)} "
+                    f"mean={_fe.mean():.6f} std={_fe.std():.6f} "
+                    f"max_seq_len={max_seq_len} "
+                    f"images_mask_true_count={images_mask[0].sum().item() if _img_mask_expanded is not None else 'N/A'} "
+                    f"image_embeddings_shape={tuple(image_embeddings.shape) if image_embeddings is not None else 'N/A'} "
+                    f"sound_embeddings_shape={tuple(sound_embeddings.shape) if sound_embeddings is not None else 'N/A'}",
+                    flush=True,
+                )
+
         # Create the final labels and loss mask (if this is the last language model stage).
         final_labels, final_loss_mask = None, None
         if self.post_process and has_labels:
@@ -1474,10 +1509,31 @@ class LLaVAModel(MegatronModule):
 
                 # NOTE: Pixel shuffle has no params, act/grad norm is same as prev embeddings
 
+                if os.environ.get("NRL_DEBUG", "0") == "1" and image_embeddings.numel() > 0:
+                    _ps = image_embeddings.float()
+                    _flat5 = _ps.reshape(-1)[:5].tolist()
+                    print(
+                        f"[PIXELSHUFFLE_MEGATRON] shape={tuple(image_embeddings.shape)} "
+                        f"mean={_ps.mean():.6f} std={_ps.std():.6f} "
+                        f"min={_ps.min():.6f} max={_ps.max():.6f} "
+                        f"flat[:5]={[f'{v:.6f}' for v in _flat5]}",
+                        flush=True,
+                    )
+
             # contiguous() required as `permute` can sparsify the tensor and this breaks pipelining
             image_embeddings = image_embeddings.permute(
                 1, 0, 2
             ).contiguous()  # [img_seq_len, num_tiles, h_vision]
+
+            if os.environ.get("NRL_DEBUG", "0") == "1" and image_embeddings.numel() > 0:
+                _pre_proj = image_embeddings.float()
+                _flat5 = _pre_proj.reshape(-1)[:5].tolist()
+                print(
+                    f"[PRE_VISION_PROJ_MEGATRON] shape={tuple(image_embeddings.shape)} "
+                    f"mean={_pre_proj.mean():.6f} std={_pre_proj.std():.6f} "
+                    f"flat[:5]={[f'{v:.6f}' for v in _flat5]}",
+                    flush=True,
+                )
 
             vision_projection_padding_needed = 0
             if self._vision_fp8_no_arch and self._dynamic_resolution:

@@ -1,6 +1,7 @@
 # Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
 
 import logging
+import os as _os
 import warnings
 from abc import ABC
 from dataclasses import dataclass, field
@@ -9,6 +10,9 @@ from typing import Any, Dict, Optional, Union
 import torch
 import torch.distributed
 from torch import Tensor
+
+_NRL_DEBUG_TL = _os.environ.get("NRL_DEBUG", "0") == "1"
+_tl_vit_detail_done = False
 
 from megatron.core import parallel_state, tensor_parallel
 from megatron.core.dist_checkpointing.mapping import ShardedStateDict
@@ -438,8 +442,45 @@ class TransformerLayer(MegatronModule, BaseTransformerLayer):
         This method calls the core computation of a transformer layer, including
         self-attention, cross-attention (if applicable), and feed-forward operations.
         """
+        global _tl_vit_detail_done
+        _do_detail = _NRL_DEBUG_TL and not _tl_vit_detail_done
+
         hidden_states, context = self._forward_attention(*args, **kwargs)
+        if _do_detail:
+            _f = hidden_states.float()
+            _flat5 = _f.reshape(-1)[:5].tolist()
+            _s0 = min(1018, hidden_states.shape[0])
+            _sub = hidden_states[:_s0, :, :].float()
+            print(
+                f"[VIT_LAYER_DEBUG_MEGATRON] layer post_attn: "
+                f"shape={tuple(hidden_states.shape)} "
+                f"numel={_f.numel()} "
+                f"mean={_f.mean():.6f} std={_f.std():.6f} "
+                f"min={_f.min():.6f} max={_f.max():.6f} "
+                f"flat[:5]={[f'{v:.6f}' for v in _flat5]} "
+                f"| first_tubelet(n={_s0}): "
+                f"mean={_sub.mean():.6f} std={_sub.std():.6f}",
+                flush=True,
+            )
+
         output = self._forward_mlp(hidden_states, kwargs.get("inference_context", None))
+        if _do_detail:
+            _f = output.float()
+            _flat5 = _f.reshape(-1)[:5].tolist()
+            _s0 = min(1018, output.shape[0])
+            _sub = output[:_s0, :, :].float()
+            print(
+                f"[VIT_LAYER_DEBUG_MEGATRON] layer post_mlp: "
+                f"shape={tuple(output.shape)} "
+                f"numel={_f.numel()} "
+                f"mean={_f.mean():.6f} std={_f.std():.6f} "
+                f"min={_f.min():.6f} max={_f.max():.6f} "
+                f"flat[:5]={[f'{v:.6f}' for v in _flat5]} "
+                f"| first_tubelet(n={_s0}): "
+                f"mean={_sub.mean():.6f} std={_sub.std():.6f}",
+                flush=True,
+            )
+
         return output, context
 
     def _forward_attention(
