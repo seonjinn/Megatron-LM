@@ -277,8 +277,12 @@ class MegatronCheckpointSaverBase:
         # (weights are overwritten from the source checkpoint). And forcing
         # CPU initialization can break Transformer-Engine when FP8/quantized
         # parameter tensors are used (illegal memory access during quantization).
-        # Keep CPU init only for the local (non-TE) transformer implementation.
+        # Keep CPU init only for the local (non-TE) transformer implementation,
+        # or when the params dtype is bf16/fp16 (where CPU init is safe and
+        # avoids GPU OOM for large models like 100B+ MoE).
         if getattr(self.args, "saver_transformer_impl", None) != "transformer_engine":
+            my_argv.append('--use-cpu-initialization')
+        elif self.md.params_dtype in (torch.float16, torch.bfloat16):
             my_argv.append('--use-cpu-initialization')
 
         if self.args.ckpt_step is not None:
@@ -342,7 +346,8 @@ class MegatronCheckpointSaverBase:
         if self.models[pp_rank][ep_rank][tp_rank] is None:
             pre_process = True if pp_rank == 0 else False
             post_process = True if pp_rank == self.args.target_pipeline_parallel_size - 1 else False
-            self.models[pp_rank][ep_rank][tp_rank] = self.model_provider(pre_process, post_process).to(self.md.params_dtype)
+            model = self.model_provider(pre_process, post_process).to(self.md.params_dtype)
+            self.models[pp_rank][ep_rank][tp_rank] = model
         return self.models[pp_rank][ep_rank][tp_rank]
 
     def save(self):
@@ -879,11 +884,253 @@ class MegatronCheckpointSaverBase:
                 model = self.get_local_model(pp_rank, ep_rank, tp_rank)
                 mtp_schema.set_mtp_layer(model, mtp_layer_idx, params_dict)
 
+    def _receive_mtp_hybrid_layer(self, msg, mtp_schema, main_schema, pp_rank, mtp_layer_idx):
+        """
+        Receive and process a hybrid MTP layer (e.g. attention + MoE pattern "*E").
+
+        The message contains:
+        - MTP-specific params: enorm, hnorm, eh_proj, final_layernorm
+        - Internal decoder layer params following the same format as main model layers
+          (attention layers send "input norm weight"/"qkv weight"/etc.,
+           MoE layers send "pre mlp norm weight"/"router weight"/etc.)
+        """
+        from megatron.core.ssm.mamba_hybrid_layer_allocation import Symbols as LayerSymbols
+        from megatron.core.ssm.mamba_hybrid_layer_allocation import allocate_layers
+
+        # Pop MTP-specific params (non-parallel)
+        enorm_weight = msg.pop("enorm weight")
+        enorm_bias = msg.pop("enorm bias", None)
+        hnorm_weight = msg.pop("hnorm weight")
+        hnorm_bias = msg.pop("hnorm bias", None)
+        final_layernorm_weight = msg.pop("final layernorm weight")
+        final_layernorm_bias = msg.pop("final layernorm bias", None)
+
+        # eh_proj weight (column-parallel, split on dim=0)
+        eh_proj_weight = chunk_weight(msg.pop("eh proj weight"), "column", self.args.target_tensor_parallel_size)
+
+        # Set MTP-specific params on all models
+        for ep_rank in range(self.args.target_expert_parallel_size):
+            for tp_rank in range(self.args.target_tensor_parallel_size):
+                model = self.get_local_model(pp_rank, ep_rank, tp_rank)
+                params_dict = {
+                    "enorm_weight": enorm_weight,
+                    "enorm_bias": enorm_bias if self.md.norm_has_bias else None,
+                    "hnorm_weight": hnorm_weight,
+                    "hnorm_bias": hnorm_bias if self.md.norm_has_bias else None,
+                    "eh_proj_weight": eh_proj_weight[tp_rank],
+                    "final_layernorm_weight": final_layernorm_weight,
+                    "final_layernorm_bias": final_layernorm_bias if self.md.norm_has_bias else None,
+                }
+                mtp_schema.set_mtp_layer(model, mtp_layer_idx, params_dict)
+
+        # Now handle the internal decoder layers using the same logic as main model layers
+        mtp_pattern = getattr(self.md, 'mtp_hybrid_override_pattern', None)
+        layer_type_list, _ = allocate_layers(mtp_pattern, vp_stage=None)
+
+        # Get the internal decoder layers from the MTP model layer
+        # We need to process each sub-layer like a main model layer, but targeting
+        # the MTP internal decoder layers instead
+        for internal_layer_id, layer_type in enumerate(layer_type_list):
+            if layer_type == LayerSymbols.MAMBA:
+                self._receive_mtp_hybrid_sublayer_mamba(msg, mtp_schema, main_schema, pp_rank, mtp_layer_idx, internal_layer_id)
+            elif layer_type == LayerSymbols.ATTENTION:
+                self._receive_mtp_hybrid_sublayer_attention(msg, mtp_schema, pp_rank, mtp_layer_idx, internal_layer_id)
+            elif layer_type == LayerSymbols.MOE:
+                self._receive_mtp_hybrid_sublayer_moe(msg, mtp_schema, main_schema, pp_rank, mtp_layer_idx, internal_layer_id)
+            elif layer_type == LayerSymbols.MLP:
+                self._receive_mtp_hybrid_sublayer_mlp(msg, mtp_schema, pp_rank, mtp_layer_idx, internal_layer_id)
+
+    def _receive_mtp_hybrid_sublayer_attention(self, msg, mtp_schema, pp_rank, mtp_layer_idx, internal_layer_id):
+        """Receive attention sub-layer within hybrid MTP and set on internal decoder layers."""
+        input_norm_weight = msg.pop("input norm weight")
+        qkv_weight = chunk_weight(msg.pop("qkv weight"), "column", self.args.target_tensor_parallel_size)
+        dense_weight = chunk_weight(msg.pop("dense weight"), "row", self.args.target_tensor_parallel_size)
+
+        if self.md.qkv_bias:
+            qkv_bias = chunk_bias(msg.pop("qkv bias"), 'column', self.args.target_tensor_parallel_size)
+        if self.md.linear_bias:
+            dense_bias = msg.pop("dense bias")
+
+        for ep_rank in range(self.args.target_expert_parallel_size):
+            for tp_rank in range(self.args.target_tensor_parallel_size):
+                model = self.get_local_model(pp_rank, ep_rank, tp_rank)
+                internal_layers = mtp_schema.get_mtp_model_layers(model, mtp_layer_idx)
+                if internal_layers is None:
+                    continue
+
+                layer_ref = internal_layers[internal_layer_id]
+
+                # Set attention norm (TE style: fused into linear_qkv)
+                if hasattr(layer_ref, 'self_attention'):
+                    sa = layer_ref.self_attention
+                    if hasattr(sa, 'linear_qkv'):
+                        if hasattr(sa.linear_qkv, 'layer_norm_weight') and sa.linear_qkv.layer_norm_weight is not None:
+                            sa.linear_qkv.layer_norm_weight.data.copy_(input_norm_weight)
+                        sa.linear_qkv.weight.data.copy_(qkv_weight[tp_rank])
+                        if self.md.qkv_bias and hasattr(sa.linear_qkv, 'bias') and sa.linear_qkv.bias is not None:
+                            sa.linear_qkv.bias.data.copy_(qkv_bias[tp_rank])
+                    if hasattr(sa, 'linear_proj'):
+                        sa.linear_proj.weight.data.copy_(dense_weight[tp_rank])
+                        if self.md.linear_bias and hasattr(sa.linear_proj, 'bias') and sa.linear_proj.bias is not None:
+                            sa.linear_proj.bias.data.copy_(dense_bias)
+                elif hasattr(layer_ref, 'input_layernorm'):
+                    # Local style
+                    layer_ref.input_layernorm.weight.data.copy_(input_norm_weight)
+                    layer_ref.self_attention.linear_qkv.weight.data.copy_(qkv_weight[tp_rank])
+                    layer_ref.self_attention.linear_proj.weight.data.copy_(dense_weight[tp_rank])
+
+    def _receive_mtp_hybrid_sublayer_moe(self, msg, mtp_schema, main_schema, pp_rank, mtp_layer_idx, internal_layer_id):
+        """Receive MoE sub-layer within hybrid MTP and set on internal decoder layers.
+
+        Uses the main model schema to correctly map parameter names to model
+        attribute paths (handles both TE and local implementations).
+        """
+        pre_mlp_norm_weight = msg.pop("pre mlp norm weight")
+        if self.md.norm_has_bias:
+            pre_mlp_norm_bias = msg.pop("pre mlp norm bias")
+
+        router_weight = msg.pop("router weight")
+        router_bias = msg.pop("router bias")
+
+        # MoE latent projections
+        moe_latent_size = getattr(self.md, 'moe_latent_size', None)
+        if moe_latent_size:
+            fc1_latent_proj_weight = msg.pop("fc1 latent proj weight")
+            fc2_latent_proj_weight = msg.pop("fc2 latent proj weight")
+
+        # Expert weights (3D: [n_experts, out, in])
+        mlp_l0_weight = msg.pop("mlp l0 weight")
+        mlp_l1_weight = msg.pop("mlp l1 weight")
+
+        # Chunk by EP/ETP
+        fc1_split = chunk_weight(mlp_l0_weight, "column", self.args.target_expert_tensor_parallel_size, self.args.target_expert_parallel_size)
+        fc2_split = chunk_weight(mlp_l1_weight, "row", self.args.target_expert_tensor_parallel_size, self.args.target_expert_parallel_size)
+
+        # Shared experts
+        shared_l0 = msg.pop("shared mlp l0 weight")
+        shared_l1 = msg.pop("shared mlp l1 weight")
+        shared_l0_chunks = chunk_weight(shared_l0, "column", self.args.target_tensor_parallel_size)
+        shared_l1_chunks = chunk_weight(shared_l1, "row", self.args.target_tensor_parallel_size)
+
+        for ep_rank in range(self.args.target_expert_parallel_size):
+            for etp_rank in range(self.args.target_expert_tensor_parallel_size):
+                local_fc1 = fc1_split[ep_rank][etp_rank]
+                local_fc2 = fc2_split[ep_rank][etp_rank]
+
+                if self.args.target_expert_parallel_size == 1 and self.args.target_expert_tensor_parallel_size == 1:
+                    tp_targets = range(self.args.target_tensor_parallel_size)
+                else:
+                    mapped_tp = (ep_rank * self.args.target_expert_tensor_parallel_size + etp_rank) % self.args.target_tensor_parallel_size
+                    tp_targets = [mapped_tp]
+
+                for tp_rank in tp_targets:
+                    model = self.get_local_model(pp_rank, ep_rank, tp_rank)
+                    internal_layers = mtp_schema.get_mtp_model_layers(model, mtp_layer_idx)
+                    if internal_layers is None:
+                        continue
+
+                    layer_ref = internal_layers[internal_layer_id]
+
+                    # Build params_dict using schema-compatible keys
+                    params_dict = {
+                        "pre_mlp_norm_weight": pre_mlp_norm_weight,
+                        "router_weight": router_weight,
+                    }
+
+                    num_local_experts = local_fc1.shape[0]
+                    for expert_idx in range(num_local_experts):
+                        params_dict[f"mlp_fc1_weight.{expert_idx}"] = local_fc1[expert_idx]
+                        params_dict[f"mlp_fc2_weight.{expert_idx}"] = local_fc2[expert_idx]
+
+                    params_dict["mlp_shared_fc1_weight"] = shared_l0_chunks[tp_rank]
+                    params_dict["mlp_shared_fc2_weight"] = shared_l1_chunks[tp_rank]
+
+                    if self.md.norm_has_bias:
+                        params_dict["pre_mlp_norm_bias"] = pre_mlp_norm_bias
+
+                    if moe_latent_size:
+                        params_dict["fc1_latent_proj_weight"] = fc1_latent_proj_weight
+                        params_dict["fc2_latent_proj_weight"] = fc2_latent_proj_weight
+
+                    # Use schema to set params (handles TE weight0/1/... mapping)
+                    main_schema._set(main_schema["layer"], layer_ref, params_dict)
+
+                    # Set router bias in fp32 (out-of-band, not in schema)
+                    rb_param = getattr(getattr(getattr(layer_ref, 'mlp', None), 'router', None), 'expert_bias', None)
+                    if isinstance(rb_param, torch.Tensor):
+                        if rb_param.dtype != torch.float32:
+                            rb_param.data = rb_param.data.to(torch.float32)
+                        rb_param.data.copy_(router_bias.to(torch.float32))
+
+    def _receive_mtp_hybrid_sublayer_mamba(self, msg, mtp_schema, main_schema, pp_rank, mtp_layer_idx, internal_layer_id):
+        """Receive Mamba sub-layer within hybrid MTP and set on internal decoder layers."""
+        in_proj_norm_weight = msg.pop("in proj norm weight")
+        dt_bias = chunk_bias(msg.pop("dt bias"), "column", self.args.target_tensor_parallel_size)
+        D = chunk_bias(msg.pop("D"), "column", self.args.target_tensor_parallel_size)
+        A_log = chunk_bias(msg.pop("A log"), "column", self.args.target_tensor_parallel_size)
+
+        if self.margs.mamba_num_heads is not None:
+            nheads = self.margs.mamba_num_heads
+            d_inner = nheads * self.margs.mamba_head_dim
+        else:
+            d_inner = self.md.hidden_size * 2
+            nheads = d_inner // self.margs.mamba_head_dim
+        ngroups = self.margs.mamba_num_groups
+        d_state = self.md.mamba_state_dim
+        in_proj_weight = split_in_proj(msg.pop("in proj weight"), d_inner, ngroups, d_state, nheads, self.args.target_tensor_parallel_size)
+        conv_1d_weight = split_conv1d(msg.pop("conv1d weight"), "weight", d_inner, ngroups, d_state, self.args.target_tensor_parallel_size)
+        conv_1d_bias = split_conv1d(msg.pop("conv1d bias"), "bias", d_inner, ngroups, d_state, self.args.target_tensor_parallel_size)
+        norm_weight = chunk_bias(msg.pop("norm weight"), "column", self.args.target_tensor_parallel_size)
+        out_proj_weight = chunk_weight(msg.pop("out proj weight"), "row", self.args.target_tensor_parallel_size)
+
+        for ep_rank in range(self.args.target_expert_parallel_size):
+            for tp_rank in range(self.args.target_tensor_parallel_size):
+                model = self.get_local_model(pp_rank, ep_rank, tp_rank)
+                internal_layers = mtp_schema.get_mtp_model_layers(model, mtp_layer_idx)
+                if internal_layers is None:
+                    continue
+                layer_ref = internal_layers[internal_layer_id]
+                # Use main_schema-style key mapping for Mamba layers
+                if hasattr(layer_ref, 'mixer'):
+                    mixer = layer_ref.mixer
+                    if hasattr(mixer, 'in_proj') and hasattr(mixer.in_proj, 'layer_norm_weight'):
+                        mixer.in_proj.layer_norm_weight.data.copy_(in_proj_norm_weight)
+                    if hasattr(mixer, 'in_proj'):
+                        mixer.in_proj.weight.data.copy_(in_proj_weight[tp_rank])
+                    mixer.dt_bias.data.copy_(dt_bias[tp_rank])
+                    mixer.D.data.copy_(D[tp_rank])
+                    mixer.A_log.data.copy_(A_log[tp_rank])
+                    mixer.conv1d.weight.data.copy_(conv_1d_weight[tp_rank])
+                    mixer.conv1d.bias.data.copy_(conv_1d_bias[tp_rank])
+                    mixer.norm.weight.data.copy_(norm_weight[tp_rank])
+                    mixer.out_proj.weight.data.copy_(out_proj_weight[tp_rank])
+
+    def _receive_mtp_hybrid_sublayer_mlp(self, msg, mtp_schema, pp_rank, mtp_layer_idx, internal_layer_id):
+        """Receive MLP sub-layer within hybrid MTP and set on internal decoder layers."""
+        post_norm_weight = msg.pop("post norm weight")
+        mlp_l0_weight = chunk_weight(msg.pop("mlp l0 weight"), "column", self.args.target_tensor_parallel_size)
+        mlp_l1_weight = chunk_weight(msg.pop("mlp l1 weight"), "row", self.args.target_tensor_parallel_size)
+
+        for ep_rank in range(self.args.target_expert_parallel_size):
+            for tp_rank in range(self.args.target_tensor_parallel_size):
+                model = self.get_local_model(pp_rank, ep_rank, tp_rank)
+                internal_layers = mtp_schema.get_mtp_model_layers(model, mtp_layer_idx)
+                if internal_layers is None:
+                    continue
+                layer_ref = internal_layers[internal_layer_id]
+                if hasattr(layer_ref, 'pre_mlp_layernorm'):
+                    layer_ref.pre_mlp_layernorm.weight.data.copy_(post_norm_weight)
+                if hasattr(layer_ref, 'mlp'):
+                    if hasattr(layer_ref.mlp, 'linear_fc1'):
+                        layer_ref.mlp.linear_fc1.weight.data.copy_(mlp_l0_weight[tp_rank])
+                    if hasattr(layer_ref.mlp, 'linear_fc2'):
+                        layer_ref.mlp.linear_fc2.weight.data.copy_(mlp_l1_weight[tp_rank])
+
     def receive_mtp(self, mtp_schema, main_schema):
         """
         Receive MTP block parameters over queue and save them in self.models.
         Only called on the last pipeline stage where MTP layers exist.
-        
+
         Args:
             mtp_schema: MTP schema for parameter setting
             main_schema: Main model schema (for reference)
@@ -891,21 +1138,26 @@ class MegatronCheckpointSaverBase:
         # Check if MTP is enabled
         if getattr(self.md, 'mtp_num_layers', None) is None or self.md.mtp_num_layers == 0:
             return
-        
+
         # MTP layers only exist on the last pipeline stage
         last_pp_rank = self.args.target_pipeline_parallel_size - 1
-        
+
         # Determine number of physical MTP layers
         # When mtp_use_repeated_layer is True, there's only 1 physical layer
         if getattr(self.md, 'mtp_use_repeated_layer', False):
             num_physical_layers = 1
         else:
             num_physical_layers = self.md.mtp_num_layers
-        
+
+        is_hybrid = getattr(self.md, 'mtp_hybrid_override_pattern', None) is not None
+
         # Receive each MTP layer
         for mtp_layer_idx in range(num_physical_layers):
             msg = self.queue_get(f"mtp layer {mtp_layer_idx}")
-            self._receive_mtp_layer(msg, mtp_schema, last_pp_rank, mtp_layer_idx)
+            if is_hybrid:
+                self._receive_mtp_hybrid_layer(msg, mtp_schema, main_schema, last_pp_rank, mtp_layer_idx)
+            else:
+                self._receive_mtp_layer(msg, mtp_schema, last_pp_rank, mtp_layer_idx)
             self.check_message(msg)
 
     def _pad_weight(self, orig_word_embed, true_vocab_size):
