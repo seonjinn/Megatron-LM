@@ -9,6 +9,22 @@ from typing import List, Optional, Tuple
 
 import torch
 
+def _tfp(t, label=""):
+    """Standardized tensor fingerprint for cross-path comparison."""
+    f = t.float()
+    flat = f.reshape(-1)
+    n = flat.numel()
+    first5 = flat[:5].tolist()
+    last5 = flat[-5:].tolist() if n >= 5 else flat.tolist()
+    return (
+        f"{label}shape={tuple(t.shape)} dtype={t.dtype} numel={n} "
+        f"mean={f.mean():.6f} std={f.std():.6f} "
+        f"min={f.min():.6f} max={f.max():.6f} "
+        f"l2={float(torch.norm(f)):.4f} sum={float(f.sum()):.4f} "
+        f"first5={[f'{v:.6f}' for v in first5]} "
+        f"last5={[f'{v:.6f}' for v in last5]}"
+    )
+
 from megatron.core import tensor_parallel
 from megatron.core.config_logger import has_config_logger_enabled, log_config_to_disk
 from megatron.core.inference.contexts import BaseInferenceContext
@@ -1401,16 +1417,10 @@ class LLaVAModel(MegatronModule):
                         )
 
                 if os.environ.get("NRL_DEBUG", "0") == "1" and images.numel() > 0:
-                    _img_f = images.float()
-                    _flat5 = _img_f.reshape(-1)[:5].tolist()
                     print(
-                        f"[PIXEL_FINGERPRINT_MEGATRON] forward (pre-encoder): "
-                        f"shape={tuple(images.shape)} "
-                        f"mean={_img_f.mean():.6f} std={_img_f.std():.6f} "
-                        f"min={_img_f.min():.6f} max={_img_f.max():.6f} "
-                        f"flat[:5]={[f'{v:.6f}' for v in _flat5]} "
-                        f"temporal_patch_size={self._video_temporal_patch_size} "
-                        f"num_frames={num_frames}",
+                        _tfp(images, "[PIXEL_FINGERPRINT_MEGATRON] forward (pre-encoder): ")
+                        + f" temporal_patch_size={self._video_temporal_patch_size}"
+                        f" num_frames={num_frames}",
                         flush=True,
                     )
 
@@ -1419,6 +1429,12 @@ class LLaVAModel(MegatronModule):
                         images, imgs_sizes=imgs_sizes, packed_seq_params=vision_packed_seq_params,
                         num_frames=num_frames,
                     )  # [num_tiles, img_seq_len, h_vision]
+
+                    if os.environ.get("NRL_DEBUG", "0") == "1" and image_embeddings.numel() > 0:
+                        print(
+                            _tfp(image_embeddings, "[ENCODER_RAW_FINGERPRINT_MEGATRON] forward (post-vision_model temporal, pre-shuffle): "),
+                            flush=True,
+                        )
 
                     # Because we only support dynamic res, num_image_tiles is a list of all ones
                     #   with length equal to len(imgs_sizes) == sum(num_frames), where each entry
@@ -1431,6 +1447,12 @@ class LLaVAModel(MegatronModule):
                     image_embeddings = self.vision_model(
                         images, imgs_sizes=imgs_sizes, packed_seq_params=vision_packed_seq_params,
                     )  # [num_tiles, img_seq_len, h_vision]
+
+                    if os.environ.get("NRL_DEBUG", "0") == "1" and image_embeddings.numel() > 0:
+                        print(
+                            _tfp(image_embeddings, "[ENCODER_RAW_FINGERPRINT_MEGATRON] forward (post-vision_model dynamic, pre-shuffle): "),
+                            flush=True,
+                        )
 
             else:
                 assert self._video_temporal_patch_size == 1, "Temporal compression is not supported for tiling"
@@ -1548,16 +1570,15 @@ class LLaVAModel(MegatronModule):
             )  # [img_seq_len, num_tiles, h_language]
 
             if os.environ.get("NRL_DEBUG", "0") == "1" and image_embeddings.numel() > 0:
-                _ie = image_embeddings.float()
-                _flat5 = _ie.reshape(-1)[:5].tolist()
                 print(
-                    f"[ENCODER_FINGERPRINT_MEGATRON] forward (post-projection): "
-                    f"shape={tuple(image_embeddings.shape)} "
-                    f"mean={_ie.mean():.6f} std={_ie.std():.6f} "
-                    f"min={_ie.min():.6f} max={_ie.max():.6f} "
-                    f"flat[:5]={[f'{v:.6f}' for v in _flat5]}",
+                    _tfp(image_embeddings, "[ENCODER_FINGERPRINT_MEGATRON] forward (post-projection): "),
                     flush=True,
                 )
+
+            if os.environ.get("NRL_VISION_QUANTIZE_DEBUG", "0") == "1":
+                _scale = 64.0
+                image_embeddings = (image_embeddings.float() * _scale).round() / _scale
+                image_embeddings = image_embeddings.to(torch.bfloat16)
 
             # Track norms for vision_projection output
             if self.log_model_act_norms and self.training:
