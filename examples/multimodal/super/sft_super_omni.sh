@@ -189,7 +189,8 @@ EXTRA_ARGS+=" --recompute-vision --recompute-method-vision block --recompute-gra
 # Sound model
 EXTRA_ARGS+=" --recompute-sound "
 
-SOUND_MODEL_TYPE="nemo://nvidia/parakeet-tdt-0.6b-v2"
+SOUND_MODEL_CACHE="${WORKSPACE}/models/parakeet-tdt-0.6b-v2.nemo"
+SOUND_MODEL_TYPE="nemo://${SOUND_MODEL_CACHE}"
 
 EXTRA_ARGS+=" --video-min-num-frames 8 --video-max-num-frames 32 "
 
@@ -307,6 +308,18 @@ else
     run_cmd="python -u ${CODE_DIR}/examples/multimodal/train.py ${OPTIONS}"
 
     DATETIME=`date +'date_%y-%m-%d_time_%H-%M-%S'`
+
+    # Download the NeMo sound model once to shared Lustre if not already cached.
+    # Uses a single task to avoid HuggingFace HTTP 429 rate-limiting.
+    if [ ! -f "${SOUND_MODEL_CACHE}" ]; then
+        mkdir -p "$(dirname ${SOUND_MODEL_CACHE})"
+        srun -l --verbose \
+        --ntasks=1 \
+        --container-image /lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/tpoon/containers/moe-avlm-editable-energon-super.sqsh \
+        --container-mounts "/lustre" \
+        --output=${LOGS_DIR}/%x_%j_${DATETIME}_predownload.log \
+        sh -c "python -c \"from huggingface_hub import hf_hub_download; hf_hub_download('nvidia/parakeet-tdt-0.6b-v2', 'parakeet-tdt-0.6b-v2.nemo', local_dir='$(dirname ${SOUND_MODEL_CACHE})'); print('Sound model download complete')\""
+    fi
 
     srun -l --verbose \
     --container-image /lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/tpoon/containers/moe-avlm-editable-energon-super.sqsh \

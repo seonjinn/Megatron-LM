@@ -1,6 +1,8 @@
 # Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+import gc
 import json
 import os
+import re
 import sys
 import types
 import torch
@@ -334,6 +336,115 @@ class MegatronCheckpointLoaderBase:
 
         return all_models, consumed_train_samples, consumed_valid_samples
 
+    def _compact_expert_memory(self):
+        """Free dispensable EP shard model objects, retaining only expert weight refs.
+
+        When loading checkpoints with many EP shards (e.g. EP=64), all shards are held
+        in memory simultaneously (~765 GB for the Super model). The saver subprocess
+        then needs additional memory to build the target model, causing OOM.
+
+        This method identifies which EP shards are needed intact for non-expert data
+        (used by get_assembled_tensor_parallel_models), then for the remaining shards:
+        stores Python references to their expert weight tensors (fc1/fc2) in
+        self.expert_cache, and deletes the model objects. Non-expert parameters
+        (attention, mamba, norms, embeddings) that are duplicated across those EP shards
+        are freed, dramatically reducing memory.
+        """
+        ep_size = self.margs.expert_model_parallel_size or 1
+        if ep_size <= 1:
+            return
+
+        tp_size = self.margs.tensor_model_parallel_size
+        etp_size = self.margs.expert_tensor_parallel_size or 1
+        pp_size = self.margs.pipeline_model_parallel_size
+        vp_size = self.margs.virtual_pipeline_model_parallel_size or 1
+
+        # EP shards accessed by get_assembled_tensor_parallel_models must be kept:
+        # get_local_model maps global tp_rank → ep_rank = tp_rank // ETP
+        needed_ep_ranks = set(tp_rank // etp_size for tp_rank in range(tp_size))
+        freeable_ep_ranks = [ep for ep in range(ep_size) if ep not in needed_ep_ranks]
+
+        if not freeable_ep_ranks:
+            return
+
+        # Match expert weight parameters in three naming conventions:
+        # 1) CoreMoETESchema (local_experts): ...layers.N.mlp.experts.local_experts.E.linear_fcK.weight
+        # 2) CoreHybridMoETESchema (fused):   ...layers.N.mlp.experts.linear_fcK.weightE
+        # 3) 3D fused tensor:                 ...layers.N.mlp.experts.linear_fcK.weight  (shape [E, out, in])
+        pattern_local = re.compile(
+            r'.*layers\.(\d+)\.mlp\.experts\.local_experts\.(\d+)\.linear_fc([12])\.weight$'
+        )
+        pattern_fused_individual = re.compile(
+            r'.*layers\.(\d+)\.mlp\.experts\.linear_fc([12])\.weight(\d+)$'
+        )
+        pattern_fused_3d = re.compile(
+            r'.*layers\.(\d+)\.mlp\.experts\.linear_fc([12])\.weight$'
+        )
+
+        self.expert_cache = {}
+
+        for pp_rank in range(pp_size):
+            for vp_rank in range(vp_size):
+                for ep_rank in freeable_ep_ranks:
+                    tp_models = self.all_models[pp_rank][vp_rank][ep_rank]
+                    for tp_rank in range(len(tp_models)):
+                        model = tp_models[tp_rank]
+                        if model is None:
+                            continue
+
+                        cache_key = (pp_rank, vp_rank, ep_rank, tp_rank)
+                        layer_data = {}
+
+                        for name, param in model.named_parameters():
+                            # Convention 1: local_experts.E.linear_fcK.weight
+                            m = pattern_local.match(name)
+                            if m:
+                                layer_idx = int(m.group(1))
+                                expert_idx = int(m.group(2))
+                                fc_num = int(m.group(3))
+                                if layer_idx not in layer_data:
+                                    layer_data[layer_idx] = {}
+                                if expert_idx not in layer_data[layer_idx]:
+                                    layer_data[layer_idx][expert_idx] = {}
+                                layer_data[layer_idx][expert_idx][fc_num] = param.data
+                                continue
+
+                            # Convention 2: linear_fcK.weightE (individual per-expert params)
+                            m = pattern_fused_individual.match(name)
+                            if m:
+                                layer_idx = int(m.group(1))
+                                fc_num = int(m.group(2))
+                                expert_idx = int(m.group(3))
+                                if layer_idx not in layer_data:
+                                    layer_data[layer_idx] = {}
+                                if expert_idx not in layer_data[layer_idx]:
+                                    layer_data[layer_idx][expert_idx] = {}
+                                layer_data[layer_idx][expert_idx][fc_num] = param.data
+                                continue
+
+                            # Convention 3: linear_fcK.weight as 3D [E, out, in]
+                            m = pattern_fused_3d.match(name)
+                            if m and param.data.dim() == 3:
+                                layer_idx = int(m.group(1))
+                                fc_num = int(m.group(2))
+                                if layer_idx not in layer_data:
+                                    layer_data[layer_idx] = {}
+                                for expert_idx in range(param.data.shape[0]):
+                                    if expert_idx not in layer_data[layer_idx]:
+                                        layer_data[layer_idx][expert_idx] = {}
+                                    layer_data[layer_idx][expert_idx][fc_num] = param.data[expert_idx]
+
+                        self.expert_cache[cache_key] = layer_data
+
+                        self.all_models[pp_rank][vp_rank][ep_rank][tp_rank] = None
+                        del model
+
+                gc.collect()
+
+        print(f"Expert memory compaction: freed {len(freeable_ep_ranks)}/{ep_size} EP shard models, "
+              f"kept {len(needed_ep_ranks)} intact, "
+              f"cached expert data for {len(self.expert_cache)} (ep, tp) combinations.")
+
     def send_metadata_over_queue(self):
         # Let the consumer know the overall metadata:
         self.md.consumed_train_samples = self.consumed_train_samples
@@ -428,16 +539,29 @@ class MegatronCheckpointLoaderBase:
 
         return message
 
-    def _send_moe_layer(self, models_by_ep, layer_idx, schema):
+    def _get_expert_stacks_from_cache(self, pp_rank, vp_rank, ep_rank, tp_rank, layer_idx, num_local_experts):
+        """Retrieve fc1/fc2 expert weight stacks from the compacted expert cache."""
+        cache_key = (pp_rank, vp_rank, ep_rank, tp_rank)
+        cached_layers = self.expert_cache[cache_key]
+        fc1_stack = torch.stack([
+            cached_layers[layer_idx][expert_idx][1] for expert_idx in range(num_local_experts)
+        ], dim=0)
+        fc2_stack = torch.stack([
+            cached_layers[layer_idx][expert_idx][2] for expert_idx in range(num_local_experts)
+        ], dim=0)
+        return fc1_stack, fc2_stack
+
+    def _send_moe_layer(self, models_by_ep, layer_idx, schema, pp_rank=0, vp_rank=0):
         """
         MoE version: aggregate experts across EP ranks and TP shards into a single message.
         models_by_ep: List[List[Module]] shaped [ep_size][tp_size]
+        pp_rank, vp_rank: needed to look up expert_cache for compacted ep>0 models.
         """
         ep_size = self.margs.expert_model_parallel_size or 1
         tp_size = self.margs.tensor_model_parallel_size
         etp_size = self.margs.expert_tensor_parallel_size or 1
 
-        # Non-parallel params from any reference model
+        # Non-parallel params from ep=0 reference model
         ref_layer = schema.get_layer(models_by_ep[0][0], layer_idx)
         message = {
             "pre mlp norm weight": ref_layer["pre_mlp_norm_weight"],
@@ -456,10 +580,10 @@ class MegatronCheckpointLoaderBase:
                 message["fc1 latent proj bias"] = ref_layer["fc1_latent_proj_bias"]
                 message["fc2 latent proj bias"] = ref_layer["fc2_latent_proj_bias"]
 
-        # Assemble shared experts across TP
+        # Assemble shared experts across TP (uses ep=0 models only)
         shared_l0_tp = []
         shared_l1_tp = []
-        assembled_models_tp = self.get_assembled_tensor_parallel_models(pp_rank=0, vp_rank=0)
+        assembled_models_tp = self.get_assembled_tensor_parallel_models(pp_rank=pp_rank, vp_rank=vp_rank)
         for tp_rank in range(tp_size):
             layer_p = schema.get_layer(assembled_models_tp[tp_rank], layer_idx)
             shared_l0_tp.append(layer_p["mlp_shared_fc1_weight"])  # column-parallel combine
@@ -469,6 +593,7 @@ class MegatronCheckpointLoaderBase:
 
         # Build per-EP, TP-merged expert weights
         num_local_experts = self.margs.num_experts // (self.margs.expert_model_parallel_size or 1)
+        use_cache = hasattr(self, 'expert_cache') and self.expert_cache
 
         fc1_ep_concat = []  # list of [local_E, out, in] merged across TP per EP
         fc2_ep_concat = []
@@ -477,14 +602,23 @@ class MegatronCheckpointLoaderBase:
             fc1_tp = []
             fc2_tp = []
             for etp_rank in range(etp_size):
-                layer_p = schema.get_layer(models_by_ep[ep_rank][etp_rank], layer_idx)
-                # Stack local experts leading dimension
-                fc1_stack = torch.stack([
-                    layer_p[f"mlp_fc1_weight.{expert_idx}"] for expert_idx in range(num_local_experts)
-                ], dim=0)
-                fc2_stack = torch.stack([
-                    layer_p[f"mlp_fc2_weight.{expert_idx}"] for expert_idx in range(num_local_experts)
-                ], dim=0)
+                model = models_by_ep[ep_rank][etp_rank]
+                if model is not None:
+                    layer_p = schema.get_layer(model, layer_idx)
+                    fc1_stack = torch.stack([
+                        layer_p[f"mlp_fc1_weight.{expert_idx}"] for expert_idx in range(num_local_experts)
+                    ], dim=0)
+                    fc2_stack = torch.stack([
+                        layer_p[f"mlp_fc2_weight.{expert_idx}"] for expert_idx in range(num_local_experts)
+                    ], dim=0)
+                elif use_cache:
+                    fc1_stack, fc2_stack = self._get_expert_stacks_from_cache(
+                        pp_rank, vp_rank, ep_rank, etp_rank, layer_idx, num_local_experts
+                    )
+                else:
+                    raise RuntimeError(
+                        f"Model is None for ep={ep_rank} tp={etp_rank} and no expert cache available"
+                    )
                 fc1_tp.append(fc1_stack)
                 fc2_tp.append(fc2_stack)
 
@@ -767,7 +901,7 @@ class MegatronCheckpointLoaderBase:
                         elif layer_type == LayerSymbols.MLP:
                             message = self._send_mlp_layer(models, layer_idx, schema)
                         elif layer_type == LayerSymbols.MOE:
-                            message = self._send_moe_layer(self.all_models[pp_rank][vp_rank], layer_idx, schema)
+                            message = self._send_moe_layer(self.all_models[pp_rank][vp_rank], layer_idx, schema, pp_rank=pp_rank, vp_rank=vp_rank)
 
                         self.queue_put(f"transformer layer {total_layer_num}", message)
                         total_layer_num += 1
@@ -877,6 +1011,9 @@ class MegatronCheckpointLoaderBase:
             model_provider,
             self.md.params_dtype
         )
+
+        # 7.5) Free ep>0 model objects, keeping only expert weight refs in cache
+        self._compact_expert_memory()
 
         # 8) Send model over the queue
         self.send_model_over_queue()
