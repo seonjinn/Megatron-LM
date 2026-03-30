@@ -887,6 +887,7 @@ class LLaVAModel(MegatronModule):
                     sound_embeddings = sound_embeddings.permute(1, 0, 2).reshape(-1, embed_dim)
                 else:
                     sound_embeddings = torch.cat([se[:sel] for se, sel in zip(sound_embeddings.permute(1, 0, 2), sound_embeddings_len)], dim=0)
+
                 final_embedding[sound_batch_indices, sound_new_position_ids] = sound_embeddings.reshape(-1, embed_dim)
             else:
                 # TODO: Sound encoder from HF/Nemo can hang with text-only samples. Find a better way to handle this.
