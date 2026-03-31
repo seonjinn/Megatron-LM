@@ -170,11 +170,21 @@ class FastConformerFeatureExtractor(SequenceFeatureExtractor):
         return window_fns[window_type](win_length, periodic=False, device=device, dtype=dtype)
 
     def get_seq_len(self, audio_len: int, n_fft: int, hop_length: int) -> int:
-        """Calculate sequence length after STFT with center=True padding."""
-        # For center=True, padding is n_fft // 2 on each side
+        """Calculate sequence length after STFT with center=True padding.
+
+        Returns ``audio_len // hop_length`` (NeMo convention), NOT
+        ``audio_len // hop_length + 1``.  ``torch.stft(center=True)``
+        physically produces the extra boundary frame, but NeMo's
+        ``FilterbankFeatures.get_seq_len`` and HF's
+        ``ParakeetFeatureExtractor`` both exclude it.  Using the same
+        count here ensures per-feature normalisation runs over the
+        identical set of frames as vLLM / NeMo, eliminating a
+        systematic mel-value bias between the Megatron training path
+        and the vLLM generation path.
+        """
         pad_amount = n_fft // 2 * 2  # Total padding
-        seq_len = (audio_len + pad_amount - n_fft) // hop_length + 1
-        return max(1, int(seq_len))  # Ensure at least 1 frame
+        seq_len = (audio_len + pad_amount - n_fft) // hop_length
+        return max(1, int(seq_len))
 
     def preemphasis_batch(self, x: "torch.Tensor", preemph: float) -> "torch.Tensor":
         """Apply preemphasis filter to batch of audio signals."""
@@ -228,9 +238,25 @@ class FastConformerFeatureExtractor(SequenceFeatureExtractor):
         """
         Convert audio to log-mel spectrograms for inference (matching NeMo exactly).
 
+        Preemphasis must be applied to *x* before calling this method (done in
+        ``__call__`` so the time-domain mask can zero out padding artifacts).
+
+        ``torch.stft(center=True)`` produces ``N // hop + 1`` frames, but
+        *seq_len* is ``N // hop`` (from ``get_seq_len``).  The extra boundary
+        frame is masked out before normalisation and filled with
+        ``padding_value``.  Downstream callers (``_prepare_sound_data``)
+        truncate the output to ``seq_len`` frames, dropping it entirely.
+
+        CROSS-PATH NOTE: The normalisation here must run over the same number
+        of frames as vLLM's ``ParakeetFeatureExtractor`` and NeMo's
+        ``FilterbankFeatures``, all of which use ``N // hop``.  Any change to
+        ``get_seq_len`` or the mask here will cause a systematic mel-value
+        divergence between the Megatron training path and the vLLM generation
+        path, breaking RL logprob consistency.
+
         Args:
-            x: Audio tensor of shape (B, T)
-            seq_len: Sequence lengths of shape (B,)
+            x: Audio tensor of shape (B, T), already preemphasized and masked.
+            seq_len: Mel-frame sequence lengths of shape (B,).
 
         Returns:
             Log-mel features of shape (B, F, T_frames)
@@ -239,53 +265,46 @@ class FastConformerFeatureExtractor(SequenceFeatureExtractor):
         device = x.device
         B = x.shape[0]
 
-        # Input validation
         if x.dim() != 2:
             raise ValueError(f"Expected 2D input (B, T), got {x.dim()}D")
         if seq_len.shape[0] != B:
             raise ValueError(f"seq_len batch size {seq_len.shape[0]} != audio batch size {B}")
 
-        # Apply preemphasis
-        if self.preemphasis is not None and self.preemphasis > 0:
-            x = self.preemphasis_batch(x, self.preemphasis)
-
-        # Get window
         window = self.get_window(self.win_length, self.window, device=device, dtype=x.dtype)
 
-        # STFT computation
-        stft_out = torch.stft(
-            x,
-            n_fft=self.n_fft,
-            hop_length=self.hop_length,
-            win_length=self.win_length,
-            window=window,
-            center=True,
-            return_complex=True,
-        )  # (B, F, T_frames)
+        with torch.amp.autocast(device.type, enabled=False):
+            # pad_mode="constant" (zero-pad) matches NeMo FilterbankFeatures.stft
+            # and HF ParakeetFeatureExtractor._torch_extract_fbank_features.
+            # torch.stft defaults to "reflect" which produces different boundary
+            # values and causes large mel diffs at the first/last frames.
+            stft_out = torch.stft(
+                x,
+                n_fft=self.n_fft,
+                hop_length=self.hop_length,
+                win_length=self.win_length,
+                window=window,
+                center=True,
+                pad_mode="constant",
+                return_complex=True,
+            )  # (B, F, T_frames)
 
-        # Convert to magnitude and apply power
         abs_stft = torch.abs(stft_out)
         if self.mag_power != 1.0:
             abs_stft = abs_stft.pow(self.mag_power)
 
-        # Apply mel filterbank
-        filterbanks = self.get_filterbanks(device=device, dtype=abs_stft.dtype)
-        mel = torch.matmul(filterbanks, abs_stft)  # (B, n_mels, T_frames)
-        mel = mel.permute(0, 2, 1)  # (B, T_frames, n_mels)
+        with torch.amp.autocast(device.type, enabled=False):
+            filterbanks = self.get_filterbanks(device=device, dtype=abs_stft.dtype)
+            mel = torch.matmul(filterbanks, abs_stft)  # (B, n_mels, T_frames)
+            mel = mel.permute(0, 2, 1)  # (B, T_frames, n_mels)
 
-        # Apply log with zero guard
-        log_guard = self.get_log_zero_guard_value(LOG_ZERO_GUARD_VALUE, mel.dtype)
-        mel = torch.log(mel + log_guard)
+            log_guard = self.get_log_zero_guard_value(LOG_ZERO_GUARD_VALUE, mel.dtype)
+            mel = torch.log(mel + log_guard)
 
-        # Create mask for valid frames
         max_frames = mel.shape[1]
         valid_mask = torch.arange(max_frames, device=device).unsqueeze(0) < seq_len.unsqueeze(1)
         mask = valid_mask.unsqueeze(-1)  # (B, T, 1)
 
-        # Apply normalization with masking
         normalized_mel = self.normalize_mel_features(mel, mask, self.normalize)
-
-        # Mask invalid frames
         normalized_mel = normalized_mel.masked_fill(~mask, self.padding_value)
 
         # Return in NeMo format: (B, F, T)
@@ -352,32 +371,37 @@ class FastConformerFeatureExtractor(SequenceFeatureExtractor):
 
         batch_audio = raw_speech.float()
 
-        # Get sequence lengths
         if audio_lengths is None:
-            # Assume all sequences use the full length
             audio_lengths = torch.full((batch_audio.shape[0],), batch_audio.shape[1], dtype=torch.long)
         else:
-            # Validate provided audio_lengths
             if audio_lengths.shape[0] != batch_audio.shape[0]:
                 raise ValueError(
                     f"audio_lengths batch size {audio_lengths.shape[0]} != audio batch size {batch_audio.shape[0]}"
                 )
 
-        # Determine target device: use explicit device parameter, otherwise use input tensor's device
         target_device = device if device is not None else batch_audio.device
 
-        # Move tensors to target device
         batch_audio = batch_audio.to(target_device)
         audio_lengths = audio_lengths.to(target_device)
 
-        # Compute sequence lengths for mel features
+        # Preemphasis + time-domain masking (matching NeMo FilterbankFeatures
+        # and HF ParakeetFeatureExtractor).  The mask zeros out positions beyond
+        # the true audio length so the first-difference filter does not produce
+        # a nonzero spike at the audio-padding boundary.
+        if self.preemphasis is not None and self.preemphasis > 0:
+            batch_audio = self.preemphasis_batch(batch_audio, self.preemphasis)
+            timemask = (
+                torch.arange(batch_audio.shape[1], device=target_device).unsqueeze(0)
+                < audio_lengths.unsqueeze(1)
+            )
+            batch_audio = batch_audio.masked_fill(~timemask, 0.0)
+
         seq_lens = torch.tensor(
             [self.get_seq_len(length.item(), self.n_fft, self.hop_length) for length in audio_lengths],
             dtype=torch.long,
             device=target_device,
         )
 
-        # Extract mel features using NeMo-matching implementation
         logmel_features = self.get_logmel(batch_audio, seq_lens)  # (B, F, T)
 
         # Transpose to HuggingFace format: (B, T, F)
