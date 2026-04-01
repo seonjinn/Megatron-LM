@@ -264,7 +264,15 @@ class FastConformerConvModule(nn.Module):
         hidden_states = self.pointwise_conv1(hidden_states)
         hidden_states = F.glu(hidden_states, dim=1)
 
-        # Apply padding mask before convolution
+        # Zero out padding positions before depthwise conv to prevent padding
+        # from leaking into valid positions through the convolution kernel.
+        # pad_mask: (B, T) with True = padding.  Matches NeMo's
+        # ConformerConvolution (conformer_modules.py:348-349).
+        #
+        # NOTE: HF's ParakeetEncoderConvolutionModule uses a different-looking
+        # approach — `torch.all(~attention_mask, dim=2)` on a 4D (B,1,T,T)
+        # symmetric mask — but it is mathematically equivalent for bidirectional
+        # masks because column j is all-False iff position j is padding.
         if pad_mask is not None:
             hidden_states = hidden_states.masked_fill(pad_mask.unsqueeze(1), 0.0)
 
