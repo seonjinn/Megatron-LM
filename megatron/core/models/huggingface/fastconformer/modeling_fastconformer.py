@@ -413,11 +413,6 @@ class FastConformerSubsamplingConv2D(nn.Module):
         self.out = nn.Linear(self.conv_channels * out_length_val, config.hidden_size, bias=True)
 
     def forward(self, input_features: torch.Tensor, lengths: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        # Save original mel-frame lengths before calc_length transforms them
-        # to post-subsampling lengths.  These are the actual valid mel frames
-        # per clip (the rest of input_features is zero-padding).
-        current_lengths = lengths.clone().long()
-
         lengths = calc_length(
             lengths,
             all_paddings=self.left_padding + self.right_padding,
@@ -427,56 +422,13 @@ class FastConformerSubsamplingConv2D(nn.Module):
             repeat_num=self.num_layers,
         )
 
-        _debug = os.environ.get("NRL_DEBUG", "0") == "1"
-
         hidden_states = input_features.unsqueeze(1)
-
-        # Iterate over conv layers with intermediate masking after each
-        # strided Conv2d, matching HF ParakeetEncoderSubsamplingConv2D and
-        # NeMo MaskedConvSequential.  Without this, zero-padding from short
-        # audio clips contaminates activations through the conv stack,
-        # producing different embeddings than the vLLM (HF) generation path.
-        _conv_idx = 0
-        for layer in self.conv:
-            hidden_states = layer(hidden_states)
-            if isinstance(layer, nn.Conv2d):
-                # Update lengths only for strided convs (depthwise, first conv).
-                # Pointwise convs (stride=1) don't change the time dimension,
-                # but we still re-apply the mask to zero out values leaked by
-                # the preceding depthwise conv's padding receptive field.
-                if layer.stride != (1, 1):
-                    padding = layer.padding
-                    kernel_size = layer.kernel_size[0]
-                    stride = layer.stride[0]
-                    current_lengths = (current_lengths + padding[0] + padding[1] - kernel_size) // stride + 1
-                seq_len = hidden_states.shape[2]
-                channel_mask = (
-                    torch.arange(seq_len, device=hidden_states.device) < current_lengths[:, None]
-                )
-                num_masked = int((~channel_mask).sum().item())
-                hidden_states = hidden_states * channel_mask[:, None, :, None]
-                if _debug:
-                    print(
-                        f"[SUBSAMP_MASK] conv{_conv_idx}: "
-                        f"seq_len={seq_len} valid_lens={current_lengths.tolist()[:4]} "
-                        f"masked_positions={num_masked}",
-                        flush=True,
-                    )
-                _conv_idx += 1
-
-        if _debug:
-            _hs = hidden_states.float()
-            print(
-                f"[SUBSAMP_DEBUG] FastConformerSubsamplingConv2D: "
-                f"input_shape={tuple(input_features.shape)} "
-                f"output_shape={tuple(hidden_states.shape)} "
-                f"input_lengths={lengths.tolist()[:4]} "
-                f"current_lengths={current_lengths.tolist()[:4]} "
-                f"padded_time={input_features.shape[1]} "
-                f"mean={_hs.mean():.6f} std={_hs.std():.6f} "
-                f"min={_hs.min():.6f} max={_hs.max():.6f}",
-                flush=True,
-            )
+        # No intermediate masking between conv layers — matches NeMo's
+        # ConvSubsampling used during SFT training.  The HF ParakeetEncoder
+        # applies per-layer masking, but the model was trained without it;
+        # adding masking here causes a distribution shift in encoder outputs
+        # that degrades ASR during RL fine-tuning.
+        hidden_states = self.conv(hidden_states)
 
         batch_size, conv_channels, time_steps, freq_bins = hidden_states.size()
         hidden_states = self.out(hidden_states.transpose(1, 2).reshape(batch_size, time_steps, -1))
