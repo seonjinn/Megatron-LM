@@ -1424,7 +1424,6 @@ class LLaVAModel(MegatronModule):
                         f" num_frames={num_frames}",
                         flush=True,
                     )
-
                 if self._video_temporal_patch_size > 1:
                     image_embeddings, imgs_sizes, num_frames = self.vision_model(
                         images, imgs_sizes=imgs_sizes, packed_seq_params=vision_packed_seq_params,
@@ -1436,7 +1435,6 @@ class LLaVAModel(MegatronModule):
                             _tfp(image_embeddings, "[ENCODER_RAW_FINGERPRINT_MEGATRON] forward (post-vision_model temporal, pre-shuffle): "),
                             flush=True,
                         )
-
                     # Because we only support dynamic res, num_image_tiles is a list of all ones
                     #   with length equal to len(imgs_sizes) == sum(num_frames), where each entry
                     #   in num_frames is 1 for images, and >1 for videos. We must update this after
@@ -1448,7 +1446,6 @@ class LLaVAModel(MegatronModule):
                     image_embeddings = self.vision_model(
                         images, imgs_sizes=imgs_sizes, packed_seq_params=vision_packed_seq_params,
                     )  # [num_tiles, img_seq_len, h_vision]
-
                     if os.environ.get("NRL_DEBUG", "0") == "1" and image_embeddings.numel() > 0:
                         print(
                             _tfp(image_embeddings, "[ENCODER_RAW_FINGERPRINT_MEGATRON] forward (post-vision_model dynamic, pre-shuffle): "),
@@ -1542,7 +1539,6 @@ class LLaVAModel(MegatronModule):
                         f"flat[:5]={[f'{v:.6f}' for v in _flat5]}",
                         flush=True,
                     )
-
             # contiguous() required as `permute` can sparsify the tensor and this breaks pipelining
             image_embeddings = image_embeddings.permute(
                 1, 0, 2
@@ -1580,7 +1576,6 @@ class LLaVAModel(MegatronModule):
                 _scale = 64.0
                 image_embeddings = (image_embeddings.float() * _scale).round() / _scale
                 image_embeddings = image_embeddings.to(torch.bfloat16)
-
             # Track norms for vision_projection output
             if self.log_model_act_norms and self.training:
                 self._store_activation_norm(image_embeddings, name="vision_projection")

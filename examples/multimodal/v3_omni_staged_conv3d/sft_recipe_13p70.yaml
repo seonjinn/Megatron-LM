@@ -1,0 +1,62 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+      # Vision data
+      - path: /lustre/fsw/portfolios/llmservice/users/cmccarthy/eagle_recipe_online_packing/final_recipe/eagle_sft_v13.70_abspath.yaml
+        repetitions: 1
+      - path: /lustre/fsw/portfolios/llmservice/users/cmccarthy/eagle_recipe_online_packing/final_recipe/sft_new_data_1702.yaml
+        repetitions: 1
+      # Text data 18.9M samples -> 3786 tokens per sample -> 71B tokens
+      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/nickel_capybara_0_16k_absolute_paths.yaml
+        repetitions: 0.5
+      # Short video data 
+      - path: /lustre/fsw/portfolios/llmservice/users/cmccarthy/eagle_recipe_online_packing/final_recipe/short_video_qa_0220.yaml
+        repetitions: 1
+      - path: /lustre/fsw/portfolios/llmservice/users/cmccarthy/eagle_recipe_online_packing/final_recipe/video_qa_v1_v2_all_0217.yaml
+        repetitions: 1
+      # Short omni data
+      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/arushi_short16k_omni_qa_0220.yaml
+        repetitions: 1.0 
+      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/gemini_filtered_omni_qa_short16k_0222.yaml
+        repetitions: 1.0
+      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/omni_caption_short16k_0220.yaml
+        repetitions: 1.0 
+      # ASR: Granary Small 10M samples -> 260 tokens per sample -> 2.6B tokens
+      - path: /lustre/fsw/portfolios/llmservice/users/ehosseiniasl/github_repos/ehosseiniasl_vlm2_unified_training/megatron-lm/examples/multimodal/avlm/data_config/granary_v1.1_small.yaml
+        repetitions: 1.0 
+      # Granary
+      - path: /lustre/fsw/portfolios/llmservice/users/ehosseiniasl/github_repos/ehosseiniasl_vlm2_unified_training/megatron-lm/examples/multimodal/avlm/data_config/granary.v1_1.yaml
+        repetitions: 0.05 
+      # Audio reasoning data 1.2M samples -> 3515 tokens per sample -> 4.2B tokens
+      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/avlm_data_yaml/audio_reasoning_sft_nano3_filtered_rep1.yaml
+        repetitions: 2.5
+      #########################################################
+      # Audio-SFT
+      #########################################################
+      # Sound 1.1M samples -> 167 tokens per sample -> 183.7M tokens
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/users/ltavabi/omcat/data_icfg/quality_filtered/audio_sound_sft.yaml
+        repetitions: 1
+      # Sound SDG 16M samples -> 448 tokens per sample -> 7.2B tokens
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/users/ltavabi/omcat/data_icfg/quality_filtered/audio_sound_sft_sdg.yaml
+        repetitions: 1
+      # Music 870k samples -> 98 tokens per sample -> 85.3M tokens
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/users/ltavabi/omcat/data_icfg/quality_filtered/audio_music_sft.yaml
+        repetitions: 1
+      # Music SDG 17.4M samples -> 2225 tokens per sample -> 38.7B tokens
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/users/ltavabi/omcat/data_icfg/quality_filtered/audio_music_sft_sdg.yaml
+        repetitions: 1
+      # Speech 4.6M samples -> 230 tokens per sample -> 1B tokens
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/users/ltavabi/omcat/data_icfg/quality_filtered/audio_speech_sft.yaml
+        repetitions: 1
+      # Speech SDG 4.4M -> 146 tokens per sample -> 642M tokens
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/users/ltavabi/omcat/data_icfg/quality_filtered/audio_speech_sft_sdg.yaml
+        repetitions: 1
+      # Audio reasoning data
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/audio-reasoning-traces-nn-v4/long_audio_sgpt_110k.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/audio-reasoning-traces-nn-v4/audio/YouTube8M
+        repetitions: 1

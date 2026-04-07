@@ -30,15 +30,19 @@ python tools/checkpoint/convert.py \
 touch $HF_BASE_PATH/mcore_to_hf_info.txt
 echo "original mcore path: $MCORE_PATH at iteration $CKPT_STEP" >> $HF_BASE_PATH/mcore_to_hf_info.txt
 
-# Step 3: Copy the "default" hf config based on the model type, error out if not 9b or 12b
+# Step 3: Copy the "default" hf config based on the model type, error out if not 9b or 12b.
+# IMPORTANT: Do NOT copy model.safetensors.index.json -- the converter just generated
+#   one with the correct weight map (including sound model keys, etc.). Overwriting it
+#   with the template's stale copy would make those weights invisible to torch / HF loaders.
 if [ "$MODEL_TYPE" == "9b" ]; then
-    cp /lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/n5p5_9b_model_config/* $HF_PATH
+    HF_CONFIG_SRC=/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/n5p5_9b_model_config
 elif [ "$MODEL_TYPE" == "12b" ]; then
-    cp /lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/n5p5_12b_hf_config/* $HF_PATH
+    HF_CONFIG_SRC=/lustre/fsw/portfolios/llmservice/users/matthieul/workspace/output/n5p5_12b_hf_config
 else
     echo "Error: MODEL_TYPE must be either '9b' or '12b', but got '$MODEL_TYPE'"
     exit 1
 fi
+rsync -a --exclude='model.safetensors.index.json' "$HF_CONFIG_SRC/" "$HF_PATH/"
 
 # Step 4: Overwrite a few model-specific params using create_yaml_inference_config.py --update_hf_config
 python examples/multimodal/tools/create_yaml_inference_config.py --model_name $MODEL_NAME --update_hf_config $HF_PATH
