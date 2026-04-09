@@ -33,7 +33,7 @@ echo "original mcore path: $MCORE_PATH at iteration $CKPT_STEP" >> $HF_BASE_PATH
 # IMPORTANT: Do NOT copy model.safetensors.index.json -- the converter just generated
 #   one with the correct weight map (including sound model keys, etc.). Overwriting it
 #   with the template's stale copy would make those weights invisible to torch / HF loaders.
-HF_CONFIG_SRC=/lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/hanrongy/project/nemotron_omni/checkpoints/moe_hf_config
+HF_CONFIG_SRC=examples/multimodal/v3/moe_hf_config
 rsync -a --exclude='model.safetensors.index.json' "$HF_CONFIG_SRC/" "$HF_PATH/"
 
 # Step 4: Overwrite a few model-specific params using create_yaml_inference_config.py --update_hf_config
