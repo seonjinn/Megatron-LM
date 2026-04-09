@@ -31,11 +31,11 @@ from transformers import AutoModelForCausalLM, AutoProcessor, AutoTokenizer
 
 def load_model(model_path: str, device: str = "cuda:0"):
     """Load the VLM model and processor.
-    
+
     Args:
         model_path: Path to the pretrained model
         device: Device to load the model on
-        
+
     Returns:
         Tuple of (model, tokenizer, processor)
     """
@@ -63,7 +63,7 @@ def test_audio_transcription(
     do_sample: bool = False,
 ):
     """Test model inference on an audio file.
-    
+
     Args:
         model: The VLM model with audio support
         tokenizer: The tokenizer
@@ -75,7 +75,7 @@ def test_audio_transcription(
         do_sample: Whether to use sampling for generation
     """
     print(f"\nProcessing audio: {audio_path}")
-    
+
     # Prepare messages with audio token
     messages = [
         {"role": "system", "content": "/no_think"},
@@ -87,31 +87,31 @@ def test_audio_transcription(
             ],
         }
     ]
-    
+
     # Generate prompt
     prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-    
+
     # Process inputs - processor handles audio loading and token expansion
     inputs = processor(
         text=[prompt],
         audio=[audio_path],
         return_tensors="pt",
     )
-    
+
     # Get sound clips before moving to device (they're numpy arrays, not tensors)
     sound_clips = inputs.pop("sound_clips", None)
-    
+
     # Move tensor inputs to device
     inputs = inputs.to(device)
-    
+
     print(f"Input ids shape: {inputs.input_ids.shape}")
-    
+
     if sound_clips is not None:
         if isinstance(sound_clips, list):
             print(f"Sound clips: {len(sound_clips)} clips, first clip length: {len(sound_clips[0])} samples")
         else:
             print(f"Sound clips: {type(sound_clips)}")
-    
+
     # Generate output - model handles feature extraction from raw waveforms
     generated_ids = model.generate(
         input_ids=inputs.input_ids,
@@ -121,12 +121,12 @@ def test_audio_transcription(
         do_sample=do_sample,
         eos_token_id=tokenizer.eos_token_id,
     )
-    
+
     # Decode output
     output_text = processor.batch_decode(
         generated_ids, skip_special_tokens=False, clean_up_tokenization_spaces=False
     )[0]
-    
+
     print(f"\n{'='*50}")
     print(f"Prompt: {prompt_text}")
     print(f"{'='*50}")
@@ -142,7 +142,7 @@ def test_audio_understanding(
     max_new_tokens: int = 1024,
 ):
     """Test various audio understanding prompts.
-    
+
     Args:
         model: The VLM model with audio support
         tokenizer: The tokenizer
@@ -156,7 +156,7 @@ def test_audio_understanding(
         "What is being said in this audio?",
         "Describe the audio content.",
     ]
-    
+
     for prompt in prompts:
         test_audio_transcription(
             model, tokenizer, processor, audio_path,
@@ -199,14 +199,14 @@ def main():
         help="Custom prompt for audio understanding (default: runs multiple prompts)"
     )
     args = parser.parse_args()
-    
+
     # Load model
     model, tokenizer, processor = load_model(args.model_path, args.device)
-    
+
     print("=" * 50)
     print("Testing Audio Inference")
     print("=" * 50)
-    
+
     if args.prompt:
         # Single custom prompt
         test_audio_transcription(

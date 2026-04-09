@@ -17,13 +17,13 @@ def encode_pil_to_jpeg_data_url(pil_image):
 def sample_video_frames_to_data_urls(video_path_local, fps=1, nframe=0, nframe_max=-1):
     """
     Sample frames from a video and return base64-encoded data URLs along with metadata.
-    
+
     Args:
         video_path_local: Path to the video file
         fps: Target frames per second for sampling (if > 0, uses fps-based sampling)
         nframe: Number of frames to sample (used if fps <= 0)
         nframe_max: Maximum number of frames to sample
-    
+
     Returns:
         tuple: (frame_data_urls, metadata)
         - frame_data_urls: List of base64-encoded frame images
@@ -70,13 +70,13 @@ def sample_video_frames_to_data_urls(video_path_local, fps=1, nframe=0, nframe_m
 
     images = [Image.fromarray(vid[i].asnumpy()) for i in indices]
     frame_urls = [encode_pil_to_jpeg_data_url(im) for im in images]
-    
+
     # Calculate timestamps for each sampled frame
     timestamps = [float(idx) / video_fps for idx in indices]
-    
+
     # Calculate metadata for the sampled frames
     sampled_num_frames = len(indices)
-    
+
     # Duration is the time span from first to last frame
     if len(timestamps) > 1:
         sampled_duration = timestamps[-1] - timestamps[0]
@@ -85,27 +85,27 @@ def sample_video_frames_to_data_urls(video_path_local, fps=1, nframe=0, nframe_m
         # Single frame case
         sampled_duration = None
         sampled_fps = None
-    
+
     metadata = VideoMetadata(
         total_num_frames=sampled_num_frames,
         fps=sampled_fps,
         duration=sampled_duration,
         video_backend=None,
     )
-    
+
     return frame_urls, metadata
 
 
 def maybe_path_or_url_to_data_urls(path_or_url, fps=1, nframe=0, nframe_max=-1):
     """
     Convert a path or URL to data URLs, handling videos, images, and remote files.
-    
+
     Args:
         path_or_url: Path or URL to the media file
         fps: Target frames per second for video sampling (if > 0, uses fps-based sampling)
         nframe: Number of frames to sample from video (used if fps <= 0)
         nframe_max: Maximum number of frames to sample
-    
+
     Returns:
         tuple: (data_urls, metadata)
         - data_urls: List of base64-encoded data URLs
@@ -113,7 +113,7 @@ def maybe_path_or_url_to_data_urls(path_or_url, fps=1, nframe=0, nframe_max=-1):
     """
     val = str(path_or_url or "")
     low = val.lower()
-    
+
     # Handle data URLs
     if low.startswith("data:"):
         if low.startswith("data:video/mp4"):

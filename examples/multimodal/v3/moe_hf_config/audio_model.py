@@ -54,9 +54,9 @@ class RMSNorm(nn.Module):
 
 class SoundProjection(nn.Module):
     """MLP projection from sound encoder hidden size to LLM hidden size.
-    
+
     Architecture: RMSNorm -> linear1 -> SquaredReLU -> linear2
-    
+
     This matches the Megatron checkpoint conversion structure:
     - sound_projection.norm.weight
     - sound_projection.linear1.weight
@@ -64,7 +64,7 @@ class SoundProjection(nn.Module):
     - sound_projection.linear1.bias (optional)
     - sound_projection.linear2.bias (optional)
     """
-    
+
     def __init__(
         self,
         sound_hidden_size: int,
@@ -78,13 +78,13 @@ class SoundProjection(nn.Module):
         self.linear1 = nn.Linear(sound_hidden_size, projection_hidden_size, bias=bias)
         self.activation = SquaredReLU()
         self.linear2 = nn.Linear(projection_hidden_size, llm_hidden_size, bias=bias)
-        
+
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         """Project sound embeddings to LLM embedding space.
-        
+
         Args:
             hidden_states: Sound encoder output [batch, seq_len, sound_hidden_size]
-        
+
         Returns:
             Projected embeddings [batch, seq_len, llm_hidden_size]
         """
@@ -97,21 +97,21 @@ class SoundProjection(nn.Module):
 
 class SoundEncoder(nn.Module):
     """Wrapper around the Parakeet encoder from HuggingFace transformers.
-    
+
     The Parakeet model is an ASR model with a Fast Conformer encoder.
     We use only the encoder portion to extract audio embeddings.
-    
+
     Checkpoint structure:
     - sound_encoder.encoder.feature_extractor.* -> Feature extraction (mel spectrogram)
     - sound_encoder.encoder.pre_encode.* -> Pre-encoding convolutions
     - sound_encoder.encoder.layers.* -> Conformer layers
-    
+
     Reference: https://huggingface.co/docs/transformers/en/model_doc/parakeet
     """
-    
+
     def __init__(self, config=None):
         super().__init__()
-        
+
         if config is not None:
             # Build from config - handle both dict and config object
             if hasattr(config, '__dict__'):
@@ -136,7 +136,7 @@ class SoundEncoder(nn.Module):
                 config_dict = config
             else:
                 config_dict = {}
-            
+
             # Create ParakeetConfig with the extracted parameters
             parakeet_config = ParakeetEncoderConfig(**config_dict)
             self.config = parakeet_config
@@ -146,18 +146,18 @@ class SoundEncoder(nn.Module):
                 "config must be provided, "
                 "and ParakeetEncoder must be available in transformers."
             )
-    
+
     def forward(
         self,
         input_features: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Encode audio features.
-        
+
         Args:
             input_features: Mel spectrogram features [batch, seq_len, feature_dim]
             attention_mask: Optional attention mask [batch, seq_len]
-            
+
         Returns:
             Audio embeddings [batch, encoded_seq_len, hidden_size]
         """
@@ -167,7 +167,7 @@ class SoundEncoder(nn.Module):
         )
         # Return the last hidden state
         return outputs.last_hidden_state
-    
+
     @property
     def hidden_size(self) -> int:
         """Return the hidden size of the encoder."""

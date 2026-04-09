@@ -1,0 +1,15 @@
+{
+  "image_processor_type": "NemotronNanoVLV2ImageProcessor",
+  "auto_map": {
+    "AutoImageProcessor": "image_processing.NemotronNanoVLV2ImageProcessor",
+    "AutoVideoProcessor": "video_processing.NemotronNanoVLV2VideoProcessor",
+    "AutoProcessor": "processing.NemotronNanoVLV2Processor"
+  },
+  "image_size": 512,
+  "patch_size": 16,
+  "downsample_ratio": 0.5,
+  "max_num_tiles": 12,
+  "use_thumbnail": true,
+  "norm_mean": [0.48145466, 0.4578275, 0.40821073],
+  "norm_std": [0.26862954, 0.26130258, 0.27577711]
+}

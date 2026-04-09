@@ -51,10 +51,10 @@ class NemotronNanoVLV2ProcessorKwargs(ProcessingKwargs, total=False):
 
 class NemotronNanoVLV2Processor(ProcessorMixin):
     r"""
-    Constructs a Nemotron Nano VL V2 processor which wraps an image processor, audio feature extractor, 
+    Constructs a Nemotron Nano VL V2 processor which wraps an image processor, audio feature extractor,
     and a tokenizer into a single processor.
-    [`NemotronNanoVLV2Processor`] offers all the functionalities of the image processor, audio processor, 
-    and tokenizer. See the [`~NemotronNanoVLV2Processor.__call__`] and [`~NemotronNanoVLV2Processor.decode`] 
+    [`NemotronNanoVLV2Processor`] offers all the functionalities of the image processor, audio processor,
+    and tokenizer. See the [`~NemotronNanoVLV2Processor.__call__`] and [`~NemotronNanoVLV2Processor.decode`]
     for more information.
     Args:
         image_processor ([`AutoImageProcessor`], *optional*):
@@ -75,10 +75,10 @@ class NemotronNanoVLV2Processor(ProcessorMixin):
     tokenizer_class = ("AutoTokenizer")
 
     def __init__(
-        self, 
-        image_processor=None, 
-        tokenizer=None, 
-        chat_template=None, 
+        self,
+        image_processor=None,
+        tokenizer=None,
+        chat_template=None,
         audio_sampling_rate: int = 16000,
         audio_subsampling_factor: int = 8,
         audio_hop_length: int = 160,
@@ -104,12 +104,12 @@ class NemotronNanoVLV2Processor(ProcessorMixin):
             if getattr(tokenizer, "audio_token_id", None)
             else tokenizer.convert_tokens_to_ids(self.audio_token)
         )
-        
+
         # Audio processing parameters
         self.audio_sampling_rate = audio_sampling_rate
         self.audio_subsampling_factor = audio_subsampling_factor
         self.audio_hop_length = audio_hop_length
-        
+
         super().__init__(image_processor, tokenizer, chat_template=chat_template)
 
     def __call__(
@@ -121,13 +121,13 @@ class NemotronNanoVLV2Processor(ProcessorMixin):
         **kwargs: Unpack[NemotronNanoVLV2ProcessorKwargs],
     ) -> BatchFeature:
         """
-        Main method to prepare multimodal inputs (text, images, videos, audio) for the model. This method processes 
-        text by replacing image/video/audio tokens with appropriate placeholder sequences, processes images and videos 
+        Main method to prepare multimodal inputs (text, images, videos, audio) for the model. This method processes
+        text by replacing image/video/audio tokens with appropriate placeholder sequences, processes images and videos
         through the image processor, and tokenizes the final text.
 
         The method performs the following key operations:
         1. Processes images using the image processor to get pixel values and patch counts
-        2. Processes videos using the image processor with max_num_tiles=1 to get video pixel values  
+        2. Processes videos using the image processor with max_num_tiles=1 to get video pixel values
         3. Processes audio to compute the number of audio tokens based on duration
         4. Replaces `<image>` tokens in text with `<img>` + image tokens + `</img>` sequences
         5. Replaces `<video>` tokens in text with frame-by-frame descriptions including timestamps (if metadata provided)
@@ -143,15 +143,15 @@ class NemotronNanoVLV2Processor(ProcessorMixin):
                 special tokens `<image>`, `<video>`, and `<audio>` that will be replaced with appropriate token sequences.
             videos (`np.ndarray`, `torch.Tensor`, `List[np.ndarray]`, `List[torch.Tensor]`, *optional*):
                 The video or batch of videos to be prepared. Each video should be a 4D NumPy array or PyTorch
-                tensor with shape (num_frames, channels, height, width). Both channels-first and channels-last formats 
+                tensor with shape (num_frames, channels, height, width). Both channels-first and channels-last formats
                 are supported. Note: Currently only supports batch size of 1 for videos.
             audio (`str`, `np.ndarray`, `torch.Tensor`, `List[str]`, `List[np.ndarray]`, `List[torch.Tensor]`, *optional*):
-                The audio or batch of audio clips to be prepared. Can be file paths, numpy arrays (waveforms), 
+                The audio or batch of audio clips to be prepared. Can be file paths, numpy arrays (waveforms),
                 or torch tensors. Waveforms should be 1D arrays at the expected sampling rate.
             images_kwargs (`Dict`, *optional*):
                 Additional keyword arguments for image processing, including:
                 - `min_pixels` (`int`, *optional*): Minimum number of pixels for image processing
-                - `max_pixels` (`int`, *optional*): Maximum number of pixels for image processing  
+                - `max_pixels` (`int`, *optional*): Maximum number of pixels for image processing
                 - `patch_size` (`int`, *optional*): Size of patches for image processing
                 - `temporal_patch_size` (`int`, *optional*): Size of temporal patches
                 - `merge_size` (`int`, *optional*): Size for merging patches
@@ -194,7 +194,7 @@ class NemotronNanoVLV2Processor(ProcessorMixin):
             **kwargs,
         )
         image_inputs = videos_inputs = audio_inputs = {}
-        
+
         if images is not None:
             image_inputs = self.image_processor(images=images, **output_kwargs["images_kwargs"])
             image_num_patches = image_inputs["num_patches"]
@@ -227,7 +227,7 @@ class NemotronNanoVLV2Processor(ProcessorMixin):
                     text[i] = text[i].replace(self.image_token, self.image_start_token + "<|placeholder|>" * image_num_patches[index] * self.image_processor.num_image_token + self.image_end_token, 1)
                     index += 1
                 text[i] = text[i].replace("<|placeholder|>", self.image_token)
-        
+
         if videos is not None:
             assert len(text) == 1, "Video is not supported for batch size > 1"
             video_metadata = output_kwargs.get("videos_kwargs", {}).get("video_metadata", None)
@@ -243,7 +243,7 @@ class NemotronNanoVLV2Processor(ProcessorMixin):
                     else:
                         # Fallback to original format without timestamps
                         video_prompt += f"Frame {j+1}: {each_frame}\n"
-                
+
                 text[i] = text[i].replace(self.video_token, video_prompt, 1)
             text[i] = text[i].replace("<|placeholder|>", self.video_token)
 
@@ -261,41 +261,41 @@ class NemotronNanoVLV2Processor(ProcessorMixin):
 
         return_tensors = output_kwargs["text_kwargs"].pop("return_tensors", None)
         text_inputs = self.tokenizer(text, **output_kwargs["text_kwargs"])
-        
+
         # Build output - exclude audio from tensor conversion since it's raw waveforms
         output_data = {**text_inputs, **image_inputs, **videos_inputs}
         result = BatchFeature(data=output_data, tensor_type=return_tensors)
-        
+
         # Add audio clips separately (as list of numpy arrays, not tensors)
         if audio_inputs:
             result["sound_clips"] = audio_inputs["sound_clips"]
-        
+
         return result
-    
+
     def _process_audio(
-        self, 
-        audio: AudioInput, 
+        self,
+        audio: AudioInput,
         audio_kwargs: dict
     ) -> tuple:
         """Process audio inputs and compute the number of audio tokens.
-        
+
         Args:
             audio: Audio input (file path, waveform array, or list thereof)
             audio_kwargs: Additional audio processing arguments
-            
+
         Returns:
             Tuple of (audio_clips, num_tokens_per_clip)
         """
         # Get sampling rate from kwargs or use default
         sampling_rate = audio_kwargs.get("sampling_rate", self.audio_sampling_rate)
-        
+
         # Normalize audio to list
         if not isinstance(audio, list):
             audio = [audio]
-        
+
         audio_clips = []
         num_tokens = []
-        
+
         for audio_item in audio:
             # Load audio if it's a file path
             if isinstance(audio_item, str):
@@ -306,25 +306,25 @@ class NemotronNanoVLV2Processor(ProcessorMixin):
                 waveform = audio_item.squeeze() if audio_item.ndim > 1 else audio_item
             else:
                 raise ValueError(f"Unsupported audio type: {type(audio_item)}")
-            
+
             audio_clips.append(waveform)
-            
+
             # Estimate number of audio tokens based on waveform length
             # num_frames ≈ audio_samples / hop_length
             # num_tokens = num_frames / subsampling_factor
             num_frames = len(waveform) // self.audio_hop_length
             n_tokens = math.ceil(num_frames / self.audio_subsampling_factor)
             num_tokens.append(max(1, n_tokens))  # At least 1 token
-        
+
         return audio_clips, num_tokens
-    
+
     def _load_audio(self, audio_path: str, target_sr: int) -> np.ndarray:
         """Load audio from file and resample if necessary.
-        
+
         Args:
             audio_path: Path to audio file
             target_sr: Target sampling rate
-            
+
         Returns:
             Audio waveform as numpy array
         """
@@ -334,7 +334,7 @@ class NemotronNanoVLV2Processor(ProcessorMixin):
             return waveform
         except ImportError:
             pass
-        
+
         try:
             import soundfile as sf
             waveform, sr = sf.read(audio_path)
@@ -348,7 +348,7 @@ class NemotronNanoVLV2Processor(ProcessorMixin):
             return waveform.astype(np.float32)
         except ImportError:
             pass
-        
+
         raise ImportError(
             "Audio loading requires either librosa or soundfile. "
             "Install with: pip install librosa soundfile"

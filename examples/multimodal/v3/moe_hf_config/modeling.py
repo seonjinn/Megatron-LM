@@ -94,7 +94,7 @@ class NemotronH_Nano_VL_V2(PreTrainedModel):
         # Instantiate LM directly to avoid Hugging Face dynamic module lookup requiring a repo id.
         self.language_model = NemotronHForCausalLM(config.llm_config)
         self.vision_model = AutoModel.from_config(config.vision_config, trust_remote_code=True)
-        self.vision_model.model._initialize_weights = self.vision_model.model._init_weights  # WAR for transformers issue 38358 
+        self.vision_model.model._initialize_weights = self.vision_model.model._init_weights  # WAR for transformers issue 38358
         self.vision_model.radio_model.make_preprocessor_external()
         self.vision_model = self.vision_model.to(self.language_model.config.torch_dtype)
 
@@ -122,7 +122,7 @@ class NemotronH_Nano_VL_V2(PreTrainedModel):
             sound_config = config.sound_config
             sound_hidden_size = sound_config.hidden_size
             sound_projection_hidden_size = sound_config.projection_hidden_size
-            
+
             # Initialize sound feature extractor for converting raw audio to mel spectrograms
             from transformers import ParakeetFeatureExtractor
             sampling_rate = getattr(sound_config, 'sampling_rate', 16000)
@@ -132,11 +132,11 @@ class NemotronH_Nano_VL_V2(PreTrainedModel):
                 feature_size=feature_size,
             )
             logger.info(f'Sound feature extractor initialized with sampling_rate={sampling_rate}, feature_size={feature_size}')
-            
+
             # Initialize sound encoder - wraps Parakeet from transformers
             self.sound_encoder = SoundEncoder(config=sound_config)
             self.sound_encoder = self.sound_encoder.to(self.language_model.config.torch_dtype)
-            
+
             # Initialize sound projection MLP
             self.sound_projection = SoundProjection(
                 sound_hidden_size=sound_hidden_size,
@@ -145,7 +145,7 @@ class NemotronH_Nano_VL_V2(PreTrainedModel):
                 bias=sound_config.projection_bias,
             )
             self.sound_projection = self.sound_projection.to(self.language_model.config.torch_dtype)
-            
+
             logger.info(f'Sound model initialized with hidden_size={sound_hidden_size}')
         else:
             self.sound_encoder = None
@@ -271,24 +271,24 @@ class NemotronH_Nano_VL_V2(PreTrainedModel):
         attention_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Extract and project sound features from audio input.
-        
+
         Args:
             input_features: Mel spectrogram features [batch, seq_len, feature_dim]
             attention_mask: Optional attention mask [batch, seq_len]
-            
+
         Returns:
             Sound embeddings projected to LLM hidden size [batch, encoded_seq_len, llm_hidden_size]
         """
         if self.sound_encoder is None:
             raise RuntimeError("Sound encoder not initialized. Check if sound_config is provided.")
-        
+
         # Encode audio features
         sound_embeds = self.sound_encoder(input_features, attention_mask)
         sound_embeds = sound_embeds.to(dtype=torch.bfloat16)
-        
+
         # Project to LLM hidden size
         sound_embeds = self.sound_projection(sound_embeds)
-        
+
         return sound_embeds
 
     @torch.no_grad()
@@ -306,7 +306,7 @@ class NemotronH_Nano_VL_V2(PreTrainedModel):
             **generate_kwargs,
     ) -> torch.LongTensor:
         """Generate text given images, videos, and/or audio.
-        
+
         Args:
             pixel_values: Image pixel values [num_tiles, C, H, W]
             pixel_values_videos: Video pixel values [num_frames, C, H, W]
@@ -321,29 +321,29 @@ class NemotronH_Nano_VL_V2(PreTrainedModel):
             output_hidden_states: Whether to output hidden states
             return_dict: Whether to return a dict
             **generate_kwargs: Additional generation arguments
-            
+
         Returns:
             Generated token IDs
         """
         assert self.img_context_token_id is not None
-        
+
         has_images = pixel_values is not None
         has_videos = pixel_values_videos is not None
         has_sound = sound_clips is not None and self.sound_encoder is not None
-        
+
         if has_images or has_videos or has_sound:
             image_vit_embeds, video_vit_embeds, sound_embeds = None, None, None
-            
+
             # Process images
             if has_images:
                 pixel_values = pixel_values.to(dtype=self.vision_model.config.torch_dtype)
                 image_vit_embeds = self.extract_feature(pixel_values)
-            
+
             # Process videos
             if has_videos:
                 pixel_values_videos = pixel_values_videos.to(dtype=self.vision_model.config.torch_dtype)
                 video_vit_embeds = self.extract_feature(pixel_values_videos)
-            
+
             # Process sound/audio
             if has_sound:
                 # Extract features from raw audio using the feature extractor
@@ -353,7 +353,7 @@ class NemotronH_Nano_VL_V2(PreTrainedModel):
                 # - 2D tensor [batch, samples] (batched raw waveforms)
                 # - 3D tensor [batch, seq_len, num_mel_bins] (pre-extracted features)
                 import numpy as np
-                
+
                 is_raw_waveform = False
                 if isinstance(sound_clips, (list, tuple)):
                     # List of audio clips (waveforms)
@@ -377,7 +377,7 @@ class NemotronH_Nano_VL_V2(PreTrainedModel):
                         is_raw_waveform = False
                 else:
                     is_raw_waveform = False
-                
+
                 if is_raw_waveform:
                     # Convert raw waveforms to mel spectrogram features
                     audio_inputs = self.sound_feature_extractor(
@@ -391,28 +391,28 @@ class NemotronH_Nano_VL_V2(PreTrainedModel):
                     # Already extracted features
                     sound_input_features = sound_clips
                     sound_attention_mask = None
-                
+
                 # Move to correct device and dtype
                 target_device = self.sound_encoder.encoder.subsampling.linear.weight.device
                 target_dtype = self.language_model.config.torch_dtype
-                
+
                 sound_input_features = sound_input_features.to(dtype=target_dtype, device=target_device)
                 if sound_attention_mask is not None:
                     sound_attention_mask = sound_attention_mask.to(device=target_device)
-                
+
                 sound_embeds = self.extract_sound_feature(sound_input_features, sound_attention_mask)
-            
+
             inputs_embeds = self.language_model.get_input_embeddings()(input_ids)
             B, N, C = inputs_embeds.shape
             inputs_embeds = inputs_embeds.reshape(B * N, C)
             input_ids_copy = input_ids.reshape(B * N)
-            
+
             # Replace image tokens with image embeddings
             if image_vit_embeds is not None:
                 image_mask = (input_ids_copy == self.img_context_token_id)
                 assert image_mask.sum() != 0, "No image tokens found in input_ids"
                 inputs_embeds[image_mask] = image_vit_embeds.reshape(-1, C).to(inputs_embeds.device, inputs_embeds.dtype)
-            
+
             # Replace video tokens with video embeddings
             if video_vit_embeds is not None:
                 if B > 1:
@@ -420,13 +420,13 @@ class NemotronH_Nano_VL_V2(PreTrainedModel):
                 video_mask = (input_ids_copy == self.video_context_token_id)
                 assert video_mask.sum() != 0, "No video tokens found in input_ids"
                 inputs_embeds[video_mask] = video_vit_embeds.reshape(-1, C).to(inputs_embeds.device, inputs_embeds.dtype)
-            
+
             # Replace sound tokens with sound embeddings
             if sound_embeds is not None and self.sound_context_token_id is not None:
                 sound_mask = (input_ids_copy == self.sound_context_token_id)
                 assert sound_mask.sum() != 0, "No sound tokens found in input_ids"
                 inputs_embeds[sound_mask] = sound_embeds.reshape(-1, C).to(inputs_embeds.device, inputs_embeds.dtype)
-            
+
             # Apply video pruning (EVS) if enabled
             if video_vit_embeds is not None and self.video_pruning_rate > 0:  # EVS
                 h = w = int(video_vit_embeds.shape[1] ** 0.5)  # assumption here (and everywhere else) is that shape is square
@@ -449,7 +449,7 @@ class NemotronH_Nano_VL_V2(PreTrainedModel):
                 inputs_embeds = inputs_embeds.reshape(B, N, C)
         else:
             inputs_embeds = self.language_model.get_input_embeddings()(input_ids)
-        
+
         outputs = self.language_model.generate(
             input_ids=input_ids,
             inputs_embeds=inputs_embeds,

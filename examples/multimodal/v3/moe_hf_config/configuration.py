@@ -22,7 +22,7 @@ logger = logging.get_logger(__name__)
 class SoundConfig(PretrainedConfig):
     """Configuration for the sound/audio model (Parakeet encoder + projection)."""
     model_type = "parakeet"
-    
+
     def __init__(
         self,
         # Parakeet encoder config
@@ -33,7 +33,7 @@ class SoundConfig(PretrainedConfig):
         conv_kernel_size: int = 31,
         feat_in: int = 80,  # Mel features
         subsampling_factor: int = 8,
-        # Projection config  
+        # Projection config
         projection_hidden_size: int = 20480,
         projection_bias: bool = True,
         # Audio processing
@@ -73,7 +73,7 @@ class NemotronH_Nano_VL_V2_Config(PretrainedConfig):
         video_pruning_rate: float = 0.0,
         # Sound/audio settings
         sound_context_token_id: int = None,
-        sound_context_token: str = "<audio>",
+        sound_context_token: str = "<so_embedding>",
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -104,7 +104,7 @@ class NemotronH_Nano_VL_V2_Config(PretrainedConfig):
         self.projector_hidden_size = projector_hidden_size
         self.vit_hidden_size = vit_hidden_size
         self.video_pruning_rate = video_pruning_rate
-        
+
         # Sound/audio token settings
         self.sound_context_token_id = sound_context_token_id
         self.sound_context_token = sound_context_token
