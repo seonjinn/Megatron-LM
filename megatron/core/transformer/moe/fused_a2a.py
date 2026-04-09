@@ -14,8 +14,13 @@ except ImportError:
     HAVE_DEEP_EP = False
 
 import torch
+import torch.nn.functional as F
 
 _buffer = None
+
+# DeepEP JIT requires MAX_NUM_OF_TOKENS_PER_RANK aligned to this value
+_DEEPEP_CHUNK_SIZE = 128
+_deepep_pad_len = 0  # Set by dispatch, read by combine
 
 
 def get_hidden_bytes(x: torch.Tensor) -> int:
@@ -350,6 +355,16 @@ class HybridEPDispatch(torch.autograd.Function):
         '''
         Forward pass of fused dispatch of the HybridEP backend
         '''
+        # Pad token dimension to multiple of _DEEPEP_CHUNK_SIZE for JIT alignment
+        num_tokens = x.shape[-2]
+        pad_len = (-num_tokens) % _DEEPEP_CHUNK_SIZE
+        if pad_len > 0:
+            x = F.pad(x, (0, 0, 0, pad_len))
+            routing_map = F.pad(routing_map, (0, 0, 0, pad_len))
+            probs = F.pad(probs, (0, 0, 0, pad_len))
+        global _deepep_pad_len
+        _deepep_pad_len = pad_len
+
         if _hybrid_ep_buffer is None:
             seq_len, hidden_dim = x.shape[-2:]
             fp8_dispatch = False  # Currently, we do not support fp8 dispatch
@@ -385,6 +400,7 @@ class HybridEPDispatch(torch.autograd.Function):
 
         ctx.handle = handle
         ctx.pad_multiple = pad_multiple
+        ctx.deepep_pad_len = _deepep_pad_len
         return (
             dispatched_hidden,
             dispatched_probs,
@@ -402,6 +418,11 @@ class HybridEPDispatch(torch.autograd.Function):
         combined_hidden, combined_probs = _hybrid_ep_buffer.combine_with_unpermute(
             hidden=grad_x, probs=grad_probs, handle=handle, pad_multiple=ctx.pad_multiple
         )
+        # Remove padding added in forward for DeepEP JIT alignment
+        if ctx.deepep_pad_len > 0:
+            combined_hidden = combined_hidden[:-ctx.deepep_pad_len]
+            if combined_probs is not None:
+                combined_probs = combined_probs[:-ctx.deepep_pad_len]
         return combined_hidden, None, combined_probs, None, None, None, None, None, None, None
 
 
@@ -419,8 +440,12 @@ class HybridEPCombine(torch.autograd.Function):
         combined_hidden, _ = _hybrid_ep_buffer.combine_with_unpermute(
             hidden=x, handle=handle, pad_multiple=pad_multiple
         )
+        # Remove padding added by HybridEPDispatch for DeepEP JIT alignment
+        if _deepep_pad_len > 0:
+            combined_hidden = combined_hidden[:-_deepep_pad_len]
         ctx.handle = handle
         ctx.pad_multiple = pad_multiple
+        ctx.deepep_pad_len = _deepep_pad_len
         ctx.num_permuted_tokens = num_permuted_tokens
         return combined_hidden
 
@@ -429,6 +454,9 @@ class HybridEPCombine(torch.autograd.Function):
         '''
         Backward pass of fused combine of the HybridEP backend
         '''
+        # Re-pad grad to match the padded shape used in HybridEPDispatch.forward
+        if ctx.deepep_pad_len > 0:
+            grad_x = F.pad(grad_x, (0, 0, 0, ctx.deepep_pad_len))
         handle = ctx.handle
         dispatched_hidden, _, _, _, _ = _hybrid_ep_buffer.dispatch_with_permute(
             hidden=grad_x,

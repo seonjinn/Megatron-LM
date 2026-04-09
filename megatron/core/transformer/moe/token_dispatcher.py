@@ -1032,8 +1032,12 @@ class _HybridEPManager(_DispatchManager):
                     "HybridEP only supports float32 probs, please set --moe-router-dtype=fp32"
                 )
             self.token_probs = self.token_probs.float()  # downcast or upcast
+        # DeepEP JIT requires MAX_NUM_OF_TOKENS_PER_RANK aligned to 128 (NUM_OF_TOKENS_PER_CHUNK)
+        # Always pad to 128; use larger alignment if fp8/fp4 requires it
         if self.config.fp8 or self.config.fp4:
-            self.pad_multiple = get_align_size_for_quantization(self.config)
+            self.pad_multiple = max(get_align_size_for_quantization(self.config), 128)
+        else:
+            self.pad_multiple = 128
         dispatched_hidden, self.dispatched_probs, _, tokens_per_expert, self.handle = (
             hybrid_ep_dispatch(
                 x=hidden_states,
