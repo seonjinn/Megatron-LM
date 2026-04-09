@@ -1305,6 +1305,12 @@ class TEDotProductAttention(te.pytorch.DotProductAttention):
             self.kept_packed_seq_params.discard("cu_seqlens_q_padded")
             self.kept_packed_seq_params.discard("cu_seqlens_kv_padded")
 
+        # max_seqlen_*_tensor fields require newer TE for CUDA graph packed seq support.
+        # Discard if TE is older to avoid TypeError on DotProductAttention.forward().
+        if get_te_version() < PkgVersion("2.4.0"):
+            self.kept_packed_seq_params.discard("max_seqlen_q_tensor")
+            self.kept_packed_seq_params.discard("max_seqlen_kv_tensor")
+
         if config.qk_clip or config.log_max_attention_logit:
             # qk-clip is only supported in TE 2.9.0 and later
             assert is_te_min_version("2.9.0"), "qk-clip is only supported in TE 2.9.0 and later"
@@ -1407,6 +1413,10 @@ class TEDotProductAttention(te.pytorch.DotProductAttention):
             )
             if num_splits is not None:
                 _fa_kwargs["num_splits"] = num_splits
+
+            # Runtime filter: remove kwargs unsupported by this TE version
+            for _unsupported in ("max_seqlen_q_tensor", "max_seqlen_kv_tensor"):
+                _fa_kwargs.pop(_unsupported, None)
 
             core_attn_out = super().forward(query, key, value, attention_mask, **_fa_kwargs)
 
