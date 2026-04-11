@@ -415,6 +415,44 @@ class MultimodalTokenizer(MegatronTokenizer):
                 return True
         return False
 
+    def _tokenize_raw_conversation(
+        self,
+        conversation: List[Dict],
+        return_target: bool,
+        add_generation_prompt: bool,
+    ):
+        """Tokenize a pre-rendered conversation without applying a chat template."""
+        if add_generation_prompt:
+            raise ValueError("add_generation_prompt is not supported when skip_chat_template=True")
+
+        conversation = self._apply_image_tag([dict(turn) for turn in conversation])
+        turn_texts = [turn.get("content", "") for turn in conversation]
+        if any(text == "" for text in turn_texts):
+            raise ValueError(f"empty turn in conversation: {conversation}. Skipping.")
+
+        cumulative_text = ""
+        cumulative_lengths = []
+        tokens = None
+        for turn_text in turn_texts:
+            cumulative_text += turn_text
+            tokens = np.asarray(self._encode(cumulative_text), dtype=np.int64)
+            cumulative_lengths.append(len(tokens))
+
+        if tokens is None:
+            tokens = np.asarray([], dtype=np.int64)
+
+        if not return_target:
+            return tokens
+
+        target = np.full_like(tokens, IGNORE_INDEX)
+        start = 0
+        for turn, end in zip(conversation, cumulative_lengths):
+            if turn["role"].lower() == "assistant":
+                target[start:end] = tokens[start:end]
+            start = end
+
+        return tokens, target
+
     def _apply_image_tag(self, text: Union[str, List[Dict]]):
         """Surround <image> with image tags such as <img> and </img>."""
         if self._image_tag is None:
@@ -444,7 +482,12 @@ class MultimodalTokenizer(MegatronTokenizer):
         return self._tokenizer.encode(text)
 
     def tokenize_conversation(
-        self, conversation: List[Dict], return_target: bool, add_generation_prompt: bool, train_only_on_last_assistant_turn: bool = False,
+        self,
+        conversation: List[Dict],
+        return_target: bool,
+        add_generation_prompt: bool,
+        train_only_on_last_assistant_turn: bool = False,
+        skip_chat_template: bool = False,
         **kwargs
     ):
         """Convert a conversation to tokens.
@@ -459,6 +502,7 @@ class MultimodalTokenizer(MegatronTokenizer):
             return_target (bool): Return target tokens with system and assistant masked.
             add_generation_prompt (bool): Add assistant prefix to the end.
             train_only_on_last_assistant_turn (bool): Train only on the last assistant turn.
+            skip_chat_template (bool): Treat each message content as already rendered text.
         """
         if train_only_on_last_assistant_turn:
             assert self._prompt_format in ("nemotron6-moe"), "train_only_on_last_assistant_turn is only supported for nemotron6-moe"
@@ -478,6 +522,13 @@ class MultimodalTokenizer(MegatronTokenizer):
             for turn in conversation:
                 tmp = turn['role']
                 turn['role'] = tmp[:1].upper() + tmp[1:]
+
+        if skip_chat_template:
+            return self._tokenize_raw_conversation(
+                conversation=conversation,
+                return_target=return_target,
+                add_generation_prompt=add_generation_prompt,
+            )
 
         # Apply possible image tag.
         conversation = self._apply_image_tag(conversation)

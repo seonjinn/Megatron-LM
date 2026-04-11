@@ -135,7 +135,7 @@ class Message:
     """A message in a conversation between a user and an assistant."""
 
     #: The sender of the message
-    sender: Literal["user", "assistant", "system"]
+    sender: Literal["user", "assistant", "system", "tool"]
 
     #: The message content
     fragments: list[Media | str]

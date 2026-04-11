@@ -26,7 +26,7 @@ warn_about_slow_media_loading = defaultdict(lambda: True)
 def cook_conversation(
     sample: dict,
     cache: CachePool,
-    media_source: FileStore,
+    media_source: FileStore | None = None,
 ) -> ConversationSample:
     global warn_about_slow_media_loading
 
@@ -36,6 +36,8 @@ def cook_conversation(
     for msg in cs.conversation:
         for frag in msg.fragments:
             if isinstance(frag, (ImageMedia, VideoMedia, AudioMedia, VideoFrameMedia)):
+                if media_source is None:
+                    raise ValueError("cook_conversation requires media_source for samples with media fragments")
                 if frag.metadata is None:
                     try:
                         frag.metadata = dataclasses.asdict(media_source.get_media_metadata(frag.value))

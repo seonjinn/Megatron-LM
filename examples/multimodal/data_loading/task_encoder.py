@@ -193,7 +193,7 @@ class BatchedPackedTaskSample(Batch):
 class LegacyConversation(TypedDict):
     """Typing for the conversation format used by the legacy tokenizer."""
 
-    role: Literal["user", "assistant", "system"]
+    role: Literal["user", "assistant", "system", "tool"]
     content: str
 
 
@@ -505,6 +505,7 @@ class MultiModalTaskEncoder(
         data_augment = sample.__subflavors__.get("data_augment", False) and not self.is_val
         tiling_augment_prob = sample.__subflavors__.get("tiling_augment_prob", self.tiling_augment_prob)
         train_only_on_last_assistant_turn = sample.__subflavors__.get("train_only_on_last_assistant_turn", False)
+        skip_chat_template = sample.__subflavors__.get("skip_chat_template", False)
         aggregated_num_frames = []
 
         # We tentatively extract the first message if it's a system prompt and use this rather than
@@ -559,7 +560,7 @@ class MultiModalTaskEncoder(
         # Format the conversation as a list of "user" / "assistant" turns.
         for message in sample.conversation:
             if not self.args.relax_sender_check:
-                assert message.sender in ["user", "assistant"], (
+                assert message.sender in ["user", "assistant", "tool"], (
                     f"unexpected sender {message.sender} in {sample.conversation}"
                 )
 
@@ -608,7 +609,12 @@ class MultiModalTaskEncoder(
 
             prompt_format = self.args.tokenizer_prompt_format
 
-            if prompt_format in ("nemotron-h-5p5-reasoning", "nemotron6-moe") and message.sender == "assistant" and not self.args.relax_thinking_trace_check:
+            if (
+                not skip_chat_template
+                and prompt_format in ("nemotron-h-5p5-reasoning", "nemotron6-moe")
+                and message.sender == "assistant"
+                and not self.args.relax_thinking_trace_check
+            ):
                 think_start_count = content.count("<think>")
                 think_end_count = content.count("</think>")
                 if think_start_count == 0 and think_end_count == 0:
@@ -638,7 +644,11 @@ class MultiModalTaskEncoder(
             legacy_conversation.append({"role": message.sender, "content": content})
 
         input_ids, target = self.tokenizer.tokenize_conversation(
-            legacy_conversation, True, False, train_only_on_last_assistant_turn=train_only_on_last_assistant_turn
+            legacy_conversation,
+            True,
+            False,
+            train_only_on_last_assistant_turn=train_only_on_last_assistant_turn,
+            skip_chat_template=skip_chat_template,
         )
         input_ids = torch.as_tensor(input_ids)
         target = torch.as_tensor(target)
