@@ -64,6 +64,14 @@ class TransformerConfig(ModelParallelConfig):
     mtp_use_repeated_layer: bool = False
     """Use a single MTP layer repeatedly instead of multiple separate layers."""
 
+<<<<<<< HEAD
+=======
+    mtp_detach_heads: bool = False
+    """If True, detach MTP head inputs from the main model graph.
+    This prevents MTP loss gradients from flowing back to the main model,
+    only training the MTP heads themselves."""
+
+>>>>>>> ananthsub/ultra-v3-posttraining
     mtp_hybrid_override_pattern: Optional[str] = None
     """DEPRECATED: Use unified hybrid_override_pattern instead.
     Legacy argument for loading old checkpoints.

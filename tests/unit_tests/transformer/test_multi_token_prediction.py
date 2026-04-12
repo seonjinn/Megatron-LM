@@ -15,7 +15,9 @@ from megatron.core.models.gpt.gpt_layer_specs import (
 from megatron.core.models.gpt.gpt_model import GPTModel
 from megatron.core.models.mamba.mamba_layer_specs import mamba_stack_spec
 from megatron.core.models.mamba.mamba_model import MambaModel
-from megatron.core.num_microbatches_calculator import destroy_num_microbatches_calculator
+from megatron.core.num_microbatches_calculator import (
+    destroy_num_microbatches_calculator,
+)
 from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.parallel_state import get_context_parallel_group
 from megatron.core.process_groups_config import ProcessGroupCollection
@@ -27,7 +29,11 @@ from megatron.core.transformer.multi_token_prediction import (
 )
 from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.utils import is_te_min_version
-from megatron.training.arguments import core_transformer_config_from_args, parse_args, validate_args
+from megatron.training.arguments import (
+    core_transformer_config_from_args,
+    parse_args,
+    validate_args,
+)
 from megatron.training.checkpointing import load_checkpoint, save_checkpoint
 from megatron.training.global_vars import (
     destroy_global_vars,
@@ -41,7 +47,9 @@ from tests.unit_tests.dist_checkpointing import TempNamedDir
 from tests.unit_tests.test_utilities import Utils
 
 try:
-    from megatron.core.extensions.transformer_engine import TEColumnParallelGroupedLinear
+    from megatron.core.extensions.transformer_engine import (
+        TEColumnParallelGroupedLinear,
+    )
 
     HAVE_TE = True
 except ImportError:
@@ -52,7 +60,7 @@ _SEED = 42
 
 class TestMultiTokenPredictionLayer:
     def setup_method(self, method):
-        os.environ['CUDA_DEVICE_MAX_CONNECTIONS'] = '1'
+        os.environ["CUDA_DEVICE_MAX_CONNECTIONS"] = "1"
 
     def teardown_method(self, method):
         Utils.destroy_model_parallel()
@@ -60,7 +68,9 @@ class TestMultiTokenPredictionLayer:
         destroy_num_microbatches_calculator()
 
     def _create_config_and_mtp_block_spec(self, tp, cp, use_te=False):
-        Utils.initialize_model_parallel(tensor_model_parallel_size=tp, context_parallel_size=cp)
+        Utils.initialize_model_parallel(
+            tensor_model_parallel_size=tp, context_parallel_size=cp
+        )
         config = TransformerConfig(
             mtp_num_layers=2,
             num_layers=4,
@@ -80,7 +90,7 @@ class TestMultiTokenPredictionLayer:
         )
         return config, mtp_block_spec
 
-    @pytest.mark.parametrize(('tp'), [(1), (2), (4)])
+    @pytest.mark.parametrize(("tp"), [(1), (2), (4)])
     def test_constructor_local(self, tp):
         """Test basic construction of MTP module."""
 
@@ -106,12 +116,16 @@ class TestMultiTokenPredictionLayer:
             assert num_weights == 15216 * config.mtp_num_layers
 
     @pytest.mark.skipif(not HAVE_TE, reason="transformer_engine not available")
-    @pytest.mark.parametrize(('tp', 'cp'), [(1, 1), (1, 2), (2, 1), (2, 2)])
+    @pytest.mark.parametrize(("tp", "cp"), [(1, 1), (1, 2), (2, 1), (2, 2)])
     def test_constructor_ues_te(self, tp, cp):
         """Test basic construction of MTP module."""
         torch.manual_seed(_SEED)
-        Utils.initialize_model_parallel(tensor_model_parallel_size=tp, context_parallel_size=cp)
-        config, mtp_block_spec = self._create_config_and_mtp_block_spec(tp, cp, use_te=True)
+        Utils.initialize_model_parallel(
+            tensor_model_parallel_size=tp, context_parallel_size=cp
+        )
+        config, mtp_block_spec = self._create_config_and_mtp_block_spec(
+            tp, cp, use_te=True
+        )
         mtp = MultiTokenPredictionBlock(config=config, spec=mtp_block_spec)
 
         assert isinstance(mtp, MultiTokenPredictionBlock)
@@ -136,7 +150,7 @@ class TestMultiTokenPrediction:
     def setup_method(self, method):
         self.seq_length = 32
         self.micro_batch_size = 2
-        os.environ['CUDA_DEVICE_MAX_CONNECTIONS'] = '1'
+        os.environ["CUDA_DEVICE_MAX_CONNECTIONS"] = "1"
 
     def teardown_method(self, method):
         Utils.destroy_model_parallel()
@@ -183,7 +197,7 @@ class TestMultiTokenPrediction:
         destroy_global_vars()
         destroy_num_microbatches_calculator()
 
-        sys.argv = ['test_multi_token_predictioin.py']
+        sys.argv = ["test_multi_token_predictioin.py"]
         args = parse_args()
         args.num_layers = 2
         args.mtp_num_layers = 2
@@ -198,10 +212,10 @@ class TestMultiTokenPrediction:
         args.tensor_model_parallel_size = tp
         args.sequence_parallel = True if tp > 1 else False
         args.context_parallel_size = cp
-        args.position_embedding_type = 'rope'
+        args.position_embedding_type = "rope"
         args.num_experts = 8
         args.train_iters = 1
-        args.ckpt_format = 'torch_dist'
+        args.ckpt_format = "torch_dist"
         args.moe_router_topk = 2
         args.moe_router_pre_softmax = False
         args.lr = 3e-5
@@ -217,10 +231,10 @@ class TestMultiTokenPrediction:
             args.moe_grouped_gemm = False
         args.bf16 = True
         if fp8 is not None:
-            args.fp8 = 'e4m3'
+            args.fp8 = "e4m3"
         if full_recompute:
-            args.recompute_granularity = 'full'
-            args.recompute_method = 'uniform'
+            args.recompute_granularity = "full"
+            args.recompute_method = "uniform"
             args.recompute_num_layers = 1
         else:
             args.recompute_granularity = None
@@ -233,19 +247,26 @@ class TestMultiTokenPrediction:
 
     def get_batch(self, seq_length, micro_batch_size):
         data = list(range(seq_length))
-        input_ids = torch.tensor(data, dtype=torch.int64).repeat((micro_batch_size, 1)).cuda()
-        labels = 1 + torch.tensor(data, dtype=torch.int64).repeat((micro_batch_size, 1)).cuda()
-        position_ids = torch.tensor(data, dtype=torch.int64).repeat((micro_batch_size, 1)).cuda()
+        input_ids = (
+            torch.tensor(data, dtype=torch.int64).repeat((micro_batch_size, 1)).cuda()
+        )
+        labels = (
+            1
+            + torch.tensor(data, dtype=torch.int64).repeat((micro_batch_size, 1)).cuda()
+        )
+        position_ids = (
+            torch.tensor(data, dtype=torch.int64).repeat((micro_batch_size, 1)).cuda()
+        )
         attention_mask = torch.ones(
             (micro_batch_size, 1, seq_length, seq_length), dtype=bool
         ).cuda()
         loss_mask = torch.ones(seq_length).repeat((micro_batch_size, 1)).cuda()
         batch = {
-            'tokens': input_ids,
-            'labels': labels,
-            'loss_mask': loss_mask,
-            'attention_mask': attention_mask,
-            'position_ids': position_ids,
+            "tokens": input_ids,
+            "labels": labels,
+            "loss_mask": loss_mask,
+            "attention_mask": attention_mask,
+            "position_ids": position_ids,
         }
         return batch
 
@@ -276,7 +297,9 @@ class TestMultiTokenPrediction:
         # Convert to tensors with shape [batch, total_seq_length]
         input_ids = torch.tensor(input_ids_list, dtype=torch.int64).unsqueeze(0).cuda()
         labels = torch.tensor(labels_list, dtype=torch.int64).unsqueeze(0).cuda()
-        position_ids = torch.tensor(position_ids_list, dtype=torch.int64).unsqueeze(0).cuda()
+        position_ids = (
+            torch.tensor(position_ids_list, dtype=torch.int64).unsqueeze(0).cuda()
+        )
 
         # Create attention mask for packed sequences (all ones for simplicity)
         attention_mask = torch.ones(
@@ -288,7 +311,8 @@ class TestMultiTokenPrediction:
 
         # Create cumulative sequence lengths for PackedSeqParams
         cu_seqlens = torch.tensor(
-            [0] + [sum(seq_lengths[: i + 1]) for i in range(len(seq_lengths))], dtype=torch.int32
+            [0] + [sum(seq_lengths[: i + 1]) for i in range(len(seq_lengths))],
+            dtype=torch.int32,
         ).cuda()
 
         packed_seq_params = PackedSeqParams(
@@ -296,16 +320,16 @@ class TestMultiTokenPrediction:
             cu_seqlens_kv=cu_seqlens,
             max_seqlen_q=max(seq_lengths),
             max_seqlen_kv=max(seq_lengths),
-            qkv_format='thd',
+            qkv_format="thd",
         )
 
         batch = {
-            'tokens': input_ids,
-            'labels': labels,
-            'loss_mask': loss_mask,
-            'attention_mask': attention_mask,
-            'position_ids': position_ids,
-            'packed_seq_params': packed_seq_params,
+            "tokens": input_ids,
+            "labels": labels,
+            "loss_mask": loss_mask,
+            "attention_mask": attention_mask,
+            "position_ids": position_ids,
+            "packed_seq_params": packed_seq_params,
         }
         return batch
 
@@ -319,7 +343,9 @@ class TestMultiTokenPrediction:
         args = self.create_test_args(tp, cp, self.seq_length, self.micro_batch_size)
         set_args(args)
         torch.manual_seed(_SEED)
-        Utils.initialize_model_parallel(tensor_model_parallel_size=tp, context_parallel_size=cp)
+        Utils.initialize_model_parallel(
+            tensor_model_parallel_size=tp, context_parallel_size=cp
+        )
         gpt_model = get_model(self.model_provider, ModelType.encoder_or_decoder)
         gpt_model = unwrap_model(gpt_model)
         sharded_state_dict = gpt_model[0].sharded_state_dict()
@@ -340,7 +366,9 @@ class TestMultiTokenPrediction:
         """Test MTP forward and backward with gptmodel."""
         tp_ref = 1
         cp_ref = 1
-        args = self.create_test_args(tp_ref, cp_ref, self.seq_length, self.micro_batch_size)
+        args = self.create_test_args(
+            tp_ref, cp_ref, self.seq_length, self.micro_batch_size
+        )
         set_args(args)
         torch.manual_seed(_SEED)
         Utils.initialize_model_parallel(
@@ -361,7 +389,7 @@ class TestMultiTokenPrediction:
         tracker = MTPLossLoggingHelper.tracker
         mtp_loss_ref = None
         assert "values" in tracker
-        mtp_loss_ref = tracker['values'].clone()
+        mtp_loss_ref = tracker["values"].clone()
         MTPLossLoggingHelper.clean_loss_in_tracker()
 
         iteration = 123
@@ -372,7 +400,7 @@ class TestMultiTokenPrediction:
             args.load = ckpt_path
 
         with TempNamedDir(
-            tmp_path_dist_ckpt / 'test_mtp_model_reconfiguration_model_A'
+            tmp_path_dist_ckpt / "test_mtp_model_reconfiguration_model_A"
         ) as ckpt_dir_A:
             set_ckpt_path(ckpt_dir_A)
             save_checkpoint(
@@ -389,12 +417,18 @@ class TestMultiTokenPrediction:
             # Test with different TP/CP configuration
             Utils.destroy_model_parallel()
             args = self.create_test_args(
-                tp, cp, self.seq_length, self.micro_batch_size, full_recompute=full_recompute
+                tp,
+                cp,
+                self.seq_length,
+                self.micro_batch_size,
+                full_recompute=full_recompute,
             )
             set_args(args)
             set_ckpt_path(ckpt_dir_A)
             torch.manual_seed(_SEED)
-            Utils.initialize_model_parallel(tensor_model_parallel_size=tp, context_parallel_size=cp)
+            Utils.initialize_model_parallel(
+                tensor_model_parallel_size=tp, context_parallel_size=cp
+            )
             gpt_model, optimizer, opt_param_scheduler = setup_model_and_optimizer(
                 self.model_provider, ModelType.encoder_or_decoder
             )
@@ -402,7 +436,9 @@ class TestMultiTokenPrediction:
             batch["output_ref"] = output_ref
             # Get batch for current CP rank (handles CP tensor splitting)
             batch = get_batch_on_this_cp_rank(batch)
-            tokens, labels, loss_mask, attention_mask, position_ids, output_ref = batch.values()
+            tokens, labels, loss_mask, attention_mask, position_ids, output_ref = (
+                batch.values()
+            )
             output = gpt_model[0].forward(
                 input_ids=tokens,
                 position_ids=position_ids,
@@ -412,9 +448,11 @@ class TestMultiTokenPrediction:
             )
             tracker = MTPLossLoggingHelper.tracker
             assert "values" in tracker
-            mtp_loss = tracker['values'].clone()
+            mtp_loss = tracker["values"].clone()
             # Average MTP loss across CP ranks for comparison with reference
-            pg_collection = ProcessGroupCollection.use_mpu_process_groups(required_pgs=['cp'])
+            pg_collection = ProcessGroupCollection.use_mpu_process_groups(
+                required_pgs=["cp"]
+            )
             torch.distributed.all_reduce(
                 mtp_loss, group=pg_collection.cp, op=torch.distributed.ReduceOp.AVG
             )
@@ -442,14 +480,21 @@ class TestMultiTokenPrediction:
         """Test MTP with FP8 training enabled."""
         tp = 1
         cp = 1
-        fp8 = 'e4m3'
+        fp8 = "e4m3"
         args = self.create_test_args(
-            tp, cp, self.seq_length, self.micro_batch_size, fp8, full_recompute=full_recompute
+            tp,
+            cp,
+            self.seq_length,
+            self.micro_batch_size,
+            fp8,
+            full_recompute=full_recompute,
         )
         set_args(args)
 
         torch.manual_seed(_SEED)
-        Utils.initialize_model_parallel(tensor_model_parallel_size=tp, context_parallel_size=cp)
+        Utils.initialize_model_parallel(
+            tensor_model_parallel_size=tp, context_parallel_size=cp
+        )
         batch = self.get_batch(self.seq_length, self.micro_batch_size)
         tokens, labels, loss_mask, attention_mask, position_ids = batch.values()
         gpt_model, optimizer, opt_param_scheduler = setup_model_and_optimizer(
@@ -464,7 +509,9 @@ class TestMultiTokenPrediction:
             loss_mask=loss_mask,
         )
 
-        assert output.dtype == torch.float32  # Output should be converted back to float32
+        assert (
+            output.dtype == torch.float32
+        )  # Output should be converted back to float32
 
         loss = output.mean()
         loss.backward()
@@ -484,16 +531,18 @@ class TestMultiTokenPrediction:
         set_args(args)
 
         torch.manual_seed(_SEED)
-        Utils.initialize_model_parallel(tensor_model_parallel_size=tp, context_parallel_size=cp)
+        Utils.initialize_model_parallel(
+            tensor_model_parallel_size=tp, context_parallel_size=cp
+        )
 
         # Get packed batch
         batch = self.get_packed_batch(seq_lengths, micro_batch_size=1)
-        tokens = batch['tokens']
-        labels = batch['labels']
-        loss_mask = batch['loss_mask']
-        attention_mask = batch['attention_mask']
-        position_ids = batch['position_ids']
-        packed_seq_params = batch['packed_seq_params']
+        tokens = batch["tokens"]
+        labels = batch["labels"]
+        loss_mask = batch["loss_mask"]
+        attention_mask = batch["attention_mask"]
+        position_ids = batch["position_ids"]
+        packed_seq_params = batch["packed_seq_params"]
 
         # Create model
         gpt_model, optimizer, opt_param_scheduler = setup_model_and_optimizer(
@@ -517,7 +566,7 @@ class TestMultiTokenPrediction:
         # Verify MTP loss was computed
         tracker = MTPLossLoggingHelper.tracker
         assert "values" in tracker
-        mtp_loss = tracker['values'].clone()
+        mtp_loss = tracker["values"].clone()
         assert mtp_loss.shape[0] == args.mtp_num_layers
         MTPLossLoggingHelper.clean_loss_in_tracker()
 
@@ -536,9 +585,13 @@ class TestMultiTokenPrediction:
         For CP=1: Tests standard packed sequence rolling with verified expected values
         For CP=2: Tests CP-enabled rolling executes without errors
         """
-        Utils.initialize_model_parallel(tensor_model_parallel_size=1, context_parallel_size=cp)
+        Utils.initialize_model_parallel(
+            tensor_model_parallel_size=1, context_parallel_size=cp
+        )
         cp_group = get_context_parallel_group() if cp > 1 else None
-        cp_rank = torch.distributed.get_rank(group=cp_group) if cp_group is not None else 0
+        cp_rank = (
+            torch.distributed.get_rank(group=cp_group) if cp_group is not None else 0
+        )
 
         if cp == 1:
             # Test case: Simple packed sequences (CP disabled)
@@ -550,12 +603,16 @@ class TestMultiTokenPrediction:
                 cu_seqlens_kv=cu_seqlens,
                 max_seqlen_q=3,
                 max_seqlen_kv=3,
-                qkv_format='thd',
+                qkv_format="thd",
             )
 
             # Roll by -1 (shift left)
             rolled, sum_val = roll_tensor(
-                tensor, shifts=-1, dims=0, cp_group=cp_group, packed_seq_params=packed_seq_params
+                tensor,
+                shifts=-1,
+                dims=0,
+                cp_group=cp_group,
+                packed_seq_params=packed_seq_params,
             )
 
             # Expected: [2, 3, 0, 5, 0] - boundaries at indices 2 and 4 are zeroed
@@ -591,21 +648,25 @@ class TestMultiTokenPrediction:
                 cu_seqlens_kv=cu_seqlens,
                 max_seqlen_q=6,  # max(4, 6) - max local seq length per sequence
                 max_seqlen_kv=6,
-                qkv_format='thd',
+                qkv_format="thd",
             )
 
             # Roll by -1 (shift left) with CP communication
             rolled, sum_val = roll_tensor(
-                tensor, shifts=-1, dims=0, cp_group=cp_group, packed_seq_params=packed_seq_params
+                tensor,
+                shifts=-1,
+                dims=0,
+                cp_group=cp_group,
+                packed_seq_params=packed_seq_params,
             )
 
             # Verify the rolled tensor matches expected values
-            assert (
-                rolled.shape == expected.shape
-            ), f"Shape mismatch: expected {expected.shape}, got {rolled.shape}"
-            assert torch.equal(
-                rolled, expected
-            ), f"CP Rank {cp_rank}: Expected\n{expected}\nbut got\n{rolled}\nDiff:\n{rolled - expected}"
+            assert rolled.shape == expected.shape, (
+                f"Shape mismatch: expected {expected.shape}, got {rolled.shape}"
+            )
+            assert torch.equal(rolled, expected), (
+                f"CP Rank {cp_rank}: Expected\n{expected}\nbut got\n{rolled}\nDiff:\n{rolled - expected}"
+            )
 
             # Verify sum is correct
             assert sum_val.numel() == 1, "Sum should be a scalar"
@@ -693,7 +754,7 @@ class TestMultiTokenPredictionMamba:
     def setup_method(self, method):
         self.seq_length = 32
         self.micro_batch_size = 2
-        os.environ['CUDA_DEVICE_MAX_CONNECTIONS'] = '1'
+        os.environ["CUDA_DEVICE_MAX_CONNECTIONS"] = "1"
 
     def teardown_method(self, method):
         Utils.destroy_model_parallel()
@@ -738,7 +799,7 @@ class TestMultiTokenPredictionMamba:
         destroy_global_vars()
         destroy_num_microbatches_calculator()
 
-        sys.argv = ['test_multi_token_prediction_mamba.py']
+        sys.argv = ["test_multi_token_prediction_mamba.py"]
         args = parse_args()
         args.num_layers = 4
         args.mtp_num_layers = 2
@@ -755,12 +816,13 @@ class TestMultiTokenPredictionMamba:
         args.tensor_model_parallel_size = tp
         args.sequence_parallel = True if tp > 1 else False
         args.context_parallel_size = cp
-        args.position_embedding_type = 'rope'
+        args.position_embedding_type = "rope"
         args.train_iters = 1
-        args.ckpt_format = 'torch_dist'
+        args.ckpt_format = "torch_dist"
         args.lr = 3e-5
         args.attention_dropout = 0.0
         args.hidden_dropout = 0.0
+        args.async_tensor_model_parallel_allreduce = False
         args.no_save_optim = True
         args.no_load_optim = True
         args.no_load_rng = True
@@ -772,10 +834,10 @@ class TestMultiTokenPredictionMamba:
         args.spec = "megatron.core.models.mamba.mamba_layer_specs.mamba_stack_spec"
 
         if fp8 is not None:
-            args.fp8 = 'e4m3'
+            args.fp8 = "e4m3"
         if full_recompute:
-            args.recompute_granularity = 'full'
-            args.recompute_method = 'uniform'
+            args.recompute_granularity = "full"
+            args.recompute_method = "uniform"
             args.recompute_num_layers = 1
         else:
             args.recompute_granularity = None
@@ -788,19 +850,26 @@ class TestMultiTokenPredictionMamba:
 
     def get_batch(self, seq_length, micro_batch_size):
         data = list(range(seq_length))
-        input_ids = torch.tensor(data, dtype=torch.int64).repeat((micro_batch_size, 1)).cuda()
-        labels = 1 + torch.tensor(data, dtype=torch.int64).repeat((micro_batch_size, 1)).cuda()
-        position_ids = torch.tensor(data, dtype=torch.int64).repeat((micro_batch_size, 1)).cuda()
+        input_ids = (
+            torch.tensor(data, dtype=torch.int64).repeat((micro_batch_size, 1)).cuda()
+        )
+        labels = (
+            1
+            + torch.tensor(data, dtype=torch.int64).repeat((micro_batch_size, 1)).cuda()
+        )
+        position_ids = (
+            torch.tensor(data, dtype=torch.int64).repeat((micro_batch_size, 1)).cuda()
+        )
         attention_mask = torch.ones(
             (micro_batch_size, 1, seq_length, seq_length), dtype=bool
         ).cuda()
         loss_mask = torch.ones(seq_length).repeat((micro_batch_size, 1)).cuda()
         batch = {
-            'tokens': input_ids,
-            'labels': labels,
-            'loss_mask': loss_mask,
-            'attention_mask': attention_mask,
-            'position_ids': position_ids,
+            "tokens": input_ids,
+            "labels": labels,
+            "loss_mask": loss_mask,
+            "attention_mask": attention_mask,
+            "position_ids": position_ids,
         }
         return batch
 
@@ -811,7 +880,9 @@ class TestMultiTokenPredictionMamba:
         args = self.create_test_args(tp, cp, self.seq_length, self.micro_batch_size)
         set_args(args)
         torch.manual_seed(_SEED)
-        Utils.initialize_model_parallel(tensor_model_parallel_size=tp, context_parallel_size=cp)
+        Utils.initialize_model_parallel(
+            tensor_model_parallel_size=tp, context_parallel_size=cp
+        )
         mamba_model = get_model(self.model_provider, ModelType.encoder_or_decoder)
         mamba_model = unwrap_model(mamba_model)
         sharded_state_dict = mamba_model[0].sharded_state_dict()
@@ -828,7 +899,9 @@ class TestMultiTokenPredictionMamba:
         """Test MTP forward and backward with Mamba hybrid model."""
         tp_ref = 1
         cp_ref = 1
-        args = self.create_test_args(tp_ref, cp_ref, self.seq_length, self.micro_batch_size)
+        args = self.create_test_args(
+            tp_ref, cp_ref, self.seq_length, self.micro_batch_size
+        )
         set_args(args)
         torch.manual_seed(_SEED)
         Utils.initialize_model_parallel(
@@ -851,7 +924,7 @@ class TestMultiTokenPredictionMamba:
         tracker = MTPLossLoggingHelper.tracker
         mtp_loss_ref = None
         assert "values" in tracker
-        mtp_loss_ref = tracker['values'].clone()
+        mtp_loss_ref = tracker["values"].clone()
         MTPLossLoggingHelper.clean_loss_in_tracker()
 
         iteration = 123
@@ -861,7 +934,9 @@ class TestMultiTokenPredictionMamba:
             args.save = ckpt_path
             args.load = ckpt_path
 
-        with TempNamedDir(tmp_path_dist_ckpt / 'test_mtp_mamba_model_reconfiguration') as ckpt_dir:
+        with TempNamedDir(
+            tmp_path_dist_ckpt / "test_mtp_mamba_model_reconfiguration"
+        ) as ckpt_dir:
             set_ckpt_path(ckpt_dir)
             save_checkpoint(
                 iteration,
@@ -879,7 +954,9 @@ class TestMultiTokenPredictionMamba:
             set_args(args)
             set_ckpt_path(ckpt_dir)
             torch.manual_seed(_SEED)
-            Utils.initialize_model_parallel(tensor_model_parallel_size=tp, context_parallel_size=cp)
+            Utils.initialize_model_parallel(
+                tensor_model_parallel_size=tp, context_parallel_size=cp
+            )
             mamba_model, optimizer, opt_param_scheduler = setup_model_and_optimizer(
                 self.model_provider, ModelType.encoder_or_decoder
             )
@@ -887,7 +964,9 @@ class TestMultiTokenPredictionMamba:
 
             batch["output_ref"] = output_ref
             batch = get_batch_on_this_cp_rank(batch)
-            tokens, labels, loss_mask, attention_mask, position_ids, output_ref = batch.values()
+            tokens, labels, loss_mask, attention_mask, position_ids, output_ref = (
+                batch.values()
+            )
             output = mamba_model[0].forward(
                 input_ids=tokens,
                 position_ids=position_ids,
@@ -897,8 +976,10 @@ class TestMultiTokenPredictionMamba:
             )
             tracker = MTPLossLoggingHelper.tracker
             assert "values" in tracker
-            mtp_loss = tracker['values'].clone()
-            pg_collection = ProcessGroupCollection.use_mpu_process_groups(required_pgs=['cp'])
+            mtp_loss = tracker["values"].clone()
+            pg_collection = ProcessGroupCollection.use_mpu_process_groups(
+                required_pgs=["cp"]
+            )
             torch.distributed.all_reduce(
                 mtp_loss, group=pg_collection.cp, op=torch.distributed.ReduceOp.AVG
             )
@@ -922,7 +1003,9 @@ class TestMultiTokenPredictionMamba:
         args = self.create_test_args(tp, cp, self.seq_length, self.micro_batch_size)
         set_args(args)
         torch.manual_seed(_SEED)
-        Utils.initialize_model_parallel(tensor_model_parallel_size=tp, context_parallel_size=cp)
+        Utils.initialize_model_parallel(
+            tensor_model_parallel_size=tp, context_parallel_size=cp
+        )
         try:
             mamba_model = get_model(self.model_provider, ModelType.encoder_or_decoder)
             mamba_model = unwrap_model(mamba_model)
@@ -930,6 +1013,8 @@ class TestMultiTokenPredictionMamba:
             assert mamba_model[0].mtp is not None
         except AssertionError as e:
             if "Multi-Token Prediction (MTP) is not yet supported" in str(e):
-                pytest.fail(f"Attention mask validation failed for Mamba hybrid model: {e}")
+                pytest.fail(
+                    f"Attention mask validation failed for Mamba hybrid model: {e}"
+                )
             else:
                 raise
