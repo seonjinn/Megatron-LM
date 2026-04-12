@@ -1819,7 +1819,9 @@ class TECudaGraphHelper:
     parameters that are covered by cudagraphs.
     """
 
-    def __init__(self, model, config, seq_length, micro_batch_size, optimizers=[]):
+    def __init__(
+        self, model, config, seq_length, micro_batch_size, optimizers=[], pool=None
+    ):
         assert HAVE_TE_GRAPHS, "CUDA Graphs are not supported without TE."
         assert config.cuda_graph_impl == "transformer_engine", (
             "Option cuda_graph_impl=transformer_engine not enabled."
@@ -1841,6 +1843,7 @@ class TECudaGraphHelper:
         self.seq_length = seq_length
         self.micro_batch_size = micro_batch_size
         self.optimizers = optimizers
+        self.pool = pool  # shared graph memory pool for multi-bucket capture
         self.num_model_chunks = len(model)
 
         # Number of microbatches to capture. The value will be set in _get_cuda_graph_input_data().
@@ -2295,6 +2298,8 @@ class TECudaGraphHelper:
                 "_order": order,
                 "retain_graph_in_backward": self.config.cuda_graph_retain_backward_graph,
             }
+            if self.pool is not None:
+                kwargs["pool"] = self.pool
 
             # Calculate the number of warmup iterations per layer per microbatch inside TE
             # make_graphed_callables(). There are two rules:
