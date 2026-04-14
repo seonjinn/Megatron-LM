@@ -200,6 +200,9 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
         margs.recompute_sound = getattr(self.md.checkpoint_args, "recompute_sound", False)
         margs.sound_model_type = getattr(self.md.checkpoint_args, "sound_model_type", None)
         margs.disable_mtp = getattr(self.md.checkpoint_args, "disable_mtp", False)
+        margs.mtp_num_layers = getattr(self.md.checkpoint_args, "mtp_num_layers", None)
+        margs.mtp_use_repeated_layer = getattr(self.md.checkpoint_args, "mtp_use_repeated_layer", False)
+        margs.mtp_hybrid_override_pattern = getattr(self.md.checkpoint_args, "mtp_hybrid_override_pattern", None)
 
         return margs
 

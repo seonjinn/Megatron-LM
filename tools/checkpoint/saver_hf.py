@@ -267,15 +267,14 @@ class HFCheckpointSaver:
         #TODO: maybe refactor hybrid layer code into separate functions
         if self.md.model_type == "hybrid":
             from megatron.core.ssm.mamba_hybrid_layer_allocation import Symbols as LayerSymbols
-            from megatron.core.ssm.mamba_hybrid_layer_allocation import allocate_layers
 
             #TODO: maybe refactor these layer things into separate functions
-            layer_type_list = allocate_layers(
-                self.md.num_layers,
-                self.md.hybrid_attention_ratio,
-                self.md.hybrid_mlp_ratio,
-                self.md.hybrid_override_pattern,
-            )
+            # The saver has already merged all PP stages, so read layer types directly
+            # from the pattern rather than calling allocate_layers(), which requires
+            # torch.distributed to be initialized.
+            layer_type_list = [
+                c for c in self.md.hybrid_override_pattern if c != LayerSymbols.PIPE
+            ]
 
             for i in range(self.md.num_layers):
                 message = self.queue_get(f"transformer layer {i}")

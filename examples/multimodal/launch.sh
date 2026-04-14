@@ -209,6 +209,7 @@ if [[ $DRY_RUN -eq 0 && $DEBUG -eq 0 && $INTERACTIVE -eq 0 && (! -d "${CODE_SNAP
         --exclude "*.pyc" \
         --exclude ".git/" \
         --exclude "wandb/" \
+        --exclude ".venv/" \
         "${SOURCE}/" "${CODE_SNAPSHOT_DIR}/"
 fi
 

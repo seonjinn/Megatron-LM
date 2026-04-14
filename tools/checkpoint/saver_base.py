@@ -1371,9 +1371,11 @@ class MegatronCheckpointSaverBase:
                     if getattr(self.md, 'mtp_num_layers', None) is not None and self.md.mtp_num_layers > 0:
                         from schema_core import get_mtp_schema
                         is_hybrid = getattr(self.md, 'mtp_hybrid_override_pattern', None) is not None
+                        mtp_schema_prefix = f"{prefix}." if prefix else ""
                         mtp_schema = get_mtp_schema(
                             self.margs.transformer_impl,
                             is_hybrid=is_hybrid,
+                            prefix=mtp_schema_prefix,
                         )
                         self.receive_mtp(mtp_schema, schema)
                     self._receive_final_layer_outputs(schema, pp_rank, out_word_embed, prefix)
@@ -1401,9 +1403,11 @@ class MegatronCheckpointSaverBase:
                     if getattr(self.md, 'mtp_num_layers', None) is not None and self.md.mtp_num_layers > 0:
                         from schema_core import get_mtp_schema
                         is_hybrid = getattr(self.md, 'mtp_hybrid_override_pattern', None) is not None
+                        mtp_schema_prefix = f"{prefix}." if prefix else ""
                         mtp_schema = get_mtp_schema(
                             self.margs.transformer_impl,
                             is_hybrid=is_hybrid,
+                            prefix=mtp_schema_prefix,
                         )
                         self.receive_mtp(mtp_schema, schema)
                     self._receive_final_layer_outputs(schema, pp_rank, out_word_embed, prefix)

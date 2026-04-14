@@ -476,7 +476,7 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
             self.margs.expert_model_parallel_size,
             prefix="language_model."
         )
-        self.send_llm_over_queue(schema)
+        self.send_llm_over_queue(schema, schema_prefix="language_model.")
 
 def load_checkpoint(queue, args):
     """

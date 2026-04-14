@@ -1,0 +1,1 @@
+../../v3/moe_hf_config/quick_test_image.py

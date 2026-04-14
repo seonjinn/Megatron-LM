@@ -352,7 +352,9 @@ class MTPSchema:
 
     def _get_mtp_layers(self, model):
         """Get the MTP layers list from the model."""
-        mtp_block = getattr(model, f"{self.prefix}mtp" if self.prefix else "mtp", None)
+        mtp_path = f"{self.prefix}mtp" if self.prefix else "mtp"
+        # Use _get_deep_attr to handle dotted prefixes like "language_model.mtp"
+        mtp_block = self._get_deep_attr(model, mtp_path)
         if mtp_block is None:
             return None
         return mtp_block.layers

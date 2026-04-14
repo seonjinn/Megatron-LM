@@ -143,6 +143,9 @@ class HFHybridMoELMSchema(HFSchema):
             "router_bias": "mixer.gate.e_score_correction_bias",
             "shared_up_proj_weight": "mixer.shared_experts.up_proj.weight",
             "shared_down_proj_weight": "mixer.shared_experts.down_proj.weight",
+            # MoE latent projections (replicated across TP, not sharded)
+            "fc1_latent_proj_weight": "mixer.fc1_latent_proj.weight",
+            "fc2_latent_proj_weight": "mixer.fc2_latent_proj.weight",
         }
 
         self.use_swiglu = use_swiglu

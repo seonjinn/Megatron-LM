@@ -53,8 +53,8 @@ class SoundConfig(PretrainedConfig):
         self.sampling_rate = sampling_rate
 
 
-class NemotronH_Nano_Omni_Reasoning_V3_Config(PretrainedConfig):
-    model_type = 'NemotronH_Nano_Omni_Reasoning_V3'
+class NemotronH_Super_Omni_Reasoning_V3_Config(PretrainedConfig):
+    model_type = 'NemotronH_Super_Omni_Reasoning_V3'
     is_composition = True
 
     def __init__(
@@ -67,7 +67,7 @@ class NemotronH_Nano_Omni_Reasoning_V3_Config(PretrainedConfig):
         template=None,
         ps_version='v1',
         image_tag_type="internvl",
-        projector_hidden_size=4096,
+        projector_hidden_size=20480,
         vit_hidden_size=1280,
         attn_implementation="flash_attention_2",
         video_pruning_rate: float = 0.0,

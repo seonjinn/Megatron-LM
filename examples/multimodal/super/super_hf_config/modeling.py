@@ -24,7 +24,7 @@ from transformers.modeling_outputs import CausalLMOutputWithPast
 from transformers.modeling_utils import PreTrainedModel
 from transformers.utils import logging
 
-from .configuration import NemotronH_Nano_Omni_Reasoning_V3_Config
+from .configuration import NemotronH_Super_Omni_Reasoning_V3_Config
 from .modeling_nemotron_h import NemotronHForCausalLM
 from .evs import EfficientVideoSampling
 from .audio_model import SoundEncoder, SoundProjection
@@ -67,13 +67,13 @@ def version_cmp(v1, v2, op='eq'):
     return op_func(version.parse(v1), version.parse(v2))
 
 
-class NemotronH_Nano_Omni_Reasoning_V3(PreTrainedModel):
-    config_class = NemotronH_Nano_Omni_Reasoning_V3_Config
+class NemotronH_Super_Omni_Reasoning_V3(PreTrainedModel):
+    config_class = NemotronH_Super_Omni_Reasoning_V3_Config
     main_input_name = 'pixel_values'
     _supports_flash_attn_2 = True
     _no_split_modules = ['NemotronHBlock']
 
-    def __init__(self, config: NemotronH_Nano_Omni_Reasoning_V3_Config):
+    def __init__(self, config: NemotronH_Super_Omni_Reasoning_V3_Config):
         super().__init__(config)
 
         assert version_cmp(transformers.__version__, '4.36.2', 'ge')

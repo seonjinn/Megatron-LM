@@ -396,7 +396,7 @@ def get_language_config_and_spec(base_config):
         )
 
     mtp_block_spec = None
-    if args.mtp_num_layers is not None:
+    if args.mtp_num_layers is not None and not getattr(args, 'disable_mtp', False):
         assert args.mtp_spec is not None
         assert args.mtp_hybrid_override_pattern is not None, "We need to set the override hybrid pattern for MTP layers!"
         mtp_mamba_stack_spec = import_module(args.mtp_spec)

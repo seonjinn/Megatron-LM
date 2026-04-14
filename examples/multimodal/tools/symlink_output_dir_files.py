@@ -128,7 +128,16 @@ def symlink_files(
             src_file = Path(root) / file
             dest_file = dest_subdir / file
 
-            if dest_file.exists() or dest_file.is_symlink():
+            try:
+                dest_already = dest_file.exists() or dest_file.is_symlink()
+            except OSError as e:
+                # e.g. PermissionError on stat() for paths we cannot traverse (Lustre/NFS, stale perms)
+                if verbose or dry_run:
+                    print(f"Skipping dest (cannot stat): {dest_file}: {e}")
+                files_skipped += 1
+                dir_files_skipped += 1
+                continue
+            if dest_already:
                 files_skipped += 1
                 dir_files_skipped += 1
                 continue

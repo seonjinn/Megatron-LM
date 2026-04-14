@@ -134,6 +134,7 @@ def get_eos_id_for_prompt_format(prompt_format):
     eos_id_mappings = {
         # Nemotron family models
         "nemotron5": 15,
+        "nemotron6-moe": 11,
         "nemotron-h-reasoning": 11,
         "nemotron-h-5p5-reasoning": 12,
         "nemotron-h-5p5-reasoning-inference": 12,
@@ -624,6 +625,29 @@ def main():
         help="Path to HF model dir (containing config.json). Generate config.yaml there and add/overwrite params from checkpoint into config.json (see HF_OVERRIDES)."
     )
 
+    parser.add_argument(
+        "--tensor-model-parallel-size",
+        type=int,
+        default=1,
+        help="Tensor model parallel size for inference (default: 1)."
+    )
+
+    parser.add_argument(
+        "--expert-tensor-parallel-size",
+        type=int,
+        default=1,
+        help="Expert tensor parallel size for inference (default: 1)."
+    )
+
+    parser.add_argument(
+        "--disable-mtp",
+        action="store_true",
+        default=False,
+        help="Disable MTP speculative decoding at inference time. Use this when the checkpoint has MTP "
+             "weights but you want to run standard (non-speculative) inference. Writes disable_mtp: true "
+             "to the output config.yaml.",
+    )
+
     args = parser.parse_args()
 
     if args.model_name is not None:
@@ -666,6 +690,19 @@ def main():
     print(f"\nUpdating with {len(INFERENCE_PARAMS)} inference parameters...")
     final_config = update_inference_params(config_dict, INFERENCE_PARAMS)
 
+    # Apply CLI parallelism overrides (after update_inference_params which defaults these to 1)
+    tp = args.tensor_model_parallel_size
+    etp = args.expert_tensor_parallel_size
+    if tp != 1:
+        print(f"  Overriding tensor-model-parallel-size: 1 -> {tp}")
+        final_config["tensor_model_parallel_size"] = tp
+    if etp != 1:
+        print(f"  Overriding expert-tensor-parallel-size: 1 -> {etp}")
+        final_config["expert_tensor_parallel_size"] = etp
+    if args.disable_mtp:
+        print("  Setting disable_mtp: true (MTP weights will be in checkpoint but not used for inference)")
+        final_config["disable_mtp"] = True
+
     # Step 4: Show parameters if requested
     if args.show_params:
         print(f"\nFinal configuration contains {len(final_config)} parameters:")
@@ -674,7 +711,7 @@ def main():
 
     # Step 5: Save YAML configuration with inference params at top
     print(f"\nSaving configuration to: {args.output_config}")
-    inference_keys = list(INFERENCE_PARAMS.keys()) + ['tokenizer_prompt_format', 'eos_id']
+    inference_keys = list(INFERENCE_PARAMS.keys()) + ['tokenizer_prompt_format', 'eos_id', 'disable_mtp']
     save_yaml_config(final_config, args.output_config, inference_keys)
 
     # Step 6: If --update_hf_config, add/overwrite params from checkpoint into config.json

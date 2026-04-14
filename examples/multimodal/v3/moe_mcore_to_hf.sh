@@ -8,6 +8,9 @@ MODEL_NAME=$1
 MCORE_PATH=$2
 HF_BASE_PATH=$3
 CKPT_STEP=$4
+HF_CONFIG_SRC=$5
+TP=${6:-1}
+ETP=${7:-1}
 
 mkdir -p $HF_BASE_PATH
 HF_PATH=$HF_BASE_PATH/mcore_to_hf
@@ -29,15 +32,25 @@ python tools/checkpoint/convert.py \
 touch $HF_BASE_PATH/mcore_to_hf_info.txt
 echo "original mcore path: $MCORE_PATH at iteration $CKPT_STEP" >> $HF_BASE_PATH/mcore_to_hf_info.txt
 
-# Step 3: Copy the "default" hf config from the template directory.
-# IMPORTANT: Do NOT copy model.safetensors.index.json -- the converter just generated
-#   one with the correct weight map (including sound model keys, etc.). Overwriting it
-#   with the template's stale copy would make those weights invisible to torch / HF loaders.
-HF_CONFIG_SRC=examples/multimodal/v3/moe_hf_config
-rsync -a --exclude='model.safetensors.index.json' "$HF_CONFIG_SRC/" "$HF_PATH/"
+# Step 3: Copy the "default" hf config from the template directory, then copy tokenizer.
+# tokenizer.json lives on lustre (not in git) — see the README at that path for context.
+TOKENIZER_SRC=/lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/tokenizers/nemotron-v3-nano/tokenizer.json
+if [ ! -f "$TOKENIZER_SRC" ]; then
+    echo "Error: tokenizer not found at $TOKENIZER_SRC" >&2
+    exit 1
+fi
+
+rsync -aL --exclude='model.safetensors.index.json' --exclude='tokenizer.json' "$HF_CONFIG_SRC/" "$HF_PATH/"
+cp "$TOKENIZER_SRC" "$HF_PATH/tokenizer.json"
+
+if [[ ! -f "$HF_PATH/tokenizer.json" ]]; then
+    echo "Error: Failed to copy tokenizer.json to $HF_PATH" >&2
+    exit 1
+fi
 
 # Step 4: Overwrite a few model-specific params using create_yaml_inference_config.py --update_hf_config
-python examples/multimodal/tools/create_yaml_inference_config.py --model_name $MODEL_NAME --update_hf_config $HF_PATH
+python examples/multimodal/tools/create_yaml_inference_config.py --model_name $MODEL_NAME --update_hf_config $HF_PATH \
+    --tensor-model-parallel-size $TP --expert-tensor-parallel-size $ETP
 
 # Step 5: Verify both config.yaml and config.json exist
 # NOTE: MCORE_PATH is `<user_lustre>/workspace/output/<model_name>/checkpoints`
