@@ -1817,7 +1817,7 @@ class LLaVAModel(MegatronModule):
 
         if self.context_parallel_lm > 1 or self.sequence_parallel_lm:
             loss_weight = None
-            if new_labels is not None:
+            if self.context_parallel_lm > 1 and new_labels is not None:
                 acc_lengths = (
                     packed_seq_params.cu_seqlens_q_padded
                     if packed_seq_params is not None
