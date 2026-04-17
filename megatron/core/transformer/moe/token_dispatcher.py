@@ -998,6 +998,17 @@ class _HybridEPManager(_DispatchManager):
         # Used for padding the output for each expert
         self.pad_multiple = None
 
+        import os as _os
+        if _os.environ.get("HYBRIDEP_DEBUG", "0") == "1":
+            try:
+                import torch as _t
+                _r = _t.distributed.get_rank()
+                _epr = _t.distributed.get_rank(group=group)
+                _eps = _t.distributed.get_world_size(group=group)
+                print(f"[HEDBG mgr-init rank={_r} ep={_epr}/{_eps} num_local_experts={num_local_experts} num_experts={num_experts}]", flush=True)
+            except Exception as _e:
+                print(f"[HEDBG mgr-init err] {_e}", flush=True)
+
         if hybrid_ep_dispatch is None:
             raise ImportError(
                 "HybridEP is not installed. Please install HybridEP package from "
@@ -1005,6 +1016,14 @@ class _HybridEPManager(_DispatchManager):
             )
 
     def setup_metadata(self, routing_map: torch.Tensor, probs: torch.Tensor):
+        import os as _os
+        if _os.environ.get("HYBRIDEP_DEBUG", "0") == "1":
+            try:
+                import torch as _t
+                _r = _t.distributed.get_rank()
+                print(f"[HEDBG setup-meta rank={_r}] routing_map.shape={tuple(routing_map.shape)} probs.shape={tuple(probs.shape)}", flush=True)
+            except Exception as _e:
+                print(f"[HEDBG setup-meta err] {_e}", flush=True)
         num_tokens = routing_map.shape[0]
         self.routing_map = routing_map.reshape(num_tokens, self.num_experts)
         self.token_probs = probs.reshape(num_tokens, self.num_experts)
@@ -1030,6 +1049,14 @@ class _HybridEPManager(_DispatchManager):
         async_finish: bool = True,
         allocate_on_comm_stream: bool = True,
     ) -> torch.Tensor:
+        import os as _os
+        if _os.environ.get("HYBRIDEP_DEBUG", "0") == "1":
+            try:
+                import torch as _t
+                _r = _t.distributed.get_rank()
+                print(f"[HEDBG mgr-disp rank={_r}] hidden.shape={tuple(hidden_states.shape)} num_permuted_tokens={self.num_permuted_tokens}", flush=True)
+            except Exception as _e:
+                print(f"[HEDBG mgr-disp err] {_e}", flush=True)
         # HybridEP only supports float32 probs
         if self.token_probs.dtype != torch.float32:
             if self.token_probs.dtype in [torch.bfloat16, torch.float16]:

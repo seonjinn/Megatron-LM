@@ -357,7 +357,9 @@ class HybridEPDispatch(torch.autograd.Function):
         '''
         global _hybrid_ep_dispatch_call_count
         _hybrid_ep_dispatch_call_count += 1
-        _hedbg = _HYBRID_EP_DEBUG_ENABLED and _hybrid_ep_dispatch_call_count <= _HYBRID_EP_DEBUG_MAX_CALLS
+        _hedbg_enabled = _hedbg_os.environ.get('HYBRIDEP_DEBUG', '0') == '1'
+        _hedbg_max = int(_hedbg_os.environ.get('HYBRIDEP_DEBUG_MAX_CALLS', '20'))
+        _hedbg = _hedbg_enabled and _hybrid_ep_dispatch_call_count <= _hedbg_max
         if _hedbg:
             try:
                 _r = torch.distributed.get_rank()
@@ -514,6 +516,15 @@ if HAVE_HYBRIDEP:
                 Alignment multiple required for FP8 GEMM. If not provided, no padding
                 is performed.
         '''
+        import os as _os
+        if _os.environ.get("HYBRIDEP_DEBUG", "0") == "1":
+            try:
+                import torch as _t
+                _r = _t.distributed.get_rank()
+                _epr = _t.distributed.get_rank(group=group)
+                print(f"[HEDBG wrapper rank={_r} ep={_epr}] entering hybrid_ep_dispatch", flush=True)
+            except Exception as _e:
+                print(f"[HEDBG wrapper err] {_e}", flush=True)
         return HybridEPDispatch.apply(
             x,
             routing_map,
