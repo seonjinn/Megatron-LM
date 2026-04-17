@@ -89,7 +89,12 @@ INFERENCE_PARAMS = {
     # Backend settings - Note: this might conflict with the skipped parameter
     # "attention_backend": "flash",    # Use Flash Attention backend - commented out since it causes issues
     "flash_decode": True,            # Enable flash decode
-    "attention_backend": "flash"
+    "attention_backend": "flash",
+
+    # MTP (Multi-Token Prediction) - disabled by default for inference.
+    # MTP weights may be present in the checkpoint (especially HF) but are
+    # only used when explicitly enabled for speculative decoding (vLLM).
+    "disable_mtp": True,
 }
 
 # =============================================================================

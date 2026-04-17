@@ -396,6 +396,11 @@ class MegatronCheckpointLoaderBase:
                         layer_data = {}
 
                         for name, param in model.named_parameters():
+                            # Skip MTP parameters: their nested "layers.N" indices
+                            # collide with decoder layer indices in the cache dict.
+                            if '.mtp.' in name:
+                                continue
+
                             # Convention 1: local_experts.E.linear_fcK.weight
                             m = pattern_local.match(name)
                             if m:

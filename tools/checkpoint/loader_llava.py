@@ -437,6 +437,13 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
         self.queue_put("sound model end", {})
 
     def send_model_over_queue(self):
+        # MTP weight transfer: gated on saver type.
+        # - mcore-to-mcore (saver=llava): skip MTP — mcore inference doesn't use MTP weights.
+        # - mcore-to-HF (saver=hf_moe_llava): transfer MTP — vLLM needs them for speculative decoding.
+        # Must be set BEFORE send_metadata_over_queue() so the saver sees the updated value.
+        if getattr(self.args, 'saver', '') not in ('hf_moe_llava',):
+            self.md.mtp_num_layers = 0
+
         self.send_metadata_over_queue()
 
         extra_layer_schema = {}

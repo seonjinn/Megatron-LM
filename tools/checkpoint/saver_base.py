@@ -152,6 +152,10 @@ class MegatronCheckpointSaverBase:
             print(f"Unable to import required Megatron modules: {e}")
             sys.exit(1)
 
+        # Suppress wandb initialization: checkpoint args store the original training user's
+        # wandb_save_dir, which we may not have write access to.  Clearing wandb_project
+        # makes _set_wandb_writer a no-op so os.makedirs is never called.
+        self.margs.wandb_project = ''
         set_global_variables(self.margs, build_tokenizer=self.build_tokenizer)
 
         # Megatron args. (i.e., 'margs')

@@ -49,8 +49,11 @@ if [[ ! -f "$HF_PATH/tokenizer.json" ]]; then
 fi
 
 # Step 4: Overwrite a few model-specific params using create_yaml_inference_config.py --update_hf_config
-python examples/multimodal/tools/create_yaml_inference_config.py --model_name $MODEL_NAME --update_hf_config $HF_PATH \
-    --tensor-model-parallel-size $TP --expert-tensor-parallel-size $ETP
+python examples/multimodal/tools/create_yaml_inference_config.py \
+--model_name $MODEL_NAME \
+--update_hf_config $HF_PATH \
+--tensor-model-parallel-size $TP \
+--expert-tensor-parallel-size $ETP
 
 # Step 5: Verify both config.yaml and config.json exist
 # NOTE: MCORE_PATH is `<user_lustre>/workspace/output/<model_name>/checkpoints`
