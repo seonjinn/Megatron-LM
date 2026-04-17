@@ -14,6 +14,11 @@ except ImportError:
     HAVE_DEEP_EP = False
 
 import torch
+import os as _hedbg_os
+
+_HYBRID_EP_DEBUG_ENABLED = _hedbg_os.environ.get('HYBRIDEP_DEBUG', '0') == '1'
+_HYBRID_EP_DEBUG_MAX_CALLS = int(_hedbg_os.environ.get('HYBRIDEP_DEBUG_MAX_CALLS', '20'))
+_hybrid_ep_dispatch_call_count = 0
 
 _buffer = None
 
@@ -350,6 +355,25 @@ class HybridEPDispatch(torch.autograd.Function):
         '''
         Forward pass of fused dispatch of the HybridEP backend
         '''
+        global _hybrid_ep_dispatch_call_count
+        _hybrid_ep_dispatch_call_count += 1
+        _hedbg = _HYBRID_EP_DEBUG_ENABLED and _hybrid_ep_dispatch_call_count <= _HYBRID_EP_DEBUG_MAX_CALLS
+        if _hedbg:
+            try:
+                _r = torch.distributed.get_rank()
+                _epr = torch.distributed.get_rank(group=group)
+                _eps = torch.distributed.get_world_size(group=group)
+                _rsum = routing_map.sum().item() if routing_map is not None else -1
+                _rshp = tuple(routing_map.shape) if routing_map is not None else None
+                _pshp = tuple(probs.shape) if probs is not None else None
+                print(f'[HEDBG call={_hybrid_ep_dispatch_call_count} rank={_r} ep={_epr}/{_eps}] '
+                      f'x.shape={tuple(x.shape)} x.numel={x.numel()} '
+                      f'routing_map.shape={_rshp} routing_sum={_rsum} '
+                      f'probs.shape={_pshp} num_local_experts={num_local_experts} '
+                      f'num_permuted_tokens={num_permuted_tokens} pad_multiple={pad_multiple}',
+                      flush=True)
+            except Exception as _e:
+                print(f'[HEDBG pre-dispatch print error] {_e}', flush=True)
         if _hybrid_ep_buffer is None:
             seq_len, hidden_dim = x.shape[-2:]
             fp8_dispatch = False  # Currently, we do not support fp8 dispatch
@@ -383,6 +407,15 @@ class HybridEPDispatch(torch.autograd.Function):
             non_blocking=non_blocking,
         )
 
+        if _hedbg:
+            try:
+                _tpe = tokens_per_expert.tolist() if tokens_per_expert is not None else None
+                print(f'[HEDBG call={_hybrid_ep_dispatch_call_count} rank={_r} POST] '
+                      f'dispatched_hidden.shape={tuple(dispatched_hidden.shape)} '
+                      f'dispatched_hidden.numel={dispatched_hidden.numel()} '
+                      f'tokens_per_expert={_tpe}', flush=True)
+            except Exception as _e:
+                print(f'[HEDBG post-dispatch print error] {_e}', flush=True)
         ctx.handle = handle
         ctx.pad_multiple = pad_multiple
         return (
