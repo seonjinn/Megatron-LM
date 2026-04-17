@@ -44,7 +44,7 @@ def load_model(model_path: str, device: str = "cuda:0"):
         model_path,
         trust_remote_code=True,
         device_map=device,
-        torch_dtype=torch.bfloat16
+        dtype=torch.bfloat16
     ).eval()
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
@@ -76,16 +76,15 @@ def test_audio_transcription(
     """
     print(f"\nProcessing audio: {audio_path}")
 
-    # Prepare messages with audio token
+    # Prepare messages with audio token embedded directly in text.
+    # The chat template does not expand {"type": "audio"} content blocks into
+    # <so_embedding> tokens — it just stringifies the list. So we place the
+    # audio placeholder token in the user message text and let the processor
+    # expand it to the correct number of repeated tokens.
+    audio_token = getattr(tokenizer, "audio_token", "<so_embedding>")
     messages = [
         {"role": "system", "content": "/no_think"},
-        {
-            "role": "user",
-            "content": [
-                {"type": "audio", "audio": audio_path},
-                {"type": "text", "text": prompt_text},
-            ],
-        }
+        {"role": "user", "content": f"{audio_token}\n{prompt_text}"},
     ]
 
     # Generate prompt
@@ -122,9 +121,12 @@ def test_audio_transcription(
         eos_token_id=tokenizer.eos_token_id,
     )
 
-    # Decode output
+    # Decode output — trim to only generated tokens
+    generated_ids_trimmed = [
+        out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
+    ]
     output_text = processor.batch_decode(
-        generated_ids, skip_special_tokens=False, clean_up_tokenization_spaces=False
+        generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
     )[0]
 
     print(f"\n{'='*50}")

@@ -4,7 +4,7 @@ from PIL import Image
 from pathlib import Path
 
 
-model_path = "/lustre/fsw/portfolios/llmservice/users/tpoon/checkpoints/nemotron-moe-vlm-hf"
+model_path = "."
 device = "cuda:0"
 model = AutoModelForCausalLM.from_pretrained(model_path, trust_remote_code=True, device_map=device, torch_dtype=torch.bfloat16).eval()
 tokenizer = AutoTokenizer.from_pretrained(model_path)
@@ -47,12 +47,8 @@ for idx, img_path in enumerate(img_lst):
             "role": "user",
             "content": [
                 {
-                    "type": "image",
-                    "image": "",
-                },
-                {
                     "type": "text",
-                    "text": "Describe the image.",
+                    "text": "<image>\nDescribe the image.",
                 },
             ],
         }
@@ -80,42 +76,17 @@ for idx, img_path in enumerate(img_lst):
     )
     print(f"Prompt: {prompt}\nOutput: {output_text[0]}\n\n\n")
 
-# Test multi-images
 print("="*50)
 print("Test multi-images")
 print("="*50)
-img_lst = [
+multi_img_lst = [
     "images/example1a.jpeg",
     "images/example1b.jpeg",
 ]
-images = [Image.open(img_lst[0]), Image.open(img_lst[1])]
+images = [Image.open(p) for p in multi_img_lst]
 messages = [
     {"role": "system", "content": "/no_think"},
-    {
-        "role": "user",
-        "content": [
-            {
-                "type": "text",
-                "text": "Image-1: ",
-            },
-            {
-                "type": "image",
-                "image": "/path/to/image1",
-            },
-            {
-                "type": "text",
-                "text": "\nImage-2: ",
-            },
-            {
-                "type": "image",
-                "image": "/path/to/image2",
-            },
-            {
-                "type": "text",
-                "text": "\nDescribe the two images in detail.",
-            },
-        ],
-    }
+    {"role": "user", "content": "Image-1: <image>\nImage-2: <image>\nDescribe the two images in detail."},
 ]
 prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 inputs = processor(
@@ -125,7 +96,6 @@ inputs = processor(
 )
 inputs = inputs.to(device)
 
-# Inference: Generation of the output
 generated_ids = model.generate(
     pixel_values=inputs.pixel_values,
     input_ids=inputs.input_ids,
@@ -138,4 +108,4 @@ generated_ids_trimmed = [
 output_text = processor.batch_decode(
     generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
 )
-print(f"Prompt: {prompt}\nOutput: {output_text[0]}\n\n\n")
+print(f"Output: {output_text[0]}\n")
