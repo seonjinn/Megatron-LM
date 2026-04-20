@@ -1,0 +1,124 @@
+# =========================
+# Build the image
+# =========================
+# =========================
+# Use the pytorch 25.11 image which has CUDA 13.0 inside.
+# =========================
+FROM nvcr.io/nvidia/pytorch:25.11-py3 AS base
+ENV SHELL=/bin/bash
+# =========================
+# Install system packages
+# =========================
+RUN rm -rf /opt/megatron-lm && \
+    apt-get update && \
+    apt-get install -y sudo gdb pstack bash-builtins git zsh autojump tmux curl gettext libfabric-dev && \
+    wget https://github.com/mikefarah/yq/releases/download/v4.27.5/yq_linux_amd64 -O /usr/bin/yq && \
+    chmod +x /usr/bin/yq
+# =========================
+# Install Python packages
+# =========================
+# NOTE: `unset PIP_CONSTRAINT` to install packages that do not meet the default constraint in the base image.
+# Some package requirements and related versions are from
+#   https://github.com/NVIDIA/Megatron-LM/blob/core_v0.12.0/Dockerfile.linting.
+#   https://github.com/NVIDIA/Megatron-LM/blob/core_v0.12.0/requirements_mlm.txt.
+#   https://github.com/NVIDIA/Megatron-LM/blob/core_v0.12.0/requirements_ci.txt.
+RUN unset PIP_CONSTRAINT && pip install debugpy dm-tree torch_tb_profiler einops wandb \
+    sentencepiece tokenizers transformers torchvision ftfy modelcards datasets tqdm pydantic \
+    nvidia-pytriton py-spy yapf darker \
+    tiktoken flask-restful \
+    nltk wrapt pytest pytest_asyncio pytest-cov pytest_mock pytest-random-order \
+    black==24.4.2 isort==5.13.2 flake8==7.1.0 pylint==3.2.6 coverage mypy \
+    one-logger --index-url https://sc-hw-artf.nvidia.com/artifactory/api/pypi/hwinf-mlwfo-pypi/simple \
+    setuptools==69.5.1
+# =========================
+# Install grouped_gemm
+# =========================
+RUN TORCH_CUDA_ARCH_LIST="8.0 9.0 10.0" pip install --no-build-isolation git+https://github.com/fanshiqing/grouped_gemm@v1.1.4
+# =========================
+# Install TE v2.13 from source for Blackwell (sm_100) FA3 support.
+# The base container's TE 2.6.0.dev0 only supports FA3 on Hopper (sm_90).
+# PyPI TE binaries have a PyTorch ABI mismatch (incref_pyobject), so must build from source.
+# =========================
+ARG TE="git+https://github.com/NVIDIA/TransformerEngine.git@v2.13"
+RUN unset PIP_CONSTRAINT && NVTE_FRAMEWORK=pytorch pip install --no-cache-dir --no-build-isolation $TE
+ENV CUDA_HOME=/usr/local/cuda
+# =========================
+# Install mamba and causal-conv1d
+# =========================
+# Mamba dependencies.
+RUN pip uninstall -y triton && pip install "triton<3.4.0"
+# Build causal-conv1d from source to match the container's PyTorch ABI.
+# MUST use --no-build-isolation so it compiles against the container's PyTorch
+# (nv25.11), not a PyPI torch pulled into the isolated build env. Without this
+# flag the compiled .so references _ZNK3c1010TensorImpl15incref_pyobjectEv which
+# doesn't exist in the container's PyTorch, causing ImportError at runtime.
+RUN unset PIP_CONSTRAINT && cd /tmp && \
+    git clone https://github.com/Dao-AILab/causal-conv1d.git && \
+    cd causal-conv1d && \
+    CAUSAL_CONV1D_FORCE_BUILD=TRUE pip install . --no-build-isolation && \
+    cd .. && \
+    rm -rf causal-conv1d
+
+RUN unset PIP_CONSTRAINT && cd /tmp && \
+    git clone https://github.com/state-spaces/mamba.git && \
+    cd mamba && \
+    git checkout v2.3.0 && \
+    MAMBA_FORCE_BUILD=TRUE pip install . --no-build-isolation && \
+    cd /tmp && \
+    rm -rf mamba
+
+
+# Install miscellaneous packages necessary for pre-training and inference.
+RUN pip install boto3 einops flash-attn sentencepiece tiktoken wandb flask flask-restful
+
+# Install Onelogger.
+RUN pip install --index-url=https://sc-hw-artf.nvidia.com/artifactory/api/pypi/hwinf-mlwfo-pypi/simple one-logger one-logger-utils
+
+# For debugging.
+RUN apt-get update && \
+   apt-get install -y gdb strace && \
+   pip install py-spy && \
+   pip install pynvml
+
+RUN apt update && \
+    apt -y upgrade && \
+    apt install -y --no-install-recommends \
+        software-properties-common \
+        build-essential \
+        python3-pip \
+        python3-dev \
+        bash \
+        git \
+        vim \
+        python-is-python3 \
+        default-jre \
+        net-tools \
+        wget \
+        curl \
+        rsync \
+        zip \
+        unzip \
+        htop \
+        tmux \
+        bmon
+
+RUN pip install einops einops-exts sentencepiece braceexpand webdataset packaging
+RUN pip install transformers datasets accelerate timm
+RUN pip install pytest-cov pytest_mock nltk wrapt
+RUN pip install black isort pylint mypy click
+RUN pip install mistral-common tiktoken
+RUN pip install git+https://github.com/openai/CLIP.git
+RUN pip install fairscale fire blobfile
+# Use --no-deps for the following to avoid outdated and unnecessary dependencies.
+RUN pip install mmf --no-deps
+RUN pip install open_clip_torch open-flamingo[eval] --no-deps
+# tensorstore: must be >= 0.1.82 for NumPy 2.x compat (base 0.1.45 was compiled against NumPy 1.x)
+RUN pip install zarr "tensorstore>=0.1.82"
+RUN pip install git+https://github.com/NVIDIA/Megatron-Energon.git#egg=megatron-energon[av_decode]
+RUN pip install -U nemo_toolkit['asr']
+RUN pip install librosa albumentations timm
+RUN apt-get install -y git-lfs
+# multi-storage-client: must be >= 0.34.0 for energon 7.3.3 prefetch_file support
+RUN pip uninstall --yes multi-storage-client && pip install "multi-storage-client>=0.34.0"
+
+WORKDIR /home/
