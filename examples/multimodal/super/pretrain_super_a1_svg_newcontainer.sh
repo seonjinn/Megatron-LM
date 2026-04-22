@@ -120,7 +120,7 @@ TP=2
 EP=64
 
 # Starting checkpoint: SVG SFT stage output (sft_super_final_ckpt_conv3d_radiov4_1377_0402)
-CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/cmccarthy/workspace/output/sft_super_final_ckpt_conv3d_radiov4_1377_0402/checkpoints"
+CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/tpoon/workspace/output/sft_super_final_ckpt_conv3d_radiov4_1377_newcontainer_0422/checkpoints"
 
 TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/users/tpoon/workspace/nemotron_3_nano_30b_a3b_tokenizer"
 TOKENIZER_PROMPT_FORMAT="nemotron6-moe"

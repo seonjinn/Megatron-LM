@@ -129,7 +129,7 @@ TP=2
 EP=64
 
 # Starting checkpoint: 16k omni SVG output
-CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/${USER}/workspace/output/sft_super_omni_16k_svg_0407/checkpoints"
+CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/${USER}/workspace/output/sft_super_omni_16k_svg_newcontainer_0422/checkpoints"
 
 TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/users/tpoon/workspace/nemotron_3_nano_30b_a3b_tokenizer"
 TOKENIZER_PROMPT_FORMAT="nemotron6-moe"

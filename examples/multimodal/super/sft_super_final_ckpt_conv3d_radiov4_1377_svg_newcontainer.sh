@@ -94,7 +94,7 @@ CODE_DIR="${SOURCE}"
 TP=2
 EP=64
 
-CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/cmccarthy/workspace/output/pretrain_super_final_ckpt_radiov4_1377_0402/checkpoints"
+CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/tpoon/workspace/output/pretrain_super_final_ckpt_radiov4_1377_newcontainer_0422/checkpoints"
 
 # TODO: Update this path to point to the correct tokenizer for the 12B model
 TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/hf-transformers/hub/models--nvidia--Nemotron-Nano-3-30B-A3.5B-dev-1016/snapshots/bb271274159f07461e919379311e32802e5ec36b/"

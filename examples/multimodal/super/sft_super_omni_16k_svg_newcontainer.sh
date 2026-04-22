@@ -125,7 +125,7 @@ TP=2
 EP=64
 
 # Starting checkpoint: A2 SVG output (chains from pretrain_super_a2_svg_0407)
-CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/tpoon/workspace/output/pretrain_super_a2_svg_0407/checkpoints"
+CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/tpoon/workspace/output/pretrain_super_a2_svg_newcontainer_0422/checkpoints"
 
 TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/users/tpoon/workspace/nemotron_3_nano_30b_a3b_tokenizer"
 TOKENIZER_PROMPT_FORMAT="nemotron6-moe"
