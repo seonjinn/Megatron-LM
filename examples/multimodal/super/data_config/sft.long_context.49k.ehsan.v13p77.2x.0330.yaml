@@ -75,6 +75,8 @@ splits:
       # 2592136 * 0.1 = 259213.6 samples - 25286 tokens per samples - 6.55B tokens
       - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/ultra-sft/epoch-0-032026-energon/ultra_txt_materialized_0407_median_gt_16384_le_49152.yaml
         repetitions: 0.1
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/ultra-sft/epoch-0-032026-energon/ultra_txt_materialized_0407_median_le_16384.yaml
+        repetitions: 0.1
 
       #####################################
       ############### Safety ################
