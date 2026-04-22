@@ -19,9 +19,7 @@ def get_nemo_sound_model(sound_model_type):
             asr_model = nemo_asr.models.ASRModel.from_pretrained(model_name=model_name)
         asr_model.encoder.sync_max_audio_length = False  # fix: hanging on unnecessary max seq len sync via NCCL in some edge cases
         for layer in asr_model.encoder.layers:
-            # TODO: turned off because of bug
-            layer.self_attn.use_pytorch_sdpa = False
-            # layer.self_attn.use_pytorch_sdpa = True
+            layer.self_attn.use_pytorch_sdpa = True
         _NEMO_SOUND_MODEL_SINGLETON = (asr_model.preprocessor, asr_model.encoder)
     return _NEMO_SOUND_MODEL_SINGLETON
 
