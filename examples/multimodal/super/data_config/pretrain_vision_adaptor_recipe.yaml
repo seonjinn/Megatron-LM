@@ -1,0 +1,34 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+      - path: pretrain_base.yaml
+        repetitions: 2
+      - path: pretrain_nvpdftex_clean_v11_120K_synthtabnet_blocks_full.yaml
+        repetitions: 2
+      - path: pretraining_cc3m.yaml
+        repetitions: 2
+      - path: pretraining_ocr_guilin_102325_ocr_only.yaml
+        repetitions: 2
+      # A sub-sample of the 13.74 SFT dataset.
+      - path: eagle_sft_v13.77_safetyfix.yaml #eagle_sft_v13.76_cleaned.yaml
+        repetitions: 0.025
+      - path: chinese_pt_0303.yaml
+        repetitions: 1.0
+      # SFT-0.5 addmix: benchfit_qa
+      - repetitions: 1
+        path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/benchfit_qa/03-10a_stage5_output.jsonl
+        subflavors:
+          name: benchfit_qa
+          cook: conversation
+        aux:
+          media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/sft-0.5/mint_200/input/image_shards
+      # SFT-0.5 addmix: dense_ocr_qa
+      - repetitions: 1
+        path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/dense_ocr/03-10a_stage5_qa_output.jsonl
+        subflavors:
+          name: dense_ocr_qa
+          cook: conversation
+        aux:
+          media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/sft-0.5/mint_200/input/image_shards

@@ -1,0 +1,19 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+
+      #########################################################
+      # ASR Datasets
+      #########################################################
+
+      ### Granary ###
+      # - path: granary.yaml
+      - path: granary.v1_1.yaml
+        repetitions: 1
+
+  val:
+    path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage1/datasets/vqa/VQAv2/stage1
+    subflavors:
+      augmentation: False

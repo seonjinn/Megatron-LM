@@ -1,0 +1,43 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+
+      #########################################################
+      # ASR Datasets
+      #########################################################
+
+      ### Granary ###
+      - path: granary.v1_1.yaml
+        repetitions: 1
+
+      # ### Riva ASR ###
+      - path: riva_asr.yaml
+        repetitions: 1
+
+
+      #########################################################
+      # Audio SFT Datasets
+      #########################################################
+
+      ### Sound ###
+      - path: audio_sound_sft.yaml
+        repetitions: 1
+
+      - path: audio_sound_sft_sdg.yaml
+        repetitions: 1
+
+      ### Music ###
+      - path: audio_music_sft_sdg.yaml
+        repetitions: 1
+
+      - path: audio_music_sft.yaml
+        repetitions: 1
+
+      ### Speech ###
+      - path: audio_speech_sft_sdg.yaml
+        repetitions: 1
+
+      - path: audio_speech_sft.yaml
+        repetitions: 1
