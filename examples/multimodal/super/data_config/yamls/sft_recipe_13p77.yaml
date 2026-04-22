@@ -14,9 +14,9 @@ splits:
         subflavors:
           cook: general_conversations_jsonl
         repetitions: 2
-      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/fixed_datasets/safety_jsonl/image_safety_energon_dataset.jsonl
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/fixed_datasets/safety/nemotron_omni_safety_image_text_sft_blend_v0.1.0.jsonl
         aux:
-          media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/mm_safety/images
+          media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/omni_data/data/images
         subflavors:
           cook: general_conversations_jsonl
         repetitions: 2
@@ -102,9 +102,9 @@ splits:
 #    #  Entry (nested YAML)                              Samples    Rep   Eff.Samples   Avg Tok   Est. Tokens
 # ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 #    1  eagle_sft_v13.77_safetyfix.yaml               72,593,761      1    72,593,761  ~  2097        152.3B
-#    2  nickel_capybara_0_16k_abspath.yaml            18,960,364   0.25     4,740,091  ~  3358         15.9B
+#    2  ultra_txt_materialized_0407_median_le_16384.yaml           ?   0.25             ?  ~     ?             ?
 #    3  filtered_textsafety_energon_dataset.jsonl         35,406      2        70,812  ~   737           52M
-#    4  image_safety_energon_dataset.jsonl                22,560      2        45,120  ~  1269           57M
+#    4  nemotron_omni_safety_image_text_sft_blend_v0.1.0.jsonl      ?      2             ?  ~     ?             ?
 #    5  03-10a_stage5_output.jsonl                       762,674    0.6       457,604  ~   722          331M
 #    6  03-10a_stage5_qa_output.jsonl                    141,361    0.6        84,816  ~  1493          127M
 #    7  short_video_qa_0318_newreps.yaml               2,689,219      1     2,689,219  ~  3403          9.2B
@@ -124,5 +124,5 @@ splits:
 #   21  sft.audio.ehsan.0310.yaml                     45,859,279      1    45,859,279  ~   997         45.8B
 #   22  audio_reasoning.mmau.0316.yaml                 1,485,530      1     1,485,530  ~   409          609M
 # ───────────────────────────────────────────────────────────────────────────────────────────────────────────
-#       TOTAL                                         244,776,090          153,285,326                  281.1B
+#       TOTAL (partial — stats for rows 2 and 4 unknown after substitution)
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════════════

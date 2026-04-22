@@ -1,0 +1,130 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/datasets/omcat_audio/riva__SQA_Mixtral8x22b__MMLPC__en___pcstrip_
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/datasets/omcat_audio/riva__SQA_Mixtral8x22b__Suno_LongForm_En_PnC_train_noExclamation__bucket1
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/datasets/omcat_audio/riva__SQA_Mixtral8x22b__Suno_LongForm_En_PnC_train_noExclamation__bucket2
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/datasets/omcat_audio/riva__SQA_Mixtral8x22b__Suno_LongForm_En_PnC_train_noExclamation__bucket3
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/datasets/omcat_audio/riva__SQA_Mixtral8x22b__Suno_LongForm_En_PnC_train_noExclamation__bucket4
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/datasets/omcat_audio/riva__SQA_Mixtral8x22b__Suno_LongForm_En_PnC_train_noExclamation__bucket5
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/datasets/omcat_audio/riva__SQA_Mixtral8x22b__Suno_LongForm_En_PnC_train_noExclamation__bucket6
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/datasets/omcat_audio/riva__SQA_Mixtral8x22b__Suno_LongForm_En_PnC_train_noExclamation__bucket7
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/datasets/omcat_audio/riva__SQA_Mixtral8x22b__Suno_LongForm_En_PnC_train_noExclamation__bucket8
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/datasets/omcat_audio/riva__SQA_Mixtral8x22b__riva_asr__en__en-US-ASR-set-6p0__bucket1
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/datasets/omcat_audio/riva__SQA_Mixtral8x22b__riva_asr__en__en-US-ASR-set-6p0__bucket2
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/datasets/omcat_audio/riva__SQA_Mixtral8x22b__riva_asr__en__en-US-ASR-set-6p0__bucket3
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/datasets/omcat_audio/riva__SQA_Mixtral8x22b__riva_asr__en__en-US-ASR-set-6p0__bucket4
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/datasets/omcat_audio/riva__SQA_Mixtral8x22b__riva_asr__en__en-US-ASR-set-6p0__bucket5
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/datasets/omcat_audio/riva__SQA_Mixtral8x22b__riva_asr__en__en-US-ASR-set-6p0__bucket6
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/datasets/omcat_audio/riva__SQA_Mixtral8x22b__riva_asr__en__en-US-ASR-set-6p0__bucket7
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/datasets/omcat_audio/riva__SQA_Mixtral8x22b__riva_asr__en__en-US-ASR-set-6p0__bucket8
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/datasets/omcat_audio/riva__SQA_Mixtral8x22b__riva_asr__en__Riva_ASR_SET_7p0_unified__bucket1
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/datasets/omcat_audio/riva__SQA_Mixtral8x22b__riva_asr__en__Riva_ASR_SET_7p0_unified__bucket2
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/datasets/omcat_audio/riva__SQA_Mixtral8x22b__riva_asr__en__Riva_ASR_SET_7p0_unified__bucket3
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/datasets/omcat_audio/riva__SQA_Mixtral8x22b__riva_asr__en__Riva_ASR_SET_7p0_unified__bucket4
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/datasets/omcat_audio/riva__SQA_Mixtral8x22b__riva_asr__en__Riva_ASR_SET_7p0_unified__bucket5
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/datasets/omcat_audio/riva__SQA_Mixtral8x22b__riva_asr__en__Riva_ASR_SET_7p0_unified__bucket6
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/datasets/omcat_audio/riva__SQA_Mixtral8x22b__riva_asr__en__Riva_ASR_SET_7p0_unified__bucket7
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/datasets/omcat_audio/riva__SQA_Mixtral8x22b__riva_asr__en__Riva_ASR_SET_7p0_unified__bucket8
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset

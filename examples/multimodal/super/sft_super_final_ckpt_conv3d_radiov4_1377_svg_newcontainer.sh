@@ -106,7 +106,7 @@ if [[ $SLURM_SUBMIT_HOST == *"lbd-lax"* ]]; then
     DATA_TRAIN="/scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/omni_stage/yamls/eagle_sft_v13.70_extra_video_0220.yaml"
 elif [[ $SLURM_SUBMIT_HOST == *"nsc-svg"* ]]; then
     echo "Using nsc-svg dataset"
-    DATA_TRAIN="${SOURCE}/examples/multimodal/super/data_config/1377_video_text.yaml"
+    DATA_TRAIN="${SOURCE}/examples/multimodal/super/data_config/yamls/1377_video_text.yaml"
 fi
 
 if [[ $DEBUG -eq 1 ]]; then

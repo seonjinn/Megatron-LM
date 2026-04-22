@@ -87,7 +87,7 @@ if [[ $SLURM_SUBMIT_HOST == *"lbd-lax"* ]]; then
     exit 1
 elif [[ $SLURM_SUBMIT_HOST == *"nsc-svg"* ]]; then
     echo "Using nsc-svg dataset"
-    DATA_TRAIN="${SOURCE}/examples/multimodal/super/data_config/pretrain_vision_adaptor_recipe.yaml"
+    DATA_TRAIN="${SOURCE}/examples/multimodal/super/data_config/yamls/pretrain_vision_adaptor_recipe.yaml"
 fi
 
 if [[ $DEBUG -eq 1 ]]; then

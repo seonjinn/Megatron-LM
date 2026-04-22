@@ -1,0 +1,110 @@
+__module__: megatron.energon
+__class__: MetadatasetV2
+splits:
+  train:
+    blend_epochized:
+    - repetitions: 1
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/ccpdf_chinese_aug/missing_fullpage_textonly_conversations__affine_photoStrong__filtered
+      subflavors:
+        name: cc_chinese_ocr_textonly_aug_v1_filtered
+        cook: conversation
+        data_augment: false
+        length: 183012
+        orig_length: 159278
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/ccpdf_chinese_aug/textonly
+    - repetitions: 1
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/ccpdf_chinese_aug/missing_fullpage_textonly_conversations__affine_photoStrong_v2__filtered
+      subflavors:
+        name: cc_chinese_ocr_textonly_aug_v2_filtered
+        cook: conversation
+        data_augment: false
+        length: 183012
+        orig_length: 159278
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/ccpdf_chinese_aug/textonly_v2
+    - repetitions: 1
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/ccpdf_chinese_aug/refined_latex_conversations_enriched__aug
+      subflavors:
+        name: cc_chinese_ocr_ground_aug_v1
+        cook: conversation
+        data_augment: false
+        length: 103308
+        orig_length: 159278
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/ccpdf_chinese_aug/grounded
+    - repetitions: 1
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/ccpdf_chinese_aug/refined_latex_conversations_enriched__augv2
+      subflavors:
+        name: cc_chinese_ocr_ground_aug_v2
+        cook: conversation
+        data_augment: false
+        length: 103309
+        orig_length: 159278
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/ccpdf_chinese_aug/groundedv2
+    - repetitions: 1
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/ccpdf_chinese_aug/refined_latex_conversations_enriched__augv3
+      subflavors:
+        name: cc_chinese_ocr_ground_aug_v3
+        cook: conversation
+        data_augment: false
+        length: 103299
+        orig_length: 159278
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/ccpdf_chinese_aug/groundedv3
+    - repetitions: 2
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/qwen_eval_traces/missing_fullpage_textonly_conversations_ocr_q4plus_bilingual_oss_qgen_qwen32b_thinking
+      subflavors:
+        name: cc_chinese_ocr_noground
+        cook: conversation
+        data_augment: false
+        length: 159278
+        orig_length: 159278
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/extracted_chinese_png
+    - repetitions: 1
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/ccpdf_chinese_aug/missing_fullpage_textonly_conversations_ocr_q4plus_filteredrep
+      subflavors:
+        name: cc_chinese_ocr_filteredrep
+        cook: conversation
+        data_augment: false
+        length: 183017
+        orig_length: 184939
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/extracted_chinese_png
+    - repetitions: 1
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/nemoocr/nemoocr_data_zh_hans
+      subflavors:
+        name: cc_chinese_ocr_bbox_nemo_ocr_hans
+        cook: conversation
+        data_augment: false
+        length: 670000
+        orig_length: 49278
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/nemoocr/zh_hans_images
+    - repetitions: 1
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/nemoocr/nemoocr_data_zh_hant
+      subflavors:
+        name: cc_chinese_ocr_bbox_nemo_ocr_hant
+        cook: conversation
+        data_augment: false
+        length: 670000
+        orig_length: 49278
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/nemoocr/zh_hant_images
+  val:
+    blend_epochized:
+    - repetitions: 1
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/vqa/VQAv2/stage1
+      subflavors:
+        augmentation: false

@@ -1,0 +1,27 @@
+__module__: megatron.energon
+__class__: MetadatasetV2
+splits:
+  train:
+    blend_epochized:
+    - repetitions: 0.1
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/eagle_v1_sft/synthtabnet_blocks_full
+      subflavors:
+        name: synthtabnet_blocks_full
+        cook: conversation
+        data_augment: false
+        length: 451174
+        orig_length: 200000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/synthtabnet_blocks/images
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/eagle_recipe/nvpdftex_v11
+      subflavors:
+        name: nvpdftex_clean_v11_120K
+        cook: conversation
+        data_augment: false
+        length: 120000
+        orig_length: 120000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/nvpdftex_v11/img

@@ -1,0 +1,27 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+    # Total (sum of 3 rows below): 9.27 + 0.08 + 0.10 ≈ 9.45B tokens — 2,494,081 effective samples
+
+    # 1244814 * 2 = 2489628 samples - 3724.72 tokens per sample - 9.27B tokens
+    - path: audio_reasoning_sft_nano3_filtered_rep1_2.yaml
+      repetitions: 2
+    
+    # 78456 * 1 = 78456 samples - 986.48 tokens per sample - 0.08B tokens
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/bbh_logical_reasoning/train_bbh_logical_reasoning.jsonl
+      repetitions: 1
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/bbh_logical_reasoning/audio
+  
+    # 41072 * 1 = 41072 samples - 2398.08 tokens per sample - 0.10B tokens
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/bbh_spatial_reasoning/train_bbh_spatial_reasoning.jsonl
+      repetitions: 1
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/bbh_spatial_reasoning/audio
+

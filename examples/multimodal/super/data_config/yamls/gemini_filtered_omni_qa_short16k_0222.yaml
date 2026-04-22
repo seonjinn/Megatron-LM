@@ -1,0 +1,143 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/omni.ehsan.0217.short.filtered.qa.gemini_filtered_20percent_partial/hd_vila_1min_topic_summary_dataset_clean_sample_30.0_v0_relative.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_video_raw/hd_vila_segments_1min
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/omni.ehsan.0217.short.filtered.qa.gemini_filtered_20percent_partial/hd_vila_2min_av_event_align_gpt_filtration_filtration_qna_accepted_v0_relative.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_video_raw/hd_vila_segments_2min
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/omni.ehsan.0217.short.filtered.qa.gemini_filtered_20percent_partial/hd_vila_2min_comparative_qna_gpt_filtration_filtration_qna_accepted_v0_relative.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_video_raw/hd_vila_segments_2min
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/omni.ehsan.0217.short.filtered.qa.gemini_filtered_20percent_partial/hd_vila_2min_mcq_qna_gpt_filtration_filtration_qna_accepted_v0_relative.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_video_raw/hd_vila_segments_2min
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/omni.ehsan.0217.short.filtered.qa.gemini_filtered_20percent_partial/hd_vila_2min_reasoning_qa_dataset_sample_30.0_v0_relative.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_video_raw/hd_vila_segments_2min
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/omni.ehsan.0217.short.filtered.qa.gemini_filtered_20percent_partial/hd_vila_2min_temporal_order_dataset_sample_30.0_v0_relative.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_video_raw/hd_vila_segments_2min
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/omni.ehsan.0217.short.filtered.qa.gemini_filtered_20percent_partial/hd_vila_2min_topic_summary_dataset_sample_30.0_v0_relative.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_video_raw/hd_vila_segments_2min
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/omni.ehsan.0217.short.filtered.qa.gemini_filtered_20percent_partial/hd_vila_2min_v2_av_event_align_gpt_filtration_filtration_qna_accepted_v0_relative.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_video_raw/hd_vila_segments_2min_v2
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/omni.ehsan.0217.short.filtered.qa.gemini_filtered_20percent_partial/hd_vila_2min_v2_comparative_qna_gpt_filtration_filtration_qna_accepted_v0_relative.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_video_raw/hd_vila_segments_2min_v2
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/omni.ehsan.0217.short.filtered.qa.gemini_filtered_20percent_partial/hd_vila_2min_v2_mcq_qna_gpt_filtration_filtration_qna_accepted_v0_relative.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_video_raw/hd_vila_segments_2min_v2
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/omni.ehsan.0217.short.filtered.qa.gemini_filtered_20percent_partial/hd_vila_2min_v2_reasoning_qa_dataset_sample_30.0_v0_relative.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_video_raw/hd_vila_segments_2min_v2
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/omni.ehsan.0217.short.filtered.qa.gemini_filtered_20percent_partial/hd_vila_2min_v2_temporal_order_dataset_sample_30.0_v0_relative.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_video_raw/hd_vila_segments_2min_v2
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/omni.ehsan.0217.short.filtered.qa.gemini_filtered_20percent_partial/hd_vila_2min_v2_topic_summary_dataset_sample_30.0_v0_relative.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_video_raw/hd_vila_segments_2min_v2
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/omni.ehsan.0217.short.filtered.qa.gemini_filtered_20percent_partial/keynote_1min_v2_topic_summary_dataset_clean_sample_30.0_v0_relative.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_video_raw/keynote_segments_1min
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/omni.ehsan.0217.short.filtered.qa.gemini_filtered_20percent_partial/keynote_2min_av_event_align_gpt_filtration_filtration_qna_accepted_v0_relative.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_video_raw/keynote_segments_2min
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/omni.ehsan.0217.short.filtered.qa.gemini_filtered_20percent_partial/keynote_2min_comparative_qna_gpt_filtration_filtration_qna_accepted_v0_relative.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_video_raw/keynote_segments_2min
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/omni.ehsan.0217.short.filtered.qa.gemini_filtered_20percent_partial/keynote_2min_keynote_2min_mcq_qna_gpt_filtration_accepted_v0_relative.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_video_raw/keynote_segments_2min
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/omni.ehsan.0217.short.filtered.qa.gemini_filtered_20percent_partial/keynote_2min_reasoning_qa_dataset_sample_30.0_v0_relative.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_video_raw/keynote_segments_2min
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/omni.ehsan.0217.short.filtered.qa.gemini_filtered_20percent_partial/keynote_2min_temporal_order_dataset_sample_30.0_v0_relative.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_video_raw/keynote_segments_2min
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/omni.ehsan.0217.short.filtered.qa.gemini_filtered_20percent_partial/keynote_2min_topic_summary_dataset_sample_30.0_v0_relative.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_video_raw/keynote_segments_2min
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/omni.ehsan.0217.short.filtered.qa.gemini_filtered_20percent_partial/keynote_video_1min_v1_topic_summary_dataset_clean_sample_30.0_v0_relative.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_video_raw/keynote_segments_1min
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/omni.ehsan.0217.short.filtered.qa.gemini_filtered_20percent_partial/keynote_video_v1_topic_summary_dataset_clean_sample_30.0_v0_relative.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_video_raw/keynote_segments
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/omni.ehsan.0217.short.filtered.qa.gemini_filtered_20percent_partial/keynote_video_v2_topic_summary_dataset_clean_sample_30.0_v0_relative.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_video_raw/keynote_segments
+      repetitions: 1

@@ -1,0 +1,41 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/arushi_0304.gemini_filtered_min3_max3/omni_blend_f1_human_object_interaction_filtration_qna_accepted_resample_200000_random_relative.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/omni_blend_f1_videos_unique
+      repetitions: 1.5
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/arushi_0304.gemini_filtered_min3_max3/omni_blend_f1_human_interaction_filtration_qna_accepted_resample_200000_random_relative.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/omni_blend_f1_videos_unique
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/arushi_0304.gemini_filtered_min3_max3/omni_blend_f1_event_metadata_filtration_qna_accepted_resample_200000_random_relative.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/omni_blend_f1_videos_unique
+      repetitions: 0.5
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/arushi_0304.gemini_filtered_min3_max3/omni_blend_f1_attribute_metadata_filtration_qna_accepted_resample_200000_random_relative.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/omni_blend_f1_videos_unique
+      repetitions: 1.5
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/arushi_0304.gemini_filtered_min3_max3/omni_blend_f1_temporal_metadata_filtration_qna_accepted_resample_200000_random_relative.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/omni_blend_f1_videos_unique
+      repetitions: 1.5
+    # - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/gemini_filtered/arushi_0304.gemini_filtered_min3_max3/omni_blend_f1_spatial_relation_filtration_qna_accepted_resample_200000_random_relative.jsonl
+    #   subflavors:
+    #     cook: general_conversations_jsonl
+    #   aux:
+    #     media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/omni_blend_f1_videos_unique/
+    #   repetitions: 1

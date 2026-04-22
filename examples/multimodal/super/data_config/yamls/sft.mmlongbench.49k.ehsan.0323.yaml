@@ -1,0 +1,16 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+    # 50000 * 1 = 50000 samples - 30943.52 tokens per sample - 1.55B tokens
+    - path: cc-batch4-single-page-qwen3p5-v3-max-pages-20-03232026.yaml
+      repetitions: 1
+    
+    # 21452 * 1 = 21452 samples - 28375.16 tokens per sample - 0.6B tokens
+    - path: cc-batch3-whole-document-qwen3p5-v2-max-pages-20-03232026.yaml
+      repetitions: 1
+
+    # 1033 * 4 = 4132 samples - 39477.64 tokens per sample - 1.6B tokens
+    - path: pew-single-page-qwen3p5-v3-max-pages-20-03232026.yaml
+      repetitions: 4

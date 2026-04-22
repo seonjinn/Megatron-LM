@@ -1,0 +1,60 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/reasoning_datasets/omni_blend_f1_reasoning_full_blend_mcq_first_half_hard_num_frames_256_fps_2_thinking_final_reasoning_dataset_diagnostics_checked.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/omni_blend_f1_videos_unique
+      repetitions: 2
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/reasoning_datasets/omni_blend_f1_reasoning_full_blend_mcq_first_half_medium_num_frames_256_fps_2_thinking_final_reasoning_dataset_diagnostics_checked.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/omni_blend_f1_videos_unique
+      repetitions: 2
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/reasoning_datasets/omni_blend_f1_reasoning_full_blend_mcq_second_half_hard_num_frames_256_fps_2_thinking_final_reasoning_dataset_diagnostics_checked.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/omni_blend_f1_videos_unique
+      repetitions: 2
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/reasoning_datasets/omni_blend_f1_reasoning_full_blend_mcq_second_half_medium_num_frames_256_fps_2_thinking_final_reasoning_dataset_diagnostics_checked.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/omni_blend_f1_videos_unique
+      repetitions: 2
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/reasoning_datasets/omni_blend_f1_reasoning_full_blend_music_avqa_hard_num_frames_256_fps_2_thinking_final_reasoning_dataset_diagnostics_checked.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/music_avqa_v2_videos
+      repetitions: 2
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/reasoning_datasets/omni_blend_f1_reasoning_full_blend_music_avqa_medium_num_frames_256_fps_2_thinking_final_reasoning_dataset_diagnostics_checked.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/music_avqa_v2_videos
+      repetitions: 2
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/reasoning_datasets/omni_blend_f1_reasoning_full_blend_temporal_order_hard_num_frames_256_fps_2_thinking_final_reasoning_dataset_diagnostics_checked.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/omni_blend_f1_videos_temporal
+      repetitions: 2
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/reasoning_datasets/omni_blend_f1_reasoning_full_blend_temporal_order_medium_num_frames_256_fps_2_thinking_final_reasoning_dataset_diagnostics_checked.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/omni_blend_f1_videos_temporal
+      repetitions: 2

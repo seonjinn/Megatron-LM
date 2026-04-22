@@ -38,9 +38,9 @@ splits:
         subflavors:
           cook: general_conversations_jsonl
         repetitions: 2
-      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/fixed_datasets/safety_jsonl/image_safety_energon_dataset.jsonl
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/fixed_datasets/safety/nemotron_omni_safety_image_text_sft_blend_v0.1.0.jsonl
         aux:
-          media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/mm_safety/images
+          media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/omni_data/data/images
         subflavors:
           cook: general_conversations_jsonl
         repetitions: 2

@@ -1,11 +1,10 @@
 __class__: MetadatasetV2
 __module__: megatron.energon
-# Total tokens (sum of per-line B for active paths; aligned with samples×tps): 126.75B
-# Total samples (sum of samples * repetitions over active entries): 15,783,415
+# Total tokens/samples: stale after substitutions to Text and Safety entries (see table at bottom)
 splits:
   train:
     blend_epochized:
-      # Total: sum(samples * repetitions) = 15,783,415 samples - ~8031 tokens/sample - 126.75B tokens
+      # Total: stale after substitutions to Text and Safety entries
 
       #####################################
       ############### ASR ################
@@ -71,8 +70,7 @@ splits:
       #####################################
       ############### Text ################
       #####################################
-      # Text total (sum of active entries below; samples×tps/1e9): 6.55B tokens - 259,214 samples
-      # 2592136 * 0.1 = 259213.6 samples - 25286 tokens per samples - 6.55B tokens
+      # Text total: stats unknown after substitution
       - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/ultra-sft/epoch-0-032026-energon/ultra_txt_materialized_0407_median_gt_16384_le_49152.yaml
         repetitions: 0.1
       - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/ultra-sft/epoch-0-032026-energon/ultra_txt_materialized_0407_median_le_16384.yaml
@@ -81,7 +79,7 @@ splits:
       #####################################
       ############### Safety ################
       #####################################
-      # Safety total (sum of active entries below; samples×tps/1e9): ~0.11B tokens - 115,932 samples
+      # Safety total: partial — image safety entry stats unknown after substitution
 
       # Safety data
       # 35,406 * 2 = 70,812 samples - 737 tokens per sample - 0.05B tokens
@@ -89,10 +87,10 @@ splits:
         subflavors:
           cook: general_conversations_jsonl
         repetitions: 2
-      # 22,560 * 2 = 45,120 samples - 1269 tokens per sample - 0.06B tokens
-      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/fixed_datasets/safety_jsonl/image_safety_energon_dataset.jsonl
+      # stats unknown after substitution
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/fixed_datasets/safety/nemotron_omni_safety_image_text_sft_blend_v0.1.0.jsonl
         aux:
-          media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/mm_safety/images
+          media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/omni_data/data/images
         subflavors:
           cook: general_conversations_jsonl
         repetitions: 2
@@ -189,9 +187,10 @@ splits:
 #    7  Vision     03-10a_stage5_output.jsonl                        762,674  0.024         18,304  ~   722        13M
 #    8  Vision     03-10a_stage5_qa_output.jsonl                     141,361  0.024          3,393  ~ 1,493       5.1M
 #    9  Vision     sft.mmlongbench.49k.ehsan.0323.yaml                75,584      1         75,584  ~31,053      2.35B
-#   10  Text       nickel_capybara_16k_49k_absolute_paths.yaml       2,592,136    0.1        259,214  ~25,286      6.55B
+#   10  Text       ultra_txt_materialized_0407_median_gt_16384_le_49152.yaml    ?    0.1              ?  ~     ?           ?
+#  10a  Text       ultra_txt_materialized_0407_median_le_16384.yaml             ?    0.1              ?  ~     ?           ?
 #   11  Safety     filtered_textsafety_energon_dataset.jsonl          35,406      2         70,812  ~   737        52M
-#   12  Safety     image_safety_energon_dataset.jsonl                  22,560      2         45,120  ~ 1,269        57M
+#   12  Safety     nemotron_omni_safety_image_text_sft_blend_v0.1.0.jsonl       ?      2              ?  ~     ?           ?
 #   13  Video      short_video_qa_0318_newreps.yaml                2,689,219   0.01         26,892  ~ 3,403        92M
 #   14  Video      video_qa_v1_v2_all_0314_safetyfix.yaml          1,096,078   0.01         10,961  ~ 4,002        44M
 #   15  Video      short_dense_captions_no_think_0310_safetyfix.yaml 2,611,833  0.01         26,118  ~ 6,544       171M
@@ -213,5 +212,5 @@ splits:
 #   31  Omni       reasoning_blend_batch2.yaml                       562,920    0.2        112,584  ~31,789      3.58B
 #   32  Omni       omni_qa_reasoning_0330.yaml                        88,394      1         88,394  ~34,506      3.05B
 # ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-#            TOTAL (sum of rows)                           233,301,643           15,783,415                  126.75B
+#            TOTAL (partial — stats for rows 10, 10a, 12 unknown after substitution)
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════

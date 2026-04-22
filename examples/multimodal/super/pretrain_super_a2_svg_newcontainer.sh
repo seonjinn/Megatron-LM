@@ -124,7 +124,7 @@ CHECKPOINT_DIR="/lustre/fsw/portfolios/llmservice/users/tpoon/workspace/output/p
 TOKENIZER_MODEL="/lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/users/tpoon/workspace/nemotron_3_nano_30b_a3b_tokenizer"
 TOKENIZER_PROMPT_FORMAT="nemotron6-moe"
 
-DATA_TRAIN="${SOURCE}/examples/multimodal/super/data_config/audio_stage2.yaml"
+DATA_TRAIN="${SOURCE}/examples/multimodal/super/data_config/a2_yamls/audio_stage2.yaml"
 
 SOUND_MODEL_CACHE="${WORKSPACE}/models/parakeet-tdt-0.6b-v2.nemo"
 SOUND_MODEL_TYPE="nemo://${SOUND_MODEL_CACHE}"
