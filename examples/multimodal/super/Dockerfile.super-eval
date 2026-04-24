@@ -194,4 +194,8 @@ RUN pip install --upgrade-strategy only-if-needed \
 # and megatron-energon[av_decode] earlier in this file.
 RUN pip install decord
 
+# MMLongBench_DOC parses PDFs through `import fitz`, which is provided by
+# PyMuPDF and is not declared in VLMEvalKit's requirements.txt.
+RUN pip install PyMuPDF
+
 WORKDIR /home/
