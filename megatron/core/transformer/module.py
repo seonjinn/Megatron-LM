@@ -329,9 +329,11 @@ class GraphableMegatronModule(MegatronModule):
         # `functionalized` for the contract.
         if getattr(self.config, 'cuda_graph_te_overlap_replay', False):
             from megatron.core.transformer.cuda_graphs import (
+                get_te_cuda_graph_replay_event,
                 get_te_cuda_graph_replay_stream,
             )
             cudagraph_kwargs['cuda_graph_stream'] = get_te_cuda_graph_replay_stream()
+            cudagraph_kwargs['cuda_graph_event'] = get_te_cuda_graph_replay_event()
 
         return cudagraph_args, cudagraph_kwargs
 
