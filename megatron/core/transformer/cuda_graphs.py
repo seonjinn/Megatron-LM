@@ -1765,23 +1765,84 @@ class CudaGraphManager(torch.nn.Module):
 
 # The following functions are for capturing CUDA Graphs using TE make_graphed_callables().
 
-# Process-wide side stream used to replay TE-captured CUDA graphs so their kernels
-# can overlap with NCCL collectives (DP grad allreduce, etc.) issued on the main stream.
-# Allocated lazily on first use so it only exists when overlap is enabled.
+# Process-wide side stream and event used to replay TE-captured CUDA graphs so their
+# kernels can overlap with NCCL collectives (DP grad allreduce, etc.) issued on the
+# main stream. Allocated lazily so they only exist when overlap is enabled.
 _TE_CUDA_GRAPH_REPLAY_STREAM = None
+_TE_CUDA_GRAPH_REPLAY_EVENT = None
 
 
 def get_te_cuda_graph_replay_stream():
-    """Return a process-wide side stream for TE CUDA graph replay.
+    """Return a process-wide high-priority side stream for TE CUDA graph replay.
 
     Passing this stream to TE make_graphed_callables-produced callables via the
     ``cuda_graph_stream`` kwarg lets graph replay execute on a dedicated stream so
     main-stream NCCL kernels can overlap with replay instead of being serialized.
+    High priority so replay is not preempted by NCCL kernels on the main stream.
     """
     global _TE_CUDA_GRAPH_REPLAY_STREAM
     if _TE_CUDA_GRAPH_REPLAY_STREAM is None:
-        _TE_CUDA_GRAPH_REPLAY_STREAM = torch.cuda.Stream()
+        _TE_CUDA_GRAPH_REPLAY_STREAM = torch.cuda.Stream(priority=-1)
     return _TE_CUDA_GRAPH_REPLAY_STREAM
+
+
+def get_te_cuda_graph_replay_event():
+    """Return a process-wide event used for TE CUDA graph replay completion sync.
+
+    The event must be recorded inside both the captured forward and backward graphs.
+    TE's wrapper does ``main.wait_event(event)`` after launching replay on the side
+    stream; recording at the end of each captured region keeps the wait safe (main
+    only proceeds once replay output is ready) while letting overlap be controlled
+    by where the record op is placed in the captured region.
+    """
+    global _TE_CUDA_GRAPH_REPLAY_EVENT
+    if _TE_CUDA_GRAPH_REPLAY_EVENT is None:
+        _TE_CUDA_GRAPH_REPLAY_EVENT = torch.cuda.Event()
+    return _TE_CUDA_GRAPH_REPLAY_EVENT
+
+
+class _RecordEventOnBackward(torch.autograd.Function):
+    """No-op forward; records ``event`` on the current stream during backward.
+
+    Used to inject an ``event.record()`` node into the END of a TE-captured backward
+    graph. Place the apply() call near the START of the layer's forward so the
+    matching backward node lands at the END of the backward replay.
+    """
+
+    @staticmethod
+    def forward(ctx, event, x):
+        ctx.event = event
+        return x
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        ctx.event.record()
+        return None, grad_output
+
+
+def wrap_callable_with_event_record(callable_, event):
+    """Wrap a TE-graphable callable so the captured graphs end with ``event.record()``.
+
+    Forward: ``event.record()`` is invoked AFTER the wrapped callable returns, so the
+    record node lands at the end of the captured forward graph.
+    Backward: a no-op autograd Function is inserted at the start of the forward,
+    whose backward records the event - landing the record node at the end of the
+    captured backward graph.
+    """
+    import functools
+
+    @functools.wraps(callable_)
+    def wrapped(*args, **kwargs):
+        new_args = list(args)
+        for i, a in enumerate(new_args):
+            if isinstance(a, torch.Tensor) and a.requires_grad:
+                new_args[i] = _RecordEventOnBackward.apply(event, a)
+                break
+        out = callable_(*new_args, **kwargs)
+        event.record()
+        return out
+
+    return wrapped
 
 
 def _layer_is_graphable(layer, config):
@@ -2449,10 +2510,21 @@ class TECudaGraphHelper:
             rng_context = get_cuda_rng_tracker().fork()
         else:
             rng_context = nullcontext()
-        with rng_context:
-            graphs = make_graphed_callables(
-                tuple(self.flattened_callables), sample_args, **kwargs
+
+        # When overlap is enabled, wrap each callable so the captured forward and
+        # backward graphs both end with `event.record()`. TE's wrapper consumes the
+        # event via `cuda_graph_event` and uses `wait_event` instead of `wait_stream`.
+        if getattr(self.config, "cuda_graph_te_overlap_replay", False):
+            event = get_te_cuda_graph_replay_event()
+            callables_to_capture = tuple(
+                wrap_callable_with_event_record(c, event)
+                for c in self.flattened_callables
             )
+        else:
+            callables_to_capture = tuple(self.flattened_callables)
+
+        with rng_context:
+            graphs = make_graphed_callables(callables_to_capture, sample_args, **kwargs)
 
         # Push the captured graphs to the corresponding TransformerBlock.
         num_layers_accumulated = 0
