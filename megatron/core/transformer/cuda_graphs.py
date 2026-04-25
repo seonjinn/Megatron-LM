@@ -1764,6 +1764,26 @@ class CudaGraphManager(torch.nn.Module):
 
 
 # The following functions are for capturing CUDA Graphs using TE make_graphed_callables().
+
+# Process-wide side stream used to replay TE-captured CUDA graphs so their kernels
+# can overlap with NCCL collectives (DP grad allreduce, etc.) issued on the main stream.
+# Allocated lazily on first use so it only exists when overlap is enabled.
+_TE_CUDA_GRAPH_REPLAY_STREAM = None
+
+
+def get_te_cuda_graph_replay_stream():
+    """Return a process-wide side stream for TE CUDA graph replay.
+
+    Passing this stream to TE make_graphed_callables-produced callables via the
+    ``cuda_graph_stream`` kwarg lets graph replay execute on a dedicated stream so
+    main-stream NCCL kernels can overlap with replay instead of being serialized.
+    """
+    global _TE_CUDA_GRAPH_REPLAY_STREAM
+    if _TE_CUDA_GRAPH_REPLAY_STREAM is None:
+        _TE_CUDA_GRAPH_REPLAY_STREAM = torch.cuda.Stream()
+    return _TE_CUDA_GRAPH_REPLAY_STREAM
+
+
 def _layer_is_graphable(layer, config):
     """
     Check if a layer is graphable.
