@@ -831,6 +831,12 @@ class TransformerConfig(ModelParallelConfig):
     """Maximum number of packed sequences per micro-batch for CUDA graph capture.
     cu_seqlens are padded to this size + 1. Batches exceeding this fall back to eager."""
 
+    cuda_graph_te_overlap_replay: bool = False
+    """[For `transformer_engine` implementation only] When True, TE graph replay runs on a
+    dedicated side stream so it can overlap with NCCL collectives (DP grad allreduce, etc.)
+    issued on the main stream. Requires TE >= 2.x with cuda_graph_stream kwarg support in
+    make_graphed_callables. Disabled by default for backward compatibility."""
+
     ####################
     # miscellaneous
     ####################
