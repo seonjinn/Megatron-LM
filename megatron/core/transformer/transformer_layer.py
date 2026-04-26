@@ -17,6 +17,39 @@ from megatron.core.dist_checkpointing.utils import apply_prefix_mapping
 from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.process_groups_config import ProcessGroupCollection
 from megatron.core.transformer.cuda_graphs import is_graph_capturing
+
+# CG replay-vs-fallback counters (process-wide). Emit summary via env CG_COUNT_LOG=1.
+_CG_REPLAY_COUNT = 0
+_CG_FALLBACK_COUNT = 0
+
+
+def _cg_count_emit():
+    import os, sys
+
+    if os.environ.get("CG_COUNT_LOG", "0") != "1":
+        return
+    try:
+        rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+    except Exception:
+        rank = 0
+    if rank != 0:
+        return
+    total = _CG_REPLAY_COUNT + _CG_FALLBACK_COUNT
+    if total == 0:
+        return
+    fb_pct = 100.0 * _CG_FALLBACK_COUNT / total
+    rp_pct = 100.0 * _CG_REPLAY_COUNT / total
+    print(
+        f"[CG_COUNT] replay={_CG_REPLAY_COUNT} fallback={_CG_FALLBACK_COUNT} "
+        f"replay_pct={rp_pct:.2f}% fallback_pct={fb_pct:.2f}%",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
+import atexit as _atexit
+
+_atexit.register(_cg_count_emit)
 from megatron.core.transformer.enums import CudaGraphScope, LayerType
 from megatron.core.typed_torch import apply_module
 from megatron.core.transformer.identity_op import IdentityFuncOp, IdentityOp
@@ -1148,7 +1181,13 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             ]  # max_seqs + 1
             if psp.cu_seqlens_q.shape[0] > bucket_max:
                 # Actual N_docs exceeds bucket -> fall back to non-CG forward.
+                global _CG_FALLBACK_COUNT
+                _CG_FALLBACK_COUNT += 1
                 return self.forward(*args, **kwargs)
+        global _CG_REPLAY_COUNT
+        _CG_REPLAY_COUNT += 1
+        if _CG_REPLAY_COUNT % 320 == 0:
+            _cg_count_emit()
 
         context = None
         if (
