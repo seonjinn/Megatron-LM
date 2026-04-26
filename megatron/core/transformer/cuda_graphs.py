@@ -1820,29 +1820,26 @@ class _RecordEventOnBackward(torch.autograd.Function):
         return None, grad_output
 
 
-def wrap_callable_with_event_record(callable_, event, record_fwd=True, record_bwd=True):
+def wrap_callable_with_event_record(callable_, event):
     """Wrap a TE-graphable callable so the captured graphs end with ``event.record()``.
 
-    record_fwd / record_bwd flags allow region-level (vs per-layer) fencing.
-    For an N-callable region, set record_fwd=True only on the LAST callable and
-    record_bwd=True only on the FIRST callable. Intermediate callables skip the
-    record so that TE's per-replay ``current.wait_event`` becomes a no-op (it
-    sees the most recent record from the boundary), eliminating per-layer
-    main-stream stalls. Default True/True preserves prior per-layer behavior.
+    Forward: ``event.record()`` is invoked AFTER the wrapped callable returns, so the
+    record node lands at the end of the captured forward graph.
+    Backward: a no-op autograd Function is inserted at the start of the forward,
+    whose backward records the event - landing the record node at the end of the
+    captured backward graph.
     """
     import functools
 
     @functools.wraps(callable_)
     def wrapped(*args, **kwargs):
         new_args = list(args)
-        if record_bwd:
-            for i, a in enumerate(new_args):
-                if isinstance(a, torch.Tensor) and a.requires_grad:
-                    new_args[i] = _RecordEventOnBackward.apply(event, a)
-                    break
+        for i, a in enumerate(new_args):
+            if isinstance(a, torch.Tensor) and a.requires_grad:
+                new_args[i] = _RecordEventOnBackward.apply(event, a)
+                break
         out = callable_(*new_args, **kwargs)
-        if record_fwd:
-            event.record()
+        event.record()
         return out
 
     return wrapped
@@ -2519,18 +2516,9 @@ class TECudaGraphHelper:
         # event via `cuda_graph_event` and uses `wait_event` instead of `wait_stream`.
         if getattr(self.config, "cuda_graph_te_overlap_replay", False):
             event = get_te_cuda_graph_replay_event()
-            n = len(self.flattened_callables)
-            # Region-level fence: only the last fwd layer and the first
-            # (= last-in-bwd) layer record the event. Intermediate layers'
-            # wait_event becomes a no-op → eliminates per-layer main-stream stalls.
             callables_to_capture = tuple(
-                wrap_callable_with_event_record(
-                    c,
-                    event,
-                    record_fwd=(i == n - 1),
-                    record_bwd=(i == 0),
-                )
-                for i, c in enumerate(self.flattened_callables)
+                wrap_callable_with_event_record(c, event)
+                for c in self.flattened_callables
             )
         else:
             callables_to_capture = tuple(self.flattened_callables)
