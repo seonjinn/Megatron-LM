@@ -50,6 +50,74 @@ def _cg_count_emit():
 import atexit as _atexit
 
 _atexit.register(_cg_count_emit)
+
+
+# Sync-call profiler (process-wide). Activate via env SYNC_PROFILE=1.
+# Counts callers of torch.Tensor.item, torch.cuda.synchronize, torch.cuda.Stream.synchronize
+# bucketed by file:line. Emits top-20 at exit and every N calls.
+def _install_sync_profiler():
+    import os, sys, atexit, collections
+
+    if os.environ.get("SYNC_PROFILE", "0") != "1":
+        return
+    counter = collections.Counter()
+    emit_every = int(os.environ.get("SYNC_PROFILE_EMIT_EVERY", "5000"))
+
+    def _record():
+        f = sys._getframe(2)  # caller of caller (skip wrapper + record)
+        key = f"{f.f_code.co_filename}:{f.f_lineno}:{f.f_code.co_name}"
+        counter[key] += 1
+        if sum(counter.values()) % emit_every == 0:
+            _emit()
+
+    def _emit():
+        try:
+            rank = (
+                torch.distributed.get_rank()
+                if torch.distributed.is_initialized()
+                else 0
+            )
+        except Exception:
+            rank = 0
+        if rank != 0:
+            return
+        total = sum(counter.values())
+        print(
+            f"[SYNC_PROFILE] total={total} top-20 callers:", file=sys.stderr, flush=True
+        )
+        for key, count in counter.most_common(20):
+            print(f"[SYNC_PROFILE]   {count:8d}  {key}", file=sys.stderr, flush=True)
+
+    _orig_item = torch.Tensor.item
+    _orig_cuda_sync = torch.cuda.synchronize
+    _orig_stream_sync = torch.cuda.Stream.synchronize
+
+    def _item(self):
+        _record()
+        return _orig_item(self)
+
+    def _cuda_sync(*args, **kwargs):
+        _record()
+        return _orig_cuda_sync(*args, **kwargs)
+
+    def _stream_sync(self, *args, **kwargs):
+        _record()
+        return _orig_stream_sync(self, *args, **kwargs)
+
+    torch.Tensor.item = _item
+    torch.cuda.synchronize = _cuda_sync
+    torch.cuda.Stream.synchronize = _stream_sync
+    atexit.register(_emit)
+    print(
+        "[SYNC_PROFILE] installed (item, cuda.synchronize, Stream.synchronize)",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
+_install_sync_profiler()
+
+
 from megatron.core.transformer.enums import CudaGraphScope, LayerType
 from megatron.core.typed_torch import apply_module
 from megatron.core.transformer.identity_op import IdentityFuncOp, IdentityOp
