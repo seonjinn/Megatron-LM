@@ -1,0 +1,16 @@
+__module__: megatron.energon
+__class__: MetadatasetV2
+splits:
+  train:
+    blend_epochized:
+    - repetitions: 1
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/sft_mmlongbench_txt/datasets/mmlongbench-cc-batch2-seed/multi-page-qwen3p5-03182026
+      subflavors:
+        name: mmlongbench
+        cook: conversation
+        data_augment: false
+        length: 90023
+        orig_length: 9999999
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/sft_mmlongbench_txt/media_sources/mmlongbench/cc-batch2-seed
