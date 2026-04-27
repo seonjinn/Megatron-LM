@@ -349,7 +349,7 @@ OPTIONS=" \
     --load ${FINETUNE_DIR} \
     --save ${FINETUNE_DIR} \
     --dataloader-save ${FINETUNE_DIR}/dataloader \
-    --save-interval 10000 \
+    --save-interval 200 \
     --ckpt-format torch \
     --log-progress  \
     --timing-log-option minmax \
