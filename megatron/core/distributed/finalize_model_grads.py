@@ -1,5 +1,6 @@
 # Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
+from contextlib import contextmanager
 from functools import partial
 from typing import Callable, List, Optional, Union
 
@@ -29,6 +30,15 @@ from ..utils import (
     get_pg_size,
     get_tensor_model_parallel_group_if_none,
 )
+
+
+@contextmanager
+def _nvtx_range(name: str):
+    torch.cuda.nvtx.range_push(name)
+    try:
+        yield
+    finally:
+        torch.cuda.nvtx.range_pop()
 
 
 def _get_main_grad_attr(param: torch.nn.Parameter):
@@ -439,8 +449,9 @@ def finalize_model_grads(
     # All-reduce / reduce-scatter across DP replicas.
     if config.timers is not None:
         config.timers('all-grads-sync', log_level=1).start(barrier=config.barrier_with_L1_time)
-    for model_chunk in model:
-        model_chunk.finish_grad_sync(force_all_reduce=force_all_reduce)
+    with _nvtx_range("megatron/finalize_model_grads/finish_grad_sync"):
+        for model_chunk in model:
+            model_chunk.finish_grad_sync(force_all_reduce=force_all_reduce)
     if config.timers is not None:
         config.timers('all-grads-sync').stop()
 
@@ -449,7 +460,8 @@ def finalize_model_grads(
         config.timers('conditional-embedder-grads-all-reduce', log_level=1).start(
             barrier=config.barrier_with_L1_time
         )
-    _allreduce_conditional_embedding_grads(model, config, pp_group)
+    with _nvtx_range("megatron/finalize_model_grads/conditional_embedding_allreduce"):
+        _allreduce_conditional_embedding_grads(model, config, pp_group)
     if config.timers is not None:
         config.timers('conditional-embedder-grads-all-reduce').stop()
 
@@ -458,7 +470,8 @@ def finalize_model_grads(
         config.timers('non-tensor-parallel-grads-all-reduce', log_level=1).start(
             barrier=config.barrier_with_L1_time
         )
-    _allreduce_non_tensor_model_parallel_grads(model, config, tp_group)
+    with _nvtx_range("megatron/finalize_model_grads/non_tensor_parallel_allreduce"):
+        _allreduce_non_tensor_model_parallel_grads(model, config, tp_group)
     if config.timers is not None:
         config.timers('non-tensor-parallel-grads-all-reduce').stop()
 
@@ -467,8 +480,10 @@ def finalize_model_grads(
         config.timers('embedding-grads-all-reduce', log_level=1).start(
             barrier=config.barrier_with_L1_time
         )
-    _allreduce_word_embedding_grads(model, config, embd_group, pp_group)
-    _allreduce_position_embedding_grads(model, config, pos_emb_group, pp_group)
+    with _nvtx_range("megatron/finalize_model_grads/word_embedding_allreduce"):
+        _allreduce_word_embedding_grads(model, config, embd_group, pp_group)
+    with _nvtx_range("megatron/finalize_model_grads/position_embedding_allreduce"):
+        _allreduce_position_embedding_grads(model, config, pos_emb_group, pp_group)
 
     if config.timers is not None:
         config.timers('embedding-grads-all-reduce').stop()
@@ -487,11 +502,14 @@ def finalize_model_grads(
         # to the other ranks in the pipeline parallel group.
         assert not isinstance(pp_group, list)
         last_rank = get_pp_last_rank(pp_group)
-        torch.distributed.broadcast(num_tokens, src=last_rank, group=pp_group)
+        with _nvtx_range("megatron/finalize_model_grads/num_tokens_broadcast"):
+            torch.distributed.broadcast(num_tokens, src=last_rank, group=pp_group)
 
         # all-reduce across DP ranks.
-        torch.distributed.all_reduce(num_tokens, group=dp_cp_group)
-        for model_chunk in model:
-            if num_tokens > 0:
-                scaling = 1.0 / num_tokens
-                model_chunk.scale_gradients(scaling)
+        with _nvtx_range("megatron/finalize_model_grads/num_tokens_allreduce"):
+            torch.distributed.all_reduce(num_tokens, group=dp_cp_group)
+        with _nvtx_range("megatron/finalize_model_grads/scale_gradients"):
+            for model_chunk in model:
+                if num_tokens > 0:
+                    scaling = 1.0 / num_tokens
+                    model_chunk.scale_gradients(scaling)

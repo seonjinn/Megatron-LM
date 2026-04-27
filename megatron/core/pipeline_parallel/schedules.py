@@ -42,6 +42,15 @@ from .hybrid_cp_schedule import hybrid_context_parallel_forward_backward
 Shape = Union[List[int], torch.Size]
 
 
+@contextlib.contextmanager
+def _nvtx_range(name: str):
+    torch.cuda.nvtx.range_push(name)
+    try:
+        yield
+    finally:
+        torch.cuda.nvtx.range_pop()
+
+
 def get_forward_backward_func(pp_size: Optional[int] = None, vp_size: Optional[int] = None):
     """Retrieves the appropriate forward_backward function given the
     configuration of parallel_state.
@@ -639,56 +648,63 @@ def forward_backward_no_pipelining(
     else:
         with no_sync_func():
             for i in range(num_microbatches - 1):
-                output_tensor, num_tokens = forward_step(
-                    forward_step_func,
-                    data_iterator,
-                    model,
-                    num_microbatches,
-                    input_tensor,
-                    forward_data_store,
-                    config,
-                    pg_collection.cp.size(),
-                    collect_non_loss_data,
-                    is_first_microbatch=check_first_val_step(first_val_step, forward_only, i == 0),
-                    current_microbatch=i,
-                )
+                with _nvtx_range("megatron/forward_backward_no_pp/forward_step"):
+                    output_tensor, num_tokens = forward_step(
+                        forward_step_func,
+                        data_iterator,
+                        model,
+                        num_microbatches,
+                        input_tensor,
+                        forward_data_store,
+                        config,
+                        pg_collection.cp.size(),
+                        collect_non_loss_data,
+                        is_first_microbatch=check_first_val_step(
+                            first_val_step, forward_only, i == 0
+                        ),
+                        current_microbatch=i,
+                    )
                 total_num_tokens += num_tokens
                 if not forward_only:
-                    backward_step(
-                        input_tensor, output_tensor, output_tensor_grad, model_type, config
-                    )
+                    with _nvtx_range("megatron/forward_backward_no_pp/backward_step"):
+                        backward_step(
+                            input_tensor, output_tensor, output_tensor_grad, model_type, config
+                        )
         # Run computation for last microbatch out of context handler (want to
         # synchronize gradients).
-        output_tensor, num_tokens = forward_step(
-            forward_step_func,
-            data_iterator,
-            model,
-            num_microbatches,
-            input_tensor,
-            forward_data_store,
-            config,
-            pg_collection.cp.size(),
-            collect_non_loss_data,
-            is_first_microbatch=check_first_val_step(
-                first_val_step, forward_only, num_microbatches == 1
-            ),
-            current_microbatch=num_microbatches - 1,
-        )
+        with _nvtx_range("megatron/forward_backward_no_pp/last_forward_step"):
+            output_tensor, num_tokens = forward_step(
+                forward_step_func,
+                data_iterator,
+                model,
+                num_microbatches,
+                input_tensor,
+                forward_data_store,
+                config,
+                pg_collection.cp.size(),
+                collect_non_loss_data,
+                is_first_microbatch=check_first_val_step(
+                    first_val_step, forward_only, num_microbatches == 1
+                ),
+                current_microbatch=num_microbatches - 1,
+            )
 
         total_num_tokens += num_tokens
 
         if not forward_only:
-            backward_step(input_tensor, output_tensor, output_tensor_grad, model_type, config)
+            with _nvtx_range("megatron/forward_backward_no_pp/last_backward_step"):
+                backward_step(input_tensor, output_tensor, output_tensor_grad, model_type, config)
 
     if config.finalize_model_grads_func is not None and not forward_only:
         # Finalize model grads (perform full grad all-reduce / reduce-scatter for
         # data parallelism and layernorm all-reduce for sequence parallelism).
-        config.finalize_model_grads_func(
-            [model],
-            total_num_tokens if config.calculate_per_token_loss else None,
-            pg_collection=pg_collection,
-            force_all_reduce=force_all_reduce,
-        )
+        with _nvtx_range("megatron/forward_backward_no_pp/finalize_model_grads"):
+            config.finalize_model_grads_func(
+                [model],
+                total_num_tokens if config.calculate_per_token_loss else None,
+                pg_collection=pg_collection,
+                force_all_reduce=force_all_reduce,
+            )
 
     if not forward_only and config.fine_grained_activation_offloading:
         off_interface.reset()

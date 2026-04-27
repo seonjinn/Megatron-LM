@@ -4,7 +4,7 @@ import functools
 import logging
 import math
 import warnings
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from enum import Enum
 from functools import partial
 from typing import Dict, List, Optional
@@ -29,6 +29,15 @@ from .distributed_data_parallel_config import DistributedDataParallelConfig
 from .reduce_scatter_with_fp32_accumulation import reduce_scatter_with_fp32_accumulation
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def _nvtx_range(name: str):
+    torch.cuda.nvtx.range_push(name)
+    try:
+        yield
+    finally:
+        torch.cuda.nvtx.range_pop()
 
 try:
     if is_torch_min_version("1.13.0"):
@@ -419,7 +428,8 @@ class _ParamAndGradBucketGroup:
             # The RS/AR communication stream needs to wait for the default stream
             # to complete its gradient computation before launching the next
             # gradient reduction collective.
-            self.communication_stream.wait_stream(torch.cuda.default_stream())
+            with _nvtx_range("megatron/grad_sync/comm_stream_wait_default"):
+                self.communication_stream.wait_stream(torch.cuda.default_stream())
         else:
             stream_context = nullcontext()
 
@@ -430,31 +440,35 @@ class _ParamAndGradBucketGroup:
 
         # Coalesce communication kernels across buckets in the bucket group.
         grad_reduce_handle = None
-        with stream_context, _coalescing_manager(communication_group, async_ops=async_op) as cm:
-            for idx, bucket in enumerate(self.buckets):
-                if self.ddp_config.use_distributed_optimizer and not force_all_reduce:
-                    if self.cached_grad_buffer_shard_list[idx] is None:
-                        self.cached_grad_buffer_shard_list[idx] = shard_buffer(
-                            bucket.grad_data, self.intra_distributed_optimizer_instance_size
+        with _nvtx_range("megatron/grad_sync/intra_instance_collectives"):
+            with stream_context, _coalescing_manager(communication_group, async_ops=async_op) as cm:
+                for idx, bucket in enumerate(self.buckets):
+                    if self.ddp_config.use_distributed_optimizer and not force_all_reduce:
+                        if self.cached_grad_buffer_shard_list[idx] is None:
+                            self.cached_grad_buffer_shard_list[idx] = shard_buffer(
+                                bucket.grad_data, self.intra_distributed_optimizer_instance_size
+                            )
+                        local_data_view = self.cached_grad_buffer_shard_list[idx][
+                            self.intra_distributed_optimizer_instance_rank
+                        ]
+                        grad_reduce_handle = dist_reduce_scatter_func(
+                            local_data_view,
+                            bucket.grad_data,
+                            op=reduce_op,
+                            group=communication_group,
+                            async_op=async_op,
                         )
-                    local_data_view = self.cached_grad_buffer_shard_list[idx][
-                        self.intra_distributed_optimizer_instance_rank
-                    ]
-                    grad_reduce_handle = dist_reduce_scatter_func(
-                        local_data_view,
-                        bucket.grad_data,
-                        op=reduce_op,
-                        group=communication_group,
-                        async_op=async_op,
-                    )
-                else:
-                    if torch.distributed.get_rank() == 0 and force_all_reduce:
-                        logger.info(
-                            f"Performing reduction using all_reduce because {force_all_reduce=}"
+                    else:
+                        if torch.distributed.get_rank() == 0 and force_all_reduce:
+                            logger.info(
+                                f"Performing reduction using all_reduce because {force_all_reduce=}"
+                            )
+                        torch.distributed.all_reduce(
+                            bucket.grad_data,
+                            op=reduce_op,
+                            group=communication_group,
+                            async_op=async_op,
                         )
-                    torch.distributed.all_reduce(
-                        bucket.grad_data, op=reduce_op, group=communication_group, async_op=async_op
-                    )
 
         # With multiple DistOpt instances, we need to all-reduce across instances.
         if (
@@ -463,27 +477,28 @@ class _ParamAndGradBucketGroup:
         ):
             assert self.inter_distributed_optimizer_instance_group is not None
             # Create a new coalescing manager for the inter-instance all-reduce.
-            with (
-                stream_context,
-                _coalescing_manager(
-                    self.inter_distributed_optimizer_instance_group, async_ops=async_op
-                ) as cm,
-            ):
-                for idx, bucket in enumerate(self.buckets):
-                    if self.cached_grad_buffer_shard_list[idx] is None:
-                        self.cached_grad_buffer_shard_list[idx] = shard_buffer(
-                            bucket.grad_data, self.intra_distributed_optimizer_instance_size
-                        )
-                    local_data_view = self.cached_grad_buffer_shard_list[idx][
-                        self.intra_distributed_optimizer_instance_rank
-                    ]
+            with _nvtx_range("megatron/grad_sync/inter_instance_collectives"):
+                with (
+                    stream_context,
+                    _coalescing_manager(
+                        self.inter_distributed_optimizer_instance_group, async_ops=async_op
+                    ) as cm,
+                ):
+                    for idx, bucket in enumerate(self.buckets):
+                        if self.cached_grad_buffer_shard_list[idx] is None:
+                            self.cached_grad_buffer_shard_list[idx] = shard_buffer(
+                                bucket.grad_data, self.intra_distributed_optimizer_instance_size
+                            )
+                        local_data_view = self.cached_grad_buffer_shard_list[idx][
+                            self.intra_distributed_optimizer_instance_rank
+                        ]
 
-                    torch.distributed.all_reduce(
-                        local_data_view,
-                        op=reduce_op,
-                        group=self.inter_distributed_optimizer_instance_group,
-                        async_op=async_op,
-                    )
+                        torch.distributed.all_reduce(
+                            local_data_view,
+                            op=reduce_op,
+                            group=self.inter_distributed_optimizer_instance_group,
+                            async_op=async_op,
+                        )
 
         if async_op:
             if self.ddp_config.reduce_scatter_with_fp32_accumulation and not force_all_reduce:
@@ -526,14 +541,16 @@ class _ParamAndGradBucketGroup:
         # When using multiple DistOpt instances, we don't need to sync here as we launch
         # communications on a separate communication stream.
         if self.ddp_config.num_distributed_optimizer_instances > 1:
-            torch.cuda.default_stream().wait_stream(self.communication_stream)
+            with _nvtx_range("megatron/grad_sync/default_stream_wait_comm"):
+                torch.cuda.default_stream().wait_stream(self.communication_stream)
             return
         assert self.grad_reduce_handle is not None, (
             f"Communication call has not been issued for this bucket "
             f"({len(self.per_param_grad_ready_counts)}/{len(self.params)} "
             "params have grad available)"
         )
-        self.grad_reduce_handle.wait()
+        with _nvtx_range("megatron/grad_sync/handle_wait"):
+            self.grad_reduce_handle.wait()
         self.grad_reduce_handle = None
 
     def register_grad_ready(
