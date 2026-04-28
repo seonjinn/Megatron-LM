@@ -6,7 +6,7 @@
 #SBATCH --mem=0
 #SBATCH --ntasks-per-node=8
 #SBATCH --dependency=singleton
-#SBATCH --nodes=128
+#SBATCH --nodes=64
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=8
