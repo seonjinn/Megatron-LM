@@ -338,8 +338,6 @@ OPTIONS=" \
     --sound-model-type ${SOUND_MODEL_TYPE} \
     --sound-target-rate 16000 \
     --sound-embedding-size 751 \
-    --allow-missing-sound-projection-checkpoint \
-    --allow-missing-sound-model-checkpoint \
     --video-target-num-patches ${VIDEO_TARGET_NUM_PATCHES} \
     --video-min-num-frames 8 \
     --video-max-num-frames ${VIDEO_MAX_NUM_FRAMES} \
