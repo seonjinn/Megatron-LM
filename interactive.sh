@@ -14,13 +14,9 @@ elif [[ $(hostname) == *"oci-nrt"* ]]; then
 elif [[ $(hostname) == *"lbd-lax"* ]]; then
     PARTITIONS="interactive"
     ACCOUNT="llmservice_nemotron_super"
-<<<<<<< HEAD
-    MOUNTS="/scratch,/lustre,/home"
-=======
 elif [[ $(hostname) == *"nsc-svg"* ]]; then
     PARTITIONS="batch"
     CONTAINER_IMAGE="/lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/users/tpoon/containers/pytorch25.06-moe-avlm-editable-energon-super.sqsh/pytorch25.06-moe-avlm-editable-energon-super.sqsh"
->>>>>>> 14f36bcc8 (Add super_hf_config; updates for super w/ mtp)
 else
     PARTITIONS="interactive"
 fi
