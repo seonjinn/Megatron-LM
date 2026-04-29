@@ -206,12 +206,15 @@ if [[ $USE_PACKING -eq 1 ]]; then
 fi
 
 # LM (Mamba block) recompute
-EXTRA_ARGS+=" --recompute-granularity selective --recompute-modules core_attn mlp layernorm moe_act moe "
+# EXTRA_ARGS+=" --recompute-granularity selective --recompute-modules core_attn mlp layernorm moe_act moe "
 # Vision (GPT block) recompute
-EXTRA_ARGS+=" --recompute-vision --recompute-method-vision block --recompute-granularity-vision full --recompute-vision-num-layers 32 "
+# EXTRA_ARGS+=" --recompute-vision --recompute-method-vision block --recompute-granularity-vision full --recompute-vision-num-layers 32 "
+
+EXTRA_ARGS+=" --recompute-granularity selective --recompute-modules mlp moe "
+EXTRA_ARGS+=" --recompute-vision --recompute-method-vision block --recompute-granularity-vision full --recompute-vision-num-layers 16 "
 
 # Sound model recompute
-EXTRA_ARGS+=" --recompute-sound "
+# EXTRA_ARGS+=" --recompute-sound "
 
 if [[ "$VIDEO_AUG_SCALE_FRAMES_UP" != "None" ]]; then
     EXTRA_ARGS+=" --video-aug-scale-frames-up ${VIDEO_AUG_SCALE_FRAMES_UP} "
