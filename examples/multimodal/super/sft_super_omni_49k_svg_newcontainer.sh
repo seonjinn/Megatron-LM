@@ -226,13 +226,20 @@ if [[ $VIDEO_AUG_SCALE_RESOLUTION_ONLY -eq 1 ]]; then
 fi
 
 # LM (Mamba block) recompute — more aggressive for longer video sequences
-EXTRA_ARGS+=" --recompute-granularity selective --recompute-modules core_attn mlp layernorm moe_act moe "
+# EXTRA_ARGS+=" --recompute-granularity selective --recompute-modules core_attn mlp layernorm moe_act moe "
 # Vision (GPT block) recompute
+# EXTRA_ARGS+=" --recompute-vision --recompute-method-vision block --recompute-granularity-vision full --recompute-vision-num-layers 32 "
+# EXTRA_ARGS+=" --recompute-vision-projection "
+# Sound model recompute
+# EXTRA_ARGS+=" --recompute-sound "
+# EXTRA_ARGS+=" --recompute-sound-projection "
+
+# LM recompute
+EXTRA_ARGS+=" --recompute-granularity selective --recompute-modules mlp moe "
+
+# Vision recompute
 EXTRA_ARGS+=" --recompute-vision --recompute-method-vision block --recompute-granularity-vision full --recompute-vision-num-layers 32 "
 EXTRA_ARGS+=" --recompute-vision-projection "
-# Sound model recompute
-EXTRA_ARGS+=" --recompute-sound "
-EXTRA_ARGS+=" --recompute-sound-projection "
 
 OPTIONS=" \
     --use-checkpoint-args \
