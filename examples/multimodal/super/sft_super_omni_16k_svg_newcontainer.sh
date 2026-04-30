@@ -336,6 +336,7 @@ OPTIONS=" \
     --video-max-num-frames ${VIDEO_MAX_NUM_FRAMES} \
     --video-temporal-patch-size 2 \
     --video-prompt-version 2 \
+    --tokenizer-keep-history-thinking \
 "
 
 export WANDB_ENTITY=$WANDB_ENTITY  # Not passed in via command line args, only env vars
