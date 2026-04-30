@@ -69,7 +69,7 @@ mlm = ["flask-restful", "sentencepiece", "tiktoken", "wandb", "transformers"]
 dev = [
     "nvidia-modelopt[torch]; sys_platform != 'darwin'",
     "transformer-engine[pytorch,core_cu13]>=2.9.0a0,<2.12.0",
-    "nvidia-resiliency-ext",
+    "nvidia-resiliency-ext; python_version < '3.13'",
     "tqdm",
     "einops~=0.8",
     "tensorstore~=0.1,!=0.1.46,!=0.1.72",
