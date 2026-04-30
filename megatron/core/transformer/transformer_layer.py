@@ -2,6 +2,7 @@
 
 import functools
 import logging
+import os
 import warnings
 from abc import ABC
 from dataclasses import dataclass, field
@@ -21,6 +22,7 @@ from megatron.core.transformer.cuda_graphs import is_graph_capturing
 # CG replay-vs-fallback counters (process-wide). Emit summary via env CG_COUNT_LOG=1.
 _CG_REPLAY_COUNT = 0
 _CG_FALLBACK_COUNT = 0
+_CG_PACKED_DEBUG_COUNT = 0
 
 
 def _cg_count_emit():
@@ -50,6 +52,63 @@ def _cg_count_emit():
 import atexit as _atexit
 
 _atexit.register(_cg_count_emit)
+
+
+def _is_cg_static_input_shape_mismatch(exc: RuntimeError) -> bool:
+    """Best-effort detection of TE replay shape mismatches before graph launch."""
+    msg = str(exc)
+    return (
+        "The size of tensor a" in msg
+        and "must match the size of tensor b" in msg
+        and "non-singleton dimension" in msg
+    )
+
+
+def _maybe_log_packed_cg_debug(
+    *,
+    psp,
+    target_len: int,
+    capture_seq_length: int,
+    replay_max_seqlen_q: int,
+    replay_max_seqlen_kv: int,
+) -> None:
+    """Emit a compact packed-CG debug line when explicitly enabled."""
+    if os.environ.get("CG_PACKED_DEBUG", "0") != "1":
+        return
+    global _CG_PACKED_DEBUG_COUNT
+    _CG_PACKED_DEBUG_COUNT += 1
+    emit_every = int(os.environ.get("CG_PACKED_DEBUG_EVERY", "64"))
+    if _CG_PACKED_DEBUG_COUNT % emit_every != 0:
+        return
+    try:
+        rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+    except Exception:
+        rank = 0
+    if rank != 0:
+        return
+
+    actual_seqlens = psp.cu_seqlens_q[1:] - psp.cu_seqlens_q[:-1]
+    actual_max = int(actual_seqlens.max().item()) if actual_seqlens.numel() > 0 else 0
+    total_tokens = int(psp.cu_seqlens_q[-1].item()) if psp.cu_seqlens_q.numel() > 0 else 0
+    num_seqs = int(psp.cu_seqlens_q.shape[0] - 1)
+    padded_max = None
+    if psp.cu_seqlens_q_padded is not None:
+        padded_seqlens = psp.cu_seqlens_q_padded[1:] - psp.cu_seqlens_q_padded[:-1]
+        padded_max = int(padded_seqlens.max().item()) if padded_seqlens.numel() > 0 else 0
+    logging.warning(
+        "[CG_PACKED_DEBUG] num_seqs=%d total_tokens=%d actual_max=%d padded_max=%s "
+        "psp.max_q=%s psp.max_kv=%s capture_seq=%d target_len=%d replay.max_q=%d replay.max_kv=%d",
+        num_seqs,
+        total_tokens,
+        actual_max,
+        padded_max,
+        psp.max_seqlen_q,
+        psp.max_seqlen_kv,
+        capture_seq_length,
+        target_len,
+        replay_max_seqlen_q,
+        replay_max_seqlen_kv,
+    )
 
 
 # Sync-call profiler (process-wide). Activate via env SYNC_PROFILE=1.
@@ -1251,7 +1310,11 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                 # Actual N_docs exceeds bucket -> fall back to non-CG forward.
                 global _CG_FALLBACK_COUNT
                 _CG_FALLBACK_COUNT += 1
-                return self.forward(*args, **kwargs)
+                nvtx_range_push(suffix="cg_packed_fallback_forward")
+                try:
+                    return self.forward(*args, **kwargs)
+                finally:
+                    nvtx_range_pop(suffix="cg_packed_fallback_forward")
         global _CG_REPLAY_COUNT
         _CG_REPLAY_COUNT += 1
         if _CG_REPLAY_COUNT % 320 == 0:
@@ -1276,22 +1339,38 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             # tensor objects), so the first layer to see a new PSP updates the
             # shared tensors; all subsequent layers skip the copies entirely.
             if bufs.get("_last_updated_psp") is not psp:
-                psp.ensure_cg_padded(target_len)
-                bufs["cu_seqlens_q"].copy_(psp._cg_padded_q)
-                bufs["cu_seqlens_kv"].copy_(psp._cg_padded_kv)
-                if psp._cg_padded_qp is not None:
-                    bufs["cu_seqlens_q_padded"].copy_(psp._cg_padded_qp)
-                if psp._cg_padded_kvp is not None:
-                    bufs["cu_seqlens_kv_padded"].copy_(psp._cg_padded_kvp)
-                if psp.max_seqlen_q_tensor is not None:
-                    bufs["max_seqlen_q_tensor"].copy_(psp.max_seqlen_q_tensor)
-                if psp.max_seqlen_kv_tensor is not None:
-                    bufs["max_seqlen_kv_tensor"].copy_(psp.max_seqlen_kv_tensor)
+                nvtx_range_push(suffix="cg_packed_prepare_psp")
+                try:
+                    psp.ensure_cg_padded(target_len)
+                finally:
+                    nvtx_range_pop(suffix="cg_packed_prepare_psp")
+
+                nvtx_range_push(suffix="cg_packed_update_shared_buffers")
+                try:
+                    bufs["cu_seqlens_q"].copy_(psp._cg_padded_q)
+                    bufs["cu_seqlens_kv"].copy_(psp._cg_padded_kv)
+                    if psp._cg_padded_qp is not None:
+                        bufs["cu_seqlens_q_padded"].copy_(psp._cg_padded_qp)
+                    if psp._cg_padded_kvp is not None:
+                        bufs["cu_seqlens_kv_padded"].copy_(psp._cg_padded_kvp)
+                    if psp.max_seqlen_q_tensor is not None:
+                        bufs["max_seqlen_q_tensor"].copy_(psp.max_seqlen_q_tensor)
+                    if psp.max_seqlen_kv_tensor is not None:
+                        bufs["max_seqlen_kv_tensor"].copy_(psp.max_seqlen_kv_tensor)
+                finally:
+                    nvtx_range_pop(suffix="cg_packed_update_shared_buffers")
                 bufs["_last_updated_psp"] = psp
 
             # Set int constants on dummy PSP (captured as Python constants in graph).
             self._cuda_graph_psp.max_seqlen_q = self._cuda_graph_seq_length
             self._cuda_graph_psp.max_seqlen_kv = self._cuda_graph_seq_length
+            _maybe_log_packed_cg_debug(
+                psp=psp,
+                target_len=target_len,
+                capture_seq_length=self._cuda_graph_seq_length,
+                replay_max_seqlen_q=self._cuda_graph_psp.max_seqlen_q,
+                replay_max_seqlen_kv=self._cuda_graph_psp.max_seqlen_kv,
+            )
 
             # Remove PSP from kwargs - shared buffers are already updated in-place,
             # and the graph was captured without PSP in sample_kwargs (it was injected
@@ -1315,11 +1394,57 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
         cudagraph_args, cudagraph_kwargs = self._get_te_cuda_graph_replay_args(
             *args, **kwargs_filtered
         )
+
+        expected_seq_len = getattr(self, "_cuda_graph_seq_length", None)
+        if (
+            psp is not None
+            and expected_seq_len is not None
+            and len(cudagraph_args) > 0
+            and isinstance(cudagraph_args[0], torch.Tensor)
+            and cudagraph_args[0].shape[0] != expected_seq_len
+        ):
+            _CG_FALLBACK_COUNT += 1
+            logging.warning(
+                "[CG] packed replay preflight mismatch: hidden_states.shape[0]=%d, "
+                "capture_seq=%d; falling back to eager.",
+                cudagraph_args[0].shape[0],
+                expected_seq_len,
+            )
+            nvtx_range_push(suffix="cg_packed_fallback_forward")
+            try:
+                return self.forward(*args, **kwargs)
+            finally:
+                nvtx_range_pop(suffix="cg_packed_fallback_forward")
+
         for hook, hook_args in self.cuda_graph_manual_hooks:
             hook(*hook_args)
-        cuda_graph_output = list(
-            self.cuda_graphs[cg_index](*cudagraph_args, **cudagraph_kwargs)
-        )
+        graph_call_range_open = False
+        nvtx_range_push(suffix="cg_packed_graph_call")
+        graph_call_range_open = True
+        try:
+            cuda_graph_output = list(
+                self.cuda_graphs[cg_index](*cudagraph_args, **cudagraph_kwargs)
+            )
+        except RuntimeError as exc:
+            if graph_call_range_open:
+                nvtx_range_pop(suffix="cg_packed_graph_call")
+                graph_call_range_open = False
+            if psp is not None and _is_cg_static_input_shape_mismatch(exc):
+                _CG_FALLBACK_COUNT += 1
+                logging.warning(
+                    "[CG] replay input shape mismatch for packed step; falling back to eager. "
+                    "error=%s",
+                    exc,
+                )
+                nvtx_range_push(suffix="cg_packed_fallback_forward")
+                try:
+                    return self.forward(*args, **kwargs)
+                finally:
+                    nvtx_range_pop(suffix="cg_packed_fallback_forward")
+            raise
+        finally:
+            if graph_call_range_open:
+                nvtx_range_pop(suffix="cg_packed_graph_call")
 
         if kwargs.get("context") is not None:
             context = cuda_graph_output.pop()
