@@ -82,7 +82,8 @@ else
     LI=5
     EXTRA_ARGS=""
     NUM_GPU=8
-    PBS=5000
+    # PBS=5000
+    PBS=2000
 fi
 
 SEQ_LEN=256
