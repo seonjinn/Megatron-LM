@@ -1216,21 +1216,7 @@ def setup_model_and_optimizer(
             lr_mult,
             use_gloo_process_groups=args.enable_gloo_process_groups,
         )
-<<<<<<< HEAD
-    else:
-        optimizer = get_megatron_muon_optimizer(
-            config,
-            model,
-            no_wd_decay_cond,
-            scale_lr_cond,
-            lr_mult,
-            use_gloo_process_groups=args.enable_gloo_process_groups,
-            layer_wise_distributed_optimizer='dist' in config.optimizer,
-        )
-    opt_param_scheduler = get_optimizer_param_scheduler(optimizer)
-=======
         opt_param_scheduler = get_optimizer_param_scheduler(optimizer)
->>>>>>> 2cc0cd1d5 (Skip optimizer and main_grad creation to save memory when --skip-train argument is provided)
 
     if args.moe_use_upcycling:
         torch.distributed.barrier()
