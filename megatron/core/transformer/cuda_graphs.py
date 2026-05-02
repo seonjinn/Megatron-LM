@@ -2727,3 +2727,52 @@ def get_overlap_moe_expert_parallel_comm_order(
                 add_order(c_id, l_b, is_wgrad=True)
 
     return new_order, chunk_id_list
+
+
+# ---------------------------------------------------------------------------
+# set_current_microbatch: sets per-layer microbatch index for TE graph replay
+# ---------------------------------------------------------------------------
+
+
+def set_current_microbatch(model, microbatch_id):
+    """Set the current microbatch on all layers that use TE CUDA graph replay.
+
+    current_microbatch is read by _te_cuda_graph_replay to select the
+    correct graph index. This helper is called from the pipeline-parallel
+    schedule before each forward step.
+    """
+    decoder_exists = True
+    model_with_decoder = None
+    try:
+        model_with_decoder = get_attr_wrapped_model(
+            model, "decoder", allow_none=False, return_model_obj=True
+        )
+    except RuntimeError:
+        decoder_exists = False
+    if decoder_exists and model_with_decoder is not None:
+        for layer in model_with_decoder.decoder.layers:
+            layer.current_microbatch = microbatch_id
+        if hasattr(model_with_decoder, 'mtp'):
+            for layer in model_with_decoder.mtp.layers:
+                assert hasattr(
+                    layer, 'mtp_model_layer'
+                ), f"MTP layer {layer} must have 'mtp_model_layer' attribute"
+                layer.mtp_model_layer.current_microbatch = microbatch_id
+
+    # Also set current_microbatch on vision encoder layers so that
+    # _te_cuda_graph_replay selects the correct graph index. Without this,
+    # vision layers always use graph 0 (since current_microbatch defaults to 0),
+    # causing all microbatch forwards to overwrite the same static buffers.
+    # When backward runs for earlier microbatches, the buffers contain stale
+    # data from later forwards, producing NaN gradients.
+    try:
+        model_with_vision = get_attr_wrapped_model(
+            model, "vision_model", allow_none=True, return_model_obj=True
+        )
+    except RuntimeError:
+        model_with_vision = None
+    if model_with_vision is not None and hasattr(model_with_vision, 'vision_model'):
+        vision_model = model_with_vision.vision_model
+        if hasattr(vision_model, 'decoder') and hasattr(vision_model.decoder, 'layers'):
+            for layer in vision_model.decoder.layers:
+                layer.current_microbatch = microbatch_id
