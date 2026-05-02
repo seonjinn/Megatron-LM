@@ -322,19 +322,14 @@ class GraphableMegatronModule(MegatronModule):
 
         cudagraph_kwargs = kwargs.copy()
         cudagraph_kwargs['is_first_microbatch'] = getattr(self, 'current_microbatch', 0) == 0
-
-        # Route replay onto a dedicated side stream so main-stream NCCL collectives
-        # (DP grad allreduce, etc.) can overlap with graph replay. TE pops this kwarg
-        # before forwarding to the captured callable; see TE pytorch/graph.py
-        # `functionalized` for the contract.
         if getattr(self.config, 'cuda_graph_te_overlap_replay', False):
             from megatron.core.transformer.cuda_graphs import (
                 get_te_cuda_graph_replay_event,
                 get_te_cuda_graph_replay_stream,
             )
+
             cudagraph_kwargs['cuda_graph_stream'] = get_te_cuda_graph_replay_stream()
             cudagraph_kwargs['cuda_graph_event'] = get_te_cuda_graph_replay_event()
-
         return cudagraph_args, cudagraph_kwargs
 
     def _should_call_local_cudagraph(self, *args, **kwargs):
