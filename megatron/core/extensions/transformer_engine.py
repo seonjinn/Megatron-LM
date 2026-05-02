@@ -80,6 +80,27 @@ except ImportError:
         HAVE_TE = False
 
 _TE_CONFIG_TYPE_KEY = "transformer_engine_config_type"
+_TE_FORWARD_SUPPORTS_MAX_SEQLEN_TENSORS: Optional[bool] = None
+
+
+def _te_forward_supports_max_seqlen_tensors() -> bool:
+    """Check whether TE DotProductAttention.forward accepts runtime max-seqlen tensors.
+
+    Some packaged TE builds report a coarse version string (for example "2.3") even when the
+    exposed Python forward signature does not match newer releases. Probe the actual callable
+    surface instead of trusting the version string alone.
+    """
+
+    global _TE_FORWARD_SUPPORTS_MAX_SEQLEN_TENSORS
+    if _TE_FORWARD_SUPPORTS_MAX_SEQLEN_TENSORS is None:
+        try:
+            params = inspect.signature(te.pytorch.DotProductAttention.forward).parameters
+            _TE_FORWARD_SUPPORTS_MAX_SEQLEN_TENSORS = (
+                "max_seqlen_q_tensor" in params and "max_seqlen_kv_tensor" in params
+            )
+        except (TypeError, ValueError, AttributeError):
+            _TE_FORWARD_SUPPORTS_MAX_SEQLEN_TENSORS = get_te_version() >= PkgVersion("2.4.0")
+    return _TE_FORWARD_SUPPORTS_MAX_SEQLEN_TENSORS
 
 
 class TransformerEngineConfigType(enum.Enum):
@@ -1516,9 +1537,9 @@ class TEDotProductAttention(te.pytorch.DotProductAttention):
             self.kept_packed_seq_params.discard("cu_seqlens_q_padded")
             self.kept_packed_seq_params.discard("cu_seqlens_kv_padded")
 
-        if get_te_version() < PkgVersion("2.4.0"):
-            # Graph replay updates max_seqlen via tensors so values can change without
-            # re-capturing. TE only learned these kwargs in 2.4.0.
+        if not _te_forward_supports_max_seqlen_tensors():
+            # Runtime max-seqlen tensor kwargs are optional. Keep the stock integer-based path for
+            # older or patched TE builds whose Python forward signature does not expose them.
             self.kept_packed_seq_params.discard("max_seqlen_q_tensor")
             self.kept_packed_seq_params.discard("max_seqlen_kv_tensor")
 
@@ -1628,7 +1649,7 @@ class TEDotProductAttention(te.pytorch.DotProductAttention):
             )
             if num_splits is not None:
                 _fa_kwargs["num_splits"] = num_splits
-            if get_te_version() < PkgVersion("2.4.0"):
+            if not _te_forward_supports_max_seqlen_tensors():
                 _fa_kwargs.pop("max_seqlen_q_tensor", None)
                 _fa_kwargs.pop("max_seqlen_kv_tensor", None)
 
@@ -1653,7 +1674,7 @@ class TEDotProductAttention(te.pytorch.DotProductAttention):
             _fa_kwargs = dict(**attention_bias_kwargs, **packed_seq_kwargs)
             if num_splits is not None:
                 _fa_kwargs["num_splits"] = num_splits
-            if get_te_version() < PkgVersion("2.4.0"):
+            if not _te_forward_supports_max_seqlen_tensors():
                 _fa_kwargs.pop("max_seqlen_q_tensor", None)
                 _fa_kwargs.pop("max_seqlen_kv_tensor", None)
             core_attn_out = super().forward(query, key, value, attention_mask, **_fa_kwargs)
