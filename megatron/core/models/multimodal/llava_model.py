@@ -111,6 +111,8 @@ class LLaVAModel(MegatronModule):
         language_rotary_base (int): RoPE base.
         language_rope_scaling (bool): Toggle RoPE scaling.
         language_rope_scaling_factor (float): RoPE scaling factor. Defaults to 8.
+        hybrid_attention_ratio (float): Ratio of attention heads in hybrid attention.
+        hybrid_mlp_ratio (float): Ratio of MLP heads in hybrid attention.
         hybrid_override_pattern (str): Pattern for hybrid attention override.
         fp16_lm_cross_entropy (bool): Use FP16 for language model cross-entropy loss.
         image_token_index (int): Token ID for image token such as <image>.
@@ -155,6 +157,8 @@ class LLaVAModel(MegatronModule):
         language_rotary_base: int = 10000,
         language_rope_scaling: bool = False,
         language_rope_scaling_factor: float = 8.0,
+        hybrid_attention_ratio: float = 1.0,
+        hybrid_mlp_ratio: float = 1.0,    
         hybrid_override_pattern: str = None,
         fp16_lm_cross_entropy: bool = False,
         image_token_index: int = DEFAULT_IMAGE_TOKEN_INDEX,
