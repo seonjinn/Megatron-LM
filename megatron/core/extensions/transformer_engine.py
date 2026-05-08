@@ -1635,11 +1635,31 @@ except ImportError:
     get_cpu_offload_context = None  # type: ignore[assignment, misc]
 
 try:
-    from transformer_engine.pytorch.attention import FusedRoPEFunc
+    if HAVE_TE and is_te_min_version("2.3.0"):
+        from transformer_engine.pytorch.attention.rope import apply_rotary_pos_emb
+    else:
+        from transformer_engine.pytorch.attention import apply_rotary_pos_emb
 
-    def fused_apply_rotary_pos_emb(t: torch.Tensor, freqs: torch.Tensor) -> torch.Tensor:
+    def fused_apply_rotary_pos_emb(
+        t: torch.Tensor,
+        freqs: torch.Tensor,
+        transpose_output_memory: bool = False,
+        interleaved: bool = False,
+    ) -> torch.Tensor:
         """Apply rotary positional embedding to input tensor T in `sbhd` format."""
-        return FusedRoPEFunc.apply(t, freqs, "sbhd")
+        if transpose_output_memory:
+            warnings.warn(
+                "transpose_output_memory is not supported by TE's fused RoPE and will be ignored."
+            )
+        if is_te_min_version("2.3.0"):
+            return apply_rotary_pos_emb(
+                t, freqs, tensor_format="sbhd", interleaved=interleaved, fused=True
+            )
+        else:
+            if interleaved:
+                raise ValueError("Only TE >= 2.3.0 supports interleaved fused RoPE.")
+
+            return apply_rotary_pos_emb(t, freqs, tensor_format="sbhd", fused=True)
 
     def fused_apply_rotary_pos_emb_thd(
         t: torch.Tensor,
@@ -1651,10 +1671,21 @@ try:
         """
         Apply rotary positional embedding to input tensor T in `thd` format with CP support.
         """
-        if is_te_min_version("1.11.0", check_equality=False):
-            return FusedRoPEFunc.apply(t, freqs, "thd", cu_seqlens, cp_size, cp_rank)
+        if is_te_min_version("1.12.0", check_equality=True):
+            return apply_rotary_pos_emb(
+                t,
+                freqs,
+                tensor_format="thd",
+                fused=True,
+                cu_seqlens=cu_seqlens,
+                cp_size=cp_size,
+                cp_rank=cp_rank,
+            )
         else:
-            return FusedRoPEFunc.apply(t, freqs, "thd", cu_seqlens)
+            assert cp_size == 1, "Only TE >= 1.12 supports RoPE fusion for THD format with CP."
+            return apply_rotary_pos_emb(
+                t, freqs, tensor_format="thd", fused=True, cu_seqlens=cu_seqlens
+            )
 
 except ImportError:
     pass
