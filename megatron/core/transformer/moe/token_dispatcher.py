@@ -1381,11 +1381,6 @@ class MoEFlexTokenDispatcher(MoETokenDispatcher):
                 "--moe-flex-dispatcher-backend=hybridep"
             )
 
-    def set_shared_experts(self, shared_experts):
-        raise NotImplementedError(
-            "Shared expert overlap is not supported in Flex Token Dispatcher."
-        )
-
     def _initialize_metadata(self, routing_map: torch.Tensor, probs: torch.Tensor) -> torch.Tensor:
         """
         Initialize the routing map and probs to a unified format covering the TPxEP group.
@@ -1464,10 +1459,16 @@ class MoEFlexTokenDispatcher(MoETokenDispatcher):
         Returns:
             A tuple of dispatched tokens and probabilities.
         """
-        return (
-            self._comm_manager.dispatch(hidden_states, async_finish, allocate_on_comm_stream),
-            self._comm_manager.dispatched_probs,
+        if self.shared_experts is not None:
+            self.shared_experts.wait_current_stream()
+        dispatched_hidden_states = self._comm_manager.dispatch(
+            hidden_states, async_finish, allocate_on_comm_stream
         )
+        if self.shared_experts is not None:
+            self.shared_experts.pre_forward_comm(hidden_states, wait_current_stream=False)
+            self.shared_experts.linear_fc1_forward_and_act(dispatched_hidden_states)
+
+        return dispatched_hidden_states, self._comm_manager.dispatched_probs
 
     def dispatch_postprocess(self, hidden_states: torch.Tensor, probs: torch.Tensor):
         """Converts dispatched tokens to a per-expert format for expert processing.
@@ -1515,6 +1516,10 @@ class MoEFlexTokenDispatcher(MoETokenDispatcher):
         Returns:
             Combined tokens after fused un-permutation and communication.
         """
+        # Make sure the shared experts fc2 is not overlapped with routed experts GEMM
+        # when CUDA_DEVICE_MAX_CONNECTIONS>1.
+        if self.shared_experts is not None:
+            self.shared_experts.wait_current_stream()
         return self._comm_manager.combine(hidden_states, async_finish, allocate_on_comm_stream)
 
     def combine_postprocess(self, hidden_states: torch.Tensor):
@@ -1530,4 +1535,8 @@ class MoEFlexTokenDispatcher(MoETokenDispatcher):
         Returns:
             The final MoE layer output reshaped to its original dimensions.
         """
+        if self.shared_experts is not None:
+            self.shared_experts.linear_fc2_forward(hidden_states)
+            self.shared_experts.post_forward_comm()
+            hidden_states += self.shared_experts.get_output()
         return hidden_states.view(self.hidden_shape)
