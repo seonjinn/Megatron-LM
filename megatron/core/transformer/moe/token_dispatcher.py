@@ -1460,12 +1460,11 @@ class MoEFlexTokenDispatcher(MoETokenDispatcher):
             A tuple of dispatched tokens and probabilities.
         """
         if self.shared_experts is not None:
-            self.shared_experts.wait_current_stream()
+            self.shared_experts.pre_forward_comm(hidden_states)
         dispatched_hidden_states = self._comm_manager.dispatch(
             hidden_states, async_finish, allocate_on_comm_stream
         )
         if self.shared_experts is not None:
-            self.shared_experts.pre_forward_comm(hidden_states, wait_current_stream=False)
             self.shared_experts.linear_fc1_forward_and_act(dispatched_hidden_states)
 
         return dispatched_hidden_states, self._comm_manager.dispatched_probs
@@ -1516,10 +1515,6 @@ class MoEFlexTokenDispatcher(MoETokenDispatcher):
         Returns:
             Combined tokens after fused un-permutation and communication.
         """
-        # Make sure the shared experts fc2 is not overlapped with routed experts GEMM
-        # when CUDA_DEVICE_MAX_CONNECTIONS>1.
-        if self.shared_experts is not None:
-            self.shared_experts.wait_current_stream()
         return self._comm_manager.combine(hidden_states, async_finish, allocate_on_comm_stream)
 
     def combine_postprocess(self, hidden_states: torch.Tensor):
