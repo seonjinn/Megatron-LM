@@ -623,6 +623,13 @@ class LLaVAModel(MegatronModule):
         if use_inference_kv_cache:
             return language_embeddings.transpose(0, 1).contiguous(), loss_mask, labels, None, packed_seq_params
 
+        context_parallel_lm = self.context_parallel_lm
+        if (
+            packed_seq_params is not None
+            and getattr(packed_seq_params, "local_cp_size", None) is not None
+        ):
+            context_parallel_lm = packed_seq_params.local_cp_size
+
         img_seq_len = self.img_seq_len
         if self._dynamic_resolution:
             img_seq_len = torch.prod(
@@ -704,7 +711,11 @@ class LLaVAModel(MegatronModule):
                 max_seq_len = self._language_max_sequence_length
 
             # Pad combined sequence length to be divisible by shard_factor for SP/CP.
-            shard_factor = self._calc_shard_factor()
+            shard_factor, _ = self.calc_shard_factor_and_seq_dim_for_preprocessing(
+                context_parallel_lm=context_parallel_lm,
+                sequence_parallel_lm=self.sequence_parallel_lm,
+                tensor_model_parallel_size_lm=self.tensor_model_parallel_size_lm,
+            )
             if shard_factor is not None and max_seq_len % shard_factor != 0:
                 max_seq_len = ((max_seq_len + shard_factor - 1) // shard_factor) * shard_factor
 
@@ -921,7 +932,14 @@ class LLaVAModel(MegatronModule):
             assert final_retention_mask.sum() == vision_tokens_retention_mask.sum() + text_position_ids.numel()
 
             initial_packed_seq_params = copy.deepcopy(packed_seq_params) if packed_seq_params is not None else None
-            shard_factor = self._calc_shard_factor() if self.training else None
+            if self.training:
+                shard_factor, _ = self.calc_shard_factor_and_seq_dim_for_preprocessing(
+                    context_parallel_lm=context_parallel_lm,
+                    sequence_parallel_lm=self.sequence_parallel_lm,
+                    tensor_model_parallel_size_lm=self.tensor_model_parallel_size_lm,
+                )
+            else:
+                shard_factor = None
 
             sequence_pad_to_divisibility = None
             if self.training and (self._vision_fp8 or self._vision_fp8_no_arch):
@@ -954,7 +972,7 @@ class LLaVAModel(MegatronModule):
             if final_embedding.shape[1] > self._language_max_sequence_length:
                 final_embedding = final_embedding[:, : self._language_max_sequence_length]
             # Transpose to [s,b,h] only if not using CP because CP Sharding expects seq in dim=1
-            if self.context_parallel_lm == 1:
+            if context_parallel_lm == 1:
                 final_embedding = final_embedding.transpose(1, 0).contiguous()
 
         if final_position_ids is not None:
@@ -962,7 +980,7 @@ class LLaVAModel(MegatronModule):
             if final_position_ids.shape[1] > self._language_max_sequence_length:
                 final_position_ids = final_position_ids[:, : self._language_max_sequence_length]
             # Transpose to [s,b,h] only if not using CP because CP Sharding expects seq in dim=1
-            if self.context_parallel_lm == 1:
+            if context_parallel_lm == 1:
                 final_position_ids = final_position_ids.transpose(1, 0).contiguous()
 
         truncate_labels = (
@@ -1041,9 +1059,26 @@ class LLaVAModel(MegatronModule):
         if not self.pre_process and not self.post_process:
             return combined_embeddings, new_labels, new_loss_mask, position_ids, packed_seq_params
 
-        _ = self._calc_shard_factor(validate_with_combined_embeddings=combined_embeddings)  # used just to assert we're good
+        cp_group = self.cp_group
+        context_parallel_lm = self.context_parallel_lm
+        if (
+            packed_seq_params is not None
+            and getattr(packed_seq_params, "local_cp_size", None) is not None
+        ):
+            context_parallel_lm = packed_seq_params.local_cp_size
+            cp_group = getattr(packed_seq_params, "cp_group", cp_group)
 
-        if self.context_parallel_lm > 1:
+        shard_factor, seq_dim = self.calc_shard_factor_and_seq_dim_for_preprocessing(
+            context_parallel_lm=context_parallel_lm,
+            sequence_parallel_lm=self.sequence_parallel_lm,
+            tensor_model_parallel_size_lm=self.tensor_model_parallel_size_lm,
+        )
+        if shard_factor is not None:
+            assert (
+                combined_embeddings.shape[seq_dim] % shard_factor == 0
+            ), f"Sequence length {combined_embeddings.shape[seq_dim]} should be divisible by {shard_factor} for Sequence/Context parallelism"
+
+        if context_parallel_lm > 1:
             batch = dict()
             if self.pre_process:
                 batch["combined_embeddings"] = combined_embeddings
@@ -1065,8 +1100,8 @@ class LLaVAModel(MegatronModule):
                     "1.10.0"
                 ), "Please update Transformer Engine to >= 1.10 to use \
                     Context Parallel with THD format data"
-                cp_size = self.cp_group.size()
-                cp_rank = self.cp_group.rank()
+                cp_size = cp_group.size()
+                cp_rank = cp_group.rank()
                 for key, data in batch.items():
                     index = tex.thd_get_partitioned_indices(
                         packed_seq_params.cu_seqlens_q_padded, data.size(1), cp_size, cp_rank
@@ -1289,6 +1324,14 @@ class LLaVAModel(MegatronModule):
             loss_mask (torch.Tensor): Loss mask expanded to combined sequence length. Shape [b, s].
         """
         inference_context = deprecate_inference_params(inference_context, inference_params)
+        cp_group = self.cp_group
+        context_parallel_lm = self.context_parallel_lm
+        if (
+            packed_seq_params is not None
+            and getattr(packed_seq_params, "local_cp_size", None) is not None
+        ):
+            context_parallel_lm = packed_seq_params.local_cp_size
+            cp_group = getattr(packed_seq_params, "cp_group", cp_group)
 
         # Keep a copy of the original imgs_sizes and num_frames in case we split to context parallel ranks later.
         global_imgs_sizes = imgs_sizes.clone() if imgs_sizes is not None else None
@@ -1327,7 +1370,7 @@ class LLaVAModel(MegatronModule):
         elif self.add_encoder and has_images:
             pad = None
             if self._dynamic_resolution:
-                if self.context_parallel_lm > 1:
+                if context_parallel_lm > 1:
                     # This will split the images and imgs_sizes to context parallel ranks. Each rank will have a different imgs_sizes.
                     # If there are fewer images than CP ranks, dummy images are added to keep all ranks active.
                     dummy_img_size = self.vision_model.patch_dim
@@ -1341,7 +1384,8 @@ class LLaVAModel(MegatronModule):
                     images, imgs_sizes, vision_packed_seq_params, has_pad_img, num_padded_imgs, local_num_frames = \
                         split_to_context_parallel_ranks_dynamic_res(
                             images, imgs_sizes, vision_packed_seq_params, self._vision_fp8, dummy_img_size,
-                            num_frames=num_frames, temporal_patch_size=self._video_temporal_patch_size
+                            num_frames=num_frames, temporal_patch_size=self._video_temporal_patch_size,
+                            cp_group=cp_group,
                         )
 
                     # Update num_frames if it was split
@@ -1376,8 +1420,10 @@ class LLaVAModel(MegatronModule):
 
             else:
                 assert self._video_temporal_patch_size == 1, "Temporal compression is not supported for tiling"
-                if self.context_parallel_lm > 1 and images.shape[0] >= 2:
-                    cp_images, pad = split_to_context_parallel_ranks(images)
+                if context_parallel_lm > 1 and images.shape[0] >= 2:
+                    cp_images, pad = split_to_context_parallel_ranks(
+                        images, cp_group=cp_group
+                    )
                     image_embeddings = self.vision_model(cp_images)
                 else:
                     image_embeddings = self.vision_model(images)  # [num_tiles, img_seq_len, h_vision]
@@ -1458,7 +1504,7 @@ class LLaVAModel(MegatronModule):
 
             vision_projection_padding_needed = 0
             if self._vision_fp8_no_arch and self._dynamic_resolution:
-                vision_projection_padding_needed = get_padding(image_embeddings.shape[0], self.context_parallel_lm, self.tensor_model_parallel_size_lm, self.sequence_parallel_lm, fp8_enabled=self._vision_fp8)
+                vision_projection_padding_needed = get_padding(image_embeddings.shape[0], context_parallel_lm, self.tensor_model_parallel_size_lm, self.sequence_parallel_lm, fp8_enabled=self._vision_fp8)
                 if vision_projection_padding_needed > 0:
                     padding_image_embeddings = torch.zeros([vision_projection_padding_needed, image_embeddings.shape[1], image_embeddings.shape[2]]).to(image_embeddings.device).to(image_embeddings.dtype)
                     image_embeddings = torch.cat([image_embeddings, padding_image_embeddings], dim=0)
@@ -1477,18 +1523,24 @@ class LLaVAModel(MegatronModule):
             if vision_projection_padding_needed > 0:
                 image_embeddings = image_embeddings[:-vision_projection_padding_needed, :, :]
 
-            if self.context_parallel_lm > 1 and self._dynamic_resolution:
-                image_embeddings = gather_from_context_parallel_ranks_dynamic_res(image_embeddings, num_padded_imgs)
+            if context_parallel_lm > 1 and self._dynamic_resolution:
+                image_embeddings = gather_from_context_parallel_ranks_dynamic_res(
+                    image_embeddings, num_padded_imgs, cp_group=cp_group
+                )
                 # For temporal compression, gather the post-compression imgs_sizes and num_frames
                 # For non-temporal, use the saved global values for backwards compatibility
                 if self._video_temporal_patch_size > 1:
-                    imgs_sizes = gather_from_context_parallel_ranks_dynamic_res(imgs_sizes, num_padded_imgs)
+                    imgs_sizes = gather_from_context_parallel_ranks_dynamic_res(
+                        imgs_sizes, num_padded_imgs, cp_group=cp_group
+                    )
                     if num_frames is not None:
                         # Convert to tensor if it's a list
                         if not isinstance(num_frames, torch.Tensor):
                             num_frames = torch.tensor(num_frames, dtype=torch.int, device=imgs_sizes.device)
                         num_frames = gather_from_context_parallel_ranks_dynamic_res(
-                            num_frames.unsqueeze(-1) if num_frames.dim() == 1 else num_frames, num_padded_imgs
+                            num_frames.unsqueeze(-1) if num_frames.dim() == 1 else num_frames,
+                            num_padded_imgs,
+                            cp_group=cp_group,
                         ).squeeze(-1)
                 else:
                     imgs_sizes = global_imgs_sizes
@@ -1519,8 +1571,10 @@ class LLaVAModel(MegatronModule):
                     raise NotImplementedError  # TODO: must rearrange `masks_seqlen` as well
                 image_embeddings = self._apply_tile_tagging(image_embeddings, num_image_tiles)
 
-            if self.context_parallel_lm > 1 and pad is not None and not self._dynamic_resolution:
-                image_embeddings = gather_from_context_parallel_ranks(image_embeddings, pad)
+            if context_parallel_lm > 1 and pad is not None and not self._dynamic_resolution:
+                image_embeddings = gather_from_context_parallel_ranks(
+                    image_embeddings, pad, cp_group=cp_group
+                )
 
             # Here, `image_embeddings` and `images` represent entire batch (not cp chunk).
 
@@ -1569,11 +1623,15 @@ class LLaVAModel(MegatronModule):
             sound_pad = None
             is_parakeet = "parakeet" in self.sound_model.config.sound_model_type.lower()
 
-            if self.context_parallel_lm > 1 and sound_clips.shape[0] > self.context_parallel_lm:
-                sound_clips, sound_pad = split_to_context_parallel_ranks(sound_clips)
+            if context_parallel_lm > 1 and sound_clips.shape[0] > context_parallel_lm:
+                sound_clips, sound_pad = split_to_context_parallel_ranks(
+                    sound_clips, cp_group=cp_group
+                )
                 if is_parakeet:
                     # Parakeet needs sound lengths. Minimum sound length is the hop length.
-                    sound_length, sound_pad2 = split_to_context_parallel_ranks(sound_length, pad_value=1600)
+                    sound_length, sound_pad2 = split_to_context_parallel_ranks(
+                        sound_length, pad_value=1600, cp_group=cp_group
+                    )
                     assert sound_pad == sound_pad2, "something went wrong with splitting to context parallel ranks"
 
             if is_parakeet:
@@ -1610,11 +1668,15 @@ class LLaVAModel(MegatronModule):
                 sound_embeddings
             ).contiguous()  # [sound_seq_len, num_clips, h_language]
 
-            if self.context_parallel_lm > 1 and sound_pad is not None:
-                sound_embeddings = gather_from_context_parallel_ranks(sound_embeddings, sound_pad)
+            if context_parallel_lm > 1 and sound_pad is not None:
+                sound_embeddings = gather_from_context_parallel_ranks(
+                    sound_embeddings, sound_pad, cp_group=cp_group
+                )
                 if sound_embeddings_len is not None:
                     # Gather sound_embeddings_len along the clips dimension (unsqueeze to 2D, gather, squeeze back)
-                    sound_embeddings_len = gather_from_context_parallel_ranks(sound_embeddings_len.unsqueeze(0), sound_pad).squeeze(0)
+                    sound_embeddings_len = gather_from_context_parallel_ranks(
+                        sound_embeddings_len.unsqueeze(0), sound_pad, cp_group=cp_group
+                    ).squeeze(0)
 
             if inference_context is not None:
                 inference_context.key_value_memory_dict["sound_tokens_count"] = sound_embeddings.shape[1]
@@ -1663,7 +1725,7 @@ class LLaVAModel(MegatronModule):
             sound_timestamps=sound_timestamps,
         )  # [combined_seq_len, b, h_language], [b, combined_seq_len], [b, combined_seq_len]
 
-        if self.context_parallel_lm > 1 or self.sequence_parallel_lm:
+        if context_parallel_lm > 1 or self.sequence_parallel_lm:
             loss_weight = None
             if new_labels is not None:
                 acc_lengths = (

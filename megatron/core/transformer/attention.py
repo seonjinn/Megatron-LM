@@ -698,8 +698,10 @@ class Attention(MegatronModule, ABC):
                     cu_seqlens_kv = packed_seq_params.cu_seqlens_kv_padded
                 else:
                     cu_seqlens_kv = packed_seq_params.cu_seqlens_kv
+                cp_group = getattr(packed_seq_params, "cp_group", None) or self.model_comm_pgs.cp
             else:
                 cu_seqlens_q = cu_seqlens_kv = None
+                cp_group = self.model_comm_pgs.cp
 
             if q_pos_emb is not None:
                 # TODO VIJAY: simplify
@@ -709,11 +711,11 @@ class Attention(MegatronModule, ABC):
                         q_pos_emb,
                         config=self.config,
                         cu_seqlens=cu_seqlens_q,
-                        cp_group=self.model_comm_pgs.cp,
+                        cp_group=cp_group,
                     )
                 else:
                     query = inference_context.apply_rotary_emb_query(
-                        query, q_pos_emb, self.config, cu_seqlens_q, self.model_comm_pgs.cp
+                        query, q_pos_emb, self.config, cu_seqlens_q, cp_group
                     )
             if k_pos_emb is not None:
                 key = apply_rotary_pos_emb(
@@ -721,7 +723,7 @@ class Attention(MegatronModule, ABC):
                     k_pos_emb,
                     config=self.config,
                     cu_seqlens=cu_seqlens_kv,
-                    cp_group=self.model_comm_pgs.cp,
+                    cp_group=cp_group,
                 )
 
             # TODO, can apply positional embedding to value_layer so it has

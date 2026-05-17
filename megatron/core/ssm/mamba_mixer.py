@@ -434,6 +434,12 @@ class MambaMixer(MegatronModule):
 
         _, batch, dim = hidden_states.shape
 
+        if packed_seq_params is not None:
+            cp_group = getattr(packed_seq_params, "cp_group", None)
+            self.cp.set_context_parallel_group(
+                cp_group if cp_group is not None else self.model_comm_pgs.cp
+            )
+
         conv_state, ssm_state = None, None
         if inference_context is not None:
             assert (

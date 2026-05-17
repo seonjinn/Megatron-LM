@@ -542,13 +542,18 @@ class MLASelfAttention(MultiLatentAttention):
                 )
 
                 # q_pos_emb: [num_tokens, n, qk_pos_emb_head_dim]
+                cp_group = (
+                    getattr(packed_seq_params, "cp_group", None) or self.model_comm_pgs.cp
+                    if packed_seq_params is not None
+                    else self.model_comm_pgs.cp
+                )
                 q_pos_emb = apply_rotary_pos_emb(
                     q_pos_emb,
                     rotary_pos_emb,
                     config=self.config,
                     cu_seqlens=cu_seqlens_q,
                     mscale=mscale,
-                    cp_group=self.model_comm_pgs.cp,
+                    cp_group=cp_group,
                 )
                 # k_pos_emb:[num_tokens, 1, qk_pos_emb_head_dim]
                 k_pos_emb = apply_rotary_pos_emb(
@@ -557,7 +562,7 @@ class MLASelfAttention(MultiLatentAttention):
                     config=self.config,
                     cu_seqlens=cu_seqlens_kv,
                     mscale=mscale,
-                    cp_group=self.model_comm_pgs.cp,
+                    cp_group=cp_group,
                 )
 
                 # query: [num_tokens, n, (qk_head_dim + v_head_dim)]

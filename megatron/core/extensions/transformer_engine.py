@@ -777,6 +777,8 @@ class TEDotProductAttention(te.pytorch.DotProductAttention):
                     model_comm_pgs, "hcp"
                 ), "TEDotProductAttention model_comm_pgs must have hierarchical cp pg"
 
+        self._default_cp_group = model_comm_pgs.cp
+
         if is_te_min_version("0.10.0"):
             extra_kwargs["attention_type"] = attention_type
             # older version don't need attention_type
@@ -884,6 +886,25 @@ class TEDotProductAttention(te.pytorch.DotProductAttention):
         packed_seq_params: PackedSeqParams = None,
     ):
         """Forward."""
+        if packed_seq_params is not None:
+            local_cp_size = getattr(packed_seq_params, "local_cp_size", None)
+            local_cp_group = getattr(packed_seq_params, "cp_group", None)
+            if local_cp_size is not None:
+                if local_cp_size == 1:
+                    super().set_context_parallel_group(None, None, None, self.cp_comm_type)
+                else:
+                    self.cp_group = (
+                        local_cp_group if local_cp_group is not None else self._default_cp_group
+                    )
+                    super().set_context_parallel_group(
+                        self.cp_group,
+                        torch.distributed.get_process_group_ranks(self.cp_group),
+                        TEDotProductAttention.cp_stream,
+                        self.cp_comm_type,
+                    )
+            self.kept_packed_seq_params.discard("cp_group")
+            self.kept_packed_seq_params.discard("local_cp_size")
+
         packed_seq_kwargs = (
             {key: getattr(packed_seq_params, key) for key in self.kept_packed_seq_params}
             if packed_seq_params is not None
