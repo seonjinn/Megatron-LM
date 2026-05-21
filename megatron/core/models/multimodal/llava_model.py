@@ -885,8 +885,13 @@ class LLaVAModel(MegatronModule):
                 )
 
             sound_mask = input_ids == self.sound_token_index
+            has_sound_embeddings = (
+                self.sound_model is not None
+                and sound_embeddings is not None
+                and sound_embeddings.numel() > 0
+            )
             # Replace with sound embeddings where needed
-            if sound_mask is not False and sound_mask.any():
+            if has_sound_embeddings and sound_mask is not False and sound_mask.any():
                 # Get the positions where sounds should be placed
                 sound_batch_indices, sound_token_indices = torch.where(sound_mask)
                 # Map the original token positions to the new (expanded) positions
@@ -902,7 +907,7 @@ class LLaVAModel(MegatronModule):
                 # TODO: Sound encoder from HF/Nemo can hang with text-only samples. Find a better way to handle this.
                 # Note(pzelasko): This should actually be fixed with dynamic shape MR since it disabled NCCL sync of max
                 #                 observed seq lengths on DP ranks in FastConformer; but I have no way to test it at the moment.
-                if sound_embeddings.shape[0] > 0:
+                if sound_embeddings is not None and sound_embeddings.shape[0] > 0:
                     assert sound_embeddings.shape[:2] == torch.Size([2, 1]) and sound_timestamps.shape == torch.Size([0])
                     final_embedding[:1, :1, :1] += 0 * sound_embeddings[:1, :1, :1]
 
