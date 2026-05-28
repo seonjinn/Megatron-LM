@@ -1,0 +1,58 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+      # CC Batch 0. https://jirasw.nvidia.com/browse/DGPTT-4298
+      - path: /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/megatron-lm5/cc-batch0-negative-reduced-01212026/cc-batch0-01212026.yaml
+      #- path: /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/megatron-lm5/cc-batch0-01282026/cc-batch0-01282026.yaml
+        repetitions: 1
+
+      # SEC. https://jirasw.nvidia.com/browse/DGPTT-3759
+      - path: /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/megatron-lm5/sec-negative-reduced-01212026/sec-01212026.yaml
+      #- path: /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/megatron-lm5/sec-01282026/sec-01282026.yaml
+        repetitions: 1
+
+      # Nabin image. https://jirasw.nvidia.com/browse/DGPTT-4298
+      - path: /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/megatron-lm5/nabin-image-01292026/nabin-image-01292026.yaml
+        repetitions: 1
+
+      # Multi-page CC batch 1. https://jirasw.nvidia.com/browse/DGPTT-4298
+      - path: /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/megatron-lm5/cc-batch1-multi-page-01302026/cc-batch1-multi-page-01302026.yaml
+        repetitions: 1
+
+      # Multi-page VL
+      #- path: /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/megatron-lm5/cc-batch2-multi-page-02012026/cc-batch2-multi-page-02012026.yaml
+      #  repetitions: 1
+
+      # Random multi-page QA
+      #- path: /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/megatron-lm5/arxiv-0-multi-page-random-02052026/arxiv-0-multi-page-random-02052026.yaml
+      #  repetitions: 1
+
+      # Nabin image v2. CC batch 0. https://jirasw.nvidia.com/browse/DGPTT-4298
+      - path: /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/megatron-lm5/nabin-image-v2-02092026/nabin-image-v2-02092026.yaml
+        repetitions: 1
+
+      # SEC multi-page. https://jirasw.nvidia.com/browse/DGPTT-3759
+      - path: /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/megatron-lm5/sec-multi-page-max-pages-60-02092026/sec-multi-page-max-pages-60-02092026.yaml
+        repetitions: 1
+
+      # Big VL multi-page. https://jirasw.nvidia.com/browse/DGPTT-1044
+      - path: /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/megatron-lm5/arxiv-random0-multi-page-big-vl-02092026/arxiv-random0-multi-page-big-vl-02092026.yaml
+        repetitions: 1
+
+      # CC batch 2 whole document. CC batch 2 https://jirasw.nvidia.com/browse/DGPTT-4298
+      - path: /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/megatron-lm5/cc-batch2-whole-document-02162026/cc-batch2-whole-document-02162026.yaml
+        repetitions: 1
+
+      # Big VL 2. https://jirasw.nvidia.com/browse/DGPTT-1044
+      - path: /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/megatron-lm5/arxiv-random1-multi-page-big-vl-max-pages60-50k-02162026/arxiv-random1-multi-page-big-vl-max-pages60-50k-02162026.yaml
+        repetitions: 1
+
+      # Nabin CC image v2 de-duped. CC batch 2 https://jirasw.nvidia.com/browse/DGPTT-4298
+      - path: /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/megatron-lm5/cc-batch2-nabin-image-v2-max-pages-60-02172026/cc-batch2-nabin-image-v2-max-pages-60-02172026.yaml
+        repetitions: 1
+
+      # Nabin arxiv image v2 de-duped. https://jirasw.nvidia.com/browse/DGPTT-1044
+      - path: /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/megatron-lm5/arxiv-random1-nabin-image-v2-max-pages-60-02172026/arxiv-random1-nabin-image-v2-max-pages-60-02172026.yaml
+        repetitions: 1

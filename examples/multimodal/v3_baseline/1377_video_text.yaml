@@ -1,0 +1,79 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+      # Base vision data
+      - path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/eagle_sft_v13.77_safetyfix.yaml
+        repetitions: 1
+      # Extra video data from Arushi
+      - path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/short_video_qa_0318_newreps.yaml
+        repetitions: 1.0
+      - path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/video_qa_v1_v2_all_0314_safetyfix.yaml
+        repetitions: 1.0
+      ## Qwen3.5 video reasoning
+      - path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/mar4_video_qa_short_reasoning_newreps.yaml
+        repetitions: 1.0
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/PLM_video_data/reasoning/yt1b_qa_plm_sampled_thinking_traces_safetyfix0323.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem:///lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/ntadevosyan/data/yttemporal180m-youtube-dataset/
+        repetitions: 1.0
+      ## Correct data, Yt1B PLM QA 900k sample dense captions with thinking traces
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/PLM_video_data/reasoning/yt1b_qa_plm_sampled_dense_captions_no_think_safetyfix0323.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem:///lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/ntadevosyan/data/yttemporal180m-youtube-dataset/
+        repetitions: 1.0
+      ## Additional data from Arushi (TODO: reduce reps?)
+      - path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/short_dense_captions_no_think_0310_safetyfix.yaml
+        repetitions: 1
+      # Text data from Matthieu (18.9M samples -> 3786 tokens per sample -> 71B tokens); updated to use abs paths
+      - path: /lustre/fsw/portfolios/llmservice/users/cmccarthy/eagle_recipe_online_packing/final_recipe/nickel_capybara_0_16k_abspath.yaml
+        repetitions: 0.25
+      # Safety data
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/safety/filtered_textsafety_energon_dataset.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        repetitions: 2
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/safety/image_safety_energon_dataset.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        repetitions: 2
+      # SFT-0.5 addmix: benchfit_qa
+      - repetitions: 0.6
+        path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/sft-0.5/mint_200/benchfit_qa/03-10a_stage5_output.jsonl
+        subflavors:
+          name: benchfit_qa
+          cook: conversation
+        aux:
+          media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/sft-0.5/mint_200/input/image_shards
+      # SFT-0.5 addmix: dense_ocr_qa
+      - repetitions: 0.6
+        path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/sft-0.5/mint_30/dense_ocr/03-10a_stage5_qa_output.jsonl
+        subflavors:
+          name: dense_ocr_qa
+          cook: conversation
+        aux:
+          media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/sft-0.5/mint_200/input/image_shards
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+#    #  Entry (nested YAML)                              Samples    Rep   Eff.Samples    Used   Avg Tok   Est. Tokens        CI@99%    Prec.
+# ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+#    1  eagle_sft_v13.77_safetyfix.yaml               72,593,748      1    72,593,748   43559  ~  2105        152.8B  ±       1.5B     1.0%
+#    2  short_video_qa_0318_newreps.yaml               2,689,219      1     2,689,219   36325  ~  3433          9.2B  ±        92M     1.0%
+#    3  video_qa_v1_v2_all_0314_safetyfix.yaml         1,096,078      1     1,096,078   19331  ~  4041          4.4B  ±        44M     1.0%
+#    4  mar4_video_qa_short_reasoning_newreps.yaml       376,767      1       376,767   27413  ~  5451          2.1B  ±        21M     1.0%
+#    5  yt1b_qa_plm_sampled_thinking_traces_safetyfix0323.jsonl    596,615      1       596,615   13827  ~  6659          4.0B  ±        40M     1.0%
+#    6  yt1b_qa_plm_sampled_dense_captions_no_think_safetyfix0323.jsonl    964,232      1       964,232   11476  ~  6424          6.2B  ±        62M     1.0%
+#    7  short_dense_captions_no_think_0310_safetyfix.yaml  2,611,833      1     2,611,833   18189  ~  6886         18.0B  ±       180M     1.0%
+#    8  nickel_capybara_0_16k_abspath.yaml            18,960,364   0.25     4,740,091   63723  ~  3691         17.5B  ±       175M     1.0%
+#    9  filtered_textsafety_energon_dataset.jsonl         35,406      2        70,812   21448  ~   733           52M  ±       520K     1.0%
+#   10  image_safety_energon_dataset.jsonl                22,560      2        45,120    1219  ~  1336           60M  ±       603K     1.0%
+#   11  03-10a_stage5_output.jsonl                       762,674    0.6       457,604    7314  ~   731          335M  ±         3M     1.0%
+#   12  03-10a_stage5_qa_output.jsonl                    141,361    0.6        84,816   35042  ~  1564          133M  ±         1M     1.0%
+# ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+#       TOTAL                                         100,850,857           86,326,935                          214.8B  ±       1.6B
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════

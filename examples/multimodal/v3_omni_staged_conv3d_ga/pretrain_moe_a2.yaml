@@ -1,0 +1,58 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+
+      #########################################################
+      # ASR Datasets
+      #########################################################
+
+      ### Granary ###
+      - path: /lustre/fsw/portfolios/llmservice/users/ehosseiniasl/github_repos/ehosseiniasl_vlm2_unified_training/megatron-lm/examples/multimodal/avlm/data_config/granary.v1_1.yaml
+        repetitions: 1
+
+      # ### Riva ASR ###
+      - path: /lustre/fsw/portfolios/llmservice/users/ehosseiniasl/github_repos/ehosseiniasl_vlm2_unified_training/megatron-lm/examples/multimodal/avlm/data_config/riva_asr.0324.yaml
+        repetitions: 1
+
+
+      #########################################################
+      # Audio SFT Datasets
+      #########################################################
+
+      ### Sound ###
+      - path: /lustre/fsw/portfolios/llmservice/users/ehosseiniasl/github_repos/ehosseiniasl_vlm2_unified_training/megatron-lm/examples/multimodal/avlm/data_config/audio_sound_sft.yaml
+        repetitions: 1
+
+      - path: /lustre/fsw/portfolios/llmservice/users/ehosseiniasl/github_repos/ehosseiniasl_vlm2_unified_training/megatron-lm/examples/multimodal/avlm/data_config/audio_sound_sft_sdg.yaml
+        repetitions: 1
+
+      ### Music ###
+      - path: /lustre/fsw/portfolios/llmservice/users/ehosseiniasl/github_repos/ehosseiniasl_vlm2_unified_training/megatron-lm/examples/multimodal/avlm/data_config/audio_music_sft_sdg.yaml
+        repetitions: 1
+
+      - path: /lustre/fsw/portfolios/llmservice/users/ehosseiniasl/github_repos/ehosseiniasl_vlm2_unified_training/megatron-lm/examples/multimodal/avlm/data_config/audio_music_sft.yaml
+        repetitions: 1
+
+      ### Speech ###
+      - path: /lustre/fsw/portfolios/llmservice/users/ehosseiniasl/github_repos/ehosseiniasl_vlm2_unified_training/megatron-lm/examples/multimodal/avlm/data_config/audio_speech_sft_sdg.yaml
+        repetitions: 1
+
+      - path: /lustre/fsw/portfolios/llmservice/users/ehosseiniasl/github_repos/ehosseiniasl_vlm2_unified_training/megatron-lm/examples/multimodal/avlm/data_config/audio_speech_sft.yaml
+        repetitions: 1
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+#    #  Entry (nested YAML)                              Samples    Rep   Eff.Samples    Used   Avg Tok   Est. Tokens        CI@99%    Prec.
+# ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+#    1  granary.v1_1.yaml                             83,342,961      1    83,342,961   47263  ~   192         16.0B  ±       160M     1.0%
+#    2  riva_asr.0324.yaml                            33,943,673      1    33,943,673   21661  ~   221          7.5B  ±        75M     1.0%
+#    3  audio_sound_sft.yaml                           1,145,890      1     1,145,890    3013  ~   161          185M  ±         2M     1.0%
+#    4  audio_sound_sft_sdg.yaml                      61,751,789      1    61,751,789   11813  ~   405         25.1B  ±       251M     1.0%
+#    5  audio_music_sft_sdg.yaml                      19,557,014      1    19,557,014   34479  ~  2290         44.8B  ±       448M     1.0%
+#    6  audio_music_sft.yaml                             870,175      1       870,175    1971  ~    93           82M  ±       817K     1.0%
+#    7  audio_speech_sft_sdg.yaml                     26,018,242      1    26,018,242   18355  ~   178          4.6B  ±        46M     1.0%
+#    8  audio_speech_sft.yaml                         22,902,589      1    22,902,589    8982  ~   232          5.3B  ±        53M     1.0%
+# ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+#       TOTAL                                         249,532,333          249,532,333                          103.6B  ±       547M
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════

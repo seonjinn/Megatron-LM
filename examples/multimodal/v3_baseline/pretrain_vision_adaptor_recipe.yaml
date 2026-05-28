@@ -1,0 +1,49 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/pretrain_base.yaml
+        repetitions: 2
+      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/pretrain_nvpdftex_clean_v11_120K_synthtabnet_blocks_full.yaml
+        repetitions: 2
+      - path: /lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/ksapra/data/final_recipe/pretraining_cc3m.yaml
+        repetitions: 2
+      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/pretraining_ocr_guilin_102325_ocr_only.yaml
+        repetitions: 2
+      # A sub-sample of the 13.74 SFT dataset.
+      - path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/eagle_sft_v13.76_cleaned.yaml
+        repetitions: 0.025
+      - path: /lustre/fsw/portfolios/llmservice/users/kchumachenko/eagle_recipe/chinese_pt_0303.yaml
+        repetitions: 1.0
+      # SFT-0.5 addmix: benchfit_qa
+      - repetitions: 1
+        path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/sft-0.5/mint_200/benchfit_qa/03-10a_stage5_output.jsonl
+        subflavors:
+          name: benchfit_qa
+          cook: conversation
+        aux:
+          media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/sft-0.5/mint_200/input/image_shards
+      # SFT-0.5 addmix: dense_ocr_qa
+      - repetitions: 1
+        path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/sft-0.5/mint_30/dense_ocr/03-10a_stage5_qa_output.jsonl
+        subflavors:
+          name: dense_ocr_qa
+          cook: conversation
+        aux:
+          media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/sft-0.5/mint_200/input/image_shards
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+#    #  Entry (nested YAML)                              Samples    Rep   Eff.Samples    Used   Avg Tok   Est. Tokens        CI@99%    Prec.
+# ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+#    1  pretrain_base.yaml                               995,510      2     1,991,020   27302  ~   914          1.8B  ±        18M     1.0%
+#    2  pretrain_nvpdftex_clean_v11_120K_synthtabnet_blocks_full.yaml    165,116      2       330,232   15446  ~  3362          1.1B  ±        11M     1.0%
+#    3  pretraining_cc3m.yaml                            867,065      2     1,734,130    2855  ~   672          1.2B  ±        12M     1.0%
+#    4  pretraining_ocr_guilin_102325_ocr_only.yaml       29,680      2        59,360   17092  ~   643           38M  ±       382K     1.0%
+#    5  eagle_sft_v13.76_cleaned.yaml                 72,608,584  0.025     1,815,214   43356  ~  2107          3.8B  ±        38M     1.0%
+#    6  chinese_pt_0303.yaml                           2,517,513      1     2,517,513   22239  ~  2693          6.8B  ±        68M     1.0%
+#    7  03-10a_stage5_output.jsonl                       762,674      1       762,674    7314  ~   731          558M  ±         6M     1.0%
+#    8  03-10a_stage5_qa_output.jsonl                    141,361      1       141,361   35042  ~  1564          221M  ±         2M     1.0%
+# ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+#       TOTAL                                         78,087,503            9,351,504                           15.5B  ±        82M
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════

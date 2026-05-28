@@ -1,0 +1,27 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+
+      #########################################################
+      # ASR Datasets
+      #########################################################
+
+      ### Granary ###
+      # - path: granary.yaml
+      - path: /lustre/fsw/portfolios/llmservice/users/ehosseiniasl/github_repos/ehosseiniasl_vlm2_unified_training/megatron-lm/examples/multimodal/avlm/data_config/granary.v1_1.yaml
+        repetitions: 1
+
+  val:
+    path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vqa/VQAv2/stage1
+    subflavors:
+      augmentation: False
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+#    #  Entry (nested YAML)                              Samples    Rep   Eff.Samples    Used   Avg Tok   Est. Tokens        CI@99%    Prec.
+# ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+#    1  granary.v1_1.yaml                             83,342,961      1    83,342,961   47263  ~   192         16.0B  ±       160M     1.0%
+# ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+#       TOTAL                                         83,342,961           83,342,961                           16.0B  ±       160M
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════

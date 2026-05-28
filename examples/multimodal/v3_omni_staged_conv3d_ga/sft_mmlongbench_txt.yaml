@@ -1,0 +1,51 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+      # MMLongBench only
+      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/mmlongbench_ultra_long_filtered_best.yaml
+        repetitions: 1.0
+      # Text
+      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/nickel_capybara_16k_49k_absolute_paths.yaml
+        repetitions: 0.025
+      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/nickel_capybara_49k_plus_absolute_paths.yaml
+        repetitions: 0.05
+      # Long context Text
+      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/nano_v3_individual_yamls/nano_v3_split_sft-lc-sdg-256k-v0.4.1_kept.yaml
+        repetitions: 0.05
+      #####################################
+      ############### Vision ################
+      #####################################
+      - path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/eagle_sft_v13.77_safetyfix.yaml
+        repetitions: 0.001
+      # SFT-0.5 addmix
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/sft-0.5/mint_200/benchfit_qa/03-10a_stage5_output.jsonl
+        repetitions: 0.0006
+        subflavors:
+          name: benchfit_qa
+          cook: conversation
+        aux:
+          media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/sft-0.5/mint_200/input/image_shards
+      # SFT-0.5 addmix: dense_ocr_qa
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/sft-0.5/mint_30/dense_ocr/03-10a_stage5_qa_output.jsonl
+        repetitions: 0.0006
+        subflavors:
+          name: dense_ocr_qa
+          cook: conversation
+        aux:
+          media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/sft-0.5/mint_200/input/image_shards
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+#    #  Entry (nested YAML)                              Samples    Rep   Eff.Samples    Used   Avg Tok   Est. Tokens        CI@99%    Prec.
+# ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+#    1  mmlongbench_ultra_long_filtered_best.yaml        735,741      1       735,741   55499  ~ 60850         44.8B  ±       448M     1.0%
+#    2  nickel_capybara_16k_49k_absolute_paths.yaml    2,592,136  0.025        64,803   11813  ~ 23871          1.5B  ±        15M     1.0%
+#    3  nickel_capybara_49k_plus_absolute_paths.yaml     532,497   0.05        26,624   13384  ~ 80420          2.1B  ±        21M     1.0%
+#    4  nano_v3_split_sft-lc-sdg-256k-v0.4.1_kept.yaml     64,252   0.05         3,212    1653  ~228385          734M  ±         7M     1.0%
+#    5  eagle_sft_v13.77_safetyfix.yaml               72,593,748  0.001        72,593   45977  ~  2112          153M  ±         2M     1.0%
+#    6  03-10a_stage5_output.jsonl                       762,674  0.0006           457    7314  ~   731          335K  ±         3K     1.0%
+#    7  03-10a_stage5_qa_output.jsonl                    141,361  0.0006            84   35042  ~  1564          131K  ±         1K     1.0%
+# ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+#       TOTAL                                         77,422,409              903,514                           49.3B  ±       449M
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════

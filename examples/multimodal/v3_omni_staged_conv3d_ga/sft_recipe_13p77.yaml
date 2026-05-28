@@ -1,0 +1,126 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+      # Base vision data
+      - path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/eagle_sft_v13.77_safetyfix.yaml
+        repetitions: 1
+      # Text data
+      - path: /lustre/fsw/portfolios/llmservice/users/cmccarthy/eagle_recipe_online_packing/final_recipe/nickel_capybara_0_16k_abspath.yaml
+        repetitions: 0.25
+      # Safety data
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/safety/filtered_textsafety_energon_dataset.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        repetitions: 2
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/safety/image_safety_energon_dataset.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        repetitions: 2
+      # SFT-0.5 addmix: benchfit_qa
+      - repetitions: 0.6
+        path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/sft-0.5/mint_200/benchfit_qa/03-10a_stage5_output.jsonl
+        subflavors:
+          name: benchfit_qa
+          cook: conversation
+        aux:
+          media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/sft-0.5/mint_200/input/image_shards
+      # SFT-0.5 addmix: dense_ocr_qa
+      - repetitions: 0.6
+        path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/sft-0.5/mint_30/dense_ocr/03-10a_stage5_qa_output.jsonl
+        subflavors:
+          name: dense_ocr_qa
+          cook: conversation
+        aux:
+          media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/sft-0.5/mint_200/input/image_shards
+      # Short video data
+      - path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/short_video_qa_0318_newreps.yaml
+        repetitions: 1
+      - path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/video_qa_v1_v2_all_0314_safetyfix.yaml
+        repetitions: 1
+      # Qwen3.5 video reasoning
+      - path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/mar4_video_qa_short_reasoning_newreps.yaml
+        repetitions: 1.0
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/PLM_video_data/reasoning/yt1b_qa_plm_sampled_thinking_traces_safetyfix0323.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem:///lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/ntadevosyan/data/yttemporal180m-youtube-dataset/
+        repetitions: 1.0
+      # Correct data, Yt1B PLM QA sample dense captions with thinking traces
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/PLM_video_data/reasoning/yt1b_qa_plm_sampled_dense_captions_no_think_safetyfix0323.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem:///lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/ntadevosyan/data/yttemporal180m-youtube-dataset/
+        repetitions: 1.0
+      # Additional data from Arushi
+      - path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/short_dense_captions_no_think_0310_safetyfix.yaml
+        repetitions: 1
+      # Short omni data
+      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/arushi_short16k_omni_qa_0220.yaml
+        repetitions: 1.0
+      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/gemini_filtered_omni_qa_short16k_0222.yaml
+        repetitions: 0.5
+      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/omni_caption_short16k_0220.yaml
+        repetitions: 1.0
+      # ASR: Granary Small
+      - path: /lustre/fsw/portfolios/llmservice/users/ehosseiniasl/github_repos/ehosseiniasl_vlm2_unified_training/megatron-lm/examples/multimodal/avlm/data_config/granary_v1.1_small.yaml
+        repetitions: 1.0
+      # Granary
+      - path: /lustre/fsw/portfolios/llmservice/users/ehosseiniasl/github_repos/ehosseiniasl_vlm2_unified_training/megatron-lm/examples/multimodal/avlm/data_config/granary.v1_1.yaml
+        repetitions: 0.05
+      # Audio reasoning data
+      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/eagle_recipe_online_packing/final_recipe/avlm_data_yaml/audio_reasoning_sft_nano3_filtered_rep1.yaml
+        repetitions: 3.0
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nemo_speechlm/data/omni_post_training/energon/speech_instruct_SDG/bbh_logical_reasoning/train_bbh_logical_reasoning.jsonl
+        repetitions: 1.5
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nemo_speechlm/data/omni_post_training/energon/speech_instruct_SDG/bbh_logical_reasoning/audio
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nemo_speechlm/data/omni_post_training/energon/speech_instruct_SDG/bbh_spatial_reasoning/train_bbh_spatial_reasoning.jsonl
+        repetitions: 1.5
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nemo_speechlm/data/omni_post_training/energon/speech_instruct_SDG/bbh_spatial_reasoning/audio
+      # # #########################################################
+      # # # Audio-SFT
+      # # #########################################################
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/users/ltavabi/omcat/data_icfg/full_configs/sft.audio.leili.0317.yaml
+        repetitions: 1
+      # AudioReasoning (MMAU benchmark)
+      - path: /lustre/fsw/portfolios/llmservice/users/ehosseiniasl/github_repos/ehosseiniasl_vlm2_unified_training/megatron-lm/examples/multimodal/avlm/data_config/audio_reasoning.mmau.0316.yaml
+        repetitions: 1
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+#    #  Entry (nested YAML)                              Samples    Rep   Eff.Samples    Used   Avg Tok   Est. Tokens        CI@99%    Prec.
+# ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+#    1  eagle_sft_v13.77_safetyfix.yaml               72,593,735      1    72,593,735   45781  ~  2100        152.5B  ±       1.5B     1.0%
+#    2  nickel_capybara_0_16k_abspath.yaml            18,960,364   0.25     4,740,091   63754  ~  3684         17.5B  ±       175M     1.0%
+#    3  filtered_textsafety_energon_dataset.jsonl         35,406      2        70,812   21150  ~   732           52M  ±       519K     1.0%
+#    4  image_safety_energon_dataset.jsonl                22,560      2        45,120    5714  ~  1118           50M  ±       505K     1.0%
+#    5  03-10a_stage5_output.jsonl                       762,674    0.6       457,604    7737  ~   740          339M  ±         3M     1.0%
+#    6  03-10a_stage5_qa_output.jsonl                    141,361    0.6        84,816   34643  ~  1617          137M  ±         1M     1.0%
+#    7  short_video_qa_0318_newreps.yaml               2,689,219      1     2,689,219   36401  ~  3458          9.3B  ±        93M     1.0%
+#    8  video_qa_v1_v2_all_0314_safetyfix.yaml         1,096,078      1     1,096,078   19180  ~  4065          4.5B  ±        45M     1.0%
+#    9  mar4_video_qa_short_reasoning_newreps.yaml       376,767      1       376,767   27542  ~  5447          2.1B  ±        21M     1.0%
+#   10  yt1b_qa_plm_sampled_thinking_traces_safetyfix0323.jsonl    596,615      1       596,615   13854  ~  6606          3.9B  ±        39M     1.0%
+#   11  yt1b_qa_plm_sampled_dense_captions_no_think_safetyfix0323.jsonl    964,232      1       964,232   11472  ~  6364          6.1B  ±        61M     1.0%
+#   12  short_dense_captions_no_think_0310_safetyfix.yaml  2,611,833      1     2,611,833   18282  ~  6848         17.9B  ±       179M     1.0%
+#   13  arushi_short16k_omni_qa_0220.yaml                452,408      1       452,408   10681  ~  5842          2.6B  ±        26M     1.0%
+#   14  gemini_filtered_omni_qa_short16k_0222.yaml       621,082    0.5       310,541    8557  ~  6601          2.1B  ±        20M     1.0%
+#   15  omni_caption_short16k_0220.yaml                  490,337      1       490,337    8095  ~  6784          3.3B  ±        33M     1.0%
+#   16  granary_v1.1_small.yaml                       10,369,039      1    10,369,039   35558  ~   227          2.4B  ±        24M     1.0%
+#   17  granary.v1_1.yaml                             83,342,961   0.05     4,167,148   47263  ~   192          800M  ±         8M     1.0%
+#   18  audio_reasoning_sft_nano3_filtered_rep1.yaml   1,244,812      3     3,734,436   52264  ~  3309         12.4B  ±       124M     1.0%
+#   19  train_bbh_logical_reasoning.jsonl                 39,228    1.5        58,842   11959  ~   981           58M  ±       578K     1.0%
+#   20  train_bbh_spatial_reasoning.jsonl                 20,536    1.5        30,804   12890  ~  2127           66M  ±       655K     1.0%
+#   21  sft.audio.leili.0317.yaml                     45,266,072      1    45,266,072  100000  ~  1053         47.7B  ±       492M    1.0%!
+#   22  audio_reasoning.mmau.0316.yaml                 1,485,530      1     1,485,530    5157  ~   385          572M  ±         6M     1.0%
+# ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+#       TOTAL                                         244,182,849          152,692,079                          286.3B  ±       1.6B
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
