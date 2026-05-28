@@ -14,14 +14,7 @@ from megatron.core.parallel_state import (
 
 
 def get_padding(
-    seq_len,
-    cp_size,
-    tp_size,
-    has_sp,
-    decoder_tp_comm_overlap=False,
-    decoder_seq_len=None,
-    fp8_enabled=False,
-    fp8_recipe=None,
+    seq_len, cp_size, tp_size, has_sp, decoder_tp_comm_overlap=False, decoder_seq_len=None, fp8_enabled=False
 ):
     """Calculate padding needed for SP, CP, TP comm overlap, and FP8.
 
@@ -33,7 +26,6 @@ def get_padding(
         decoder_tp_comm_overlap (bool): Decoder (LLM) uses tensor parallel communication overlap.
         decoder_seq_len (int): Decoder (LLM) maximum sequence length.
         fp8_enabled (bool): FP8 is enabled.
-        fp8_recipe (str): FP8 recipe. Affects required padding.
 
     Returns:
         padding (int): Padding needed given model configuration.
@@ -53,13 +45,16 @@ def get_padding(
     padding_factor = 1
     if has_sp and cp_size > 1:
         # Padding to multiple of tp_size * cp_size * 2 when using CP + SP.
-        padding_factor = tp_size * cp_size * 2
+        padding_factor = max(tp_size * cp_size, cp_size * 2)
     elif cp_size > 1:
         padding_factor = cp_size * 2
     elif has_sp:
         padding_factor = tp_size
-    elif fp8_enabled:
-        padding_factor = 32 if fp8_recipe == "mxfp8" else 16
+
+    if fp8_enabled:
+        # FP8 must be padded to multiple of 16.
+        fp8_factor = 16 * padding_factor
+        padding_factor = (padding_factor + fp8_factor - 1) // fp8_factor * fp8_factor
 
     padding = int((seq_len + padding_factor - 1) // padding_factor * padding_factor) - seq_len
 
@@ -132,10 +127,17 @@ def split_to_context_parallel_ranks(global_t, pad_value=0):
     cp_size = get_context_parallel_world_size()
     cp_rank = get_context_parallel_rank()
 
+    # t: [batch, ...]
+    # Number of samples per context parallel rank, rounded up.
     samples_per_rank = (global_t.shape[0] + cp_size - 1) // cp_size
+
+    # Get the local slice
     local_t = global_t[cp_rank * samples_per_rank : (cp_rank + 1) * samples_per_rank]
+
+    # Total padding to have equal samples_per_rank across context parallel ranks.
     global_pad = samples_per_rank * cp_size - global_t.shape[0]
 
+    # Pad the local slice to equal size if needed.
     if local_t.shape[0] < samples_per_rank:
         local_pad = samples_per_rank - local_t.shape[0]
         zeros = torch.full(
@@ -149,71 +151,81 @@ def split_to_context_parallel_ranks(global_t, pad_value=0):
 def _gather_along_second_dim(local_t):
     group = get_context_parallel_group()
     cp_size = get_context_parallel_world_size()
+    # Bypass the function if we are using only 1 context parallel rank.
     if cp_size == 1:
         return local_t
 
     tensor_list = [
-        torch.empty(local_t.shape, device=local_t.device, dtype=local_t.dtype)
+        torch.empty(
+            local_t.shape,
+            device=local_t.device,
+            dtype=local_t.dtype,
+        )
         for _ in range(cp_size)
     ]
     torch.distributed.all_gather(tensor_list, local_t, group=group)
-    return torch.cat(tensor_list, dim=1)
+    global_t = torch.cat(tensor_list, dim=1)
+
+    return global_t
 
 
 def _reduce_scatter_along_second_dim(global_t):
     cp_size = get_context_parallel_world_size()
+    # Bypass the function if we are using only 1 CP rank.
     if cp_size == 1:
         return global_t
 
     assert global_t.shape[1] % cp_size == 0
     samples_per_rank = global_t.shape[1] // cp_size
 
-    tensor_list = [
-        global_t[:, cp_rank * samples_per_rank : (cp_rank + 1) * samples_per_rank]
-        for cp_rank in range(cp_size)
-    ]
+    tensor_list = [global_t[:, cp_rank * samples_per_rank : (cp_rank + 1) * samples_per_rank] for cp_rank in range(cp_size)]
 
-    local_t = torch.zeros(
-        global_t.shape[0],
-        samples_per_rank,
-        *global_t.shape[2:],
-        device=global_t.device,
-        dtype=global_t.dtype,
-    )
+    local_t = torch.zeros(global_t.shape[0], samples_per_rank, *global_t.shape[2:], device=global_t.device, dtype=global_t.dtype)
 
     torch.distributed.reduce_scatter(local_t, tensor_list, group=get_context_parallel_group())
+
     return local_t
 
 
 class GatherFromContextParallelRanks(torch.autograd.Function):
     """Gather the input from context parallel ranks."""
-
     @staticmethod
-    def symbolic(graph, input_):
-        """Symbolic forward used during ``torch.jit`` tracing."""
+    def symbolic(
+        graph,
+        input_,
+    ):
+        """Symbolic function for tracing."""
         return _gather_along_second_dim(input_)
 
     @staticmethod
     def forward(ctx, input_):
-        """All-gather ``input_`` along its second dimension across CP ranks."""
+        """Forward function."""
         return _gather_along_second_dim(input_)
 
     @staticmethod
     def backward(ctx, grad_output):
-        """Reduce-scatter the gradient along the second dimension."""
+        """Backward function."""
         return _reduce_scatter_along_second_dim(grad_output)
 
 
 def gather_from_context_parallel_ranks(local_t, global_pad):
-    """Gather ``local_t`` across CP ranks, removing ``global_pad`` trailing pad tokens."""
     global_t = GatherFromContextParallelRanks.apply(local_t)
+
     if global_pad > 0:
         global_t = global_t[:, :-global_pad]
+
     return global_t
 
-
 def gather_from_context_parallel_ranks_dynamic_res(local_t, num_padded_imgs=0):
-    """Gather dynamic-resolution tensors (variable seq per rank) from CP ranks."""
+    """Gather the tensor local_t from context parallel ranks.
+
+    A twist here is that the tensors have different sequence lengths.
+    So we gather the shapes first, then all-to-all the tensors (all-gather requires same shape).
+
+    Args:
+        local_t: Local tensor to gather
+        num_padded_imgs: Number of padding images that were added in split (will be removed from end)
+    """
     cp_size = get_context_parallel_world_size()
     shape = torch.as_tensor(local_t.shape, device=local_t.device)
     shapes = [torch.empty_like(shape) for _ in range(cp_size)]
@@ -221,92 +233,104 @@ def gather_from_context_parallel_ranks_dynamic_res(local_t, num_padded_imgs=0):
     torch.distributed.all_gather(shapes, shape, group=get_context_parallel_group())
 
     inputs = [local_t] * cp_size
-    outputs = [torch.empty(*s, dtype=local_t.dtype, device=local_t.device) for s in shapes]
+    outputs = [
+        torch.empty(*s, dtype=local_t.dtype, device=local_t.device)
+        for s in shapes
+    ]
     torch.distributed.nn.functional.all_to_all(outputs, inputs, group=get_context_parallel_group())
 
+    # If padding images were added, remove them from the last num_padded_imgs outputs
     if num_padded_imgs > 0:
         outputs = outputs[:-num_padded_imgs]
 
-    return torch.cat(outputs, dim=0)
+    global_t = torch.cat(outputs, dim=0)
+
+    return global_t
 
 
 def _compute_tubelet_aware_split_points(num_frames, temporal_patch_size, cp_size, total_frames):
-    """Compute frame-space split points that respect tubelet boundaries within videos.
+    """Compute split points that respect tubelet boundaries within videos.
 
-    Returns ``cp_size + 1`` split points in **frame** indices (not tubelet indices),
-    since callers slice per-frame ``cu_seqlens`` and ``imgs_sizes`` with these bounds.
-    Splits land on either media boundaries or tubelet boundaries inside a media so
-    that no rank receives a partial tubelet.
+    Args:
+        num_frames: List of frame counts per media item (1 for images, >1 for videos)
+        temporal_patch_size: Number of frames per tubelet (T)
+        cp_size: Number of context parallel ranks
+        total_frames: Total number of frames
+
+    Returns:
+        List of split points (frame indices) for each CP rank boundary
     """
     T = temporal_patch_size
-    target_per_rank = total_frames / cp_size
-
-    media_boundaries = [0]
+    unit_lengths = []
     for nf in num_frames:
-        media_boundaries.append(media_boundaries[-1] + nf)
-    boundary_set = set(media_boundaries)
+        num_tubelets = math.ceil(nf / T)
+        if num_tubelets <= 1:
+            unit_lengths.append(nf)
+            continue
+        for start in range(0, nf, T):
+            unit_lengths.append(min(T, nf - start))
+
+    derived_total_frames = sum(unit_lengths)
+    if derived_total_frames != total_frames:
+        total_frames = derived_total_frames
+
+    # Each split unit is an indivisible image or tubelet. Once dummy padding ensures we have
+    # at least cp_size units, assigning at least one unit per rank guarantees non-empty shards.
+    assert len(unit_lengths) >= cp_size, (
+        f"Expected at least {cp_size} split units after padding, got {len(unit_lengths)} "
+        f"for num_frames={num_frames} and temporal_patch_size={temporal_patch_size}"
+    )
+
+    unit_boundaries = [0]
+    for unit_len in unit_lengths:
+        unit_boundaries.append(unit_boundaries[-1] + unit_len)
 
     split_points = [0]
+    prev_unit_idx = 0
     for rank in range(1, cp_size):
-        target_split = int(rank * target_per_rank)
+        remaining_ranks = cp_size - rank
+        min_unit_idx = prev_unit_idx + 1
+        max_unit_idx = len(unit_lengths) - remaining_ranks
+        target_split = rank * total_frames / cp_size
 
-        # If the target lands exactly on a media boundary, split there cleanly
-        # without forcing a cut into the next media.
-        if target_split in boundary_set:
-            split_point = target_split
-        else:
-            media_idx = 0
-            for i, boundary in enumerate(media_boundaries[1:], 1):
-                if boundary > target_split:
-                    media_idx = i - 1
-                    break
-            else:
-                media_idx = len(num_frames) - 1
+        best_unit_idx = min_unit_idx
+        best_error = float("inf")
+        for unit_idx in range(min_unit_idx, max_unit_idx + 1):
+            candidate = unit_boundaries[unit_idx]
+            error = abs(candidate - target_split)
+            if error < best_error:
+                best_error = error
+                best_unit_idx = unit_idx
 
-            media_start = media_boundaries[media_idx]
-            media_end = media_boundaries[media_idx + 1]
-            nf = num_frames[media_idx]
-            num_tubelets = math.ceil(nf / T)
+        split_points.append(unit_boundaries[best_unit_idx])
+        prev_unit_idx = best_unit_idx
 
-            if num_tubelets <= 1:
-                if target_split - media_start < media_end - target_split:
-                    split_point = media_start
-                else:
-                    split_point = media_end
-            else:
-                offset_in_media = target_split - media_start
-                tubelet_idx = round(offset_in_media / T)
-                tubelet_idx = max(1, min(tubelet_idx, num_tubelets - 1))
-                split_point = media_start + tubelet_idx * T
-                split_point = min(split_point, media_end)
-
-        split_point = max(split_point, split_points[-1])
-        split_points.append(split_point)
-
-    split_points.append(total_frames)
+    split_points.append(total_frames)  # End of last rank
     return split_points
 
 
 def _split_num_frames(num_frames, lb, ub):
-    """Return per-media frame counts clipped to the frame range ``[lb, ub)``.
+    """Split num_frames to match frames in range [lb, ub).
 
-    ``lb`` and ``ub`` are frame indices (the same coordinate system used by
-    :func:`_compute_tubelet_aware_split_points` and the per-frame ``seqlens``
-    array in :func:`split_to_context_parallel_ranks_dynamic_res`). The returned
-    list has one entry per media that contributes at least one frame to the
-    range, with the value being the number of frames of that media in the
-    range.
+    Returns:
+        List of frame counts for media items (or partial media) in the range
     """
     new_num_frames = []
     frame_idx = 0
+
     for nf in num_frames:
         media_start = frame_idx
         media_end = frame_idx + nf
+
+        # Check overlap with [lb, ub)
         overlap_start = max(media_start, lb)
         overlap_end = min(media_end, ub)
+
         if overlap_start < overlap_end:
             new_num_frames.append(overlap_end - overlap_start)
+
         frame_idx = media_end
+
     return new_num_frames
 
 
@@ -314,110 +338,93 @@ def split_to_context_parallel_ranks_dynamic_res(
     global_t,
     global_imgs_sizes,
     global_packed_seq_params,
-    *,
-    patch_dim,
     fp8_enabled=False,
-    fp8_recipe=None,
+    patch_dim=16,
     num_frames=None,
     temporal_patch_size=1,
 ):
-    """Split patched vision input across CP ranks.
+    """Split the tensors global_t and global_imgs_sizes into context parallel world size parts.
 
-    ``global_packed_seq_params`` provides per-image seqlens; the split respects them
-    so each rank owns an integer number of images. When ``temporal_patch_size > 1``,
-    splits also respect tubelet boundaries and ``num_frames`` is required.
+    global_packed_seq_params will be used to compute the local PackedSeqParams corresponding to the split.
+    fp8_enabled is used to compute possible padding.
 
-    Args:
-        global_t: ``[1, total_patches, C * patch_dim * patch_dim]`` patched tokens
-            (pre-embedder). The last dim must equal ``3 * patch_dim * patch_dim``.
-        global_imgs_sizes: ``[num_imgs, 2]`` per-image (H, W) in pixels.
-        global_packed_seq_params: ``PackedSeqParams`` with per-image ``cu_seqlens_q``.
-        patch_dim: Patch size of the vision backbone (e.g. 14 for SigLIP, 16 for
-            many ViTs). Required because dummy padding tensors are sized in patch
-            units and the default would silently mismatch some backbones.
-        fp8_enabled: If True, pad each rank's local sequence to the FP8 multiple
-            (16 by default; 32 for ``mxfp8``).
-        fp8_recipe: Forwarded to :func:`get_padding` so the FP8 padding multiple
-            matches the active recipe.
-        num_frames: Per-media frame count, required when ``temporal_patch_size > 1``.
-        temporal_patch_size: Tubelet size for temporal compression.
+    When temporal_patch_size > 1 (temporal compression), num_frames MUST be provided and the split
+    will respect tubelet boundaries to avoid splitting videos mid-tubelet.
 
     Returns:
-        (local_t, local_imgs_sizes, local_packed_seq_params, has_padding,
-         num_padded_ranks, local_num_frames)
+        local_t: Local tensor for this CP rank
+        local_imgs_sizes: Local image sizes for this CP rank
+        local_packed_seq_params: Local packed sequence params for this CP rank
+        has_padding: Whether FP8 padding was added
+        num_padded_imgs: Number of empty images added to pad when num_imgs < cp_size
+        local_num_frames: Split num_frames for this CP rank (None if temporal_patch_size == 1)
     """
     cp_size = get_context_parallel_world_size()
     cp_rank = get_context_parallel_rank()
 
+    # Temporal compression requires num_frames for proper tubelet-aware splitting
     use_tubelet_aware_split = temporal_patch_size > 1
+    split_points = None
     if use_tubelet_aware_split:
         assert num_frames is not None, (
-            f"num_frames must be provided when using temporal compression "
-            f"(temporal_patch_size={temporal_patch_size})"
+            f"num_frames must be provided when using temporal compression (temporal_patch_size={temporal_patch_size})"
         )
-        num_frames_list = num_frames.tolist() if hasattr(num_frames, "tolist") else list(num_frames)
+        # Convert to list for manipulation
+        num_frames_list = num_frames.tolist() if hasattr(num_frames, 'tolist') else list(num_frames)
 
     cu_seqlens = global_packed_seq_params.cu_seqlens_q
 
+    # Compute how many dummy images needed to ensure all CP ranks have work
     num_imgs = len(global_imgs_sizes)
     if use_tubelet_aware_split:
+        # With temporal compression, we need enough tubelets (not just images) for all ranks.
+        # Each tubelet groups T frames; single-tubelet items can't be split.
+        # Example: num_frames=[30, 1, 1, 1, 1] (one 30-frame video + 4 images), T=2, cp_size=2
+        #   -> total_tubelets = ceil(30/2) + 4*ceil(1/2) = 15 + 4 = 19 (enough for cp_size=2)
+        #   -> num_padded_imgs = max(0, 2 - 19) = 0 (no padding needed)
+        #   -> below: split at tubelet boundary, rank 0 gets 16 frames [16], rank 1 gets 18 frames [14,1,1,1,1]
         T = temporal_patch_size
         total_tubelets = sum(math.ceil(nf / T) for nf in num_frames_list)
         num_padded_imgs = max(0, cp_size - total_tubelets)
     else:
+        # Without temporal compression, we need enough images for all ranks
         num_padded_imgs = max(0, cp_size - num_imgs)
 
-    # This function operates on pre-embedder patches, so the hidden dim is
-    # exactly ``3 * patch_dim * patch_dim``. Both the dummy padding image and
-    # the FP8 right-pad tensor below assume this layout.
-    expected_hidden = 3 * patch_dim * patch_dim
-    assert int(global_t.shape[2]) == expected_hidden, (
-        f"split_to_context_parallel_ranks_dynamic_res expects pre-embedder patches "
-        f"with hidden dim 3*patch_dim*patch_dim={expected_hidden}, got "
-        f"{int(global_t.shape[2])} (patch_dim={patch_dim})."
-    )
+    # Pre-compute dummy image specs (needed for initial padding and potential retries)
+    dummy_img_size = torch.tensor([[patch_dim, patch_dim]], device=global_imgs_sizes.device, dtype=global_imgs_sizes.dtype)
+    hidden_dim = int(global_t.shape[2])
+    dummy_seqlen = int(patch_dim*patch_dim*3/hidden_dim)
+    dummy_img = torch.zeros([1, dummy_seqlen, hidden_dim], device=global_t.device, dtype=global_t.dtype)
 
-    dummy_img_size = torch.tensor(
-        [[patch_dim, patch_dim]], device=global_imgs_sizes.device, dtype=global_imgs_sizes.dtype
-    )
-    hidden_dim = expected_hidden
-    dummy_seqlen = 1
-    dummy_img = torch.zeros(
-        [1, dummy_seqlen, hidden_dim], device=global_t.device, dtype=global_t.dtype
-    )
-
+    # Helper to append N dummy images to the tensors
     def _add_dummies(n, global_t, global_imgs_sizes, cu_seqlens, num_frames_list):
         seqlens = cu_seqlens[1:] - cu_seqlens[:-1]
         for _ in range(n):
             global_imgs_sizes = torch.cat([global_imgs_sizes, dummy_img_size], dim=0)
             global_t = torch.cat([global_t, dummy_img], dim=1)
-            seqlens = torch.cat(
-                [seqlens, torch.tensor([dummy_seqlen], device=seqlens.device, dtype=seqlens.dtype)]
-            )
+            seqlens = torch.cat([seqlens, torch.tensor([dummy_seqlen], device=seqlens.device, dtype=seqlens.dtype)])
         if use_tubelet_aware_split:
             num_frames_list = num_frames_list + [1] * n
-        cu_seqlens = torch.cat(
-            [
-                torch.tensor([0], device=cu_seqlens.device, dtype=cu_seqlens.dtype),
-                torch.cumsum(seqlens, dim=0),
-            ]
-        )
+        cu_seqlens = torch.cat([torch.tensor([0], device=cu_seqlens.device, dtype=cu_seqlens.dtype), torch.cumsum(seqlens, dim=0)])
         return global_t, global_imgs_sizes, cu_seqlens, num_frames_list
 
+    # Add initial dummy images to keep all CP ranks active
     if num_padded_imgs > 0:
         global_t, global_imgs_sizes, cu_seqlens, num_frames_list = _add_dummies(
-            num_padded_imgs,
-            global_t,
-            global_imgs_sizes,
-            cu_seqlens,
-            num_frames_list if use_tubelet_aware_split else None,
+            num_padded_imgs, global_t, global_imgs_sizes, cu_seqlens, num_frames_list
         )
 
+    # Compute split points, aka. sequences per CP rank
+    # TODO: this has imbalance per ranks. Add a better algorithm to balance the load.
     seqlens = cu_seqlens[1:] - cu_seqlens[:-1]
     total_frames = len(global_imgs_sizes)
     num_padded_ranks = num_padded_imgs
-
     if use_tubelet_aware_split:
+        # Use tubelet-aware splitting for video with temporal compression.
+        # The initial padding ensures total_tubelets >= cp_size, but the greedy split
+        # algorithm can still produce duplicate split points when multiple rank targets
+        # map to the same tubelet boundary within a large video. When this happens,
+        # add more dummy images and retry until every rank gets at least one frame.
         for _retry in range(cp_size):
             total_frames = len(global_imgs_sizes)
             split_points = _compute_tubelet_aware_split_points(
@@ -426,12 +433,17 @@ def split_to_context_parallel_ranks_dynamic_res(
             num_empty = sum(1 for k in range(cp_size) if split_points[k] == split_points[k + 1])
             if num_empty == 0:
                 break
+            # Add one dummy per empty rank and retry
             global_t, global_imgs_sizes, cu_seqlens, num_frames_list = _add_dummies(
                 num_empty, global_t, global_imgs_sizes, cu_seqlens, num_frames_list
             )
             num_padded_imgs += num_empty
             seqlens = cu_seqlens[1:] - cu_seqlens[:-1]
 
+        # Ensure no rank straddles the real/dummy boundary.
+        # original_total_frames is always a media boundary (start of the first dummy),
+        # so forcing a split there preserves tubelet alignment and doesn't create
+        # empty ranks (there are real frames before it and dummy frames after).
         original_total_frames = total_frames - num_padded_imgs
         if num_padded_imgs > 0 and original_total_frames not in split_points:
             for k in range(cp_size):
@@ -439,6 +451,8 @@ def split_to_context_parallel_ranks_dynamic_res(
                     split_points[k + 1] = original_total_frames
                     break
 
+        # Compute how many trailing CP ranks contain only dummy data.
+        # The gather uses this count to remove trailing rank outputs.
         num_padded_ranks = 0
         if num_padded_imgs > 0:
             for i in range(cp_size - 1, -1, -1):
@@ -451,11 +465,10 @@ def split_to_context_parallel_ranks_dynamic_res(
         ub = split_points[cp_rank + 1]
         local_num_frames = _split_num_frames(num_frames_list, lb, ub)
     else:
+        # Original logic: split by frame count (no temporal compression)
         seq_per_rank = total_frames // cp_size
         lb = cp_rank * seq_per_rank
-        # The last rank absorbs the remainder so the union of [lb, ub) ranges
-        # exactly covers the [0, total_frames) image set.
-        ub = (cp_rank + 1) * seq_per_rank if cp_rank < cp_size - 1 else total_frames
+        ub = (cp_rank + 1) * seq_per_rank if cp_rank < cp_size - 1 else len(cu_seqlens)
         local_num_frames = None
 
     seqlens_local = torch.cat([torch.tensor([0], device=seqlens.device), seqlens[lb:ub]])
@@ -465,25 +478,12 @@ def split_to_context_parallel_ranks_dynamic_res(
 
     pad_img = None
     if fp8_enabled:
-        padding_needed = get_padding(
-            final_seqlen, 1, 1, False, fp8_enabled=True, fp8_recipe=fp8_recipe
-        )
+        padding_needed = get_padding(final_seqlen, 1, 1, False, fp8_enabled=True)
+        patch_dim = 16
+
         if padding_needed > 0:
-            pad_img = torch.zeros(
-                [1, padding_needed, patch_dim * patch_dim * 3],
-                device=global_t.device,
-                dtype=global_t.dtype,
-            )
-            cu_seqlens_local = torch.cat(
-                [
-                    cu_seqlens_local,
-                    torch.tensor(
-                        [final_seqlen + padding_needed],
-                        device=cu_seqlens_local.device,
-                        dtype=cu_seqlens_local.dtype,
-                    ),
-                ]
-            )
+            pad_img = torch.zeros([1, padding_needed, patch_dim * patch_dim * 3], device=global_t.device, dtype=global_t.dtype)
+            cu_seqlens_local = torch.cat([cu_seqlens_local, torch.tensor([final_seqlen + padding_needed], device=cu_seqlens_local.device, dtype=cu_seqlens_local.dtype)])
 
     has_padding = pad_img is not None
 
@@ -494,43 +494,30 @@ def split_to_context_parallel_ranks_dynamic_res(
         cu_seqlens_q_padded=None,
         cu_seqlens_kv_padded=None,
     )
+
     max_seqlen_local = max(seqlens_local).to(torch.int32)
     local_packed_seq_params.max_seqlen_q = max_seqlen_local
     local_packed_seq_params.max_seqlen_kv = max_seqlen_local
 
     local_imgs_sizes = global_imgs_sizes[lb:ub]
     if has_padding:
-        local_imgs_sizes = torch.cat(
-            [
-                local_imgs_sizes,
-                torch.tensor(
-                    [[patch_dim, patch_dim * padding_needed]],
-                    device=local_imgs_sizes.device,
-                    dtype=local_imgs_sizes.dtype,
-                ),
-            ]
-        )
+        local_imgs_sizes = torch.cat([local_imgs_sizes, torch.tensor([[patch_dim, patch_dim * padding_needed]], device=local_imgs_sizes.device, dtype=local_imgs_sizes.dtype)])
 
     offset = torch.cumsum(seqlens[:lb], dim=0)[-1] if lb > 0 else 0
 
     if not has_padding:
         local_t = global_t[:, offset + cu_seqlens_local[0] : offset + cu_seqlens_local[-1]]
     else:
-        local_t = torch.cat(
-            [global_t[:, offset + cu_seqlens_local[0] : offset + cu_seqlens_local[-2]], pad_img],
-            dim=1,
-        )
+        local_t = torch.cat([global_t[:, offset + cu_seqlens_local[0] : offset + cu_seqlens_local[-2]], pad_img], dim=1)
 
+    # Convert local_num_frames to tensor if provided
     if local_num_frames is not None:
-        local_num_frames = torch.tensor(
-            local_num_frames, dtype=torch.int32, device=global_imgs_sizes.device
-        )
+        local_num_frames = torch.tensor(local_num_frames, dtype=torch.int32, device=global_imgs_sizes.device)
 
-    return (
-        local_t,
-        local_imgs_sizes,
-        local_packed_seq_params,
-        has_padding,
-        num_padded_ranks,
-        local_num_frames,
+    assert lb < ub and local_imgs_sizes.numel() > 0, (
+        f"Context-parallel split produced an empty local shard: cp_rank={cp_rank}, cp_size={cp_size}, "
+        f"lb={lb}, ub={ub}, num_padded_imgs={num_padded_imgs}, split_points={split_points}, "
+        f"use_tubelet_aware_split={use_tubelet_aware_split}, temporal_patch_size={temporal_patch_size}"
     )
+
+    return local_t, local_imgs_sizes, local_packed_seq_params, has_padding, num_padded_ranks, local_num_frames
