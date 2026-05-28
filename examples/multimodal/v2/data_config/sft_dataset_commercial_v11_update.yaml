@@ -1,0 +1,16 @@
+__module__: megatron.energon
+__class__: Metadataset
+splits:
+  train:
+    datasets:
+      - weight: 1.0
+        path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/commercial/sft_v11_update
+        subflavor: no_augmentation
+        subflavors:
+          has_image: True
+  val:
+    datasets:
+      - weight: 1.
+        path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vqa/VQAv2/stage1
+        subflavors:
+          augmentation: False

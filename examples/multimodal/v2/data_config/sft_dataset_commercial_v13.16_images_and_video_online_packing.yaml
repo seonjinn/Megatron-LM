@@ -1,0 +1,17 @@
+__module__: megatron.energon
+__class__: MetadatasetV2
+splits:
+  train:
+    blend_epochized:
+    - repetitions: 1
+      path: /lustre/fsw/portfolios/llmservice/users/lvoegtle/src/megatron-lm/tmpdata/eagle_sft_v13.16_sft1/metadataset.yaml
+      subflavors:
+        augmentation: False
+    - repetitions: 1
+      path: /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/megatron-lm5/DST_PATH2/eagle_video.yaml
+      subflavors:
+        augmentation: False
+  val:
+    path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vqa/VQAv2/stage1
+    subflavors:
+      augmentation: False

@@ -1,0 +1,15 @@
+__module__: megatron.energon
+__class__: Metadataset
+splits:
+  train:
+    datasets:
+      - weight: 1.
+        path: /lustre/fs1/portfolios/llmservice/users/ksapra/data/pretraining/llama_free_plus_29kocr_plus1munfiltered
+        subflavors:
+          has_image: True
+  val:
+    datasets:
+      - weight: 1.
+        path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vqa/VQAv2/stage1
+        subflavors:
+          augmentation: False
