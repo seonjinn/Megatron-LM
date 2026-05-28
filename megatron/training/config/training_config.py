@@ -67,9 +67,15 @@ class TrainingConfig:
     Note that either train_iters or train_samples should be provided.
     """
 
+    train_full_dataset: bool = False
+    """Train on the full dataset."""
+
     train_samples: int | None = None
     """Total number of samples to train over all training runs.
     Note that either train_iters or train_samples should be provided."""
+
+    early_exit_iters: int | None = None
+    """Exit the program after this many iterations regardless of the configured training schedule."""
 
     exit_interval: int | None = None
     """Exit the program after the iteration is divisible by this value."""

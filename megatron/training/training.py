@@ -1226,6 +1226,26 @@ def pretrain(
     else:
         checkpointing_context = {}
 
+    if args.train_full_dataset:
+        # This path is only validated for the multimodal dataloader. It builds
+        # the dataloader once to derive the sample count used by the scheduler.
+        assert (
+            "examples/multimodal/dataloader_provider.py"
+            in train_valid_test_dataset_provider.__code__.co_filename
+        ), "train_full_dataset is only supported for the multimodal case so far."
+        assert args.train_iters is None, "train_iters should be None when training on the full dataset"
+        assert args.train_samples is None, "train_samples should be None when training on the full dataset"
+        args.iteration = 0
+        train_data_iterator, _, _ = train_valid_test_dataset_provider(None)
+        train_data_iterator_length = (
+            len(train_data_iterator._dataloader)
+            if hasattr(train_data_iterator, "_dataloader")
+            else None
+        )
+        train_data_iterator_length = _reduce_sum_across_data_parallel_group(train_data_iterator_length)
+        train_data_iterator_length = reduce_max_stat_across_model_parallel_group(train_data_iterator_length)
+        args.train_samples = int(train_data_iterator_length)
+
     # Model, optimizer, and learning rate.
     timers('model-and-optimizer-setup', log_level=0).start(barrier=True)
     model, optimizer, opt_param_scheduler = setup_model_and_optimizer(
@@ -1878,6 +1898,17 @@ def get_optimizer_param_scheduler(optimizer):
     )
 
     return opt_param_scheduler
+
+
+def _reduce_sum_across_data_parallel_group(stat: float) -> float | None:
+    """Reduce a scalar stat across the data parallel group."""
+    if stat is None:
+        stat = 0.0
+    stat = torch.tensor([stat], dtype=torch.float32, device=torch.cuda.current_device())
+    torch.distributed.all_reduce(stat, op=torch.distributed.ReduceOp.SUM, group=mpu.get_data_parallel_group())
+    if stat.item() == 0.0:
+        return None
+    return stat.item()
 
 
 def get_megatron_optimizer_config(args: Any) -> OptimizerConfig:
@@ -3059,6 +3090,22 @@ def checkpoint_and_decide_exit(
 
         return True
 
+    # Exit based on a fixed verification iteration count.
+    if args.early_exit_iters and iteration >= args.early_exit_iters:
+        if args.save and not saved_checkpoint:
+            save_checkpoint_and_time(
+                iteration,
+                model,
+                optimizer,
+                opt_param_scheduler,
+                num_floating_point_operations_so_far,
+                checkpointing_context,
+                train_data_iterator=train_data_iterator,
+            )
+        print_datetime(f'exiting program at iteration {iteration} (early_exit_iters={args.early_exit_iters})')
+
+        return True
+
     return False
 
 
@@ -3396,9 +3443,16 @@ def train(
             optimizers=[optimizer],
         )
 
+    def _finished_training(iteration):
+        return (
+            (args.train_iters and iteration >= args.train_iters)
+            or (args.train_samples and args.consumed_train_samples >= args.train_samples)
+            or (args.early_exit_iters and iteration >= args.early_exit_iters)
+        )
+
     # Run training iterations till done.
     buffered_rollouts = None
-    while iteration < args.train_iters:
+    while not _finished_training(iteration):
         if (args.profile 
             and (len(args.profile_ranks) == 0 or
                  torch.distributed.get_rank() in args.profile_ranks)):
