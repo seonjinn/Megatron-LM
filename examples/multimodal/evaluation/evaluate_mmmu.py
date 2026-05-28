@@ -7,7 +7,7 @@ import sys
 import re
 import subprocess
 
-from .mmmu_utils import parse_multi_choice_response
+from mmmu_utils import parse_multi_choice_response
 # Get the absolute path of the parent directory
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
 # Add the parent directory to sys.path
