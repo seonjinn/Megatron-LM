@@ -1,0 +1,124 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/video_qa_yt8m/reasoning_cleaned/output_video_qa_yt8m_action_reasoning_correct.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/YouTube8M/
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/video_qa_yt8m/reasoning_cleaned/output_video_qa_yt8m_action_reasoning_incorrect.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/YouTube8M/
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/video_qa_yt8m/reasoning_cleaned/output_video_qa_yt8m_action_recognition_correct.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/YouTube8M/
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/video_qa_yt8m/reasoning_cleaned/output_video_qa_yt8m_action_recognition_incorrect.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/YouTube8M/
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/video_qa_yt8m/reasoning_cleaned/output_video_qa_yt8m_attribute_perception_correct.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/YouTube8M/
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/video_qa_yt8m/reasoning_cleaned/output_video_qa_yt8m_attribute_perception_incorrect.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/YouTube8M/
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/video_qa_yt8m/reasoning_cleaned/output_video_qa_yt8m_counting_problem_correct.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/YouTube8M/
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/video_qa_yt8m/reasoning_cleaned/output_video_qa_yt8m_counting_problem_incorrect.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/YouTube8M/
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/video_qa_yt8m/reasoning_cleaned/output_video_qa_yt8m_object_reasoning_correct.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/YouTube8M/
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/video_qa_yt8m/reasoning_cleaned/output_video_qa_yt8m_object_reasoning_incorrect.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/YouTube8M/
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/video_qa_yt8m/reasoning_cleaned/output_video_qa_yt8m_ocr_problems_correct.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/YouTube8M/
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/video_qa_yt8m/reasoning_cleaned/output_video_qa_yt8m_ocr_problems_incorrect.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/YouTube8M/
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/video_qa_yt8m/reasoning_cleaned/output_video_qa_yt8m_temporal_perception_correct.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/YouTube8M/
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/video_qa_yt8m/reasoning_cleaned/output_video_qa_yt8m_temporal_perception_incorrect.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/YouTube8M/
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/video_qa_yt8m/reasoning_cleaned/output_yt1b_qa_plm_sampled_correct.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/PLM_video_data/fgqa_videos
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/video_qa_yt8m/reasoning_cleaned/output_yt1b_qa_plm_sampled_incorrect.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/PLM_video_data/fgqa_videos
+      repetitions: 1
+      # Correct data, Yt1B PLM QA 600k sample thinking traces
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/PLM_video_data/reasoning_cleaned/yt1b_qa_plm_sampled_thinking_traces_safetyfix0323.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/ntadevosyan/data/yttemporal180m-youtube-dataset/
+      repetitions: 1
+    # Correct data, Yt1B PLM QA 900k sample dense captions without thinking traces
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/PLM_video_data/reasoning_cleaned/yt1b_qa_plm_sampled_dense_captions_no_think_safetyfix0323.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/ntadevosyan/data/yttemporal180m-youtube-dataset/
+      repetitions: 1
+
+
+    # Correct data, Yt1B PLM QA 900k sample dense captions with thinking traces
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/PLM_video_data/reasoning/yt1b_qa_plm_sampled_dense_captions.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/ntadevosyan/data/yttemporal180m-youtube-dataset/
+      repetitions: 1

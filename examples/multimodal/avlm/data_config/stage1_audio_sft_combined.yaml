@@ -1,0 +1,17 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+
+      #########################################################
+      # ASR Datasets
+      #########################################################
+
+      ### Granary ###
+      - path: granary.yaml
+        repetitions: 1
+
+      ### Riva ASR ###
+      - path: riva_asr.yaml
+        repetitions: 1

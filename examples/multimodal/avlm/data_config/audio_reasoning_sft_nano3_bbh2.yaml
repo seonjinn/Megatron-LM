@@ -1,0 +1,19 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+    - path: audio_reasoning_sft_nano3_filtered_rep1.yaml
+      repetitions: 2
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nemo_speechlm/data/omni_post_training/energon/speech_instruct_SDG/bbh_logical_reasoning/train_bbh_logical_reasoning.jsonl
+      repetitions: 1
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nemo_speechlm/data/omni_post_training/energon/speech_instruct_SDG/bbh_logical_reasoning/audio
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nemo_speechlm/data/omni_post_training/energon/speech_instruct_SDG/bbh_spatial_reasoning/train_bbh_spatial_reasoning.jsonl
+      repetitions: 1
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nemo_speechlm/data/omni_post_training/energon/speech_instruct_SDG/bbh_spatial_reasoning/audio

@@ -1,0 +1,2274 @@
+__module__: megatron.energon
+__class__: MetadatasetV2
+splits:
+  train:
+    blend_epochized:
+    #########################################################
+    # Eagle SFT v13.52
+    #########################################################
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/vila_v3_backup/LN_VILA_augment_caption_nmh5r
+      subflavors:
+        name: LN_VILA_augment_caption_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 503275
+        orig_length: 100000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/openimages
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/vila_v3_backup/OI_VILA_caption_1.2M_filt_nmh5r
+      subflavors:
+        name: OI_VILA_caption_1.2M_filt_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 1278221
+        orig_length: 100000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/openimages
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/vila_v3_backup/textcaps_nmh5r
+      subflavors:
+        name: textcaps_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 21953
+        orig_length: 100000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/Cambrian-10M
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/vila_v3_backup/textcaps_commercial_new_nmh5r
+      subflavors:
+        name: textcaps_commercial_new_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 109765
+        orig_length: 100000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/Cambrian-10M/textvqa
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/vila_v3_backup/textvqa_commercial_new_nmh5r
+      subflavors:
+        name: textvqa_commercial_new_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 34602
+        orig_length: 100000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/Cambrian-10M/textvqa
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/vila_v3_backup/refcoco_updated_nmh5r
+      subflavors:
+        name: refcoco_updated_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 14694
+        orig_length: 100000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/vila_v3_backup/vqav2_okvqa_updated_nmh5r
+      subflavors:
+        name: vqav2_okvqa_updated_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 28555
+        orig_length: 100000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data
+    - repetitions: 1
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/vila_v3_backup/a_okvqa_legal_updated_nmh5r
+      subflavors:
+        name: a_okvqa_legal_updated_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 20832
+        orig_length: 100000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/vila_v3_backup/gqa_updated_new_nmh5r
+      subflavors:
+        name: gqa_updated_new_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 21433
+        orig_length: 100000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/Cambrian-10M/gqa/images
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/vila_v3_backup/aokvqa_commercial_new_nmh5r
+      subflavors:
+        name: aokvqa_commercial_new_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 16131
+        orig_length: 100000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/coco
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/vila_v3_backup/clevr_merge_explanation_nmh5r
+      subflavors:
+        name: commercial_clevr_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 70000
+        orig_length: 70000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/Cambrian-10M/clevr/CLEVR_v1.0
+    - repetitions: 5.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl_draco/eagle_v1/clevr_math_merged_70k_nmh5r
+      subflavors:
+        name: clevr_math_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 70000
+        orig_length: 70000
+        category: Counter
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/Cambrian-10M/clevr/CLEVR_v1.0/images/train
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/length/commercial_synthdog-en_nmh5r
+      subflavors:
+        name: commercial_synthdog-en_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 29672
+        orig_length: 29765
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/data
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/length/commercial_wit_1_8m_nmh5r
+      subflavors:
+        name: commercial_wit_1_8m_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 538916
+        orig_length: 538990
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/vila_v3_backup/oasst_processed_laion_openasst_nmh5r
+      subflavors:
+        name: oasst_processed_laion_openasst_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 47118
+        orig_length: 538990
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/vila_v3_backup/vatex_subset_nmh5r
+      subflavors:
+        name: vatex_subset_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 2880
+        orig_length: 538990
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/video/vatex/videos_clipped
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/vila_v3_backup/youcook_subset_nmh5r
+      subflavors:
+        name: youcook2_subset_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 36
+        orig_length: 538990
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/video/youcook2/video_data_clipped
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/vila_v3_backup/processed_videos_v1_cosmos_caption_nmh5r
+      subflavors:
+        name: processed_videos_v1_cosmos_caption_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 274472
+        orig_length: 538990
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/video/processed_videos_v1
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/vila_v3_backup/vcg_subset_nmh5r
+      subflavors:
+        name: vcg_subset_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 164
+        orig_length: 538990
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/video/activitynet_videos
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/vila_v3_backup/vidln_combined_nmh5r
+      subflavors:
+        name: vidln_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 373
+        orig_length: 538990
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/video/vidln
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/vila_v3_backup/df_v1_nmh5r
+      subflavors:
+        name: df_v1_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 24998
+        orig_length: 538990
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/1m_caption_Nov_19_24/all_images
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/vila_v3_backup/approved_20240921_nmh5r
+      subflavors:
+        name: hf_data_approved_20240921_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 302004
+        orig_length: 538990
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/Cambrian-10M
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/tallyqa_filtered_commercial_nmh5r
+      subflavors:
+        name: tally_qa_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 68775
+        orig_length: 538990
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/Cambrian-10M
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/vila_v3_backup/df_human_v1_nmh5r
+      subflavors:
+        name: df_human_v1_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 14256
+        orig_length: 538990
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/video/human_labeled
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/new_jsonl/invisible_aug_prompts_v2_nmh5r
+      subflavors:
+        name: nv_invisible_aug_v2_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 20250
+        orig_length: 10000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/data/vendor_dataset/enterprise/images/invisible_vqa
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/new_jsonl/turing_aug_prompts_v2_nmh5r
+      subflavors:
+        name: nv_turing_aug_v2_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 20098
+        orig_length: 10000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/data/vendor_dataset/enterprise/images/turing_vqa
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl_draco/eagle_v1/scale_nv_nmh5r
+      subflavors:
+        name: scale_nv_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 14872
+        orig_length: 14882
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/scale/images
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/eagle_v1/textbooks_nv_nmh5r
+      subflavors:
+        name: textbooks_nv_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 46745
+        orig_length: 46745
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/textbooks
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/nv_ocr_datasets/synthtabnet_blocks/raw/synthtabnet_blocks_nmh5r
+      subflavors:
+        name: synthtabnet_blocks_nmh5r
+        cook: conversation
+        data_augment: false
+        length: 200000
+        orig_length: 200000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/nv_ocr_datasets/synthtabnet_blocks/raw/images
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/human_annotation_v2_ground_augmented_v1_tables_mixprompts_nmh5r
+      subflavors:
+        name: human_annotation_2_ocr_ground_aug_tables_mixprompts_v1_nmh5r
+        cook: conversation
+        data_augment: false
+        length: 8461
+        orig_length: 8461
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/human_annotation_v2_ground_augmented_v1_tables_mixprompts
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/human_annotation_v2_ground_augmented_v2_tables_mixprompts_nmh5r
+      subflavors:
+        name: human_annotation_2_ocr_ground_aug_tables_mixprompts_v2_nmh5r
+        cook: conversation
+        data_augment: false
+        length: 8462
+        orig_length: 8462
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/human_annotation_v2_ground_augmented_v2_tables_mixprompts
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/human_annotation_v0_ground_augmented_v3_tables_mixprompts_nmh5r
+      subflavors:
+        name: human_annotation_ocr_ground_aug_tables_mixprompts_v3_nmh5r
+        cook: conversation
+        data_augment: false
+        length: 14236
+        orig_length: 14236
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/human_annotation_v0_ground_augmented_v3_tables_mixprompts
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/human_annotation_v0_ground_augmented_v2_tables_mixprompts_nmh5r
+      subflavors:
+        name: human_annotation_ocr_ground_aug_tables_mixprompts_nmh5r
+        cook: conversation
+        data_augment: false
+        length: 14232
+        orig_length: 14232
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/human_annotation_v0_ground_augmented_v2_tables_mixprompts
+    - repetitions: 4.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/nv_ocr_datasets/nvpdftex_clean_v11/nvpdftex_clean_v11_600K_grounding_nmh5r
+      subflavors:
+        name: nvpdftex_clean_v11_600K_grounding_nmh5r
+        cook: conversation
+        data_augment: false
+        length: 599927
+        orig_length: 599927
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/nv_ocr_datasets/nvpdftex_clean_v11/images
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/nvpdftex_clean_augmented_v3_1_6M_grounding_augv2_mixprompts_nmh5r
+      subflavors:
+        name: nvpdftex_augmented_v3_augmented_v2_mixprompts_nmh5r
+        cook: conversation
+        data_augment: false
+        length: 1565011
+        orig_length: 599927
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/nvpdftex_augmented_v3_augmented_v2
+    - repetitions: 3.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/doclaynet_augmented_v2_tables_mixprompts_nmh5r
+      subflavors:
+        name: doclaynet_ro_v4_augmented_v2_tables_mixprompts_v2_nmh5r
+        cook: conversation
+        data_augment: false
+        length: 48249
+        orig_length: 48249
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/doclaynet_augmented_v2_tables_mixprompts
+    - repetitions: 3.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/doclaynet_augmented_v1_tables_mixprompts_nmh5r
+      subflavors:
+        name: doclaynet_ro_v4_augmented_v1_tables_mixprompts_nmh5r
+        cook: conversation
+        data_augment: false
+        length: 48267
+        orig_length: 48267
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/doclaynet_augmented_v1_tables_mixprompts
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/nv_ocr_datasets/SynthTables/SynthTables_nmh5r
+      subflavors:
+        name: SynthTables_nmh5r
+        cook: conversation
+        data_augment: false
+        length: 4887
+        orig_length: 4887
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/nv_ocr_datasets/SynthTables/images
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/openimages_v7/det_2_nlp_coord_nmh5r
+      subflavors:
+        name: det_2_nlp_coord_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 1664533
+        orig_length: 1664533
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/openimages/train
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/openimages_v7/det_2_nlp_coord_detect_all_nmh5r
+      subflavors:
+        name: det_2_nlp_coord_detect_all_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 1664533
+        orig_length: 1664533
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/openimages/train
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/openimages_v7/det_2_nlp_size_nmh5r
+      subflavors:
+        name: det_2_nlp_size_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 1128326
+        orig_length: 1128326
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/openimages/train
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/reasoning_clevrer_mc_converted_nmh5r
+      subflavors:
+        name: reasoning_clevrer_mc_converted_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 42620
+        orig_length: 42620
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/clevrer
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/reasoning_clevrer_qa_converted_nmh5r
+      subflavors:
+        name: reasoning_clevrer_qa_converted_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 40000
+        orig_length: 40000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/clevrer
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/vila_v3_backup/nextqa_subset_nmh5r
+      subflavors:
+        name: nextqa_subset_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 10368
+        orig_length: 10368
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/NExTQA/test
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/brainy-mantis_commercial.shuf.eagle_nmh5r
+      subflavors:
+        name: brainy-mantis_commercial.shuf.eagle_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 197938
+        orig_length: 199546
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data
+    - repetitions: 6.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/format4/chartqa_aug_base_nmh5r
+      subflavors:
+        name: chartqa_aug_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 15121
+        orig_length: 15121
+        category: Chart
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/ChartQA/ChartQA_Dataset
+    - repetitions: 6.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/format4/chartqa_aug_yn_base_nmh5r
+      subflavors:
+        name: chartqa_aug_yn_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 15050
+        orig_length: 15050
+        category: Chart
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/ChartQA/ChartQA_Dataset
+    - repetitions: 6.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/format4/chartqa_qwen_max_cot_base_nmh5r
+      subflavors:
+        name: chartqa_qwen_max_cot_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 23571
+        orig_length: 23581
+        category: Chart
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/Cambrian-10M
+    - repetitions: 6.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/format4/chartqa_base_nmh5r
+      subflavors:
+        name: chartqa_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 60438
+        orig_length: 60438
+        category: Chart
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/ChartQA/ChartQA_Dataset
+    - repetitions: 4.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/format4/docvqa_base_nmh5r
+      subflavors:
+        name: docvqa_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 39463
+        orig_length: 39463
+        category: OCR
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/Cambrian-10M
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/format4/docvqa_cot_base_nmh5r
+      subflavors:
+        name: docvqa_cot_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 16881
+        orig_length: 16881
+        category: OCR
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/Cambrian-10M/docvqa/documents
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/format4/cauldron_websight_base_nmh5r
+      subflavors:
+        name: cauldron_websight_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 9809
+        orig_length: 9910
+        category: Code
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/cauldron
+    - repetitions: 6.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/format4/ai2d_base_nmh5r
+      subflavors:
+        name: ai2d_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 12413
+        orig_length: 15501
+        category: OCR
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/ai2d/ai2d
+    - repetitions: 5.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/format4/scienceqa_base_nmh5r
+      subflavors:
+        name: scienceqa_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 12716
+        orig_length: 12726
+        category: Science
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/ScienceQA
+    - repetitions: 4.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/format4/scienceqa_onevision_base_nmh5r
+      subflavors:
+        name: scienceqa_onevision_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 19196
+        orig_length: 19208
+        category: Science
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/LLaVA-OneVision-Data/scienceqa(nona_context)/images
+    - repetitions: 5.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/format4/geo_s_base_nmh5r
+      subflavors:
+        name: geo_s_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 13263
+        orig_length: 13263
+        category: Math
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/Cambrian-10M
+    - repetitions: 6.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/format4/infovqa_base_nmh5r
+      subflavors:
+        name: infovqa_nmh5r
+        cook: conversation
+        data_augment: false
+        length: 23946
+        orig_length: 23946
+        category: OCR
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/infovqa/images
+    - repetitions: 4.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/format4/pmc_vqa_s_base_nmh5r
+      subflavors:
+        name: pmc_vqa_s_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 2266
+        orig_length: 2266
+        category: Med
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/pmc_vqa/PMC-VQA/figures
+    - repetitions: 3.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/format4/tab_mwp_base_nmh5r
+      subflavors:
+        name: tab_mwp_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 23058
+        orig_length: 23058
+        category: Table
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/tabmwp/tabmwp/tables
+    - repetitions: 3.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/format4/tab_mwp_qwenvl_cot_base_nmh5r
+      subflavors:
+        name: tab_mwp_qwenvl_cot_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 20305
+        orig_length: 20305
+        category: Table
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/tabmwp/tabmwp/tables
+    - repetitions: 5.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/format4/cauldron_ocrvqa_base_nmh5r
+      subflavors:
+        name: cauldron_ocrvqa_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 165746
+        orig_length: 165746
+        category: OCR
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/cauldron
+    - repetitions: 4.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/format4/est_vqa_base_nmh5r
+      subflavors:
+        name: est_vqa_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 17043
+        orig_length: 17043
+        category: OCR
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/estvqa/train
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/format4/cauldron_st_vqa_base_nmh5r
+      subflavors:
+        name: cauldron_st_vqa_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 17232
+        orig_length: 17247
+        category: DOC
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/cauldron
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/format4/HME100K_base_nmh5r
+      subflavors:
+        name: HME100K_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 74502
+        orig_length: 74502
+        category: OCR
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/haoweilai/HME100K/train_images
+    - repetitions: 3.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/format4/HME100K_s_base_nmh5r
+      subflavors:
+        name: HME100K_s_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 6499
+        orig_length: 6499
+        category: OCR
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/haoweilai/HME100K/train_images
+    - repetitions: 3.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/eagle_v1/pixmo-cap-qa_nmh5r
+      subflavors:
+        name: pixmo-cap-qa_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 214978
+        orig_length: 10000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/data/pixmo-cap-qa-images/images
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/eagle_v1/pixmo-ask-model-anything_nmh5r
+      subflavors:
+        name: pixmo-ask-model-anything_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 153592
+        orig_length: 10000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/data/pixmo-ask-model-anything-images/images
+    - repetitions: 4.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/eagle_v1/pixmo-cap_nmh5r
+      subflavors:
+        name: pixmo-cap_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 706897
+        orig_length: 10000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/data/pixmo-cap-images/images
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/format4/TAL_OCR_ENG_base_nmh5r
+      subflavors:
+        name: TAL_OCR_ENG_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 9998
+        orig_length: 10000
+        category: OCR
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/haoweilai/TAL_OCR_ENG/data_composition
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/format4/SlideVQA_base_nmh5r
+      subflavors:
+        name: SlideVQA_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 5773
+        orig_length: 5773
+        category: OCR
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/SlideVQA/images
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/format4/allava_laion_base_nmh5r
+      subflavors:
+        name: allava_laion_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 505360
+        orig_length: 505360
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/Cambrian-10M
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/format4/allava_laion_s_base_nmh5r
+      subflavors:
+        name: allava_laion_s_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 19532
+        orig_length: 19532
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/Cambrian-10M
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/format4/allava_vflan_base_nmh5r
+      subflavors:
+        name: allava_vflan_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 202223
+        orig_length: 202899
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/Cambrian-10M
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/format4/allava_vflan_s_base_nmh5r
+      subflavors:
+        name: allava_vflan_s_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 25553
+        orig_length: 25571
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/Cambrian-10M
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/tabrecset_html_nmh5r
+      subflavors:
+        name: tabrecset_html_nmh5r
+        cook: conversation
+        data_augment: false
+        length: 25281
+        orig_length: 25281
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/TabRecSet/image
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/tabrecset_html_clean_augmented_v2_nmh5r
+      subflavors:
+        name: tabrecset_html_augmented_v2_nmh5r
+        cook: conversation
+        data_augment: false
+        length: 25281
+        orig_length: 25281
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/TabRecSet_augmented_v2
+    - repetitions: 3.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/fintabnet_html_bbox_nmh5r
+      subflavors:
+        name: fintabnet_html_bbox_nmh5r
+        cook: conversation
+        data_augment: false
+        length: 57137
+        orig_length: 57137
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/fintabnet
+    - repetitions: 3.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/fintabnet_html_bbox_augmented_v2_mixprompts_nmh5r
+      subflavors:
+        name: fintabnet_html_bbox_augmented_v2_mixprompts_nmh5r
+        cook: conversation
+        data_augment: false
+        length: 57131
+        orig_length: 57137
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/fintabnet_augmented_v2_mixprompts
+    - repetitions: 3.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/fintabnet_html_bbox_augmented_v3_mixprompts_nmh5r
+      subflavors:
+        name: fintabnet_html_bbox_augmented_v3_mixprompts_nmh5r
+        cook: conversation
+        data_augment: false
+        length: 57129
+        orig_length: 57137
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/fintabnet_augmented_v3_mixprompts
+    - repetitions: 3.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/jsonl/pubtables_1m_html_bbox_fixed_nmh5r
+      subflavors:
+        name: pubtables_1m_html_bbox_fixed_nmh5r
+        cook: conversation
+        data_augment: false
+        length: 224170
+        orig_length: 224170
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/pubtables_1m
+    - repetitions: 3.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/pubtables_1m_html_bbox_augmented_v1_nmh5r
+      subflavors:
+        name: pubtables_1m_html_bbox_fixed_augmented_nmh5r
+        cook: conversation
+        data_augment: false
+        length: 224169
+        orig_length: 224169
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/pubtables_1m_augmented_v1
+    - repetitions: 3.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/pubtables_1m_html_bbox_augmented_v1_mixprompts_nmh5r
+      subflavors:
+        name: pubtables_1m_html_bbox_fixed_augmented_mixprompts_nmh5r
+        cook: conversation
+        data_augment: false
+        length: 225108
+        orig_length: 225108
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/pubtables_1m_augmented_v1_mixprompts
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/smoketest_ascii_v5_15K_nmh5r
+      subflavors:
+        name: smoketest_ascii_v5_15K_nmh5r
+        cook: conversation
+        data_augment: false
+        length: 14533
+        orig_length: 14554
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/smoketest_ascii_v5_15K
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/smoketest_ascii_v5_15K_augmented_v1_nmh5r
+      subflavors:
+        name: smoketest_ascii_v5_15K_augmented_v1_nmh5r
+        cook: conversation
+        data_augment: false
+        length: 14533
+        orig_length: 14554
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/smoketest_ascii_v5_15K_augmented_v1
+    - repetitions: 3.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/smoketest_chinese_v5_30K_nmh5r
+      subflavors:
+        name: smoketest_chinese_v5_30K_nmh5r
+        cook: conversation
+        data_augment: false
+        length: 29108
+        orig_length: 29123
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/smoketest_chinese_v5_30K
+    - repetitions: 3.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/smoketest_chinese_v5_30K_augmented_v1_nmh5r
+      subflavors:
+        name: smoketest_chinese_v5_30K_augmented_v1_nmh5r
+        cook: conversation
+        data_augment: false
+        length: 29108
+        orig_length: 29123
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/smoketest_chinese_v5_30K_augmented_v1
+    - repetitions: 3.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/smoketest_english_v5_15K_nmh5r
+      subflavors:
+        name: smoketest_english_v5_15K_nmh5r
+        cook: conversation
+        data_augment: false
+        length: 14525
+        orig_length: 14557
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/smoketest_english_v5_15K
+    - repetitions: 3.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/smoketest_english_v5_15K_augmented_v1_nmh5r
+      subflavors:
+        name: smoketest_english_v5_15K_augmented_v1_nmh5r
+        cook: conversation
+        data_augment: false
+        length: 14525
+        orig_length: 14557
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/smoketest_english_v5_15K_augmented_v1
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/dewiki_v5_0828
+      subflavors:
+        name: dewiki_v5_0828
+        cook: conversation
+        data_augment: false
+        length: 200000
+        orig_length: 200000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/dewiki_v5_0828
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/enwiki_v5_0828
+      subflavors:
+        name: enwiki_v5_0828
+        cook: conversation
+        data_augment: false
+        length: 200000
+        orig_length: 200000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/enwiki_v5_0828
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/eswiki_v5_0828
+      subflavors:
+        name: eswiki_v5_0828
+        cook: conversation
+        data_augment: false
+        length: 200000
+        orig_length: 200000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/eswiki_v5_0828
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/frwiki_v5_0828
+      subflavors:
+        name: frwiki_v5_0828
+        cook: conversation
+        data_augment: false
+        length: 200000
+        orig_length: 200000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/frwiki_v5_0828
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/itwiki_v5_0828
+      subflavors:
+        name: itwiki_v5_0828
+        cook: conversation
+        data_augment: false
+        length: 200000
+        orig_length: 200000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/itwiki_v5_0828
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/jawiki_v5_0828
+      subflavors:
+        name: jawiki_v5_0828
+        cook: conversation
+        data_augment: false
+        length: 200000
+        orig_length: 200000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/jawiki_v5_0828
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/kowiki_v5_0828
+      subflavors:
+        name: kowiki_v5_0828
+        cook: conversation
+        data_augment: false
+        length: 200000
+        orig_length: 200000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/kowiki_v5_0828
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/nlwiki_v5_0828
+      subflavors:
+        name: nlwiki_v5_0828
+        cook: conversation
+        data_augment: false
+        length: 200000
+        orig_length: 200000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/nlwiki_v5_0828
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/ptwiki_v5_0828
+      subflavors:
+        name: ptwiki_v5_0828
+        cook: conversation
+        data_augment: false
+        length: 200000
+        orig_length: 200000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/ptwiki_v5_0828
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/zhwiki_v5_0828
+      subflavors:
+        name: zhwiki_v5_0828
+        cook: conversation
+        data_augment: false
+        length: 200000
+        orig_length: 200000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/zhwiki_v5_0828
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/dewiki_v5_augmented_0828
+      subflavors:
+        name: dewiki_v5_augmented_0828
+        cook: conversation
+        data_augment: false
+        length: 200000
+        orig_length: 200000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/dewiki_v5_augmented_0828
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/enwiki_v5_augmented_0828
+      subflavors:
+        name: enwiki_v5_augmented_0828
+        cook: conversation
+        data_augment: false
+        length: 200000
+        orig_length: 200000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/enwiki_v5_augmented_0828
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/eswiki_v5_augmented_0828
+      subflavors:
+        name: eswiki_v5_augmented_0828
+        cook: conversation
+        data_augment: false
+        length: 200000
+        orig_length: 200000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/eswiki_v5_augmented_0828
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/frwiki_v5_augmented_0828
+      subflavors:
+        name: frwiki_v5_augmented_0828
+        cook: conversation
+        data_augment: false
+        length: 200000
+        orig_length: 200000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/frwiki_v5_augmented_0828
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/itwiki_v5_augmented_0828
+      subflavors:
+        name: itwiki_v5_augmented_0828
+        cook: conversation
+        data_augment: false
+        length: 200000
+        orig_length: 200000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/itwiki_v5_augmented_0828
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/jawiki_v5_augmented_0828
+      subflavors:
+        name: jawiki_v5_augmented_0828
+        cook: conversation
+        data_augment: false
+        length: 200000
+        orig_length: 200000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/jawiki_v5_augmented_0828
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/kowiki_v5_augmented_0828
+      subflavors:
+        name: kowiki_v5_augmented_0828
+        cook: conversation
+        data_augment: false
+        length: 200000
+        orig_length: 200000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/kowiki_v5_augmented_0828
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/nlwiki_v5_augmented_0828
+      subflavors:
+        name: nlwiki_v5_augmented_0828
+        cook: conversation
+        data_augment: false
+        length: 200000
+        orig_length: 200000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/nlwiki_v5_augmented_0828
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/ptwiki_v5_augmented_0828
+      subflavors:
+        name: ptwiki_v5_augmented_0828
+        cook: conversation
+        data_augment: false
+        length: 200000
+        orig_length: 200000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/ptwiki_v5_augmented_0828
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/zhwiki_v5_augmented_0828
+      subflavors:
+        name: zhwiki_v5_augmented_0828
+        cook: conversation
+        data_augment: false
+        length: 200000
+        orig_length: 200000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/zhwiki_v5_augmented_0828
+    - repetitions: 6.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/TextOCR_clean_v3_nmh5r
+      subflavors:
+        name: textocr_clean_v3_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 21727
+        orig_length: 21727
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/Cambrian-10M/textvqa/train_images
+    - repetitions: 3.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/TextOCR_clean_v3_augmentedv1_nmh5r
+      subflavors:
+        name: textocr_clean_v3_augmented_nmh5r
+        cook: conversation
+        data_augment: false
+        length: 21138
+        orig_length: 21727
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/TextOCR_augmented_v1
+    - repetitions: 3.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/jsonl/azure_cc_tables_nmh5r
+      subflavors:
+        name: azure_tables_nmh5r
+        cook: conversation
+        data_augment: false
+        length: 19359
+        orig_length: 19379
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/azure_tables_20K
+    - repetitions: 3.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/azure_cc_tables_augmented_v2_mixprompts_fixed_nmh5r
+      subflavors:
+        name: azure_tables_aug_v2_mixprompts_fixed_nmh5r
+        cook: conversation
+        data_augment: false
+        length: 19351
+        orig_length: 19379
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/azure_tables_20K_augmented_v2_mixprompts_fixed
+    - repetitions: 3.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/azure_cc_tables_augmented_v3_mixprompts_fixed_nmh5r
+      subflavors:
+        name: azure_tables_aug_v3_mixprompts_fixed_nmh5r
+        cook: conversation
+        data_augment: false
+        length: 19350
+        orig_length: 19379
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/azure_tables_20K_augmented_v3_mixprompts_fixed
+    - repetitions: 6.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/jsonl/hiertext_nmh5r
+      subflavors:
+        name: hiertext_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 8278
+        orig_length: 8278
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/hiertext
+    - repetitions: 10.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/jsonl/funsd_nmh5r
+      subflavors:
+        name: funsd_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 149
+        orig_length: 149
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/funsd
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/safety_fc/safety_gretel_aegis_mixtral8x22b_nmh5r
+      subflavors:
+        name: sft_safety_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 19779
+        orig_length: 19779
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/safety_fc/mm_safety/sft_safety_mm_nmh5r
+      subflavors:
+        name: sft_safety_mm_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 22559
+        orig_length: 22560
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/safety_fc/mm_safety/images
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/safety_fc/glaive+xlam-fc-llama-8K_nmh5r
+      subflavors:
+        name: function_call_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 8000
+        orig_length: 8000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/safety_fc/alfred_train_action_nmh5r
+      subflavors:
+        name: alfred_action_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 6524
+        orig_length: 10000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/safety_fc/alfred/train
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/safety_fc/alfred_train_goal_nmh5r
+      subflavors:
+        name: alfred_goal_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 6464
+        orig_length: 10000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/safety_fc/alfred/train
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/safety_fc/medical/train_rad_nmh5r
+      subflavors:
+        name: rad_med_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 1793
+        orig_length: 2000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/safety_fc/medical/rad_images
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/safety_fc/medical/train_slake_nmh5r
+      subflavors:
+        name: slake_med_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 9835
+        orig_length: 10000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/safety_fc/medical/slake_images
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/safety_fc/filtered_merged_stem_opent_102k_bespoke-so185K_scp97k_wa777K_sdg_gpqa71K_30k_nmh5r_fixed
+      subflavors:
+        name: stem_deepseek_nmh5r_fixedbyamala
+        cook: conversation
+        data_augment: true
+        length: 37444
+        orig_length: 30000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/nvpdftex_v12_withcharts_grounding_augv2_nmh5r
+      subflavors:
+        name: nvpdftex_clean_v12_charts_18K_grounding_v2_nmh5r
+        cook: conversation
+        data_augment: false
+        length: 18280
+        orig_length: 599927
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/nvpdftex_v12_withcharts_augmented_v2
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl_draco/digit2/VisualWebInstruct_nmh5r
+      subflavors:
+        name: visualwebinstruct_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 260419
+        orig_length: 1000000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/VisualWebInstruct/images
+    - repetitions: 3.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/icdar2019_rects_nmh5r
+      subflavors:
+        name: icdar2019_rects_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 20000
+        orig_length: 20000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/icdar2019_rects
+    - repetitions: 4.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/icdar2017_rctw_nmh5r
+      subflavors:
+        name: icdar2017_rctw_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 8034
+        orig_length: 20000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/icdar2017_rctw
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/sparsetables_augmented_v1_mixprompts_nmh5r
+      subflavors:
+        name: sparsetables_mixprompts_nmh5r
+        cook: conversation
+        data_augment: false
+        length: 100000
+        orig_length: 100000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/sparsetables_v1_images
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/nv11_equations_2000_nmh5r
+      subflavors:
+        name: nv11_equations_cropped_nmh5r
+        cook: conversation
+        data_augment: false
+        length: 2000
+        orig_length: 599927
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/nv11_equations_2000
+    - repetitions: 6.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/vision_r1_llava_cot/vision_r1_llava_cot_full_nmh5r_legal_cleanedup
+      subflavors:
+        name: vision_r1_llava_cot_nmh5r_legal_v1
+        cook: conversation
+        data_augment: true
+        length: 63013
+        orig_length: 63019
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_jsonl/vision_r1_llava_cot
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/internvl_cot/geomverse_en_aug_nmh5r
+      subflavors:
+        name: geomverse_cot_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 9298
+        orig_length: 9298
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/internvl_data/image_data/geomverse
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/internvl_data/original/visual_7w/pointing_qa_nmh5r
+      subflavors:
+        name: v7w_pointing_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 25733
+        orig_length: 25733
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/internvl_data/original/visual_7w
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/internvl_data/original/vistext/vistext_nmh5r
+      subflavors:
+        name: vistext_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 9969
+        orig_length: 9969
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/internvl_data/original/vistext
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/internvl_data/original/screen_qa/screen_qa_nmh5r
+      subflavors:
+        name: screenqa_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 32724
+        orig_length: 33161
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/internvl_data/original/RICO
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/internvl_data/original/wave_ui_25k/wave_ui_25k_nmh5r
+      subflavors:
+        name: wave_ui_25k_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 24978
+        orig_length: 24978
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/internvl_data/original/wave_ui_25k
+    - repetitions: 4.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/internvl_data/image_data/charts2500/charts2500_zh_nmh5r
+      subflavors:
+        name: charts2500_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 2486
+        orig_length: 382066
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/internvl_data/image_data/charts2500
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/internvl_data/image_data/cyrillic_handwriting/cyrillic_handwriting_ru_nmh5r
+      subflavors:
+        name: cyrillic_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 72284
+        orig_length: 72284
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/internvl_data/image_data/cyrillic_handwriting
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/internvl_data/image_data/educhat_math/cmm_math_cot_zh_nmh5r
+      subflavors:
+        name: educhat_math_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 13148
+        orig_length: 13148
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/internvl_data/image_data/educhat_math
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/internvl_data/image_data/simchart9k/simchart9k_csv_en_nmh5r
+      subflavors:
+        name: simchart9k_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 9536
+        orig_length: 9536
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/internvl_data/image_data/simchart9k
+    - repetitions: 4.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/internvl_data/image_data/unichart/unichart_en_nmh5r
+      subflavors:
+        name: unichart_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 504885
+        orig_length: 504885
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/internvl_data/image_data/unichart
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/internvl_data/image_data/casia/casia_concat_zh_nmh5r
+      subflavors:
+        name: casia_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 2193
+        orig_length: 2193
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/internvl_data/image_data/casia
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/internvl_data/image_data/mmtab/mmtab_instruct_sft_en_nmh5r
+      subflavors:
+        name: mmtab_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 232746
+        orig_length: 232746
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/internvl_data/image_data/mmtab
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/internvl_data/image_data/docmatix/docmatix_single_20k_en_nmh5r
+      subflavors:
+        name: docmatix_single_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 19992
+        orig_length: 19992
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/internvl_data/image_data/docmatix
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/internvl_data/image_data/docreason25k/docreason_en_nmh5r
+      subflavors:
+        name: docreason25k_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 25863
+        orig_length: 25863
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/internvl_data/image_data/docreason25k
+    - repetitions: 4.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/internvl_data/image_data/figureqa/figureqa_en_nmh5r
+      subflavors:
+        name: figureqa_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 100000
+        orig_length: 100000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/internvl_data/image_data/figureqa
+    - repetitions: 4.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/internvl_data/image_data/lrv_instruction/lrv_chart_en_nmh5r
+      subflavors:
+        name: lrv_instruction_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 7198
+        orig_length: 7198
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/internvl_data/image_data/lrv_instruction
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/visualwebinstruct/final_dict
+      subflavors:
+        name: visualwebinstruct_cot_v0
+        cook: conversation
+        data_augment: true
+        length: 48929
+        orig_length: 48929
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/visualwebinstruct/images
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/internvl_data/image_data/docmatix/docmatix_multi_20k_en_nmh5r_fixed
+      subflavors:
+        name: docmatix_multi_20k_en_nmh5rfixed
+        cook: conversation
+        data_augment: true
+        length: 19969
+        orig_length: 19969
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/internvl_data/image_data/docmatix
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/internvl_data/original/Mantis-Instruct/spot-the-diff/spot_the_diff_nmh5r
+      subflavors:
+        name: spot_the_diff_nmh5r
+        cook: conversation
+        data_augment: true
+        length: 8007
+        orig_length: 8007
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/internvl_data/original/Mantis-Instruct/spot-the-diff
+    - repetitions: 4.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/internvl_cot/unigeo_calc_en_nmh5r_v2
+      subflavors:
+        name: unigeo_cot_nmh5r_v2
+        cook: conversation
+        data_augment: true
+        length: 9728
+        orig_length: 20922
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/internvl_data/image_data/unigeo
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/internvl_data/original/Mantis-Instruct/dreamsim/dreamsim_nmh5r_fixed_cot_v2
+      subflavors:
+        name: dreamsim_nmh5rfixed_cot_v2
+        cook: conversation
+        data_augment: true
+        length: 12906
+        orig_length: 12906
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/internvl_data/original/Mantis-Instruct/dreamsim
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/internvl_data/original/Mantis-Instruct/nlvr2/nlvr2_nmh5r_fixed_cot_v2
+      subflavors:
+        name: mantis_instruct_nlvr2_nmh5rfixed_cot_v2
+        cook: conversation
+        data_augment: true
+        length: 67723
+        orig_length: 67723
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/internvl_data/original/Mantis-Instruct/nlvr2
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/human_annotation_v0_ground_augmented_v2_tables_mixprompts_nmh5r_QA_reasoning_qwen_allocr
+      subflavors:
+        name: human_annotation_0_ocr_ground_aug_tables_mixprompts_v2_nmh5r_QA_reason_qwen_allocr
+        cook: conversation
+        data_augment: false
+        length: 2858
+        orig_length: 2858
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/human_annotation_v0_ground_augmented_v2_tables_mixprompts
+    - repetitions: 6.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/human_annotation_v2_ground_augmented_v2_tables_mixprompts_nmh5r_QA_reasoning_qwen
+      subflavors:
+        name: human_annotation_2_ocr_ground_aug_tables_mixprompts_v2_nmh5r_QA_reason_qwen_allocr
+        cook: conversation
+        data_augment: false
+        length: 586
+        orig_length: 586
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/human_annotation_v2_ground_augmented_v2_tables_mixprompts
+    - repetitions: 6.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/hiertext_nmh5r_ocrqa
+      subflavors:
+        name: hiertext_nmh5r_ocrqa_qwen
+        cook: conversation
+        data_augment: false
+        length: 514
+        orig_length: 514
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/hiertext
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/fintabnet_html_bbox_augmented_v2_mixprompts_nmh5r_QA_reasoning_qwen
+      subflavors:
+        name: fintabnet_html_bbox_augmented_v2_mixprompts_nmh5r_QA_reason_qwen
+        cook: conversation
+        data_augment: false
+        length: 8356
+        orig_length: 8356
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/fintabnet_augmented_v2_mixprompts
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/azure_cc_tables_augmented_v2_mixprompts_fixed_nmh5r_QA_reasoning_qwen
+      subflavors:
+        name: azure_tables_aug_v2_mixprompts_fixed_nmh5r_QA_reason_qwen
+        cook: conversation
+        data_augment: false
+        length: 4846
+        orig_length: 4846
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/azure_tables_20K_augmented_v2_mixprompts_fixed
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/mulberry_cot_v2/final_processed_better_cotprompt/chartqa_qwen_adlr_cot
+      subflavors:
+        name: chartqa_qwen_adlr_cot_v2
+        cook: conversation
+        data_augment: true
+        length: 45710
+        orig_length: 67723
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/ChartQA/ChartQA_Dataset
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/mulberry_cot_v2/final_processed_better_cotprompt/infovqa_qwen_adlr_cot
+      subflavors:
+        name: infovqa_qwen_adlr_cot_v2
+        cook: conversation
+        data_augment: true
+        length: 19548
+        orig_length: 67723
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/infovqa/images
+    - repetitions: 2.5
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/mulberry_cot_v2/final_processed_better_cotprompt/vision_r1_mulberry_qwen_adlr_cot_legal_cleanedup
+      subflavors:
+        name: mulbbery_qwen_adlr_cot_legal_v2
+        cook: conversation
+        data_augment: true
+        length: 103763
+        orig_length: 67723
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_jsonl/mulberry_sft
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/ecd_reasoning
+      subflavors:
+        name: ecd_reasoning
+        cook: conversation
+        data_augment: true
+        length: 132613
+        orig_length: 132613
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/ecd-images/images
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/nvpdftex_translated_de_augmented_0626_augmented_0828
+      subflavors:
+        name: nvpdftex_translated_de_augmented_0828
+        cook: conversation
+        data_augment: false
+        length: 418059
+        orig_length: 200000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/nvpdftex_translated_de_augmented_0626_augmented_0828
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/nvpdftex_translated_es_augmented_0626_augmented_0828
+      subflavors:
+        name: nvpdftex_translated_es_augmented_0828
+        cook: conversation
+        data_augment: false
+        length: 200001
+        orig_length: 200000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/nvpdftex_translated_es_augmented_0626_augmented_0828
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/nvpdftex_translated_fr_augmented_0626_augmented_0828
+      subflavors:
+        name: nvpdftex_translated_fr_augmented_0828
+        cook: conversation
+        data_augment: false
+        length: 200000
+        orig_length: 200000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/nvpdftex_translated_fr_augmented_0626_augmented_0828
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/nvpdftex_translated_it_augmented_0626_augmented_0828
+      subflavors:
+        name: nvpdftex_translated_it_augmented_0828
+        cook: conversation
+        data_augment: false
+        length: 200001
+        orig_length: 200000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/nvpdftex_translated_it_augmented_0626_augmented_0828
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/nvpdftex_translated_ja_augmented_0626_augmented_0828
+      subflavors:
+        name: nvpdftex_translated_ja_augmented_0828
+        cook: conversation
+        data_augment: false
+        length: 400000
+        orig_length: 400000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/nvpdftex_translated_ja_augmented_0626_augmented_0828
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/nvpdftex_translated_zh_augmented_0626_augmented_0828
+      subflavors:
+        name: nvpdftex_translated_zh_augmented_0828
+        cook: conversation
+        data_augment: false
+        length: 400000
+        orig_length: 400000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/nvpdftex_translated_zh_augmented_0626_augmented_0828
+    - repetitions: 4.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/invoices_qa_qwen_grounding_clean
+      subflavors:
+        name: invoices_qa_qwen_grounding_clean
+        cook: conversation
+        data_augment: false
+        length: 6471
+        orig_length: 6471
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/invoices_qa_qwen
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/mulberry_cot_v2/docvqa_qwen_adlr_cot_clean
+      subflavors:
+        name: docvqa_qwen_adlr_cot_v2_clean
+        cook: conversation
+        data_augment: true
+        length: 36333
+        orig_length: 67723
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/Cambrian-10M
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/internvl_data/image_data/arxivqa/arxivqa_en_nmh5r_clean
+      subflavors:
+        name: arxivqa_nmh5r_clean
+        cook: conversation
+        data_augment: true
+        length: 99995
+        orig_length: 99995
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/internvl_data/image_data/arxivqa
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/internvl_cot/telling_qa_nmh5r_clean
+      subflavors:
+        name: v7w_telling_cot_nmh5r_clean
+        cook: conversation
+        data_augment: true
+        length: 62592
+        orig_length: 139868
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/internvl_data/original/visual_7w
+    - repetitions: 3.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/internvl_cot/plotqa_v1_en_nmh5r_clean
+      subflavors:
+        name: plotqa_cot_nmh5r_clean
+        cook: conversation
+        data_augment: true
+        length: 16256
+        orig_length: 272725
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/internvl_data/image_data/plotqa
+    - repetitions: 3.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/eagle_v1/pixmo-docs_nmh5r_clean
+      subflavors:
+        name: pixmo-docs_nmh5r_clean
+        cook: conversation
+        data_augment: true
+        length: 251165
+        orig_length: 10000
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/data/pixmo-docs/images
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/format4/TAL_HW_MATH_base_nmh5r_clean
+      subflavors:
+        name: TAL_HW_MATH_nmh5r_clean
+        cook: conversation
+        data_augment: true
+        length: 22244
+        orig_length: 22244
+        category: OCR
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_data/haoweilai
+    - repetitions: 6.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/mulberry_sft/vision_r1_mulberry_sft_full_nmh5r_legal_cleanedup_v2
+      subflavors:
+        name: mulberry_sft_cot_nmh5_legal_v2
+        cook: conversation
+        data_augment: true
+        length: 191332
+        orig_length: 197963
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/sft_jsonl/mulberry_sft
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/internvl_cot/mapqa_suv_en_nmh5r_clean
+      subflavors:
+        name: mapqa_cot_nmh5r_clean
+        cook: conversation
+        data_augment: true
+        length: 16832
+        orig_length: 37417
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/internvl_data/image_data/mapqa
+    - repetitions: 5.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/internvl_cot/metamathqa_en_nmh5r_clean
+      subflavors:
+        name: metamathqa_en_cot_nmh5r_clean
+        cook: conversation
+        data_augment: true
+        length: 225408
+        orig_length: 382201
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/internvl_data/image_data/metamathqa
+    - repetitions: 5.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/sft_jsonl/internvl_cot/metamathqa_ocr_en_nmh5r_clean
+      subflavors:
+        name: metamathqa_ocr_en_cot_nmh5r_clean
+        cook: conversation
+        data_augment: true
+        length: 220544
+        orig_length: 382066
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/internvl_data/image_data/metamathqa
+    - repetitions: 4.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/invoices_qa_grounding
+      subflavors:
+        name: invoices_qa_grounding
+        cook: conversation
+        data_augment: false
+        length: 11258
+        orig_length: 11258
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/invoices_qa_qwen/english
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_data/SDG_cot/reasoning_active_learning_max_token1024
+      subflavors:
+        name: reasoning_active_learning_max_token1024
+        cook: conversation
+        data_augment: true
+        length: 13843
+        orig_length: 13843
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/SDG_cot/reasoning_active_learning_max_token1024
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/vila_v3_backup/perceptiontest_train_nmh5r_direct
+      subflavors:
+        name: perceptiontest_train_nmh5r_direct
+        cook: conversation
+        data_augment: true
+        length: 7392
+        orig_length: 538990
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/video/perception_test/videos
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/vila_v3_backup/perceptiontest_train_nmh5r_cot
+      subflavors:
+        name: perceptiontest_train_nmh5r_cot
+        cook: conversation
+        data_augment: true
+        length: 4977
+        orig_length: 538990
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/video/perception_test/videos
+    - repetitions: 6.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_data/SDG_cot/reasoning_active_learning_max_token4096_extended
+      subflavors:
+        name: reasoning_active_learning_max_token4096_extended
+        cook: conversation
+        data_augment: true
+        length: 18442
+        orig_length: 13717
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/SDG_cot/reasoning_active_learning_max_token4096_extended
+    - repetitions: 2.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/multi_page_ocr_qwen332_v3_clean
+      subflavors:
+        name: multi_page_ocr_qwen332_v3_clean
+        cook: conversation
+        data_augment: false
+        length: 7262
+        orig_length: 7545
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/multi_page_ocr_qa_qwen332-v2
+    - repetitions: 3.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/tables_augmented_v1__mixprompts
+      subflavors:
+        name: tables_ocr_augmented_v1
+        cook: conversation
+        data_augment: false
+        length: 4281
+        orig_length: 4281
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/tables_augmented_v1
+    - repetitions: 3.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/tables_augmented_v2__mixprompts
+      subflavors:
+        name: tables_ocr_augmented_v2
+        cook: conversation
+        data_augment: false
+        length: 4285
+        orig_length: 4285
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/tables_augmented_v2
+    - repetitions: 3.0
+      path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/commercial_sft_jsonl/tables_augmented_v3__mixprompts
+      subflavors:
+        name: tables_ocr_augmented_v3
+        cook: conversation
+        data_augment: false
+        length: 4282
+        orig_length: 4283
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/tables_augmented_v3
+    # - repetitions: 0.5
+    #   path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/text_reasoning_nanov2/unpack_faked_pack_raw_128k_processed_with_sys_prompt/identity_fix_code_ocr_r1_0528_inst34k_all_merged.unpacked_transformed
+    #   subflavors:
+    #     name: identity_fix_code_ocr_r1_0528_inst34k_all_merged_unpacked_transformed_with_sys_prompt
+    #     cook: conversation
+    #     data_augment: false
+    #     length: 1165591
+    #     orig_length: 9999999
+    #     category: General
+    #   aux:
+    #     media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_nanov2
+    # - repetitions: 0.5
+    #   path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/text_reasoning_nanov2/unpack_faked_pack_raw_128k_processed_with_sys_prompt/reasoning_off_identity_fix_code_ocr_r1_0528_inst34k_all_15percent_merged.unpacked_transformed
+    #   subflavors:
+    #     name: reasoning_off_identity_fix_code_ocr_r1_0528_inst34k_all_15percent_merged_unpacked_transformed_with_sys_prompt
+    #     cook: conversation
+    #     data_augment: false
+    #     length: 175000
+    #     orig_length: 9999999
+    #     category: General
+    #   aux:
+    #     media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_nanov2
+    # - repetitions: 0.5
+    #   path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/text_reasoning_nanov2/unpack_faked_pack_raw_128k_processed_with_sys_prompt/identity_fix_openstem_syngpqa11_12_partial0613_holdout_rl_merged.unpacked_transformed
+    #   subflavors:
+    #     name: identity_fix_openstem_syngpqa11_12_partial0613_holdout_rl_merged_unpacked_transformed_with_sys_prompt
+    #     cook: conversation
+    #     data_augment: false
+    #     length: 1922012
+    #     orig_length: 9999999
+    #     category: General
+    #   aux:
+    #     media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_nanov2
+    # - repetitions: 0.5
+    #   path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/text_reasoning_nanov2/unpack_faked_pack_raw_128k_processed_with_sys_prompt/reasoning_off_identity_fix_openstem_syngpqa11_12_partial0613_holdout_rl_15percent_merged.unpacked_transformed
+    #   subflavors:
+    #     name: reasoning_off_identity_fix_openstem_syngpqa11_12_partial0613_holdout_rl_15percent_merged_unpacked_transformed_with_sys_prompt
+    #     cook: conversation
+    #     data_augment: false
+    #     length: 288000
+    #     orig_length: 9999999
+    #     category: General
+    #   aux:
+    #     media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_nanov2
+    # - repetitions: 0.5
+    #   path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/text_reasoning_nanov2/unpack_faked_pack_raw_128k_processed_with_sys_prompt/identity_fix_hle_jun19_merged.unpacked_transformed
+    #   subflavors:
+    #     name: identity_fix_hle_jun19_merged_unpacked_transformed_with_sys_prompt
+    #     cook: conversation
+    #     data_augment: false
+    #     length: 445958
+    #     orig_length: 9999999
+    #     category: General
+    #   aux:
+    #     media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_nanov2
+    # - repetitions: 0.5
+    #   path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/text_reasoning_nanov2/unpack_faked_pack_raw_128k_processed_with_sys_prompt/reasoning_off_identity_fix_hle_jun19_15percent_merged.unpacked_transformed
+    #   subflavors:
+    #     name: reasoning_off_identity_fix_hle_jun19_15percent_merged_unpacked_transformed_with_sys_prompt
+    #     cook: conversation
+    #     data_augment: false
+    #     length: 67000
+    #     orig_length: 9999999
+    #     category: General
+    #   aux:
+    #     media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_nanov2
+    # - repetitions: 0.5
+    #   path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/text_reasoning_nanov2/unpack_faked_pack_raw_128k_processed_with_sys_prompt/tool_calling-glaive_xlam_synth_multi_turn-0703-qwen_responses-nano_v2_format-400k-sys1_5pct_sys2_95pct_filtered_merged.unpacked_transformed
+    #   subflavors:
+    #     name: tool_calling_glaive_xlam_synth_multi_turn_0703_qwen_responses_nano_v2_format_400k_sys1_5pct_sys2_95pct_filtered_merged_unpacked_transformed_with_sys_prompt
+    #     cook: conversation
+    #     data_augment: false
+    #     length: 403619
+    #     orig_length: 9999999
+    #     category: General
+    #   aux:
+    #     media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_nanov2
+    # - repetitions: 0.5
+    #   path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/text_reasoning_nanov2/unpack_faked_pack_raw_128k_processed_with_sys_prompt/identity_fix_nemo_safety_blend_v0.2.2_with_deepseek-r1-0528-safe-responses_oai_merged.unpacked_transformed
+    #   subflavors:
+    #     name: identity_fix_nemo_safety_blend_v0_2_2_with_deepseek_r1_0528_safe_responses_oai_merged_unpacked_transformed_with_sys_prompt
+    #     cook: conversation
+    #     data_augment: false
+    #     length: 30710
+    #     orig_length: 9999999
+    #     category: General
+    #   aux:
+    #     media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_nanov2
+    # - repetitions: 0.5
+    #   path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/text_reasoning_nanov2/unpack_faked_pack_raw_128k_processed_with_sys_prompt/identity_nosys.nano_v2_filtered_merged.unpacked_transformed
+    #   subflavors:
+    #     name: identity_nosys_nano_v2_filtered_merged_unpacked_transformed_with_sys_prompt
+    #     cook: conversation
+    #     data_augment: false
+    #     length: 2262
+    #     orig_length: 9999999
+    #     category: General
+    #   aux:
+    #     media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_nanov2
+    # - repetitions: 0.5
+    #   path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/text_reasoning_nanov2/unpack_faked_pack_raw_128k_processed_with_sys_prompt/its-hs3-hs2-qwen3-253b-sys2-responses_merged.unpacked_transformed
+    #   subflavors:
+    #     name: its_hs3_hs2_qwen3_253b_sys2_responses_merged_unpacked_transformed_with_sys_prompt
+    #     cook: conversation
+    #     data_augment: false
+    #     length: 32752
+    #     orig_length: 9999999
+    #     category: General
+    #   aux:
+    #     media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_nanov2
+    # - repetitions: 0.5
+    #   path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/text_reasoning_nanov2/unpack_faked_pack_raw_128k_processed_with_sys_prompt/its-hs3-hs2-qwen3-253b-sys1-responses_merged.unpacked_transformed
+    #   subflavors:
+    #     name: its_hs3_hs2_qwen3_253b_sys1_responses_merged_unpacked_transformed_with_sys_prompt
+    #     cook: conversation
+    #     data_augment: false
+    #     length: 3636
+    #     orig_length: 9999999
+    #     category: General
+    #   aux:
+    #     media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_nanov2
+    # - repetitions: 0.5
+    #   path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/text_reasoning_nanov2/unpack_faked_pack_raw_128k_processed_with_sys_prompt/widentity_fix_brainy_mantis_system1_system2_mix_notool_gemma_3_4b_safety_filtered.empty_response.filtered_merged.unpacked_transformed
+    #   subflavors:
+    #     name: widentity_fix_brainy_mantis_system1_system2_mix_notool_gemma_3_4b_safety_filtered_empty_response_filtered_merged_unpacked_transformed_with_sys_prompt
+    #     cook: conversation
+    #     data_augment: false
+    #     length: 389350
+    #     orig_length: 9999999
+    #     category: General
+    #   aux:
+    #     media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_nanov2
+    # - repetitions: 0.5
+    #   path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/text_reasoning_nanov2/unpack_faked_pack_raw_128k_processed_with_sys_prompt/identity_fix_qwen_yian_sys2_filtered_gemma-3-4b_safe_responses_only_filtered_merged.unpacked_transformed
+    #   subflavors:
+    #     name: identity_fix_qwen_yian_sys2_filtered_gemma_3_4b_safe_responses_only_filtered_merged_unpacked_transformed_with_sys_prompt
+    #     cook: conversation
+    #     data_augment: false
+    #     length: 353526
+    #     orig_length: 9999999
+    #     category: General
+    #   aux:
+    #     media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_nanov2
+    # - repetitions: 0.5
+    #   path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/text_reasoning_nanov2/unpack_faked_pack_raw_128k_processed_with_sys_prompt/identity_fix_qwen_yian_sys1_filtered_gemma-3-4b_safe_responses_only_filtered_merged.unpacked_transformed
+    #   subflavors:
+    #     name: identity_fix_qwen_yian_sys1_filtered_gemma_3_4b_safe_responses_only_filtered_merged_unpacked_transformed_with_sys_prompt
+    #     cook: conversation
+    #     data_augment: false
+    #     length: 361733
+    #     orig_length: 9999999
+    #     category: General
+    #   aux:
+    #     media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_nanov2
+    # - repetitions: 0.5
+    #   path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/text_reasoning_nanov2/unpack_faked_pack_raw_128k_processed_with_sys_prompt/multilingual_de_es_fr_it_ja_code_math_stem_20_percent_5M_samples_shuffled_subset_think_in_english_identity_fixed_oai_format_merged.unpacked_transformed
+    #   subflavors:
+    #     name: multilingual_de_es_fr_it_ja_code_math_stem_20_percent_5M_samples_shuffled_subset_think_in_english_identity_fixed_oai_format_merged_unpacked_transformed_with_sys_prompt
+    #     cook: conversation
+    #     data_augment: false
+    #     length: 4999794
+    #     orig_length: 9999999
+    #     category: General
+    #   aux:
+    #     media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_nanov2
+    # - repetitions: 0.5
+    #   path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/text_reasoning_nanov2/unpack_faked_pack_raw_128k_processed_with_sys_prompt/wildchat-qwen3-235b-30b-sys2-responses-identity-fixed_merged.unpacked_transformed
+    #   subflavors:
+    #     name: wildchat_qwen3_235b_30b_sys2_responses_identity_fixed_merged_unpacked_transformed_with_sys_prompt
+    #     cook: conversation
+    #     data_augment: false
+    #     length: 545844
+    #     orig_length: 9999999
+    #     category: General
+    #   aux:
+    #     media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_nanov2
+    # - repetitions: 0.5
+    #   path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/text_reasoning_nanov2/unpack_faked_pack_raw_128k_processed_with_sys_prompt/wildchat-qwen3-235b-30b-sys1-responses-identity-fixed_merged.unpacked_transformed
+    #   subflavors:
+    #     name: wildchat_qwen3_235b_30b_sys1_responses_identity_fixed_merged_unpacked_transformed_with_sys_prompt
+    #     cook: conversation
+    #     data_augment: false
+    #     length: 81876
+    #     orig_length: 9999999
+    #     category: General
+    #   aux:
+    #     media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_nanov2
+    # - repetitions: 0.5
+    #   path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/text_reasoning_nanov2/unpack_faked_pack_raw_128k_processed_with_sys_prompt/identity_fix_math_new_r1_strict-filter_holdout_rl_merged.unpacked_transformed
+    #   subflavors:
+    #     name: identity_fix_math_new_r1_strict_filter_holdout_rl_merged_unpacked_transformed_with_sys_prompt
+    #     cook: conversation
+    #     data_augment: false
+    #     length: 1591641
+    #     orig_length: 9999999
+    #     category: General
+    #   aux:
+    #     media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_nanov2
+    # - repetitions: 0.5
+    #   path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle_recipe/online_packing/playground/text_reasoning_nanov2/unpack_faked_pack_raw_128k_processed_with_sys_prompt/reasoning_off_identity_fix_math_new_r1_strict-filter_holdout_rl_15percent_merged.unpacked_transformed
+    #   subflavors:
+    #     name: reasoning_off_identity_fix_math_new_r1_strict-filter_holdout_rl_15percent_merged_unpacked_transformed_with_sys_prompt
+    #     cook: conversation
+    #     data_augment: false
+    #     length: 239467
+    #     orig_length: 9999999
+    #     category: General
+    #   aux:
+    #     media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_nanov2

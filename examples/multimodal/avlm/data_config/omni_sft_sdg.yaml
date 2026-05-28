@@ -1,0 +1,342 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+
+    ### Batch 3 ###
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/vidchapter_4min/vidchapter_4min_av_event_align_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/vidchapter_4min/vidchapter_4min_causal_reasoning_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/vidchapter_4min/vidchapter_4min_combine_omni_caption_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/vidchapter_4min/vidchapter_4min_comparative_qna_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/vidchapter_4min/vidchapter_4min_emotional_change_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/vidchapter_4min/vidchapter_4min_human_interaction_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/vidchapter_4min/vidchapter_4min_human_object_interaction_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/vidchapter_4min/vidchapter_4min_mcq_qna_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/vidchapter_4min/vidchapter_4min_reasoning_qa_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/vidchapter_4min/vidchapter_4min_temporal_order_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/vidchapter_4min/vidchapter_4min_text_diagram_understanding_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/vidchapter_4min/vidchapter_4min_topic_summary_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/internvid_v1_8min/internvid_v1_eight_min_attribute_metadata_dataset_clip_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/internvid_v1_8min/internvid_v1_eight_min_causal_reasoning_dataset_clip_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/internvid_v1_8min/internvid_v1_eight_min_emotional_change_dataset_clip_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/internvid_v1_8min/internvid_v1_eight_min_event_metadata_dataset_clip_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/internvid_v1_8min/internvid_v1_eight_min_human_emotion_dataset_clip_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/internvid_v1_8min/internvid_v1_eight_min_human_interaction_dataset_clip_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/internvid_v1_8min/internvid_v1_eight_min_human_object_interaction_dataset_clip_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/internvid_v1_8min/internvid_v1_eight_min_scene_metadata_dataset_clip_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/internvid_v1_8min/internvid_v1_eight_min_spatial_relation_dataset_clip_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/internvid_v1_8min/internvid_v1_eight_min_text_diagram_understanding_dataset_clip_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/internvid_v1_6min/internvid_v1_six_min_attribute_metadata_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/internvid_v1_6min/internvid_v1_six_min_causal_reasoning_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/internvid_v1_6min/internvid_v1_six_min_event_metadata_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/internvid_v1_6min/internvid_v1_six_min_human_emotion_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/internvid_v1_6min/internvid_v1_six_min_human_interaction_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/internvid_v1_6min/internvid_v1_six_min_human_object_interaction_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/internvid_v1_6min/internvid_v1_six_min_scene_metadata_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/internvid_v1_6min/internvid_v1_six_min_spatial_relation_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/internvid_v1_4min/internvid_v1_four_min_attribute_metadata_dataset_clip_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/internvid_v1_4min/internvid_v1_four_min_causal_reasoning_dataset_clip_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/internvid_v1_4min/internvid_v1_four_min_emotional_change_dataset_clip_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/internvid_v1_4min/internvid_v1_four_min_event_metadata_dataset_clip_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/internvid_v1_4min/internvid_v1_four_min_human_interaction_dataset_clip_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/internvid_v1_4min/internvid_v1_four_min_human_object_interaction_dataset_clip_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/internvid_v1_4min/internvid_v1_four_min_scene_metadata_dataset_clip_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/internvid_v1_4min/internvid_v1_four_min_spatial_relation_dataset_clip_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/internvid_v1_4min/internvid_v1_four_min_text_diagram_understanding_dataset_clip_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/vidchapter_4min/vidchapter_4min_attribute_metadata_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/vidchapter_4min/vidchapter_4min_spatial_relation_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/vidchapter_4min/vidchapter_4min_event_metadata_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/vidchapter_4min/vidchapter_4min_human_emotion_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+
+
+    ### Batch 2 ###
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/keynote_2min/keynote_2min_av_event_align_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/keynote_2min/keynote_2min_comparative_qna_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/keynote_2min/keynote_2min_mcq_qna_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/keynote_2min/keynote_2min_omni_caption_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/keynote_2min/keynote_2min_reasoning_qa_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/keynote_2min/keynote_2min_temporal_order_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/keynote_2min/keynote_2min_topic_summary_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/hd_vila_2min/hd_vila_2min_av_event_align_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/hd_vila_2min/hd_vila_2min_comparative_qna_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/hd_vila_2min/hd_vila_2min_mcq_qna_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/hd_vila_2min/hd_vila_2min_omni_caption_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/hd_vila_2min/hd_vila_2min_reasoning_qa_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/hd_vila_2min/hd_vila_2min_temporal_order_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/hd_vila_2min/hd_vila_2min_topic_summary_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/hd_vila_2min_v2/hd_vila_2min_v2_av_event_align_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/hd_vila_2min_v2/hd_vila_2min_v2_comparative_qna_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/hd_vila_2min_v2/hd_vila_2min_v2_mcq_qna_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/hd_vila_2min_v2/hd_vila_2min_v2_omni_caption_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/hd_vila_2min_v2/hd_vila_2min_v2_reasoning_qa_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/hd_vila_2min_v2/hd_vila_2min_v2_temporal_order_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/hd_vila_2min_v2/hd_vila_2min_v2_topic_summary_dataset_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+
+   ### BATCH 1 ###
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/keynote_1min_v1_topic/keynote_video_topic_summary_dataset_clean_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/keynote_1min_v1_omni/keynote_video_omni_caption_dataset_clean_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/keynote_v1_omni/keynote_video_omni_caption_dataset_clean_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path:  /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/keynote_v1_topic/keynote_video_topic_summary_dataset_clean_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/keynote_v2_omni/keynote_video_omni_caption_dataset_clean_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/keynote_v2_topic/keynote_video_topic_summary_dataset_clean_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/hd_vila_1min_v1_omni/hd_vila_1min_omni_caption_dataset_clean_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/hd_vila_1min_v1_topic/hd_vila_1min_topic_summary_dataset_clean_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/keynote_1min_v2_topic/keynote_1min_v2_topic_summary_dataset_clean_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path:  /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/keynote_1min_v2_omni/keynote_1min_v2_omni_caption_dataset_clean_nrt.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1

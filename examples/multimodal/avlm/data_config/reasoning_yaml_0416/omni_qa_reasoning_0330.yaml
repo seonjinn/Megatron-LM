@@ -1,0 +1,65 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/video_qa_yt8m/omni_reasoning_v3_cleaned/output_omni_event_metadata_correct.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/omni_blend_f1_videos_unique/
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/video_qa_yt8m/omni_reasoning_v3_cleaned/output_omni_event_metadata_incorrect.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/omni_blend_f1_videos_unique/
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/video_qa_yt8m/omni_reasoning_v3_cleaned/output_omni_human_object_interaction_correct.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/omni_blend_f1_videos_unique/
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/video_qa_yt8m/omni_reasoning_v3_cleaned/output_omni_human_object_interaction_incorrect.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/omni_blend_f1_videos_unique/
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/video_qa_yt8m/omni_reasoning_v3_cleaned/output_omni_object_state_change_correct.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/omni_blend_f1_videos_unique/
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/video_qa_yt8m/omni_reasoning_v3_cleaned/output_omni_object_state_change_incorrect.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/omni_blend_f1_videos_unique/
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/video_qa_yt8m/omni_reasoning_v3_cleaned/output_omni_text_diagram_correct.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/vidchapter_segments_4min
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/video_qa_yt8m/omni_reasoning_v3_cleaned/output_omni_text_diagram_incorrect.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/vidchapter_segments_4min
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/video_qa_yt8m/omni_reasoning_v3_cleaned/output_omni_video_emotion_correct.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/omni_blend_f1_videos_unique/
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/video_qa_yt8m/omni_reasoning_v3_cleaned/output_omni_video_emotion_incorrect.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/omni_blend_f1_videos_unique/
+      repetitions: 1

@@ -1,0 +1,53 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+    #########
+    # Audio-SFT Datasets
+    #########
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/audioFlamingo__Clotho-v2-AudioCaptioning
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/audioFlamingo__audiocaps-AudioCaptioning
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/audioFlamingo__WavText5K-Tagging
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/audioFlamingo__Clotho-AQA-AQA/
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/audioFlamingo__Clotho-AQA-EventClassification
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/audioFlamingo__AudioSetFullwoAudioMusicCaps-EventClassification
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/audioFlamingo__FSD50k-EventClassification/
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/audioFlamingo__CochlScene-SceneClassification
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/audioFlamingo__SONYC-UST-EventClassification
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset

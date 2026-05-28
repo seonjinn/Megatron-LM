@@ -1,0 +1,772 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend:
+
+    #########################################################
+    # Granary datasets (ASR)
+    #########################################################
+
+    # LibriLight
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/LibriLight_en_ll2_webds
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: granary_english_webdataset
+      weight: 2
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/LibriLight_en_ll1_webds
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: granary_english_webdataset
+      weight: 2
+
+    # MMLPC
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/data_ASR_MMLPC_en_tarred_train_v2
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: granary_english_webdataset
+      weight: 2.0
+
+    # YODAS2
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/yodas2_en_1_by_whisper_bucket1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: granary_english_webdataset
+      weight: 1
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/yodas2_en_1_by_whisper_bucket2
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: granary_english_webdataset
+      weight: 1
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/yodas2_en_1_by_whisper_bucket3
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: granary_english_webdataset
+      weight: 1
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/yodas2_en_1_by_whisper_bucket4
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: granary_english_webdataset
+      weight: 1
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/yodas2_en_0_from_captions
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: granary_english_webdataset
+      weight: 1
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/yodas2_en_0_by_whisper
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: granary_english_webdataset
+      weight: 1
+
+    # YTC
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/YTC_clean_en1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: granary_english_webdataset
+      weight: 1.0
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/YTC/manifests2/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/YTC/en2
+      weight: 1.0
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/YTC/manifests3/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/YTC/en3
+      weight: 1.0
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/YTC/manifests4/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/YTC/en4
+      weight: 7
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/YTC/manifests5/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/YTC/en5
+      weight: 7
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/YTC/manifests6/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/YTC/en6
+      weight: 1.0
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/YTC/manifests7/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/YTC/en7
+      weight: 1.0
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/YTC/manifests8/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/YTC/en8
+      weight: 1.0
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/YTC/manifests9/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/YTC/en9
+      weight: 1.0
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/YTC/manifests10/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/YTC/en10
+      weight: 1.0
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/YTC/manifests11/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/YTC/en11
+      weight: 1.0
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/YTC/manifests12/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/YTC/en12
+      weight: 1.0
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/YTC/manifests14/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/YTC/en14
+      weight: 1.0
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/YTC/manifests16/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/YTC/en16
+      weight: 1.0
+
+    # MCV
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/MCV_MCV4_train_tarred_en
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: granary_english_webdataset
+      weight: 1.0
+
+    # AMI_IHM
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/AMI_IHM-ASR_tarred
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: granary_english_webdataset
+      weight: 4.0
+
+    # MOSEL
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/MOSEL_en_tarred_train
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: granary_english_webdataset
+      weight: 4
+
+    # FLEURS
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Granary/FLEURS_tarred_en
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: granary_english_webdataset
+      weight: 1
+
+
+    # Riva ASR datasets
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__MMLPC__en_
+      weight: 2
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__asr_phase2__soundhound__en-GB
+      weight: 0.5
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__long_form__bucket5
+      weight: 0.5
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__long_form__bucket6
+      weight: 0.5
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__long_form__bucket7
+      weight: 0.5
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__long_form__bucket8
+      weight: 0.5
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_en_6p0__en-US-ASR-set-6p0__bucket1
+      weight: 2
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_en_6p0__en-US-ASR-set-6p0__bucket2
+      weight: 0.5
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_en_6p0__en-US-ASR-set-6p0__bucket3
+      weight: 0.5
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_en_6p0__en-US-ASR-set-6p0__bucket4
+      weight: 0.5
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_en_6p0__en-US-ASR-set-6p0__bucket5
+      weight: 0.5
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_en_6p0__en-US-ASR-set-6p0__bucket6
+      weight: 0.5
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_en_6p0__en-US-ASR-set-6p0__bucket7
+      weight: 0.5
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_en_6p0__en-US-ASR-set-6p0__bucket8
+      weight: 0.5
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_en_gb_2pt5__train_tarred__bucket1
+      weight: 0.5
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_en_gb_2pt5__train_tarred__bucket2
+      weight: 0.5
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_en_gb_2pt5__train_tarred__bucket3
+      weight: 0.5
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_en_gb_2pt5__train_tarred__bucket4
+      weight: 0.5
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_es_us__bucket1
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_es_us__bucket2
+      weight: 0.5
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_es_us__bucket3
+      weight: 0.5
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_es_us__bucket4
+      weight: 0.5
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SH_LDC__bucket1
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SH_LDC__bucket2
+      weight: 0.5
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SH_LDC__bucket3
+      weight: 0.5
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SH_LDC__bucket4
+      weight: 0.5
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SH_LDC__bucket5
+      weight: 0.5
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SH_LDC__bucket6
+      weight: 0.5
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SH_LDC__bucket7
+      weight: 0.5
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SH_LDC__bucket8
+      weight: 0.5
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__Suno_LongForm_En_PnC_train__bucket1
+      weight: 0.5
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__Suno_LongForm_En_PnC_train__bucket2
+      weight: 0.5
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__Suno_LongForm_En_PnC_train__bucket3
+      weight: 0.5
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__Suno_LongForm_En_PnC_train__bucket5
+      weight: 0.5
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__Suno_LongForm_En_PnC_train__bucket6
+      weight: 0.5
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__Suno_LongForm_En_PnC_train__bucket8
+      weight: 0.5
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+
+      #########
+      # Speech-SFT Datasets
+      #########
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SQA_Mixtral8x22b__MMLPC__en___pcstrip_
+      weight: 2
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/ALM_SFT/AVLM_SFT_AUDIO/amazon_sift_en
+      weight: 0.25
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Speech_QA/riva__SQA_Mixtral8x22b__Suno_LongForm_En_PnC_train_noExclamation__bucket1
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Speech_QA/riva__SQA_Mixtral8x22b__Suno_LongForm_En_PnC_train_noExclamation__bucket2
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Speech_QA/riva__SQA_Mixtral8x22b__Suno_LongForm_En_PnC_train_noExclamation__bucket3
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Speech_QA/riva__SQA_Mixtral8x22b__Suno_LongForm_En_PnC_train_noExclamation__bucket4
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Speech_QA/riva__SQA_Mixtral8x22b__Suno_LongForm_En_PnC_train_noExclamation__bucket5
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Speech_QA/riva__SQA_Mixtral8x22b__Suno_LongForm_En_PnC_train_noExclamation__bucket6
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Speech_QA/riva__SQA_Mixtral8x22b__Suno_LongForm_En_PnC_train_noExclamation__bucket7
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Speech_QA/riva__SQA_Mixtral8x22b__Suno_LongForm_En_PnC_train_noExclamation__bucket8
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Speech_QA/riva__SQA_Mixtral8x22b__riva_asr__en__en-US-ASR-set-6p0__bucket1
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Speech_QA/riva__SQA_Mixtral8x22b__riva_asr__en__en-US-ASR-set-6p0__bucket2
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Speech_QA/riva__SQA_Mixtral8x22b__riva_asr__en__en-US-ASR-set-6p0__bucket3
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Speech_QA/riva__SQA_Mixtral8x22b__riva_asr__en__en-US-ASR-set-6p0__bucket4
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Speech_QA/riva__SQA_Mixtral8x22b__riva_asr__en__en-US-ASR-set-6p0__bucket5
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Speech_QA/riva__SQA_Mixtral8x22b__riva_asr__en__en-US-ASR-set-6p0__bucket6
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Speech_QA/riva__SQA_Mixtral8x22b__riva_asr__en__en-US-ASR-set-6p0__bucket7
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Speech_QA/riva__SQA_Mixtral8x22b__riva_asr__en__en-US-ASR-set-6p0__bucket8
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Speech_QA/riva__SQA_Mixtral8x22b__riva_asr__en__Riva_ASR_SET_7p0_unified__bucket1
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Speech_QA/riva__SQA_Mixtral8x22b__riva_asr__en__Riva_ASR_SET_7p0_unified__bucket2
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Speech_QA/riva__SQA_Mixtral8x22b__riva_asr__en__Riva_ASR_SET_7p0_unified__bucket3
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Speech_QA/riva__SQA_Mixtral8x22b__riva_asr__en__Riva_ASR_SET_7p0_unified__bucket4
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Speech_QA/riva__SQA_Mixtral8x22b__riva_asr__en__Riva_ASR_SET_7p0_unified__bucket5
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Speech_QA/riva__SQA_Mixtral8x22b__riva_asr__en__Riva_ASR_SET_7p0_unified__bucket6
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Speech_QA/riva__SQA_Mixtral8x22b__riva_asr__en__Riva_ASR_SET_7p0_unified__bucket7
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Speech_QA/riva__SQA_Mixtral8x22b__riva_asr__en__Riva_ASR_SET_7p0_unified__bucket8
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+
+    #########
+    # Audio_SFT/real audio datasets
+    #########
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/audioFlamingo__Clotho-AQA-EventClassification
+      weight: 8
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/audioFlamingo__CochlScene-SceneClassification
+      weight: 2
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/audioFlamingo__Clotho-v2-AudioCaptioning
+      weight: 2
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/audioFlamingo__NSynth-MIR
+      weight: 6
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/audioFlamingo__SONYC-UST-EventClassification
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/audioFlamingo__Clotho-AQA-AQA/
+      weight: 2
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/audioFlamingo__audiocaps-AudioCaptioning
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/audioFlamingo__WavText5K-Tagging
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/audioFlamingo__AudioSetFullwoAudioMusicCaps-EventClassification
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/audioFlamingo__FSD50k-EventClassification/
+      weight: 2
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+
+    #########
+    # Audio-STF/Audio_SDG datasets
+    #########
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Audio_SDG/meld-emotion
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Audio_SDG/meld_sentiment
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Audio_SDG/msp_podcast
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+
+
+    #########
+    # Music-SFT Datasets
+    #########
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/audioFlamingo__MusicCaps-AudioCaptioning
+      weight: 2
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+
+    #########################################################
+    # SDG Datasets
+    #########################################################
+
+    #########
+    # Audio-SDG/Audio-SFT Datasets
+    #########
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Audio_SDG/audioset_temporal
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Audio_SDG/comp_r_aqa
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Audio_SDG/speechsoundcaps_wo_ego
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Audio_SDG/speechsoundQA_wo_ego
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Audio_SDG/MMAU_QA_sound
+      weight: 2
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+
+    ## Sound-SDG
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/AVLM/energon/sound/Ego/action2sound/manifests/processed_fixed_redistributed_v3.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/AVLM/energon/sound/Ego/action2sound
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/AVLM/energon/sound/Ego/ego_10/manifests/processed_fixed_redistributed_v2.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/AVLM/energon/sound/Ego/ego_10
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/AVLM/energon/sound/MMTrail/manifest_v3_fixed.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/AVLM/energon/sound/MMTrail
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/AVLM/energon/sound/MiraData/manifest_v3_redistributed.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/AVLM/energon/sound/MiraData
+
+    #########
+    # Audio-SDG/Music-SFT Datasets
+    #########
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Audio_SDG/Nsynth_mir_full
+      weight: 6
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Audio_SDG/Nsynth_instrument_full
+      weight: 6
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Audio_SDG/Nsynth_source_full
+      weight: 6
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Audio_SDG/youtube_caps
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/omni_omcat_manifests/energon/Audio_SDG/audioset_caps
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/AVLM/energon/music/laion_music/laion_music_batch1_qa
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/AVLM/energon/music/laion_music/laion_music_batch1_captions
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/AVLM/energon/music/laion_music/laion_music_batch2_captions/music_captions_batch2.jsonl
+      weight: 1
+      subflavors:
+        cook: general_conversations_jsonl
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/AVLM/energon/music/laion_music/laion_music_batch2_qa/music_qa_batch2.jsonl
+      weight: 1
+      subflavors:
+        cook: general_conversations_jsonl
+    - path: /lustre/fsw/portfolios/edgeai/projects/edgeai_riva_rivamlops/data/AVLM/energon/music/laion_music/laion_music_batch2_qa/music_qa_batch2_diverse.jsonl
+      weight: 1
+      subflavors:
+        cook: general_conversations_jsonl
+
+    #########################################################
+    # Audio Reasoning Datasets
+    #########################################################
+
+    # Semantic Reasoning (Speech Instruction)
+    # Below are generated by MagpieTTS from Nano v2 text SFT datasets. The voices are from LibriTTS.
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nemo_speechlm/data/omni_post_training/energon/nano_v2_user_audio/manifests_fixed_prompt/identity_fix_openstem_syngpqa11_12_partial0613_holdout_rl.jsonl
+      weight: 0.2
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nemo_speechlm/data/omni_post_training/energon/nano_v2_user_audio/audio/identity_fix_openstem_syngpqa11_12_partial0613_holdout_rl
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nemo_speechlm/data/omni_post_training/energon/nano_v2_user_audio/manifests_fixed_prompt/identity_fix_hle_jun19.jsonl
+      weight: 0.2
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nemo_speechlm/data/omni_post_training/energon/nano_v2_user_audio/audio/identity_fix_hle_jun19
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nemo_speechlm/data/omni_post_training/energon/nano_v2_user_audio/manifests_fixed_prompt/widentity_fix_brainy_mantis_system1_system2_mix_notool_gemma_3_4b_safety_filtered.empty_response.filtered.jsonl
+      weight: 0.2
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nemo_speechlm/data/omni_post_training/energon/nano_v2_user_audio/audio/widentity_fix_brainy_mantis_system1_system2_mix_notool_gemma_3_4b_safety_filtered.empty_response.filtered
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nemo_speechlm/data/omni_post_training/energon/nano_v2_user_audio/manifests_fixed_prompt/wildchat-qwen3-235b-30b-sys2-responses-identity-fixed.jsonl
+      weight: 0.2
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nemo_speechlm/data/omni_post_training/energon/nano_v2_user_audio/audio/wildchat-qwen3-235b-30b-sys2-responses-identity-fixed
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nemo_speechlm/data/omni_post_training/energon/nano_v2_user_audio/manifests_fixed_prompt/wildchat-qwen3-235b-30b-sys1-responses-identity-fixed.jsonl
+      weight: 0.2
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nemo_speechlm/data/omni_post_training/energon/nano_v2_user_audio/audio/wildchat-qwen3-235b-30b-sys1-responses-identity-fixed
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nemo_speechlm/data/omni_post_training/energon/nano_v2_user_audio/manifests_fixed_prompt/identity_fix_qwen_yian_sys1_safe.jsonl
+      weight: 0.2
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nemo_speechlm/data/omni_post_training/energon/nano_v2_user_audio/audio/identity_fix_qwen_yian_sys1_safe
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nemo_speechlm/data/omni_post_training/energon/nano_v2_user_audio/manifests_fixed_prompt/identity_fix_qwen_yian_sys2_safe.jsonl
+      weight: 0.2
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nemo_speechlm/data/omni_post_training/energon/nano_v2_user_audio/audio/identity_fix_qwen_yian_sys2_safe
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nemo_speechlm/data/omni_post_training/energon/nano_v2_user_audio/manifests_fixed_prompt/identity_fix_nemo_safety_blend_v0.2.2_with_deepseek-r1-0528-safe-responses_oai.jsonl
+      weight: 0.2
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nemo_speechlm/data/omni_post_training/energon/nano_v2_user_audio/audio/identity_fix_nemo_safety_blend_v0.2.2_with_deepseek-r1-0528-safe-responses_oai
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nemo_speechlm/data/omni_post_training/energon/nano_v2_user_audio/manifests_fixed_prompt/its-hs3-hs2-qwen3-253b-sys2-responses.jsonl
+      weight: 0.2
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nemo_speechlm/data/omni_post_training/energon/nano_v2_user_audio/audio/its-hs3-hs2-qwen3-253b-sys2-responses
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nemo_speechlm/data/omni_post_training/energon/nano_v2_user_audio/manifests_fixed_prompt/its-hs3-hs2-qwen3-253b-sys1-responses.jsonl
+      weight: 0.2
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nemo_speechlm/data/omni_post_training/energon/nano_v2_user_audio/audio/its-hs3-hs2-qwen3-253b-sys1-responses
+
+    # Below is synthesized by selecting text prompts from CommonVoice ASR dataset, where responses are from GPT-OSS-120B. This improves speech instruction for real speech input.
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nemo_speechlm/data/omni_post_training/energon/asr_sdg/commonvoice/info-seeking_gpt-oss-120b_hybrid_thinking.jsonl
+      weight: 0.1
+      subflavors:
+        cook: general_conversations_jsonl
+
+  val:
+    aux:
+      adlr_audio_music_YouTube8M: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/adlr_audio_music/YouTube8M
+      adlr_audio_music_unbalanced_train_segments: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_af3/adlr_audio_music/unbalanced_train_segments
+    path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/omcat_wds_af3/YoutubeVeCaps
+    split_part: train
+    subflavors:
+      cook: audio_conversation
+      aux_data_prefixes:
+        YouTube8M/: adlr_audio_music_YouTube8M
+        audioset/unbalanced_train_segments/22khz/: adlr_audio_music_unbalanced_train_segments

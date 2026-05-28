@@ -1,0 +1,65 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/short/dense_captions/no_think_cleaned/output_boyi_data_custom_safetyfix0323.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/boyi_data/videos_crop
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/short/dense_captions/no_think_cleaned/output_merged_drop3_lita_processed_custom.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/metropolis_data/df_human/
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/short/dense_captions/no_think_cleaned/output_molmo2_video_askmodelanything_custom_safetyfix0323.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+      aux:
+        media_source: filesystem:///lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/molmo2_videos
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/short/dense_captions/no_think_cleaned/output_molmo2_video_capqa_custom_safetyfix0323.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+      aux:
+        media_source: filesystem:///lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/molmo2_videos
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/short/dense_captions/no_think_cleaned/output_molmo2_video_pointqa_custom_safetyfix0323.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+      aux:
+        media_source: filesystem:///lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/molmo2_videos
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/short/dense_captions/no_think_cleaned/output_short_video_ocr_vggsound_custom.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/users/arushig/datasets/video_data/VGGSound/video/
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/short/dense_captions/no_think_cleaned/output_short_video_qa_vggsound_custom.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/users/arushig/datasets/video_data/VGGSound/video/
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/short/dense_captions/no_think_cleaned/output_train_chunked_processed_clean_v2_custom_safetyfix0323.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/metropolis_data/lita_data/video_chunked_60s/
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/short/dense_captions/no_think_cleaned/output_yt1b_qa_plm_sampled_custom_safetyfix0323.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/ntadevosyan/data/yttemporal180m-youtube-dataset/
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/short/dense_captions/no_think_cleaned/output_fgqa_plm_human_relative_custom.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/PLM_video_data/fgqa_videos
+      repetitions: 1

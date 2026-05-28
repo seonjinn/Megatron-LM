@@ -1,0 +1,266 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+
+    # Riva ASR datasets
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__MMLPC__en_
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__asr_phase2__soundhound__en-GB
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__long_form__bucket5
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__long_form__bucket6
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__long_form__bucket7
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__long_form__bucket8
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_en_6p0__en-US-ASR-set-6p0__bucket1
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_en_6p0__en-US-ASR-set-6p0__bucket2
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_en_6p0__en-US-ASR-set-6p0__bucket3
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_en_6p0__en-US-ASR-set-6p0__bucket4
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_en_6p0__en-US-ASR-set-6p0__bucket5
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_en_6p0__en-US-ASR-set-6p0__bucket6
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_en_6p0__en-US-ASR-set-6p0__bucket7
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_en_6p0__en-US-ASR-set-6p0__bucket8
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_en_gb_2pt5__train_tarred__bucket1
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_en_gb_2pt5__train_tarred__bucket2
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_en_gb_2pt5__train_tarred__bucket3
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_en_gb_2pt5__train_tarred__bucket4
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_es_us__bucket1
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_es_us__bucket2
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_es_us__bucket3
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_es_us__bucket4
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SH_LDC__bucket1
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SH_LDC__bucket2
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SH_LDC__bucket3
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SH_LDC__bucket4
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SH_LDC__bucket5
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SH_LDC__bucket6
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SH_LDC__bucket7
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SH_LDC__bucket8
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__Suno_LongForm_En_PnC_train__bucket1
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__Suno_LongForm_En_PnC_train__bucket2
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__Suno_LongForm_En_PnC_train__bucket3
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__Suno_LongForm_En_PnC_train__bucket5
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__Suno_LongForm_En_PnC_train__bucket6
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__Suno_LongForm_En_PnC_train__bucket8
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__yt10k_en__bucket1
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__yt10k_en__bucket2
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__yt10k_en__bucket3
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__yt10k_en__bucket4
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__yt10k_en__bucket6
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__yt10k_en__bucket7
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__yt10k_en__bucket8
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__yt30k_en__bucket1
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__yt30k_en__bucket2
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__yt30k_en__bucket3
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__yt30k_en__bucket4
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__yt30k_en__bucket5
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__yt30k_en__bucket6
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__yt30k_en__bucket7
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__yt30k_en__bucket8
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: omcat_legacy_conversation_monolithic

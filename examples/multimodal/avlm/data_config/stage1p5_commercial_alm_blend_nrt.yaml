@@ -1,0 +1,720 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend:
+
+    #########################################################
+    # Granary datasets (ASR)
+    #########################################################
+
+    # LibriLight
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/LibriLight_en_ll2_webds
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: granary_english_webdataset
+      weight: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/LibriLight_en_ll1_webds
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: granary_english_webdataset
+      weight: 1
+
+    # MMLPC
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/data_ASR_MMLPC_en_tarred_train_v2
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: granary_english_webdataset
+      weight: 1
+
+    # YODAS2
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/yodas2_en_1_by_whisper_bucket1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: granary_english_webdataset
+      weight: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/yodas2_en_1_by_whisper_bucket2
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: granary_english_webdataset
+      weight: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/yodas2_en_1_by_whisper_bucket3
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: granary_english_webdataset
+      weight: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/yodas2_en_1_by_whisper_bucket4
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: granary_english_webdataset
+      weight: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/yodas2_en_0_from_captions
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: granary_english_webdataset
+      weight: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/yodas2_en_0_by_whisper
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: granary_english_webdataset
+      weight: 1
+
+    # YTC
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/YTC_clean_en1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: granary_english_webdataset
+      weight: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/YTC/manifests2/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/YTC/en2
+      weight: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/YTC/manifests3/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/YTC/en3
+      weight: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/YTC/manifests4/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/YTC/en4
+      weight: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/YTC/manifests5/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/YTC/en5
+      weight: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/YTC/manifests6/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/YTC/en6
+      weight: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/YTC/manifests7/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/YTC/en7
+      weight: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/YTC/manifests8/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/YTC/en8
+      weight: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/YTC/manifests9/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/YTC/en9
+      weight: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/YTC/manifests10/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/YTC/en10
+      weight: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/YTC/manifests11/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/YTC/en11
+      weight: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/YTC/manifests12/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/YTC/en12
+      weight: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/YTC/manifests14/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/YTC/en14
+      weight: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/YTC/manifests16/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/YTC/en16
+      weight: 1
+
+    # MCV
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/MCV_MCV4_train_tarred_en
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: granary_english_webdataset
+      weight: 1
+
+    # AMI_IHM
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/AMI_IHM-ASR_tarred
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: granary_english_webdataset
+      weight: 1
+
+    # MOSEL
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/MOSEL_en_tarred_train
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: granary_english_webdataset
+      weight: 1
+
+    # FLEURS
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/Granary/FLEURS_tarred_en
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: granary_english_webdataset
+      weight: 1
+
+
+    # Riva ASR datasets
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__MMLPC__en_
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__asr_phase2__soundhound__en-GB
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__long_form__bucket5
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__long_form__bucket6
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__long_form__bucket7
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__long_form__bucket8
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_en_6p0__en-US-ASR-set-6p0__bucket1
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_en_6p0__en-US-ASR-set-6p0__bucket2
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_en_6p0__en-US-ASR-set-6p0__bucket3
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_en_6p0__en-US-ASR-set-6p0__bucket4
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_en_6p0__en-US-ASR-set-6p0__bucket5
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_en_6p0__en-US-ASR-set-6p0__bucket6
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_en_6p0__en-US-ASR-set-6p0__bucket7
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_en_6p0__en-US-ASR-set-6p0__bucket8
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_en_gb_2pt5__train_tarred__bucket1
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_en_gb_2pt5__train_tarred__bucket2
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_en_gb_2pt5__train_tarred__bucket3
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_en_gb_2pt5__train_tarred__bucket4
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_es_us__bucket1
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_es_us__bucket2
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_es_us__bucket3
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__riva_asr_es_us__bucket4
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SH_LDC__bucket1
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SH_LDC__bucket2
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SH_LDC__bucket3
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SH_LDC__bucket4
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SH_LDC__bucket5
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SH_LDC__bucket6
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SH_LDC__bucket7
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SH_LDC__bucket8
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__Suno_LongForm_En_PnC_train__bucket1
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__Suno_LongForm_En_PnC_train__bucket2
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__Suno_LongForm_En_PnC_train__bucket3
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__Suno_LongForm_En_PnC_train__bucket5
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__Suno_LongForm_En_PnC_train__bucket6
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__Suno_LongForm_En_PnC_train__bucket8
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__yt10k_en__bucket1
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__yt10k_en__bucket2
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__yt10k_en__bucket3
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__yt10k_en__bucket4
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__yt10k_en__bucket6
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__yt10k_en__bucket7
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__yt10k_en__bucket8
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__yt30k_en__bucket1
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__yt30k_en__bucket2
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__yt30k_en__bucket3
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__yt30k_en__bucket4
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__yt30k_en__bucket5
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__yt30k_en__bucket6
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__yt30k_en__bucket7
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__suno_en__yt30k_en__bucket8
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+
+
+      #########
+      # Speech-SFT Datasets
+      #########
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SQA_Mixtral8x22b__MMLPC__en___pcstrip_
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/ALM_SFT/AVLM_SFT_AUDIO/amazon_sift_en
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SQA_Mixtral8x22b__Suno_LongForm_En_PnC_train_noExclamation__bucket1
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SQA_Mixtral8x22b__Suno_LongForm_En_PnC_train_noExclamation__bucket2
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SQA_Mixtral8x22b__Suno_LongForm_En_PnC_train_noExclamation__bucket3
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SQA_Mixtral8x22b__Suno_LongForm_En_PnC_train_noExclamation__bucket4
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SQA_Mixtral8x22b__Suno_LongForm_En_PnC_train_noExclamation__bucket5
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SQA_Mixtral8x22b__Suno_LongForm_En_PnC_train_noExclamation__bucket6
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SQA_Mixtral8x22b__Suno_LongForm_En_PnC_train_noExclamation__bucket7
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SQA_Mixtral8x22b__Suno_LongForm_En_PnC_train_noExclamation__bucket8
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SQA_Mixtral8x22b__riva_asr__en__en-US-ASR-set-6p0__bucket1
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SQA_Mixtral8x22b__riva_asr__en__en-US-ASR-set-6p0__bucket2
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SQA_Mixtral8x22b__riva_asr__en__en-US-ASR-set-6p0__bucket3
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SQA_Mixtral8x22b__riva_asr__en__en-US-ASR-set-6p0__bucket4
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SQA_Mixtral8x22b__riva_asr__en__en-US-ASR-set-6p0__bucket5
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SQA_Mixtral8x22b__riva_asr__en__en-US-ASR-set-6p0__bucket6
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SQA_Mixtral8x22b__riva_asr__en__en-US-ASR-set-6p0__bucket7
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SQA_Mixtral8x22b__riva_asr__en__en-US-ASR-set-6p0__bucket8
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SQA_Mixtral8x22b__riva_asr__en__Riva_ASR_SET_7p0_unified__bucket1
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SQA_Mixtral8x22b__riva_asr__en__Riva_ASR_SET_7p0_unified__bucket2
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SQA_Mixtral8x22b__riva_asr__en__Riva_ASR_SET_7p0_unified__bucket3
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SQA_Mixtral8x22b__riva_asr__en__Riva_ASR_SET_7p0_unified__bucket4
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SQA_Mixtral8x22b__riva_asr__en__Riva_ASR_SET_7p0_unified__bucket5
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SQA_Mixtral8x22b__riva_asr__en__Riva_ASR_SET_7p0_unified__bucket6
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SQA_Mixtral8x22b__riva_asr__en__Riva_ASR_SET_7p0_unified__bucket7
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/riva__SQA_Mixtral8x22b__riva_asr__en__Riva_ASR_SET_7p0_unified__bucket8
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+
+    #########
+    # Audio_SFT/real audio datasets
+    #########
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/audioFlamingo__Clotho-AQA-EventClassification
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/audioFlamingo__CochlScene-SceneClassification
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/audioFlamingo__Clotho-v2-AudioCaptioning
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/audioFlamingo__NSynth-MIR
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/audioFlamingo__SONYC-UST-EventClassification
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/audioFlamingo__Clotho-AQA-AQA/
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/audioFlamingo__audiocaps-AudioCaptioning
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/audioFlamingo__WavText5K-Tagging
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/audioFlamingo__AudioSetFullwoAudioMusicCaps-EventClassification
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/audioFlamingo__FSD50k-EventClassification/
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+
+    #########
+    # Audio-STF/Audio_SDG datasets
+    #########
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/ALM_SFT/AVLM_SFT_AUDIO/meld-emotion
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/ALM_SFT/AVLM_SFT_AUDIO/meld_sentiment
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/ALM_SFT/AVLM_SFT_AUDIO/msp_podcast
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+
+
+    #########
+    # Music-SFT Datasets
+    #########
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/omni_omcat_manifests/energon/audio_shards_manifests_to_wds/wds/audioFlamingo__MusicCaps-AudioCaptioning
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+
+    #########################################################
+    # SDG Datasets
+    #########################################################
+
+    #########
+    # Audio-SDG/Audio-SFT Datasets
+    #########
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/ALM_SFT/AVLM_SFT_AUDIO/audioset_temporal
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/ALM_SFT/AVLM_SFT_AUDIO/comp_r_aqa
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/ALM_SFT/AVLM_SFT_AUDIO/speechsoundcaps_wo_ego
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/ALM_SFT/AVLM_SFT_AUDIO/speechsoundQA_wo_ego
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/ALM_SFT/AVLM_SFT_AUDIO/MMAU_QA_sound
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+
+    #########
+    # Audio-SDG/Music-SFT Datasets
+    #########
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/ALM_SFT/AVLM_SFT_AUDIO/Nsynth_mir_full
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/ALM_SFT/AVLM_SFT_AUDIO/Nsynth_instrument_full
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/ALM_SFT/AVLM_SFT_AUDIO/Nsynth_source_full
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/ALM_SFT/AVLM_SFT_AUDIO/youtube_caps
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/ALM_SFT/AVLM_SFT_AUDIO/audioset_caps
+      weight: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+
+  val:
+    path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vqa/VQAv2/stage1
+    subflavors:
+      augmentation: False

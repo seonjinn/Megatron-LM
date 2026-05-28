@@ -1,0 +1,15 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+
+    ### omnivinci data ###
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/llava_video_caps/llava_video_academic_caps_qwen3.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl/llava_video_caps/llava_video_youtube_caps_qwen3.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1

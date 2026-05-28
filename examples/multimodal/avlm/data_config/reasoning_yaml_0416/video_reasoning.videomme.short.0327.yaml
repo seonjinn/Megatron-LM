@@ -1,0 +1,141 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+    # Correct data
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/short/reasoning_cleaned/molmo2_video_capqa_correct_safetyfix0323.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/molmo2_videos
+      repetitions: 2
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/short/reasoning_cleaned/molmo2_video_pointqa_correct.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/molmo2_videos
+      repetitions: 2
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/short/reasoning_cleaned/plm_rcap_train_correct.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/PLM_video_data/SA-V
+      repetitions: 2
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/short/reasoning_cleaned/plm_rtloc_train_correct.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/PLM_video_data/SA-V
+      repetitions: 2
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/short/reasoning_cleaned/short_video_qa_vggsound_correct.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/users/arushig/datasets/video_data/VGGSound/video/
+      repetitions: 2
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/short/reasoning_cleaned/train_chunked_processed_clean_v2_correct.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/metropolis_data/lita_data/video_chunked_60s/
+      repetitions: 2
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/short/reasoning_cleaned/video_qa_miradata_counting_correct.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/miradata_all_clips
+      repetitions: 2
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/short/reasoning_cleaned/video_qa_miradata_needle_correct.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/miradata_all_clips
+      repetitions: 2
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/short/reasoning_cleaned/video_qa_miradata_spatial_reasoning_correct.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/miradata_all_clips
+      repetitions: 2
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/short/reasoning_cleaned/video_qa_miradata_subscene_correct.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/miradata_all_clips
+      repetitions: 2
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/short/reasoning_cleaned/video_qa_miradata_temporal_correct.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/miradata_all_clips
+      repetitions: 2
+
+
+    # Incorrect data
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/short/reasoning_cleaned/molmo2_video_capqa_incorrect.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/molmo2_videos
+      repetitions: 2
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/short/reasoning_cleaned/molmo2_video_pointqa_incorrect.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/molmo2_videos
+      repetitions: 2
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/short/reasoning_cleaned/plm_rcap_train_incorrect.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/PLM_video_data/SA-V
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/short/reasoning_cleaned/plm_rtloc_train_incorrect.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/PLM_video_data/SA-V
+      repetitions: 2
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/short/reasoning_cleaned/short_video_qa_vggsound_incorrect.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/users/arushig/datasets/video_data/VGGSound/video/
+      repetitions: 2
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/short/reasoning_cleaned/train_chunked_processed_clean_v2_incorrect_safetyfix0323.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/metropolis_data/lita_data/video_chunked_60s/
+      repetitions: 2
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/short/reasoning_cleaned/video_qa_miradata_counting_incorrect.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/miradata_all_clips
+      repetitions: 2
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/short/reasoning_cleaned/video_qa_miradata_needle_incorrect.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/miradata_all_clips
+      repetitions: 2
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/short/reasoning_cleaned/video_qa_miradata_spatial_reasoning_incorrect.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/miradata_all_clips
+      repetitions: 2
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/short/reasoning_cleaned/video_qa_miradata_subscene_incorrect.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/miradata_all_clips
+      repetitions: 2
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/short/reasoning_cleaned/video_qa_miradata_temporal_incorrect.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/miradata_all_clips
+      repetitions: 2
