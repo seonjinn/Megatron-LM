@@ -124,7 +124,7 @@ def train_valid_test_dataloaders_provider(train_val_test_num_samples, task_encod
         task_encoder = TaskEncoder()
 
     # Dataloader is only on specific ranks.
-    if not is_dataloader_rank(args.encoder_pipeline_model_parallel_size):
+    if not is_dataloader_rank(getattr(args, "encoder_pipeline_model_parallel_size", 0)):
         return None, None, None
 
     worker_debug_path = None

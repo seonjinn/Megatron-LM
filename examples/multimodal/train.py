@@ -28,6 +28,8 @@ from megatron.core.parallel_state import (
 )
 from megatron.core.utils import get_batch_on_this_cp_rank, nvtx_range_pop, nvtx_range_push
 from megatron.training import get_args, get_timers, get_tokenizer, pretrain
+from megatron.training.argument_utils import pretrain_cfg_container_from_args
+from megatron.training.arguments import parse_and_validate_args
 from megatron.training.utils import is_last_rank
 
 
@@ -60,7 +62,7 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
 
     # Dataloader doesn't run on the middle stages in a pipeline parallel model.
     pp_size = get_pipeline_model_parallel_world_size()
-    if not is_first_or_last_stage(pp_size):
+    if not is_first_or_last_stage(pp_size, getattr(args, "encoder_pipeline_model_parallel_size", 0)):
         # Note these are all set to None above.
         return (
             tokens,
@@ -545,18 +547,21 @@ if __name__ == "__main__":
     train_valid_test_dataloaders_provider.is_distributed = True
 
     try:
+        args = parse_and_validate_args(
+            args_defaults={'tokenizer_type': 'GPT2BPETokenizer'},
+            extra_args_provider=add_multimodal_extra_args,
+        )
+        full_config = pretrain_cfg_container_from_args(args)
         pretrain(
+            full_config,
             train_valid_test_dataloaders_provider,
             model_provider,
             ModelType.encoder_or_decoder,
             forward_step,
-            args_defaults={'tokenizer_type': 'GPT2BPETokenizer'},
-            extra_args_provider=add_multimodal_extra_args,
             process_non_loss_data_func=write_online_eval_to_tensorboard,
             get_embedding_ranks=llava_embedding_ranks,
             get_position_embedding_ranks=llava_position_embedding_ranks,
             non_loss_data_func=run_online_eval,
-            post_init_func=post_init_func,
         )
     except Exception as e:
         # If using DEBUG_RANK to debug, don't exit on failure (or torchrun will kill all ranks)
