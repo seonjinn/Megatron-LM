@@ -333,7 +333,7 @@ def scaled_loss_func(loss_mask, output_tensor, samples_seen):
         num_tokens,
         {
             'lm loss': reporting_loss,
-            '_samples_seen': samples_seen.detach(),
+            '_samples_seen': samples_seen.detach().float(),
         }
     )
 
@@ -378,7 +378,7 @@ def loss_func(loss_mask, output_tensor, samples_seen):
         num_tokens,
         {
             'lm loss': reporting_loss,
-            '_samples_seen': samples_seen.detach(),
+            '_samples_seen': samples_seen.detach().float(),
         },
     )
 
