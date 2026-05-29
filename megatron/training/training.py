@@ -2301,7 +2301,7 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
 
     should_checkpoint, should_exit, exit_code = rerun_state_machine.should_checkpoint_and_exit()
     if should_exit:
-        return {}, True, should_checkpoint, should_exit, exit_code, None, None, 0
+        return {}, True, should_checkpoint, should_exit, exit_code, None, None, 0, 0
 
     # Empty unused memory.
     if args.empty_unused_memory_level >= 1:
@@ -2311,6 +2311,19 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
     if args.vision_pretraining and args.vision_pretraining_type == "dino":
         unwrapped_model = unwrap_model(model[0])
         unwrapped_model.cancel_gradients_last_layer(args.curr_iteration)
+
+    if any("_samples_seen" in loss for loss in losses_reduced):
+        samples_seen = [loss.pop("_samples_seen", 1) for loss in losses_reduced]
+        assert len(samples_seen) == get_num_microbatches(), (
+            f"{len(samples_seen)=} != {get_num_microbatches()=}"
+        )
+        samples_seen_in_iteration = sum(samples_seen)
+        if isinstance(samples_seen_in_iteration, torch.Tensor):
+            samples_seen_in_iteration = samples_seen_in_iteration.item()
+        samples_seen_in_iteration = _reduce_sum_across_data_parallel_group(samples_seen_in_iteration)
+        samples_seen_in_iteration = int(samples_seen_in_iteration)
+    else:
+        samples_seen_in_iteration = get_num_microbatches() * args.micro_batch_size * args.data_parallel_size
 
     # Update parameters.
 
@@ -2345,8 +2358,7 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
 
     # Update learning rate.
     if update_successful:
-        increment = get_num_microbatches() * args.micro_batch_size * args.data_parallel_size
-        opt_param_scheduler.step(increment=increment)
+        opt_param_scheduler.step(increment=samples_seen_in_iteration)
         skipped_iter = 0
     else:
         skipped_iter = 1
@@ -2385,8 +2397,19 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
             grad_norm,
             num_zeros_in_grad,
             log_max_attention_logit,
+            samples_seen_in_iteration,
         )
-    return {}, skipped_iter, should_checkpoint, should_exit, exit_code, grad_norm, num_zeros_in_grad, log_max_attention_logit
+    return (
+        {},
+        skipped_iter,
+        should_checkpoint,
+        should_exit,
+        exit_code,
+        grad_norm,
+        num_zeros_in_grad,
+        log_max_attention_logit,
+        samples_seen_in_iteration,
+    )
 
 
 def training_log(
@@ -3572,6 +3595,7 @@ def train(
             grad_norm = 0.0
             num_zeros_in_grad = 0
             max_attention_logit = None
+            samples_seen_in_iteration = None
         else:
             ft_integration.on_training_step_start()
             (
@@ -3583,6 +3607,7 @@ def train(
                 grad_norm,
                 num_zeros_in_grad,
                 max_attention_logit,
+                samples_seen_in_iteration,
             ) = train_step(
                 forward_step_func, train_data_iterator, model, optimizer, opt_param_scheduler, config, forward_backward_func, iteration=iteration
             )
@@ -3660,6 +3685,8 @@ def train(
                 mpu.get_data_parallel_world_size() * args.micro_batch_size * get_num_microbatches()
             )
             args.consumed_train_bins += bin_count
+        elif samples_seen_in_iteration is not None:
+            iteration_sequences = samples_seen_in_iteration
         else:
             batch_size = (
                 mpu.get_data_parallel_world_size() * args.micro_batch_size * get_num_microbatches()
