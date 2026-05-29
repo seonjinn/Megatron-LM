@@ -1,4 +1,5 @@
 """Pretrain or SFT multimodal."""
+import inspect
 import math
 import os
 import sys
@@ -31,6 +32,16 @@ from megatron.training import get_args, get_timers, get_tokenizer, pretrain
 from megatron.training.argument_utils import pretrain_cfg_container_from_args
 from megatron.training.arguments import parse_and_validate_args
 from megatron.training.utils import is_last_rank
+
+
+_BROADCAST_DATA_SUPPORTS_OPTIMIZE = "optimize" in inspect.signature(
+    tensor_parallel.broadcast_data
+).parameters
+
+
+def _broadcast_data(keys, data, datatype, optimize):
+    kwargs = {"optimize": optimize} if _BROADCAST_DATA_SUPPORTS_OPTIMIZE else {}
+    return tensor_parallel.broadcast_data(keys, data, datatype, **kwargs)
 
 
 def get_batch(data_iterator, image_token_index, img_seq_len):
@@ -91,10 +102,10 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
     else:
         data = None
 
-    data_text = tensor_parallel.broadcast_data(["tokens"], data, torch.int64, optimize=args.optimize_broadcast)["tokens"]
-    labels = tensor_parallel.broadcast_data(["labels"], data, torch.int64, optimize=args.optimize_broadcast)["labels"]
+    data_text = _broadcast_data(["tokens"], data, torch.int64, args.optimize_broadcast)["tokens"]
+    labels = _broadcast_data(["labels"], data, torch.int64, args.optimize_broadcast)["labels"]
 
-    imgs = tensor_parallel.broadcast_data(["imgs"], data, torch.float32, optimize=args.optimize_broadcast)["imgs"]
+    imgs = _broadcast_data(["imgs"], data, torch.float32, args.optimize_broadcast)["imgs"]
 
     # Handle datasets that don't provide num_frames (for backward compatibility with image-only datasets)
     if get_tensor_model_parallel_rank() == 0 and data is not None and "num_frames" not in data:
@@ -104,23 +115,31 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
         else:
             data["num_frames"] = torch.tensor([], dtype=torch.int32)
 
-    tiles_and_frames = tensor_parallel.broadcast_data(["num_tiles", "num_frames"], data, torch.int32, optimize=args.optimize_broadcast)
+    tiles_and_frames = _broadcast_data(
+        ["num_tiles", "num_frames"], data, torch.int32, args.optimize_broadcast
+    )
     num_tiles, num_frames = tiles_and_frames["num_tiles"], tiles_and_frames["num_frames"]
 
-    cu_lengths = tensor_parallel.broadcast_data(["cu_lengths"], data, torch.int32, optimize=args.optimize_broadcast)["cu_lengths"]
-    cu_lengths_padded = tensor_parallel.broadcast_data(["cu_lengths_padded"], data, torch.int32, optimize=args.optimize_broadcast)["cu_lengths_padded"]
-    max_lengths = tensor_parallel.broadcast_data(["max_lengths"], data, torch.int32, optimize=args.optimize_broadcast)["max_lengths"]
+    cu_lengths = _broadcast_data(["cu_lengths"], data, torch.int32, args.optimize_broadcast)["cu_lengths"]
+    cu_lengths_padded = _broadcast_data(
+        ["cu_lengths_padded"], data, torch.int32, args.optimize_broadcast
+    )["cu_lengths_padded"]
+    max_lengths = _broadcast_data(["max_lengths"], data, torch.int32, args.optimize_broadcast)["max_lengths"]
 
     if get_tensor_model_parallel_rank() == 0 and 'samples_seen' not in data:
         data['samples_seen'] = torch.tensor(1, dtype=torch.int32, device=data_text.device)
 
-    samples_seen = tensor_parallel.broadcast_data(["samples_seen"], data, torch.int32, optimize=args.optimize_broadcast)["samples_seen"]
+    samples_seen = _broadcast_data(["samples_seen"], data, torch.int32, args.optimize_broadcast)["samples_seen"]
 
-    imgs_sizes = tensor_parallel.broadcast_data(["imgs_sizes"], data, torch.int32, optimize=args.optimize_broadcast)["imgs_sizes"]
+    imgs_sizes = _broadcast_data(["imgs_sizes"], data, torch.int32, args.optimize_broadcast)["imgs_sizes"]
 
-    vision_cu_lengths = tensor_parallel.broadcast_data(["vision_cu_lengths"], data, torch.int32, optimize=args.optimize_broadcast)["vision_cu_lengths"]
-    vision_max_lengths = tensor_parallel.broadcast_data(["vision_max_lengths"], data, torch.int32, optimize=args.optimize_broadcast)["vision_max_lengths"]
-    has_pad_img = tensor_parallel.broadcast_data(["has_pad_img"], data, torch.bool, optimize=args.optimize_broadcast)["has_pad_img"]
+    vision_cu_lengths = _broadcast_data(
+        ["vision_cu_lengths"], data, torch.int32, args.optimize_broadcast
+    )["vision_cu_lengths"]
+    vision_max_lengths = _broadcast_data(
+        ["vision_max_lengths"], data, torch.int32, args.optimize_broadcast
+    )["vision_max_lengths"]
+    has_pad_img = _broadcast_data(["has_pad_img"], data, torch.bool, args.optimize_broadcast)["has_pad_img"]
 
     sound1 = tensor_parallel.broadcast_data(["sound_clips", "sound_timestamps"], data, torch.float32)
     sound_clips, sound_timestamps = sound1["sound_clips"], sound1["sound_timestamps"]
