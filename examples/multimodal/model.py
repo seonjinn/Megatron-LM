@@ -281,6 +281,11 @@ def model_provider(
 
     sound_model, sound_projection, sound_token_index = sound_model_provider(base_config, language_config.hidden_size)
 
+    hybrid_layer_pattern = getattr(args, "hybrid_layer_pattern", None)
+    hybrid_override_pattern = getattr(args, "hybrid_override_pattern", None)
+    if hybrid_layer_pattern is not None:
+        hybrid_override_pattern = None
+
     model = LLaVAModel(
         language_transformer_config=language_config,
         language_transformer_layer_spec=language_transformer_layer_spec,
@@ -306,9 +311,10 @@ def model_provider(
         patch_dim=args.patch_dim,
         language_rotary_base=args.rotary_base,
         language_rope_scaling=args.use_rope_scaling,
-        hybrid_attention_ratio=args.hybrid_attention_ratio,
-        hybrid_mlp_ratio=args.hybrid_mlp_ratio,
-        hybrid_override_pattern=args.hybrid_override_pattern,
+        hybrid_layer_pattern=hybrid_layer_pattern,
+        hybrid_attention_ratio=getattr(args, "hybrid_attention_ratio", 0.0),
+        hybrid_mlp_ratio=getattr(args, "hybrid_mlp_ratio", 0.0),
+        hybrid_override_pattern=hybrid_override_pattern,
         fp16_lm_cross_entropy=args.fp16_lm_cross_entropy,
         image_token_index=image_token_index,
         pixel_shuffle=args.pixel_shuffle,
