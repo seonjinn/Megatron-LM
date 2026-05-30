@@ -85,6 +85,7 @@ class MambaContextParallel:
             raise ImportError("einops is required by the Mamba model but cannot be imported")
 
         self.cp_group = cp_group
+        self._default_cp_group = cp_group
         self.d_inner_local_tp = d_inner_local_tp
         self.nheads_local_tp = nheads_local_tp
         self.ngroups_local_tp = ngroups_local_tp
@@ -96,14 +97,18 @@ class MambaContextParallel:
         self.D_has_hdim = D_has_hdim
 
         self.cp_size = self.cp_group.size()
+        self.cp_rank = self.cp_group.rank() if self.cp_size > 1 else 0
+        self._set_cp_metadata(self.cp_size, self.cp_rank)
 
+    def _set_cp_metadata(self, cp_size: int, cp_rank: int) -> None:
+        self.cp_size = cp_size
+        self.cp_rank = cp_rank
         if self.cp_size == 1:
             self.d_inner_local_tpcp = self.d_inner_local_tp
             self.nheads_local_tpcp = self.nheads_local_tp
             self.ngroups_local_tpcp = self.ngroups_local_tp
+            self.group_repeat_count = 1
             return
-
-        self.cp_rank = self.cp_group.rank()
 
         # Ensure that each CP rank gets at least one head:
         assert (
@@ -140,10 +145,28 @@ class MambaContextParallel:
         # and also `nheads_local_tpcp = nheads_local_tp // cp_size` whilst ngroups_local_tpcp is
         # either 1 or `ngroups_local_tp // cp_size`
 
+    def _activate_cp_group(self, packed_seq_params: Optional[PackedSeqParams] = None) -> None:
+        cp_group = self._default_cp_group
+        cp_size = None
+
+        if packed_seq_params is not None:
+            cp_group = getattr(packed_seq_params, "cp_group", None) or cp_group
+            cp_size = getattr(packed_seq_params, "local_cp_size", None)
+
+        if cp_size is None:
+            cp_size = cp_group.size()
+        cp_size = int(cp_size)
+        cp_rank = cp_group.rank() if cp_size > 1 else 0
+
+        if self.cp_group is not cp_group or self.cp_size != cp_size or self.cp_rank != cp_rank:
+            self.cp_group = cp_group
+            self._set_cp_metadata(cp_size, cp_rank)
+
     def pre_conv_ssm(
         self, input_: torch.Tensor, packed_seq_params: Optional[PackedSeqParams] = None
     ) -> torch.Tensor:
         """Method to be applied before the convolution and SSM"""
+        self._activate_cp_group(packed_seq_params)
         if self.cp_size == 1:
             return input_
 
@@ -205,6 +228,7 @@ class MambaContextParallel:
         self, input_: torch.Tensor, packed_seq_params: Optional[PackedSeqParams] = None
     ) -> torch.Tensor:
         """Method to be applied after the convolution and SSM"""
+        self._activate_cp_group(packed_seq_params)
         if self.cp_size == 1:
             return input_
         else:

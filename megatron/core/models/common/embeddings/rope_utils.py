@@ -283,12 +283,12 @@ def apply_rotary_pos_emb(
         if cu_seqlens is None:
             return fused_apply_rotary_pos_emb(t, freqs)
         else:
-            cp_size = parallel_state.get_context_parallel_world_size()
+            cp_size = cp_group.size()
             if cp_size > 1:
                 if not is_te_min_version("1.11.0", check_equality=False):
                     raise ValueError("Only TE >= 1.12 supports RoPE fusion for THD format with CP.")
                 return fused_apply_rotary_pos_emb_thd(
-                    t, cu_seqlens, freqs, cp_size=cp_size, cp_rank=parallel_state.get_context_parallel_rank(),
+                    t, cu_seqlens, freqs, cp_size=cp_size, cp_rank=cp_group.rank(),
                 )
             else:
                 return fused_apply_rotary_pos_emb_thd(t, cu_seqlens, freqs)

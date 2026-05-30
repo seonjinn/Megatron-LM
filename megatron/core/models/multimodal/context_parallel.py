@@ -2,15 +2,28 @@
 """Multimodal Sequence Parallel (SP) and Context Parallel (CP) functionality."""
 
 import math
+from typing import Optional
 
 import torch
 
 from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.parallel_state import (
     get_context_parallel_group,
-    get_context_parallel_rank,
-    get_context_parallel_world_size,
 )
+
+
+def _resolve_cp_group(cp_group: Optional[torch.distributed.ProcessGroup]):
+    return get_context_parallel_group() if cp_group is None else cp_group
+
+
+def _get_cp_world_size(cp_group: Optional[torch.distributed.ProcessGroup]) -> int:
+    group = _resolve_cp_group(cp_group)
+    return torch.distributed.get_world_size(group)
+
+
+def _get_cp_rank(cp_group: Optional[torch.distributed.ProcessGroup]) -> int:
+    group = _resolve_cp_group(cp_group)
+    return torch.distributed.get_rank(group)
 
 
 def get_padding(
@@ -113,7 +126,7 @@ def get_packed_seq_params(tokens, img_seq_len, padding_needed, cp_size, use_pack
     return packed_seq_params
 
 
-def split_to_context_parallel_ranks(global_t, pad_value=0):
+def split_to_context_parallel_ranks(global_t, pad_value=0, cp_group=None):
     """Split the tensor global_t into context parallel world size parts.
 
     Args:
@@ -124,8 +137,8 @@ def split_to_context_parallel_ranks(global_t, pad_value=0):
         local_t: [samples_per_rank, ...]. samples_per_rank is the # of samples per CP rank.
         global_pad: Total padding to have equal samples_per_rank across context parallel ranks.
     """
-    cp_size = get_context_parallel_world_size()
-    cp_rank = get_context_parallel_rank()
+    cp_size = _get_cp_world_size(cp_group)
+    cp_rank = _get_cp_rank(cp_group)
 
     # t: [batch, ...]
     # Number of samples per context parallel rank, rounded up.
@@ -148,9 +161,9 @@ def split_to_context_parallel_ranks(global_t, pad_value=0):
     return local_t, global_pad
 
 
-def _gather_along_second_dim(local_t):
-    group = get_context_parallel_group()
-    cp_size = get_context_parallel_world_size()
+def _gather_along_second_dim(local_t, cp_group=None):
+    group = _resolve_cp_group(cp_group)
+    cp_size = _get_cp_world_size(cp_group)
     # Bypass the function if we are using only 1 context parallel rank.
     if cp_size == 1:
         return local_t
@@ -169,8 +182,8 @@ def _gather_along_second_dim(local_t):
     return global_t
 
 
-def _reduce_scatter_along_second_dim(global_t):
-    cp_size = get_context_parallel_world_size()
+def _reduce_scatter_along_second_dim(global_t, cp_group=None):
+    cp_size = _get_cp_world_size(cp_group)
     # Bypass the function if we are using only 1 CP rank.
     if cp_size == 1:
         return global_t
@@ -185,7 +198,7 @@ def _reduce_scatter_along_second_dim(global_t):
 
     local_t = torch.zeros(global_t.shape[0], samples_per_rank, *global_t.shape[2:], device=global_t.device, dtype=global_t.dtype)
 
-    torch.distributed.reduce_scatter(local_t, tensor_list, group=get_context_parallel_group())
+    torch.distributed.reduce_scatter(local_t, tensor_list, group=_resolve_cp_group(cp_group))
 
     return local_t
 
@@ -196,30 +209,32 @@ class GatherFromContextParallelRanks(torch.autograd.Function):
     def symbolic(
         graph,
         input_,
+        cp_group=None,
     ):
         """Symbolic function for tracing."""
-        return _gather_along_second_dim(input_)
+        return _gather_along_second_dim(input_, cp_group)
 
     @staticmethod
-    def forward(ctx, input_):
+    def forward(ctx, input_, cp_group=None):
         """Forward function."""
-        return _gather_along_second_dim(input_)
+        ctx.cp_group = cp_group
+        return _gather_along_second_dim(input_, cp_group)
 
     @staticmethod
     def backward(ctx, grad_output):
         """Backward function."""
-        return _reduce_scatter_along_second_dim(grad_output)
+        return _reduce_scatter_along_second_dim(grad_output, ctx.cp_group), None
 
 
-def gather_from_context_parallel_ranks(local_t, global_pad):
-    global_t = GatherFromContextParallelRanks.apply(local_t)
+def gather_from_context_parallel_ranks(local_t, global_pad, cp_group=None):
+    global_t = GatherFromContextParallelRanks.apply(local_t, cp_group)
 
     if global_pad > 0:
         global_t = global_t[:, :-global_pad]
 
     return global_t
 
-def gather_from_context_parallel_ranks_dynamic_res(local_t, num_padded_imgs=0):
+def gather_from_context_parallel_ranks_dynamic_res(local_t, num_padded_imgs=0, cp_group=None):
     """Gather the tensor local_t from context parallel ranks.
 
     A twist here is that the tensors have different sequence lengths.
@@ -229,18 +244,19 @@ def gather_from_context_parallel_ranks_dynamic_res(local_t, num_padded_imgs=0):
         local_t: Local tensor to gather
         num_padded_imgs: Number of padding images that were added in split (will be removed from end)
     """
-    cp_size = get_context_parallel_world_size()
+    group = _resolve_cp_group(cp_group)
+    cp_size = _get_cp_world_size(cp_group)
     shape = torch.as_tensor(local_t.shape, device=local_t.device)
     shapes = [torch.empty_like(shape) for _ in range(cp_size)]
 
-    torch.distributed.all_gather(shapes, shape, group=get_context_parallel_group())
+    torch.distributed.all_gather(shapes, shape, group=group)
 
     inputs = [local_t] * cp_size
     outputs = [
         torch.empty(*s, dtype=local_t.dtype, device=local_t.device)
         for s in shapes
     ]
-    torch.distributed.nn.functional.all_to_all(outputs, inputs, group=get_context_parallel_group())
+    torch.distributed.nn.functional.all_to_all(outputs, inputs, group=group)
 
     # If padding images were added, remove them from the last num_padded_imgs outputs
     if num_padded_imgs > 0:
@@ -342,7 +358,16 @@ def _split_num_frames(num_frames, lb, ub):
     return new_num_frames
 
 
-def split_to_context_parallel_ranks_dynamic_res(global_t, global_imgs_sizes, global_packed_seq_params, fp8_enabled=False, patch_dim=16, num_frames=None, temporal_patch_size=1):
+def split_to_context_parallel_ranks_dynamic_res(
+    global_t,
+    global_imgs_sizes,
+    global_packed_seq_params,
+    fp8_enabled=False,
+    patch_dim=16,
+    num_frames=None,
+    temporal_patch_size=1,
+    cp_group=None,
+):
     """Split the tensors global_t and global_imgs_sizes into context parallel world size parts.
 
     global_packed_seq_params will be used to compute the local PackedSeqParams corresponding to the split.
@@ -359,8 +384,8 @@ def split_to_context_parallel_ranks_dynamic_res(global_t, global_imgs_sizes, glo
         num_padded_imgs: Number of empty images added to pad when num_imgs < cp_size
         local_num_frames: Split num_frames for this CP rank (None if temporal_patch_size == 1)
     """
-    cp_size = get_context_parallel_world_size()
-    cp_rank = get_context_parallel_rank()
+    cp_size = _get_cp_world_size(cp_group)
+    cp_rank = _get_cp_rank(cp_group)
 
     # Temporal compression requires num_frames for proper tubelet-aware splitting
     use_tubelet_aware_split = temporal_patch_size > 1
@@ -455,6 +480,8 @@ def split_to_context_parallel_ranks_dynamic_res(global_t, global_imgs_sizes, glo
         cu_seqlens_q_padded=None,
         cu_seqlens_kv_padded=None,
     )
+    local_packed_seq_params.local_cp_size = cp_size
+    local_packed_seq_params.cp_group = _resolve_cp_group(cp_group)
 
     max_seqlen_local = max(seqlens_local).to(torch.int32)
     local_packed_seq_params.max_seqlen_q = max_seqlen_local

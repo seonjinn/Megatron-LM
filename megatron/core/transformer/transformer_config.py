@@ -541,6 +541,9 @@ class TransformerConfig(ModelParallelConfig):
     moe_enable_deepep: bool = False
     """[Experimental] Enable DeepEP for efficient token dispatching and combine in MoE models."""
 
+    moe_flex_dispatcher_backend: str = "deepep"
+    """[Experimental] Backend for the flex token dispatcher."""
+
     moe_enable_hybridep: bool = False
     """[Experimental] Enable HybridEP for efficient token dispatching and combine in MoE models."""
 
