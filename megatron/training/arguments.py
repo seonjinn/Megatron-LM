@@ -101,13 +101,12 @@ def parse_and_validate_args(extra_args_provider=None, ignore_unknown_args=False,
     if args.use_checkpoint_args or args_defaults.get("use_checkpoint_args", False):
         from megatron.training.checkpointing import load_args_from_checkpoint
 
-        assert args.load is not None or args.pretrained_checkpoint is not None, "--use-checkpoint-args requires --load or --pretrained-checkpoint argument"
+        assert args.load is not None, "--use-checkpoint-args requires --load argument"
         assert args.non_persistent_ckpt_type != "local", (
             "--use-checkpoint-args is not supported with --non_persistent_ckpt_type=local. "
             "Two-stage checkpoint loading is not implemented, and all arguments must be defined "
             "before initializing LocalCheckpointManager."
         )
-        load_args_from_checkpoint(args, load_arg='pretrained_checkpoint')
         load_args_from_checkpoint(args)
 
     if args.yaml_cfg is not None:
@@ -2795,7 +2794,7 @@ def _add_distributed_args(parser):
     group.add_argument('--create-all-gather-group', action='store_true',
                        help='Create a separate process group for all-gather operations '
                        'to overlap reduce-scatter and all-gather operations.')
-    group.add_argument('--data-parallel-sharding-strategy', type=str, default='optim_grads_params',
+    group.add_argument('--data-parallel-sharding-strategy', type=str, default='no_shard',
                        choices=['no_shard', 'optim', 'optim_grads', 'optim_grads_params'],
                        help='Sharding strategy of data parallelism.')
     group.add_argument('--outer-dp-sharding-strategy', type=str, default='no_shard',

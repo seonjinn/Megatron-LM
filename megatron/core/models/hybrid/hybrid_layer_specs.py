@@ -46,7 +46,6 @@ from megatron.core.transformer.multi_token_prediction import (
 )
 from megatron.core.transformer.spec_utils import ModuleSpec
 from megatron.core.transformer.transformer_layer import (
-    MoETransformerLayer,
     TransformerLayer,
     TransformerLayerSubmodules,
 )
@@ -181,7 +180,7 @@ hybrid_stack_spec = ModuleSpec(
             ),
         ),
         moe_layer=ModuleSpec(
-            module=MoETransformerLayer,
+            module=TransformerLayer,
             submodules=TransformerLayerSubmodules(
                 pre_mlp_layernorm=TENorm, mlp=moe, mlp_bda=get_bias_dropout_add
             ),

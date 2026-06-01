@@ -2347,7 +2347,10 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
     update_successful = logical_and_across_model_parallel_group(update_successful)
     # grad_norm and num_zeros_in_grad will be None on ranks without trainable params,
     # so we must gather across mp ranks
-    grad_norm = reduce_max_stat_across_model_parallel_group(grad_norm)
+    if args.pipeline_model_parallel_size > 1 and (
+        args.freeze_LM or args.freeze_ViT or args.freeze_sound_model
+    ):
+        grad_norm = reduce_max_stat_across_model_parallel_group(grad_norm)
     if args.log_num_zeros_in_grad:
         num_zeros_in_grad = reduce_max_stat_across_model_parallel_group(num_zeros_in_grad)
 
@@ -2374,14 +2377,55 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
         for key in losses_reduced[0].keys():
             val = [x[key].view(-1) for x in losses_reduced]
             if val[0].numel() == 2:
-                # there is one dict per microbatch. in new reporting, we average
-                # over the total number of tokens across the global batch.
-                val = torch.vstack(val).sum(dim=0)
-                torch.distributed.all_reduce(
-                    val,
-                    group=mpu.get_data_parallel_group(with_context_parallel=True)
-                )
-                loss_reduced[key] = val[0] / val[1]
+                if args.sft:
+                    # For SFT we report the average microbatch loss. With context parallelism,
+                    # some local shards can legitimately have zero trainable tokens, so we
+                    # ignore zero-denominator entries when reducing the logging value.
+                    val = torch.vstack(val)
+                    numerators = val[:, 0]
+                    denominators = val[:, 1]
+                    valid = denominators > 0
+
+                    if valid.any():
+                        local_sum = (numerators[valid] / denominators[valid]).sum()
+                        local_count = torch.tensor(
+                            float(valid.sum().item()),
+                            dtype=local_sum.dtype,
+                            device=local_sum.device,
+                        )
+                    else:
+                        local_sum = torch.tensor(
+                            0.0, dtype=numerators.dtype, device=numerators.device
+                        )
+                        local_count = torch.tensor(
+                            0.0, dtype=numerators.dtype, device=numerators.device
+                        )
+
+                    torch.distributed.all_reduce(
+                        local_sum,
+                        group=mpu.get_data_parallel_group(with_context_parallel=True)
+                    )
+                    torch.distributed.all_reduce(
+                        local_count,
+                        group=mpu.get_data_parallel_group(with_context_parallel=True)
+                    )
+
+                    if local_count.item() > 0:
+                        val = local_sum / local_count
+                    else:
+                        val = torch.tensor(
+                            0.0, dtype=numerators.dtype, device=numerators.device
+                        )
+                    loss_reduced[key] = val
+                else:
+                    # there is one dict per microbatch. in new reporting, we average
+                    # over the total number of tokens across the global batch.
+                    val = torch.vstack(val).sum(dim=0)
+                    torch.distributed.all_reduce(
+                        val,
+                        group=mpu.get_data_parallel_group(with_context_parallel=True)
+                    )
+                    loss_reduced[key] = val[0] / val[1]
             elif val[0].numel() == 1:
                 # legacy behavior, we average over the number of microbatches
                 val = torch.cat(val).mean()

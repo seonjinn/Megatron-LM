@@ -262,6 +262,9 @@ class TransformerConfig(ModelParallelConfig):
     """Whether cross entropy loss is calculated over the actual number of non-padded tokens in the
     global batch, versus the default behavior of assuming all tokens are non-padded."""
 
+    no_load_balancing_sequence_scaling: bool = False
+    """Whether to skip sequence-length scaling for MoE load-balancing and z-loss gradients."""
+
     multi_latent_attention: bool = False
     """Whether to use multi-latent attention."""
 

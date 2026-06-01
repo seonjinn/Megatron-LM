@@ -965,7 +965,11 @@ def maybe_save_dataloader_state(train_iterator, iteration, dataloader_save_path)
         raise RuntimeError(f"Could not find a save_state for the train_iterator of type {type(train_iterator)}")
 
     # Save dataloader state for each data parallel rank only once.
-    first_rank = mpu.is_pipeline_first_stage(ignore_virtual=True) and mpu.get_tensor_model_parallel_rank() == 0
+    first_rank = (
+        mpu.is_pipeline_first_stage(ignore_virtual=True)
+        and mpu.get_tensor_model_parallel_rank() == 0
+        and mpu.get_context_parallel_rank() == 0
+    )
     if not first_rank:
         return
 
@@ -975,6 +979,7 @@ def maybe_save_dataloader_state(train_iterator, iteration, dataloader_save_path)
     train_dataloader_state_dict = train_iterator.iterable.save_state()
     data_state_save_path = get_checkpoint_name(
         dataloader_save_path, iteration,
+        expert_parallel=False,
         basename=f'train_dataloader_dprank{dp_rank:03d}.pt'
     )
 

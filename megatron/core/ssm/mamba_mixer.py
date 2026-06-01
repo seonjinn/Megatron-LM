@@ -420,6 +420,26 @@ class MambaMixer(MegatronModule):
         )
         self.tp_group = pg_collection.tp
 
+    @staticmethod
+    def _create_packed_seq_idx(packed_seq_params: PackedSeqParams, total_tokens: int):
+        """Create per-token sequence ids for Mamba packed-sequence training."""
+        if packed_seq_params.cu_seqlens_q_padded is not None:
+            cu_seqlens = packed_seq_params.cu_seqlens_q_padded
+        else:
+            cu_seqlens = packed_seq_params.cu_seqlens_q
+        total_tokens_tensor = torch.tensor(
+            [total_tokens], dtype=cu_seqlens.dtype, device=cu_seqlens.device
+        )
+        cu_seqlens_with_max = torch.cat([cu_seqlens, total_tokens_tensor])
+        seq_lengths = cu_seqlens_with_max[1:] - cu_seqlens_with_max[:-1]
+        return (
+            torch.repeat_interleave(
+                torch.arange(seq_lengths.numel(), device=cu_seqlens.device), seq_lengths
+            )
+            .to(torch.int32)
+            .unsqueeze(0)
+        )
+
     def forward(
         self,
         hidden_states,
@@ -708,6 +728,8 @@ class MambaMixer(MegatronModule):
             )
             assert sequence_packing_available, reason_for_no_sequence_packing
             seq_idx = packed_seq_params.seq_idx
+            if seq_idx is None:
+                seq_idx = self._create_packed_seq_idx(packed_seq_params, zxBCdt.shape[1])
 
         y = mamba_split_conv1d_scan_combined(
             zxBCdt,

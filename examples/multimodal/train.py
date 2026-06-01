@@ -575,7 +575,7 @@ if __name__ == "__main__":
             full_config,
             train_valid_test_dataloaders_provider,
             model_provider,
-            ModelType.encoder_or_decoder,
+            ModelType.encoder_and_decoder,
             forward_step,
             process_non_loss_data_func=write_online_eval_to_tensorboard,
             get_embedding_ranks=llava_embedding_ranks,
