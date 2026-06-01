@@ -734,8 +734,15 @@ class LLaVAModel(MegatronModule):
             ):
                 max_seq_len = self._language_max_sequence_length
 
-            # Pad combined sequence length to be divisible by shard_factor for SP/CP.
-            shard_factor = self._calc_shard_factor()
+            # Pad combined sequence length using the effective CP group for this
+            # microbatch. Hybrid CP can lower local CP size per microbatch, and
+            # padding with the global CP size corrupts packed VLM logprob
+            # alignment after image-token expansion.
+            shard_factor, _ = self.calc_shard_factor_and_seq_dim_for_preprocessing(
+                context_parallel_lm=context_parallel_lm,
+                sequence_parallel_lm=self.sequence_parallel_lm,
+                tensor_model_parallel_size_lm=self.tensor_model_parallel_size_lm,
+            )
             if shard_factor is not None and max_seq_len % shard_factor != 0:
                 _old_max_seq_len = max_seq_len
                 max_seq_len = ((max_seq_len + shard_factor - 1) // shard_factor) * shard_factor
@@ -1002,7 +1009,14 @@ class LLaVAModel(MegatronModule):
             assert final_retention_mask.sum() == vision_tokens_retention_mask.sum() + text_position_ids.numel()
 
             initial_packed_seq_params = copy.deepcopy(packed_seq_params) if packed_seq_params is not None else None
-            shard_factor = self._calc_shard_factor() if self.training else None
+            if self.training:
+                shard_factor, _ = self.calc_shard_factor_and_seq_dim_for_preprocessing(
+                    context_parallel_lm=context_parallel_lm,
+                    sequence_parallel_lm=self.sequence_parallel_lm,
+                    tensor_model_parallel_size_lm=self.tensor_model_parallel_size_lm,
+                )
+            else:
+                shard_factor = None
 
             sequence_pad_to_divisibility = None
             if self.training and (self._vision_fp8 or self._vision_fp8_no_arch):
