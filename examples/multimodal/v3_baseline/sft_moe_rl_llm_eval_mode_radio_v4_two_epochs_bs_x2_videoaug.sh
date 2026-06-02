@@ -15,7 +15,7 @@
 # !! Example launch command !!
 # examples/multimodal/launch.sh \
 # --name sft_moe_rl_llm_2e_bs_x2_radio_v4_h_rc2_conv3d_vf32a_videoaug_v1377_0324 \
-# --sbatch examples/multimodal/v3_conv3d/sft_moe_rl_llm_eval_mode_radio_v4_two_epochs_bs_x2_videoaug.sh \
+# --sbatch examples/multimodal/v3_baseline/sft_moe_rl_llm_eval_mode_radio_v4_two_epochs_bs_x2_videoaug.sh \
 # --num-jobs 10
 
 # Strict mode: exit immediately on failure (-e), treat unset vars as error (-u), mark any failures as whole pipeline (-o pipefail)

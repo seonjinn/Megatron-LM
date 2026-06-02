@@ -486,11 +486,8 @@ class TopKRouter(Router):
             # which scales both the main_loss gradient and aux_loss gradient by
             # 1/(num_local_tokens * dp_size * num_micro_batches) in finalize_model_grads function.
             # To correct this scaling, we need to scale the aux_loss by num_local_tokens here.
-            if self.config.no_load_balancing_sequence_scaling:
-                num_tokens = 1
-            else:
-                # Use valid_token_count (excluding padding) if provided, otherwise use total tokens.
-                num_tokens = valid_token_count if valid_token_count is not None else activation.shape[0]
+            # Use valid_token_count (excluding padding) if provided, otherwise use total tokens.
+            num_tokens = valid_token_count if valid_token_count is not None else activation.shape[0]
             activation = MoEAuxLossAutoScaler.apply(activation, aux_loss * num_tokens)
         else:
             activation = MoEAuxLossAutoScaler.apply(activation, aux_loss)
@@ -521,11 +518,8 @@ class TopKRouter(Router):
                 # which scales both the main_loss gradient and z_loss gradient by
                 # 1/(num_local_tokens * dp_size * num_micro_batches) in finalize_model_grads().
                 # To correct this scaling, we need to scale the z_loss by num_local_tokens here.
-                if self.config.no_load_balancing_sequence_scaling:
-                    num_tokens = 1
-                else:
-                    # Count valid tokens: sum of inverted mask (False -> True = valid)
-                    num_tokens = (~padding_mask).sum() if padding_mask is not None else logits.shape[0]
+                # Count valid tokens: sum of inverted mask (False -> True = valid)
+                num_tokens = (~padding_mask).sum() if padding_mask is not None else logits.shape[0]
                 logits = MoEAuxLossAutoScaler.apply(logits, z_loss * num_tokens)
             else:
                 logits = MoEAuxLossAutoScaler.apply(logits, z_loss)

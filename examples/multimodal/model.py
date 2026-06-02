@@ -138,7 +138,6 @@ def model_provider(
     base_config.vision_model_type = args.vision_model_type
     base_config.sound_model_type = getattr(args, "sound_model_type", None)
     base_config.calculate_per_token_loss = False if getattr(args, "no_calculate_per_token_loss", False) else True
-    base_config.no_load_balancing_sequence_scaling = getattr(args, "no_load_balancing_sequence_scaling", False)
 
     if getattr(args, "no_calculate_per_token_loss", False):
         assert not args.use_loss_scaling, "Cannot disable calculating per-token loss and use loss scaling at the same time, either remove --no-calculate-per-token-loss or --use-loss-scaling"

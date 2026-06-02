@@ -438,7 +438,7 @@ CUDA_DEVICE_MAX_CONNECTIONS=1 python tools/checkpoint/convert.py \
 ./interactive.sh
 
 # Conversion paths/vars (usually PREVIOUS_VLM doesn't exist, but here it does)
-# - PREVIOUS_VLM from `examples/multimodal/v2/pretrain_nemotron_5p5_hybrid_9b_radio.sh`, CHECKPOINT_DIR value
+# - PREVIOUS_VLM from the previous VLM checkpoint, CHECKPOINT_DIR value
 CONVERTED_LLM=/lustre/fsw/portfolios/llmservice/users/amalasanjayd/checkpoints/nemotron_5p5_9b_v2/torch_patched/iter_0000000
 CONVERTED_VISION_PARENT_DIR=/lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/artifacts/mcore/radio_checkpoints/c-radio-v2-vlm-tp4
 FINAL_VLM_TP=4

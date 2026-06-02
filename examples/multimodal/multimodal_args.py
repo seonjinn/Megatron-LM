@@ -337,11 +337,6 @@ def add_multimodal_extra_args(parser):
         "--no-calculate-per-token-loss", action="store_true", default=False,
         help="Disable calculating per-token loss."
     )
-    if "--no-load-balancing-sequence-scaling" not in parser._option_string_actions:
-        group.add_argument(
-            "--no-load-balancing-sequence-scaling", action="store_true", default=False,
-            help="Disable scaling the load balancing gradient by the number of tokens."
-        )
     group.add_argument(
         "--tokenizer-keep-history-thinking", action="store_true", default=False,
         help="Keep the history thinking in the tokenizer."
