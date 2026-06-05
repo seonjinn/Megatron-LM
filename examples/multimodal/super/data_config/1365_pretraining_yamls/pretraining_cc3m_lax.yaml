@@ -1,0 +1,16 @@
+__module__: megatron.energon
+__class__: MetadatasetV2
+splits:
+  train:
+    blend_epochized:
+    - repetitions: 1
+      path: /scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/1365_pretrain/llmservice/projects/llmservice_fm_vision/users/ksapra/data/final_recipe/playground/pretraining_data/cc3m_relabelled_byqwen3-30b/final_processed/combined_data_new
+      subflavors:
+        name: cc3m_relabelled_byqwen3-30b
+        cook: conversation
+        data_augment: false
+        length: 867065
+        orig_length: 1000000
+        category: General
+      aux:
+        media_source: filesystem:///scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/

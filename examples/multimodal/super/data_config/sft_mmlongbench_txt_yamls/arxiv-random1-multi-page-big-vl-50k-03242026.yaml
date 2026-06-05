@@ -1,0 +1,16 @@
+__module__: megatron.energon
+__class__: MetadatasetV2
+splits:
+  train:
+    blend_epochized:
+    - repetitions: 1
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/sft_mmlongbench_txt/datasets/mmlongbench-arxiv-seed_random_1/multi-page-vl2-max-samples-50k-frontier-filtered-03242026
+      subflavors:
+        name: mmlongbench
+        cook: conversation
+        data_augment: false
+        length: 50000
+        orig_length: 9999999
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/sft_mmlongbench_txt/media_sources/mmlongbench/arxiv-seed_random_1

@@ -1498,18 +1498,18 @@ class MultiModalTaskEncoder(
                 f"max_text_tokens: {max_text_tokens} \n"
                 f"total_img_embeddings_len: {total_img_embeddings_len} \n"
                 f"total_num_images: {total_num_images} \n"
-                f"total_num_audio_embeddings: {total_num_audio_embeddings} \n"
-                f"total_num_audio: {total_num_audio} \n"
             )
 
         # If truncate causes all labels to be ignored, then skip the sample
         if len(truncated_target) == 0 or (truncated_target == IGNORE_INDEX).all():
             raise ValueError(
                 "All targets will be ignored after truncation: \n"
-                f"original input: {input_ids} \n"
-                f"original target: {target} \n"
-                f"truncated input:  {truncated_input_ids} \n"
-                f"truncated target: {truncated_target} \n"
+                f"sample_key: {sample_key} \n"
+                f"sample_subflavors: {sample_subflavors} \n"
+                f"original input length: {len(input_ids)} \n"
+                f"original target length: {len(target)} \n"
+                f"truncated input length: {len(truncated_input_ids)} \n"
+                f"truncated target length: {len(truncated_target)} \n"
                 f"max_text_tokens: {max_text_tokens} \n"
                 f"total_img_embeddings_len: {total_img_embeddings_len} \n"
                 f"total_num_images: {total_num_images} \n"

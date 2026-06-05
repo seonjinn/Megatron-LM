@@ -1,0 +1,247 @@
+__module__: megatron.energon
+__class__: MetadatasetV2
+splits:
+  train:
+    blend_epochized:
+    - repetitions: 0.2
+      path: /scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/1365_pretrain/llmservice/projects/llmservice_fm_vision/users/matthieul/eagle_recipe_online_packing/final_recipe/playground/commercial_sft_jsonl/vila_v3/LN_VILA_augment_caption
+      subflavors:
+        name: LN_VILA_augment_caption
+        cook: conversation
+        data_augment: false
+        length: 503275
+        orig_length: 503275
+        category: General
+      aux:
+        media_source: filesystem:///scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/commercial_sft_data/openimages
+    - repetitions: 0.1
+      path: /scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/1365_pretrain/llmservice/projects/llmservice_fm_vision/users/matthieul/eagle_recipe_online_packing/final_recipe/playground/commercial_sft_jsonl/vila_v3/OI_VILA_caption_1.2M_filt
+      subflavors:
+        name: OI_VILA_caption_1.2M_filt
+        cook: conversation
+        data_augment: false
+        length: 1278221
+        orig_length: 1278221
+        category: General
+      aux:
+        media_source: filesystem:///scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/commercial_sft_data/openimages
+    - repetitions: 1
+      path: /scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/1365_pretrain/llmservice/projects/llmservice_fm_vision/users/matthieul/eagle_recipe_online_packing/final_recipe/playground/commercial_sft_jsonl/vila_v3/textcaps
+      subflavors:
+        name: textcaps
+        cook: conversation
+        data_augment: false
+        length: 21953
+        orig_length: 21953
+        category: General
+      aux:
+        media_source: filesystem:///scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/sft_data/Cambrian-10M
+    - repetitions: 1
+      path: /scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/1365_pretrain/llmservice/projects/llmservice_fm_vision/users/matthieul/eagle_recipe_online_packing/final_recipe/playground/commercial_sft_jsonl/vila_v3/textcaps_commercial_new
+      subflavors:
+        name: textcaps_commercial_new
+        cook: conversation
+        data_augment: false
+        length: 109765
+        orig_length: 109765
+        category: General
+      aux:
+        media_source: filesystem:///scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/sft_data/Cambrian-10M/textvqa
+    - repetitions: 1
+      path: /scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/1365_pretrain/llmservice/projects/llmservice_fm_vision/users/matthieul/eagle_recipe_online_packing/final_recipe/playground/commercial_sft_jsonl/vila_v3/textvqa_commercial_new
+      subflavors:
+        name: textvqa_commercial_new
+        cook: conversation
+        data_augment: false
+        length: 34602
+        orig_length: 34602
+        category: General
+      aux:
+        media_source: filesystem:///scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/sft_data/Cambrian-10M/textvqa
+    - repetitions: 1
+      path: /scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/1365_pretrain/llmservice/projects/llmservice_fm_vision/users/matthieul/eagle_recipe_online_packing/final_recipe/playground/commercial_sft_jsonl/vila_v3/refcoco_updated
+      subflavors:
+        name: refcoco_updated
+        cook: conversation
+        data_augment: false
+        length: 14694
+        orig_length: 14694
+        category: General
+      aux:
+        media_source: filesystem:///scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/sft_data
+    - repetitions: 1
+      path: /scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/1365_pretrain/llmservice/projects/llmservice_fm_vision/users/matthieul/eagle_recipe_online_packing/final_recipe/playground/commercial_sft_jsonl/vila_v3/vqav2_okvqa_updated
+      subflavors:
+        name: vqav2_okvqa_updated
+        cook: conversation
+        data_augment: false
+        length: 28555
+        orig_length: 28555
+        category: General
+      aux:
+        media_source: filesystem:///scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/sft_data
+    - repetitions: 1
+      path: /scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/1365_pretrain/llmservice/projects/llmservice_fm_vision/users/matthieul/eagle_recipe_online_packing/final_recipe/playground/commercial_sft_jsonl/vila_v3/a_okvqa_legal_updated
+      subflavors:
+        name: a_okvqa_legal_updated
+        cook: conversation
+        data_augment: false
+        length: 20832
+        orig_length: 20832
+        category: General
+      aux:
+        media_source: filesystem:///scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/sft_data
+    - repetitions: 1
+      path: /scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/1365_pretrain/llmservice/projects/llmservice_fm_vision/users/matthieul/eagle_recipe_online_packing/final_recipe/playground/commercial_sft_jsonl/vila_v3/gqa_updated_new
+      subflavors:
+        name: gqa_updated_new
+        cook: conversation
+        data_augment: false
+        length: 21433
+        orig_length: 21433
+        category: General
+      aux:
+        media_source: filesystem:///scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/sft_data/Cambrian-10M/gqa/images
+    - repetitions: 1
+      path: /scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/1365_pretrain/llmservice/projects/llmservice_fm_vision/users/matthieul/eagle_recipe_online_packing/final_recipe/playground/commercial_sft_jsonl/vila_v3/aokvqa_commercial_new
+      subflavors:
+        name: aokvqa_commercial_new
+        cook: conversation
+        data_augment: false
+        length: 16131
+        orig_length: 16131
+        category: General
+      aux:
+        media_source: filesystem:///scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/sft_data/coco
+    - repetitions: 1
+      path: /scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/1365_pretrain/llmservice/projects/llmservice_fm_vision/users/matthieul/eagle_recipe_online_packing/final_recipe/playground/commercial_sft_jsonl/vila_v3/clevr_merge_explanation
+      subflavors:
+        name: commercial_clevr
+        cook: conversation
+        data_augment: false
+        length: 70000
+        orig_length: 70000
+        category: General
+      aux:
+        media_source: filesystem:///scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/sft_data/Cambrian-10M/clevr/CLEVR_v1.0
+    - repetitions: 1
+      path: /scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/1365_pretrain/llmservice/projects/llmservice_fm_vision/users/matthieul/eagle_recipe_online_packing/final_recipe/playground/sft_jsonl_draco/eagle_v1/clevr_math_merged_70k
+      subflavors:
+        name: clevr_math
+        cook: conversation
+        data_augment: false
+        length: 70000
+        orig_length: 70000
+        category: Counter
+      aux:
+        media_source: filesystem:///scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/sft_data/Cambrian-10M/clevr/CLEVR_v1.0/images/train
+    - repetitions: 1
+      path: /scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/1365_pretrain/llmservice/projects/llmservice_fm_vision/users/matthieul/eagle_recipe_online_packing/final_recipe/playground/commercial_sft_jsonl/length/commercial_synthdog-en
+      subflavors:
+        name: commercial_synthdog-en
+        cook: conversation
+        data_augment: false
+        length: 29672
+        orig_length: 29765
+        category: General
+      aux:
+        media_source: filesystem:///scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/data
+    - repetitions: 0.3
+      path: /scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/1365_pretrain/llmservice/projects/llmservice_fm_vision/users/matthieul/eagle_recipe_online_packing/final_recipe/playground/commercial_sft_jsonl/vila_v3/approved_20240921
+      subflavors:
+        name: hf_data_approved_20240921
+        cook: conversation
+        data_augment: false
+        length: 302004
+        orig_length: 302004
+        category: General
+      aux:
+        media_source: filesystem:///scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/sft_data/Cambrian-10M
+    - repetitions: 1
+      path: /scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/1365_pretrain/llmservice/projects/llmservice_fm_vision/users/matthieul/eagle_recipe_online_packing/final_recipe/playground/commercial_sft_jsonl/tallyqa_filtered_commercial
+      subflavors:
+        name: tally_qa
+        cook: conversation
+        data_augment: false
+        length: 68775
+        orig_length: 68775
+        category: General
+      aux:
+        media_source: filesystem:///scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/sft_data/Cambrian-10M
+    - repetitions: 1
+      path: /scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/1365_pretrain/llmservice/projects/llmservice_fm_vision/users/matthieul/eagle_recipe_online_packing/final_recipe/playground/sft_jsonl/eagle_v1/invisible
+      subflavors:
+        name: nv_invisible
+        cook: conversation
+        data_augment: false
+        length: 20476
+        orig_length: 20476
+        category: General
+      aux:
+        media_source: filesystem:///scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/data/vendor_dataset/enterprise/images/invisible_vqa
+    - repetitions: 1
+      path: /scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/1365_pretrain/llmservice/projects/llmservice_fm_vision/users/matthieul/eagle_recipe_online_packing/final_recipe/playground/sft_jsonl/eagle_v1/turing
+      subflavors:
+        name: nv_turing
+        cook: conversation
+        data_augment: false
+        length: 20364
+        orig_length: 20364
+        category: General
+      aux:
+        media_source: filesystem:///scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/data/vendor_dataset/enterprise/images/turing_vqa
+    - repetitions: 1
+      path: /scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/1365_pretrain/llmservice/projects/llmservice_fm_vision/users/matthieul/eagle_recipe_online_packing/final_recipe/playground/sft_jsonl_draco/eagle_v1/scale_nv
+      subflavors:
+        name: scale_nv
+        cook: conversation
+        data_augment: false
+        length: 14872
+        orig_length: 14872
+        category: General
+      aux:
+        media_source: filesystem:///scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/sft_data/scale/images
+    - repetitions: 1
+      path: /scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/1365_pretrain/llmservice/projects/llmservice_fm_vision/users/matthieul/eagle_recipe_online_packing/final_recipe/playground/sft_jsonl/eagle_v1/textbooks_nv
+      subflavors:
+        name: textbooks_nv
+        cook: conversation
+        data_augment: false
+        length: 46745
+        orig_length: 46745
+        category: General
+      aux:
+        media_source: filesystem:///scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/sft_data/textbooks
+    - repetitions: 1
+      path: /scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/1365_pretrain/llmservice/projects/llmservice_fm_vision/users/matthieul/eagle_recipe_online_packing/final_recipe/playground/nv_ocr_datasets/human_annotation/v0/raw/human_annotation_v0
+      subflavors:
+        name: human_annotation_ocr
+        cook: conversation
+        data_augment: false
+        length: 14309
+        orig_length: 14309
+        category: General
+      aux:
+        media_source: filesystem:///scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/nv_ocr_datasets/human_annotation/v0/raw/images
+    - repetitions: 1
+      path: /scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/1365_pretrain/llmservice/projects/llmservice_fm_vision/users/matthieul/eagle_recipe_online_packing/final_recipe/playground/nv_ocr_datasets/doclaynet_ro_v4/raw/doclaynet_ro_v4
+      subflavors:
+        name: doclaynet_ro_v4
+        cook: conversation
+        data_augment: false
+        length: 48369
+        orig_length: 48369
+        category: General
+      aux:
+        media_source: filesystem:///scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/nv_ocr_datasets/doclaynet_ro_v4/raw/images
+    - repetitions: 1
+      path: /scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/1365_pretrain/llmservice/projects/llmservice_fm_vision/users/matthieul/eagle_recipe_online_packing/final_recipe/playground/nv_ocr_datasets/SynthTables/SynthTables
+      subflavors:
+        name: SynthTables
+        cook: conversation
+        data_augment: false
+        length: 4887
+        orig_length: 4887
+        category: General
+      aux:
+        media_source: filesystem:///scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/nv_ocr_datasets/SynthTables/images

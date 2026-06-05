@@ -87,6 +87,9 @@ class TransformerConfig(ModelParallelConfig):
     Force a specific hybrid layer pattern for MTP layers.
     """
 
+    keep_mtp_spec_in_bf16: bool = False
+    """Keep MTP layers out of quantized fp8/fp4 contexts."""
+
     num_layers_in_first_pipeline_stage: Optional[int] = None
     """Number of transformer layers on first pipeline stage.
     None implies equal layer division across PP ranks."""

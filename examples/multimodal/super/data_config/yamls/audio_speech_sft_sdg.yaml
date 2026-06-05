@@ -1,0 +1,17 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_omcat_audio_wds/riva__SQA_Mixtral8x22b__MMLPC__en___pcstrip_
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_sft_audio/Counting/word_counting_processed_subsampled.jsonl
+      repetitions: 1
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/granary_en/ytc/0/tarred_audio_filepaths

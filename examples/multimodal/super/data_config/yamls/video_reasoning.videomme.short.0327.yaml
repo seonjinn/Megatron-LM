@@ -1,0 +1,19 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+      # Total
+      # 705330 samples - 10532.16 tokens per sample - 7.42B tokens
+
+      # # Video reasoning short
+      # # 235110 samples - 9986.56 tokens per sample - 2.34B tokens
+      # - path: /lustre/fsw/portfolios/llmservice/users/ehosseiniasl/github_repos/ehosseiniasl_vlm2_unified_training/megatron-lm/examples/multimodal/avlm/data_config/video_qa_short_reasoning_0305.yaml
+      #   repetitions: 1
+            
+      # Qwen3.5 video reasoning
+      # Video reasoning short
+      # 
+      - path: mar4_video_qa_short_reasoning_newreps.yaml
+        repetitions: 1
+    

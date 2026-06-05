@@ -1,0 +1,81 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+      # CC Batch 0. OCR+LLM. Frontier filtered.
+      - path: cc-batch0-03172026.yaml
+        repetitions: 1
+
+      # SEC. OCR+LLM. Frontier filtered.
+      - path: sec-03172026.yaml
+        repetitions: 1
+
+      # Nabin image. VLM. Frontier filtered.
+      - path: nabin-image-03172026.yaml
+        repetitions: 1
+
+      # Multi-page. OCR+LLM. Frontier filtered.
+      - path: cc-batch1-multi-page-03172026.yaml
+        repetitions: 1
+
+      # Nabin image v2. VLM. Frontier filtered.
+      - path: nabin-image-v2-03242026.yaml
+        repetitions: 1
+
+      # SEC multi-page. OCR+LLM. Frontier filtered.
+      - path: sec-multi-page-03242026.yaml
+        repetitions: 1
+
+      # Big VL multi-page. VLM. Frontier filtered.
+      - path: arxiv-random0-multi-page-big-vl-03242026.yaml
+        repetitions: 1
+
+      # CC batch 2 whole document. OCR+LLM
+      - path: cc-batch2-whole-document-03242026.yaml
+        repetitions: 1
+
+      # Big VL 2. VLM. Frontier filtered.
+      - path: arxiv-random1-multi-page-big-vl-50k-03242026.yaml
+        repetitions: 1
+
+      # Nabin CC batch 2 image v2 de-duped. VLM
+      - path: cc-batch2-nabin-image-v2-03242026.yaml
+        repetitions: 1
+
+      # Nabin arxiv image v2 de-duped. VLM
+      - path: arxiv-random1-nabin-image-v2-03242026.yaml
+        repetitions: 1
+
+      # CC batch 2 multi-page qwen3.5
+      - path: cc-batch2-multi-page-qwen3p5-03182026.yaml
+        repetitions: 1
+
+      # manuals-en single-page qwen3.5
+      - path: manuals-en-single-page-qwen3p5-v2-03182026.yaml
+        repetitions: 1
+
+      # CC batch 3 whole document qwen3.5 v2
+      - path: cc-batch3-whole-document-qwen3p5-v2-03182026.yaml
+        repetitions: 1
+
+      # CC batch 4 whole document qwen3.5 v2
+      - path: cc-batch4-whole-document-qwen3p5-v2-03182026.yaml
+        repetitions: 1
+
+      # SEC single-page qwen3.5 v2
+      - path: sec-single-page-qwen3p5-v2-03182026.yaml
+        repetitions: 1
+
+      # SEC whole document qwen3.5 v2
+      - path: sec-whole-document-qwen3p5-03182026.yaml
+        repetitions: 1
+
+      # Pew single page.
+      - path: pew-single-page-qwen3p5-v3-03252026.yaml
+        repetitions: 1.5
+
+      # Pew whole document.
+      - path: pew-whole-document-qwen3p5-v3-03252026.yaml
+        repetitions: 1.5
+

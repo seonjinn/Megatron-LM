@@ -178,7 +178,10 @@ def _reduce_scatter_along_second_dim(global_t):
     assert global_t.shape[1] % cp_size == 0
     samples_per_rank = global_t.shape[1] // cp_size
 
-    tensor_list = [global_t[:, cp_rank * samples_per_rank : (cp_rank + 1) * samples_per_rank] for cp_rank in range(cp_size)]
+    tensor_list = [
+        global_t[:, cp_rank * samples_per_rank : (cp_rank + 1) * samples_per_rank].contiguous()
+        for cp_rank in range(cp_size)
+    ]
 
     local_t = torch.zeros(global_t.shape[0], samples_per_rank, *global_t.shape[2:], device=global_t.device, dtype=global_t.dtype)
 

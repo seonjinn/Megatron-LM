@@ -1,0 +1,99 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+    
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/audio_reasoning/cc_long_audio_sgpt_790k_audioset_fixed_format_fixed_token.jsonl
+      repetitions: 2
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_audioflamingo/audioset/unbalanced_train_22khz
+    
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/audio_reasoning/cc_long_audio_sgpt_790k_AudioSet_SL_fixed_format_fixed_token.jsonl
+      repetitions: 2
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/AudioSet_SL
+    
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/audio_reasoning/cc_long_audio_sgpt_790k_cochlscene_fixed_format_fixed_token.jsonl
+      repetitions: 2
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_audioflamingo/CochlScene
+    
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/audio_reasoning/cc_long_audio_sgpt_790k_DailyTalk_fixed_format_fixed_token.jsonl
+      repetitions: 2
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/DailyTalk
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/audio_reasoning/cc_long_audio_sgpt_790k_FSD50k_fixed_format_fixed_token.jsonl
+      repetitions: 2
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/FSD50k/44khz/dev
+    
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/audio_reasoning/cc_long_audio_sgpt_790k_LibriSpeech_fixed_format_fixed_token.jsonl
+      repetitions: 2
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/audio-reasoning-traces-nn-v4/audio/LibriSpeech
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/audio_reasoning/cc_long_audio_sgpt_790k_MusicCaps_fixed_format_fixed_token.jsonl
+      repetitions: 2
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/MusicCaps/44khz
+    
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/audio_reasoning/cc_long_audio_sgpt_790k_vggsound_fixed_format_fixed_token.jsonl
+      repetitions: 2
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_audioflamingo/VGGSound
+    
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/audio_reasoning/cc_long_audio_sgpt_790k_Youtube8M_fixed_format_fixed_token.jsonl
+      repetitions: 2
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_audioflamingo/YouTube8M
+
+
+    #AudioMCQ - Strong Audio Contribution
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/thinking_trace_strong_audio_contribution/AudioMCQ_SpeechCraft_reasoning_audiocontribution_fixed_token.jsonl
+      repetitions: 2
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/LibriTTS
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/thinking_trace_strong_audio_contribution/AudioMCQ_Clotho_filtered_reasoning_audiocontribution_fixed_token.jsonl
+      repetitions: 2
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_audioflamingo/Clotho-v2/development
+
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/thinking_trace_strong_audio_contribution/AudioMCQ_MusicCaps_reasoning_audiocontribution_fixed_token.jsonl
+      repetitions: 2
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/MusicCaps/44khz
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/thinking_trace_strong_audio_contribution/AudioMCQ_TACOS_filtered_reasoning_audiocontribution_fixed_token.jsonl
+      repetitions: 2
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_audioflamingo/TACOS

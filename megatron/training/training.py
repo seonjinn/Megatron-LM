@@ -2678,9 +2678,9 @@ def training_log(
 
     # Log MTP metrics.
     if args.mtp_num_layers is not None:
-        mtp_loss_scale = 1 / get_num_microbatches()
+        # MTP logging tracks summed loss and token count across microbatches.
         MTPLossLoggingHelper.track_mtp_metrics(
-            mtp_loss_scale, iteration, writer, wandb_writer, total_loss_dict
+            1.0, iteration, writer, wandb_writer, total_loss_dict
         )
 
     # Track sparse attention indexer loss.

@@ -1,0 +1,16 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+      - path: pretrain_base_lax.yaml
+        repetitions: 2
+      - path: pretrain_nvpdftex_clean_v11_120K_synthtabnet_blocks_full_lax.yaml
+        repetitions: 2
+      - path: pretraining_cc3m_lax.yaml
+        repetitions: 2
+      - path: pretraining_ocr_guilin_102325_ocr_only_lax.yaml
+        repetitions: 2
+      # A sub-sample of the 13.52 SFT dataset.
+      - path: eagle_sft_v13.52.no.text.2x_lax.yaml
+        repetitions: 0.025

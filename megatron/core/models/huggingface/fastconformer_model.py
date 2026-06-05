@@ -12,11 +12,14 @@ _NEMO_SOUND_MODEL_CACHE: dict[str, tuple] = {}
 def get_nemo_sound_model(sound_model_type):
     """Load (and cache) a NeMo ASR encoder + preprocessor for the given ``nemo://`` model id."""
     if sound_model_type not in _NEMO_SOUND_MODEL_CACHE:
+        import os
         import nemo.collections.asr as nemo_asr
 
-        asr_model = nemo_asr.models.ASRModel.from_pretrained(
-            model_name=sound_model_type.split("nemo://")[1]
-        )
+        model_name = sound_model_type.split("nemo://", 1)[1]
+        if os.path.isfile(model_name):
+            asr_model = nemo_asr.models.ASRModel.restore_from(restore_path=model_name)
+        else:
+            asr_model = nemo_asr.models.ASRModel.from_pretrained(model_name=model_name)
         # Avoid hangs from an unnecessary max-seq-len NCCL sync in some edge cases.
         asr_model.encoder.sync_max_audio_length = False
         for layer in asr_model.encoder.layers:

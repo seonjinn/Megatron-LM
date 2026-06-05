@@ -1,0 +1,216 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+# Total tokens/samples: stale after substitutions to Text and Safety entries (see table at bottom)
+splits:
+  train:
+    blend_epochized:
+      # Total: stale after substitutions to Text and Safety entries
+
+      #####################################
+      ############### ASR ################
+      #####################################
+      # ASR total (sum of active entries below; samples×tps/1e9): 0.39B tokens - 1,666,836 samples
+      # ASR
+      # 83341800 * 0.02 = 1666836 samples - 233 tokens per sample - 0.38B tokens
+      - path: granary.v1_1.yaml
+        repetitions: 0.02
+
+      #####################################
+      ############### Audio ################
+      #####################################
+      # Audio total (sum of active entries below; samples×tps/1e9): 9.97B tokens - 7,557,721 samples
+      # MMAU SFT
+      # 45266072 * 0.1 = 4526607.2 samples - 891.68 tokens per sample - 4.04B tokens
+      - path: sft.audio.leili.0317.yaml
+        repetitions: 0.1
+      # MMAU reasoning
+      # 1644616 * 1 = 1644616 samples - 390 tokens per sample - 0.64B tokens
+      - path: audio_reasoning.mmau.0316.yaml
+        repetitions: 1
+      # VoiceBench Reasoning (audio_reasoning.voicebench.ehsan.0323)
+      # 2609156 * 0.5 = 1304578 samples - ~3621.5 tps - 4.72B tokens
+      - path: audio_reasoning.voicebench.ehsan.0323.yaml
+        repetitions: 0.5
+      # Long Form audio
+      # 40960 * 2 = 81920 samples - 6888.52 tokens per sample - 0.56B tokens
+      - path: ytc_longform_dataset.yaml
+        repetitions: 2
+
+      #####################################
+      ############### Vision ################
+      #####################################
+      # Vision total (sum of active entries below; samples×tps/1e9): 8.45B tokens - 3,001,031 samples
+      # Base Vision data
+      # 72,593,761 * 0.04 = 2,903,750 samples - 2097 tokens per sample - 6.09B tokens
+      - path: eagle_sft_v13.77_safetyfix.yaml
+        repetitions: 0.04 
+      # SFT-0.5 addmix: benchfit_qa
+      # 762,674 * 0.024 = 18304 samples - 722 tokens per sample - ~13.2M tokens
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/benchfit_qa/03-10a_stage5_output.jsonl
+        repetitions: 0.024
+        subflavors:
+          name: benchfit_qa
+          cook: conversation
+        aux:
+          media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/sft-0.5/mint_200/input/image_shards
+      # SFT-0.5 addmix: dense_ocr_qa
+      # 141,361 * 0.024 = 3393 samples - 1493 tokens per sample - ~5.1M tokens
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/dense_ocr/03-10a_stage5_qa_output.jsonl
+        repetitions: 0.024
+        subflavors:
+          name: dense_ocr_qa
+          cook: conversation
+        aux:
+          media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/sft-0.5/mint_200/input/image_shards
+      # MMLongBench short 
+      # 75584 * 1 = 75584 samples - 31052.6 tokens per sample - 2.35B tokens
+      - path: sft.mmlongbench.49k.ehsan.0323.yaml
+        repetitions: 1
+
+      #####################################
+      ############### Text ################
+      #####################################
+      # Text total: stats unknown after substitution
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/ultra-sft/epoch-0-032026-energon/ultra_txt_materialized_0407_median_gt_16384_le_49152.yaml
+        repetitions: 0.1
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/ultra-sft/epoch-0-032026-energon/ultra_txt_materialized_0407_median_le_16384.yaml
+        repetitions: 0.1
+
+      #####################################
+      ############### Safety ################
+      #####################################
+      # Safety total: partial — image safety entry stats unknown after substitution
+
+      # Safety data
+      # 35,406 * 2 = 70,812 samples - 737 tokens per sample - 0.05B tokens
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/safety/filtered_textsafety_energon_dataset.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        repetitions: 2
+      # stats unknown after substitution
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/fixed_datasets/safety/nemotron_omni_safety_image_text_sft_blend_v0.1.0.jsonl
+        aux:
+          media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/omni_data/data/images
+        subflavors:
+          cook: general_conversations_jsonl
+        repetitions: 2
+
+      #####################################
+      ############### Video ################
+      #####################################
+      # Video total (sum of active entries below; samples×tps/1e9): 27.73B tokens - 845,667 samples
+      # Short video
+      # 2,689,219 * 0.01 = 26892 samples - 3403 tokens per sample - 0.92B tokens
+      - path: short_video_qa_0318_newreps.yaml
+        repetitions: 0.01
+      # 1,096,078 * 0.01 = 10960 samples - 4002 tokens per sample - 0.44B tokens
+      - path: video_qa_v1_v2_all_0314_safetyfix.yaml
+        repetitions: 0.01
+      # Additional data from Arushi
+      # 2,611,833 * 0.01 = 26118 samples - 6544 tokens per sample - 0.17B tokens
+      - path: short_dense_captions_no_think_0310_safetyfix.yaml
+        repetitions: 0.01
+      # Medium video
+      # (256 frame) 4936712 * 0.05 = 246835.6 samples - 35648.36 tokens per sample - 8.79B tokens
+      - path: medium_video_qa_all_0320.yaml
+        repetitions: 0.05
+      # Long video
+      # (256 frame) 1078717 * 0.1 = 107871 samples - 36767 tokens per sample - 3.9B tokens
+      - path: long_video_qa_all_0227_rebalanced.yaml
+        repetitions: 0.1
+      # Short Video reasoning (VideoMME)
+      # 376767 * 0.1 = 37676.7 samples - 11157.92 tokens per sample - 0.42B tokens
+      - path: video_reasoning.videomme.short.0327.yaml
+        repetitions: 0.1
+      # Medium Video reasoning (VideoMME)
+      # 3112659 * 0.1 = 311265.9 samples - 36780.72 tokens per sample - 11.47B tokens
+      - path: video_reasoning.videomme.medium.0327.yaml
+        repetitions: 0.1
+      # Long Video reasoning (VideoMME)
+      # 1560920 * 0.05 = 78046 samples - 35719.88 tokens per sample - 2.79B tokens
+      - path: video_reasoning.videomme.long.0316.yaml
+        repetitions: 0.05
+
+      #####################################
+      ############### Omni ################
+      #####################################
+      # Omni total (sum of active entries below; samples×tps/1e9): ~73.55B tokens - 2,337,013 samples
+      # Short omni data
+      # 4500 samples - 15622 tokens per sample - 0.07B tokens
+      - path: arushi_short16k_omni_qa_0220.yaml
+        repetitions: 0.01
+      # 6168 samples - 33905 tokens per sample - 0.21B tokens
+      - path: gemini_filtered_omni_qa_short16k_0222.yaml
+        repetitions: 0.01
+      # (256 frame) 490339 * 0.01 = 4903 samples - 27048 tokens per sample - 0.13B tokens
+      - path: omni_caption_short16k_0220.yaml
+        repetitions: 0.01
+      # Medium omni
+      # (256 frame) 2275298 * 0.1 = 227529 samples - 39213.52 tokens per sample - 8.9B tokens
+      - path: arushi_medium49k_omni_qa_0310.yaml
+        repetitions: 0.1 
+      # (256 frame) 94530 * 1 = 94530 samples - 39554.96 tokens per sample - 3.7B tokens
+      - path: gemini_filtered_omni_qa_medium49k_0222.yaml
+        repetitions: 1 #0.1
+      # (256 frame) 750543 * 0.5 = 375271.5 samples - 31947.2 tokens per sample - 11.99B tokens
+      - path: gemini_filtered_omni_qa_improvement_categories_0310_550k.yaml
+        repetitions: 0.5
+      # (256 frame) 427426 * 1 = 427426 samples - 29127.08 tokens per sample - 12.45B tokens
+      - path: gemini_filtered_omni_qa_remaining_categories_0310_550k.yaml
+        repetitions: 1
+      # (256 frame) 1391534 * 0.5 = 695767 samples - 28404 tokens per sample - ~19.76B tokens
+      - path: pritam_omni_remaining_categories_0310.yaml
+        repetitions: 0.5
+      # Omni reasoning
+      # 199778 * 0.5 = 99889 samples - 39757.4 tokens per sample - 3.97B tokens
+      - path: omni_qa_reasoning_0320.yaml
+        repetitions: 0.5
+      # 421222 * 0.5 = 210611 samples - 28262.32 tokens per sample - 5.95B tokens
+      - path: reasoning_blend.yaml
+        repetitions: 0.5
+      # 562920 * 0.2 = 112584 samples - 31789.48 tokens per sample - ~3.58B tokens
+      - path: reasoning_blend_batch2.yaml
+        repetitions: 0.2
+      # 88394 * 1 = 88394 samples - 34505.96 tokens per sample - ~3.05B tokens
+      - path: omni_qa_reasoning_0330.yaml
+        repetitions: 1 
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+#    #  Category   Entry (nested YAML / leaf)                         Samples      Rep   Eff.Samples   Avg Tok   Est.Tokens
+# ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+#    1  ASR        granary.v1_1.yaml                              83,341,800   0.02      1,666,836  ~   233       388M
+#    2  Audio      sft.audio.leili.0317.yaml                      45,266,272    0.1      4,526,607  ~   892      4.04B
+#    3  Audio      audio_reasoning.mmau.0316.yaml                  1,644,616      1      1,644,616  ~   390       641M
+#    4  Audio      audio_reasoning.voicebench.ehsan.0323.yaml      2,609,156    0.5      1,304,578  ~ 3,622      4.72B
+#    5  Audio      ytc_longform_dataset.yaml                          40,960      2         81,920  ~ 6,889       564M
+#    6  Vision     eagle_sft_v13.77_safetyfix.yaml                72,593,761   0.04      2,903,750  ~ 2,097      6.09B
+#    7  Vision     03-10a_stage5_output.jsonl                        762,674  0.024         18,304  ~   722        13M
+#    8  Vision     03-10a_stage5_qa_output.jsonl                     141,361  0.024          3,393  ~ 1,493       5.1M
+#    9  Vision     sft.mmlongbench.49k.ehsan.0323.yaml                75,584      1         75,584  ~31,053      2.35B
+#   10  Text       ultra_txt_materialized_0407_median_gt_16384_le_49152.yaml    ?    0.1              ?  ~     ?           ?
+#  10a  Text       ultra_txt_materialized_0407_median_le_16384.yaml             ?    0.1              ?  ~     ?           ?
+#   11  Safety     filtered_textsafety_energon_dataset.jsonl          35,406      2         70,812  ~   737        52M
+#   12  Safety     nemotron_omni_safety_image_text_sft_blend_v0.1.0.jsonl       ?      2              ?  ~     ?           ?
+#   13  Video      short_video_qa_0318_newreps.yaml                2,689,219   0.01         26,892  ~ 3,403        92M
+#   14  Video      video_qa_v1_v2_all_0314_safetyfix.yaml          1,096,078   0.01         10,961  ~ 4,002        44M
+#   15  Video      short_dense_captions_no_think_0310_safetyfix.yaml 2,611,833  0.01         26,118  ~ 6,544       171M
+#   16  Video      medium_video_qa_all_0320.yaml                   4,936,712   0.05        246,836  ~35,648      8.80B
+#   17  Video      long_video_qa_all_0227_rebalanced.yaml          1,078,717    0.1        107,871  ~36,767      3.97B
+#   18  Video      video_reasoning.videomme.short.0327.yaml          376,767    0.1         37,677  ~11,158       420M
+#   19  Video      video_reasoning.videomme.medium.0327.yaml       3,112,659    0.1        311,266  ~36,781     11.45B
+#   20  Video      video_reasoning.videomme.long.0316.yaml         1,560,920   0.05         78,046  ~35,720      2.79B
+#   21  Omni       arushi_short16k_omni_qa_0220.yaml                   4,500   0.01             45  ~15,622         1M
+#   22  Omni       gemini_filtered_omni_qa_short16k_0222.yaml          6,168   0.01             62  ~33,905         2M
+#   23  Omni       omni_caption_short16k_0220.yaml                   490,339   0.01          4,903  ~27,048       133M
+#   24  Omni       arushi_medium49k_omni_qa_0310.yaml              2,275,298    0.1        227,530  ~39,214      8.92B
+#   25  Omni       gemini_filtered_omni_qa_medium49k_0222.yaml        94,530      1         94,530  ~39,555      3.74B
+#   26  Omni       gemini_filtered_omni_qa_improvement_0310_550k.yaml 750,543    0.5        375,272  ~31,947     11.99B
+#   27  Omni       gemini_filtered_omni_qa_remaining_0310_550k.yaml   427,426      1        427,426  ~29,127     12.45B
+#   28  Omni       pritam_omni_remaining_categories_0310.yaml      1,391,534    0.5        695,767  ~28,404     19.76B
+#   29  Omni       omni_qa_reasoning_0320.yaml                       199,778    0.5         99,889  ~39,757      3.97B
+#   30  Omni       reasoning_blend.yaml                              421,222    0.5        210,611  ~28,262      5.95B
+#   31  Omni       reasoning_blend_batch2.yaml                       562,920    0.2        112,584  ~31,789      3.58B
+#   32  Omni       omni_qa_reasoning_0330.yaml                        88,394      1         88,394  ~34,506      3.05B
+# ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+#            TOTAL (partial — stats for rows 10, 10a, 12 unknown after substitution)
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════

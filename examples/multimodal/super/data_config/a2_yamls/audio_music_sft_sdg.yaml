@@ -1,0 +1,80 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/datasets/avlm_sft_audio/youtube_caps
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/datasets/avlm_sft_audio/audioset_caps
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/datasets/avlm_laion_music/laion_music_batch1_captions_final/music_captions_batch1_final.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/media_sources/avlm_audioflamingo/laion_disco_12M/data
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/datasets/avlm_laion_music/laion_music_batch1_qa_final/music_qa_batch1_final.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/media_sources/avlm_audioflamingo/laion_disco_12M/data
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/datasets/avlm_laion_music/laion_music_batch2_captions/music_captions_batch2.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/media_sources/avlm_audioflamingo/laion_disco_12M/data
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/datasets/avlm_laion_music/laion_music_batch2_qa/music_qa_batch2_final.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/media_sources/avlm_audioflamingo/laion_disco_12M/data
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/datasets/avlm_laion_music/laion_music_batch2_qa/music_qa_batch2_diverse_final.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/media_sources/avlm_audioflamingo/laion_disco_12M/data
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/datasets/avlm_laion_music/laion_music_batch3_captions/music_captions_batch3.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/media_sources/avlm_audioflamingo/laion_disco_12M/data
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/datasets/avlm_laion_music/laion_music_batch3_qa/music_qa_batch3_genre_mood_final.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/media_sources/avlm_audioflamingo/laion_disco_12M/data
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/datasets/avlm_laion_music/laion_music_batch3_qa/music_qa_batch3_temporal_cultural_final.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/media_sources/avlm_audioflamingo/laion_disco_12M/data
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/datasets/avlm_laion_music/laion_music_batch3_qa/music_qa_batch3_lyrics_final.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/audio_stage2/media_sources/avlm_audioflamingo/laion_disco_12M/data
+      repetitions: 1

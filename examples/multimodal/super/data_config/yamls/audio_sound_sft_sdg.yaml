@@ -1,0 +1,202 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+     #########
+      # Audio-SDG Datasets
+      #########
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_sft_audio/comp_r_aqa
+      repetitions: 1
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+    
+    ### SpeechSoundQA
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_sft_audio/SpeechSoundQA_quality_filtered/SpeechSoundQA_wo_ego_quality_filtered_audioset.jsonl
+      repetitions: 1
+      subflavors:
+        cook: general_conversations_jsonl  
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_audioflamingo/audioset/unbalanced_train_22khz
+    
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_sft_audio/SpeechSoundQA_quality_filtered/SpeechSoundQA_wo_ego_quality_filtered_YouTube8M.jsonl
+      repetitions: 1
+      subflavors:
+        cook: general_conversations_jsonl  
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_audioflamingo/YouTube8M
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_sft_audio/SpeechSoundQA_quality_filtered/SpeechSoundQA_wo_ego_quality_filtered_CochlScene.jsonl
+      repetitions: 1
+      subflavors:
+        cook: general_conversations_jsonl  
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_audioflamingo/CochlScene
+
+
+    ### MMAU-QA
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_sft_audio/MMAU_QA_quality_filtered/MMAU_QA_quality_filtered_Clotho.jsonl
+      repetitions: 1
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_audioflamingo/Clotho-v2/development
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_sft_audio/MMAU_QA_quality_filtered/MMAU_QA_quality_filtered_YouTube8M.jsonl
+      repetitions: 1
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_audioflamingo/YouTube8M
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_sft_audio/MMAU_QA_quality_filtered/MMAU_QA_quality_filtered_audiocaps.jsonl
+      repetitions: 1
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_audioflamingo/audiocaps/train
+        
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_sft_audio/MMAU_QA_quality_filtered/MMAU_QA_quality_filtered_audioset.jsonl
+      repetitions: 1
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_audioflamingo/audioset/unbalanced_train_22khz
+
+    ### Action2Sound
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_sft_audio/action2sound/manifests/processed_fixed_redistributed_v4_captions.jsonl
+      repetitions: 1
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_sft_audio/action2sound
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_sft_audio/action2sound/manifests/action2sound_quality.jsonl
+      repetitions: 1
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_sft_audio/action2sound
+
+    ### EGO10
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_sft_audio/ego_10/manifests/processed_fixed_redistributed_v3_captions.jsonl
+      repetitions: 1
+      subflavors:
+        cook: general_conversations_jsonl  
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_sft_audio/ego_10
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_sft_audio/ego_10/manifests/EGO10_quality.jsonl
+      repetitions: 1
+      subflavors:
+        cook: general_conversations_jsonl  
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_sft_audio/ego_10
+
+    ### VGGSound
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_sft_audio/VGGSound/vggsound_captions_filtered.jsonl
+      repetitions: 1
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_audioflamingo/VGGSound
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_sft_audio/VGGSound/VGGSOUND_quality.jsonl
+      repetitions: 1
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_audioflamingo/VGGSound
+
+    ### Audio Entailment
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_sft_audio/audio_entailment/all_audio_entailment.jsonl
+      repetitions: 1
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_audioflamingo/root
+    
+    ### TACOS
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_sft_audio/TACOS/tacos_captions.jsonl
+      repetitions: 1
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_audioflamingo/TACOS
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_sft_audio/TACOS/TACOS_quality.jsonl
+      repetitions: 1
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_audioflamingo/TACOS
+        
+    ### MMTrail-30sec
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_sft_audio/MMTrail/mmtrail_manifest_v4_fixed_captions_validated.jsonl
+      repetitions: 1
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_sft_audio/MMTrail
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_sft_audio/MMTrail/mmtrail_30sec_segments_quality.jsonl
+      repetitions: 1
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_sft_audio/MMTrail
+
+    ### MMTrail-2min
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_sft_audio/MMTrail/all_mmtrail_captions_2min.jsonl
+      repetitions: 1
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_sft_audio/MMTrail
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_sft_audio/MMTrail/mmtrail_2min_segments_quality.jsonl
+      repetitions: 1
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_sft_audio/MMTrail
+
+    ### MiraData-30sec
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_sft_audio/MiraData/miradata_manifest_v4_redistributed_captions_validated.jsonl
+      repetitions: 1
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_sft_audio/MiraData
+    
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_sft_audio/MiraData/miradata_30sec_segments_quality.jsonl
+      repetitions: 1
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_sft_audio/MiraData
+
+    ### MiraData-2min
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_sft_audio/MiraData/all_miradata_captions_2min.jsonl
+      repetitions: 1
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_sft_audio/MiraData
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_sft_audio/MiraData/miradata_2min_segments_quality.jsonl
+      repetitions: 1
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_sft_audio/MiraData
+
+    ### Ego30
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_sft_audio/ego_30/manifests/processed_fixed_captions.jsonl
+      repetitions: 1
+      subflavors:
+        cook: general_conversations_jsonl  
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_sft_audio/ego_30
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_sft_audio/ego_30/manifests/EGO30_quality.jsonl
+      repetitions: 1
+      subflavors:
+        cook: general_conversations_jsonl  
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_sft_audio/ego_30

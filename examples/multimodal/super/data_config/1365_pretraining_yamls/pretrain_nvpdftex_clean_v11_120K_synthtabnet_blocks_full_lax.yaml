@@ -1,0 +1,27 @@
+__module__: megatron.energon
+__class__: MetadatasetV2
+splits:
+  train:
+    blend_epochized:
+    - repetitions: 0.1
+      path: /scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/1365_pretrain/llmservice/projects/llmservice_fm_vision/users/matthieul/eagle_recipe_online_packing/final_recipe/playground/sft_jsonl/eagle_v1/synthtabnet_blocks_full
+      subflavors:
+        name: synthtabnet_blocks_full
+        cook: conversation
+        data_augment: false
+        length: 451174
+        orig_length: 200000
+        category: General
+      aux:
+        media_source: filesystem:///scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/1365_pretrain_media/llmservice/projects/llmservice_fm_vision/users/matthieul/data/image_data/synthtabnet_blocks/images
+    - repetitions: 1.0
+      path: /scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/1365_pretrain/llmservice/projects/llmservice_fm_vision/users/matthieul/eagle_recipe_online_packing/final_recipe/nvpdftex_v11/nvpdftex_v11
+      subflavors:
+        name: nvpdftex_clean_v11_120K
+        cook: conversation
+        data_augment: false
+        length: 120000
+        orig_length: 120000
+        category: General
+      aux:
+        media_source: filesystem:///scratch/fsw/portfolios/llmservice/projects/llmservice_nemotron_super/eagle-next/image_data/1365_pretrain_media/llmservice/projects/llmservice_fm_vision/users/matthieul/data/image_data/nvpdftex_v11/img

@@ -15,6 +15,12 @@ from megatron.core.transformer.dot_product_attention import DotProductAttention
 from megatron.core.transformer.enums import AttnMaskType
 from megatron.core.transformer.identity_op import IdentityOp
 from megatron.core.transformer.mlp import MLP, MLPSubmodules
+from megatron.core.transformer.multi_token_prediction import (
+    MultiTokenPredictionBlock,
+    MultiTokenPredictionBlockSubmodules,
+    MultiTokenPredictionLayer,
+    MultiTokenPredictionLayerSubmodules,
+)
 from megatron.core.transformer.spec_utils import ModuleSpec
 from megatron.core.transformer.transformer_layer import TransformerLayer, TransformerLayerSubmodules
 from megatron.core.typed_torch import not_none
@@ -35,6 +41,25 @@ else:
         TENorm,
         TERowParallelLinear,
     ) = (None, None, None, None, None)
+
+
+_hybrid_mtp_block_spec = ModuleSpec(
+    module=MultiTokenPredictionBlock,
+    submodules=MultiTokenPredictionBlockSubmodules(
+        layer_specs=[
+            ModuleSpec(
+                module=MultiTokenPredictionLayer,
+                submodules=MultiTokenPredictionLayerSubmodules(
+                    enorm=TENorm,
+                    hnorm=TENorm,
+                    eh_proj=TEColumnParallelLinear,
+                    mtp_model_layer=None,
+                    layer_norm=TENorm,
+                ),
+            )
+        ]
+    ),
+)
 
 try:
     import apex
@@ -182,6 +207,7 @@ def get_hybrid_layer_spec_te(padding=False) -> ModuleSpec:
                     mlp_bda=get_bias_dropout_add,
                 ),
             ),
+            mtp_block_spec=_hybrid_mtp_block_spec,
         ),
     )
 

@@ -1,0 +1,24 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+      # MMLongBench only
+      - path: mmlongbench_ultra_long_filtered_best.yaml
+        repetitions: 1.0
+      # Text
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/ultra-sft/epoch-0-032026-energon/ultra_txt_materialized_0407_median_gt_16384_le_49152.yaml
+        repetitions: 0.025
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/ultra-sft/epoch-0-032026-energon/ultra_txt_materialized_0407_median_gt_49152.yaml
+        repetitions: 0.05
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+#    #  Entry (nested YAML)                              Samples    Rep   Eff.Samples   Avg Tok   Est. Tokens
+# ───────────────────────────────────────────────────────────────────────────────────────────────────────────
+#    1  mmlongbench_ultra_long_filtered_best.yaml                          802,407      1       802,407  ~ 41420         33.2B
+#    2  ultra_txt_materialized_0407_median_gt_16384_le_49152.yaml                ?  0.025              ?  ~     ?             ?
+#    3  ultra_txt_materialized_0407_median_gt_49152.yaml                         ?   0.05              ?  ~     ?             ?
+# (removed: nano_v3_split_sft-lc-sdg-256k-v0.4.1_kept.yaml)
+# ───────────────────────────────────────────────────────────────────────────────────────────────────────────
+#       TOTAL (partial — stats for rows 2 and 3 unknown after substitution)
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════════════

@@ -4,7 +4,6 @@ import logging
 from collections import namedtuple
 from copy import deepcopy
 from functools import partial
-import os
 from typing import List, Optional, Tuple
 
 import torch
@@ -214,7 +213,12 @@ class LLaVAModel(MegatronModule):
         self.context_parallel_lm = language_transformer_config.context_parallel_size
         if self.sequence_parallel_lm or self.context_parallel_lm > 1:
             # TODO: maybe need a better check for when using heterogeneous layer config
-            if not language_model_type.startswith('nemotron5-hybrid') and not language_model_type.startswith('nemotron6-moe') and not isinstance(language_transformer_config, HeterogeneousTransformerConfig):
+            if (
+                not language_model_type.startswith('nemotron5-hybrid')
+                and not language_model_type.startswith('nemotron6-moe')
+                and not language_model_type.startswith('nemotron6-super')
+                and not isinstance(language_transformer_config, HeterogeneousTransformerConfig)
+            ):
                 attn_module = language_transformer_layer_spec.submodules.self_attention
                 assert (
                     attn_module.submodules.core_attention == TEDotProductAttention and HAVE_TE
@@ -401,7 +405,11 @@ class LLaVAModel(MegatronModule):
                     language_transformer_config, language_transformer_config.language_model_type
                 )
                 self.language_model = build_hf_model(language_transformer_config)
-            elif language_model_type.startswith('nemotron5-hybrid') or language_model_type.startswith('nemotron6-moe'):
+            elif (
+                language_model_type.startswith('nemotron5-hybrid')
+                or language_model_type.startswith('nemotron6-moe')
+                or language_model_type.startswith('nemotron6-super')
+            ):
                 self.language_model = MambaModel(
                     config=language_transformer_config,
                     mamba_stack_spec=language_transformer_layer_spec,
@@ -1680,6 +1688,7 @@ class LLaVAModel(MegatronModule):
             inference_context=inference_context,
             runtime_gather_output=runtime_gather_output,
             packed_seq_params=packed_seq_params,
+            loss_mask=new_loss_mask,
         )
         # Track norms for language_model output
         if self.log_model_act_norms and self.training:

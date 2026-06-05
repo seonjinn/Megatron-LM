@@ -47,12 +47,17 @@ class _ResampleAudioTransformStrategy(AudioPreprocessingStrategy):
         audio = torch.stack(val, dim=0)
 
         # Convert to float32 for processing. For stereo audio, we average the channels.
-
-        # Convert integer values to float by dividing by the max value
-
-        # max_value = audio.max()
-        # audio = audio / max_value
-        audio = audio.to(torch.float32)
+        # Normalize integer PCM to [-1.0, 1.0] using per-dtype constants.
+        if audio.dtype == torch.int16:
+            audio = audio.to(torch.float32) / 32768.0
+        elif audio.dtype == torch.int32:
+            audio = audio.to(torch.float32) / 2147483648.0
+        else:
+            audio = audio.to(torch.float32)
+        # Fallback: normalize if values are outside [-1, 1] (e.g., float32 with int-scale values)
+        max_val = audio.abs().max()
+        if max_val > 1.0:
+            audio = audio / max_val
         audio = audio.mean(dim=1, keepdim=True)
 
         if params.media.audio_samples_per_second != self._target_freq:

@@ -1,0 +1,30 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+      
+      #########################################################
+      # Audio-SFT (Total size: 44.5M)
+      #########################################################
+            
+      ### Sound ###
+      - path: audio_sound_sft.yaml
+        repetitions: 1 # SIZE 1.1M
+
+      - path: audio_sound_sft_sdg.yaml
+        repetitions: 1 # SIZE 18.1M
+      
+      ### Music ###
+      - path: audio_music_sft_sdg.03.17.yaml
+        repetitions: 1 
+      
+      - path: audio_music_sft.yaml
+        repetitions: 1 # SIZE 870K
+      
+      ### Speech ###
+      - path: audio_speech_sft_sdg.yaml
+        repetitions: 1 # SIZE 4.4M
+
+      - path: audio_speech_sft.yaml
+        repetitions: 1 # SIZE 4.6M

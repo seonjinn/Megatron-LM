@@ -1,0 +1,616 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/HC-STVG_open_30s.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/HC-STVG_30s
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/crosstask_open_30s_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/crosstask_30s
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-vqa-egoexolearn-video-oe_chunks_combined_batches_combined_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/EgoExoLearn
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/llava_video_178k_1_2_m_activitynetqa_oe_qa_processed_chunks_combined_batches_combined_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/llava_video_178k/activitynetqa_1_2m
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/llava_video_178k_1_2_m_nextqa_mc_qa_processed_chunks_combined_batches_combined_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/llava_video_178k/nextqa_1_2m
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/llava_video_178k_0_30_s_nextqa_mc_qa_processed_chunks_combined_batches_combined_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/llava_video_178k/nextqa_0_30s
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-vqa-tvqa-long-mcq-multiturn-shuffle-repeat-2_chunks_combined_batches_combined_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/tvqa_fps3_mp4
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/llava_video_178k_30_60_s_activitynetqa_oe_qa_processed_chunks_combined_batches_combined_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/llava_video_178k/activitynetqa_30_60s
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/llava_video_178k_1_2_m_nextqa_mc_qa_processed_chunks_combined_batches_combined_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/llava_video_178k/nextqa_1_2m
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/llava_video_178k_30_60_s_nextqa_mc_qa_processed_chunks_combined_batches_combined_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/llava_video_178k/nextqa_30_60s
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-vtg-queryd_chunks_combined_batches_combined_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/queryd
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-vtg-medvidqa-train_chunks_combined_batches_combined_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/medvidqa
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/llava_video_178k_0_30_s_nextqa_mc_qa_processed_chunks_combined_batches_combined_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/llava_video_178k/nextqa_0_30s
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/crosstask_open_30s.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/crosstask_30s
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-vqa-videochat2-egoqa_chunks_combined_batches_combined_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/videochat2_egoqa
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/llava_video_178k_1_2_m_nextqa_oe_qa_processed_chunks_combined_batches_combined_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/llava_video_178k/nextqa_1_2m
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/tapos_mcq_30s.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/tapos_30s
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/llava_video_178k_30_60_s_nextqa_mc_qa_processed_chunks_combined_batches_combined_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/llava_video_178k/nextqa_30_60s
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-vqa-perceptiontest-mcq-singleturn_chunks_combined_batches_combined_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/perception_test_train_videos
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-cap-egoexolearn-ego-untrimmed_chunks_combined_batches_combined_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/EgoExoLearn
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-vtg-queryd_chunks_combined_batches_combined_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/queryd
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-vqa-videochat2-egoqa_chunks_combined_batches_combined_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/videochat2_egoqa
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-cls-k710-full-train_chunks_combined_batches_combined_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/k710
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-tal-hacs-train_chunks_combined_batches_combined_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/hacs
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-dvpc-youcook2-train_chunks_combined_batches_combined_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/youcook2
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-tal-hirest-class-train_chunks_combined_batches_combined_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/hirest
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/HC-STVG_mcq_30s_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/HC-STVG_30s
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/llava_video_178k_30_60_s_perceptiontest_mc_qa_processed_chunks_combined_batches_combined_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/llava_video_178k/perceptiontest_30_60s
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/HC-STVG_open_30s_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/HC-STVG_30s
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/tapos_mcq_30s_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/tapos_30s
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-tal-fineaction-train_chunks_combined_batches_combined_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/fineaction
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/llava_video_178k_0_30_s_nextqa_oe_qa_processed_chunks_combined_batches_combined_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/llava_video_178k/nextqa_0_30s
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/llava_video_178k_1_2_m_nextqa_oe_qa_processed_chunks_combined_batches_combined_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/llava_video_178k/nextqa_1_2m
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-tal-hacs-train_chunks_combined_batches_combined_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/hacs
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-vqa-nextqa_chunks_combined_batches_combined_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/nextqa/NExTVideo
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-tal-perceptiontest-train_chunks_combined_batches_combined_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/perception_test_train_videos
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/llava_video_178k_0_30_s_perceptiontest_mc_qa_processed_chunks_combined_batches_combined_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/llava_video_178k/perceptiontest_0_30s
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/llava_video_178k_0_30_s_activitynetqa_oe_qa_processed_chunks_combined_batches_combined_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/llava_video_178k/activitynetqa_0_30s
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/llava_video_178k_30_60_s_perceptiontest_mc_qa_processed_chunks_combined_batches_combined_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/llava_video_178k/perceptiontest_30_60s
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-dvpc-youcook2-train_chunks_combined_batches_combined_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/youcook2
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-vtg-ego4d-nlq-train_chunks_combined_batches_combined_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/ego4d_nlq_short448_30fps
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-groundvqa-anet-rtl_chunks_combined_batches_combined_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/anet
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/llava_video_178k_2_3_m_nextqa_mc_qa_processed_chunks_combined_batches_combined_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/llava_video_178k/nextqa_2_3m
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/llava_video_178k_0_30_s_perceptiontest_mc_qa_processed_chunks_combined_batches_combined_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/llava_video_178k/perceptiontest_0_30s
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-tal-anet-train_chunks_combined_batches_combined_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/anet
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/egoprocel_open_30s.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/egoprocel_30s
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/tapos_open_30s_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/tapos_30s
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-tal-anet-train_chunks_combined_batches_combined_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/anet
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/llava_video_178k_2_3_m_activitynetqa_oe_qa_processed_chunks_combined_batches_combined_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/llava_video_178k/activitynetqa_2_3m
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-dvpc-hirest-step-train_chunks_combined_batches_combined_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/hirest
+      repetitions: 1
+
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-vqa-perceptiontest-mcq-singleturn_chunks_combined_batches_combined_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/perception_test_train_videos
+      repetitions: 1
+
+
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/llava_video_178k_0_30_s_activitynetqa_oe_qa_processed_chunks_combined_batches_combined_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/llava_video_178k/activitynetqa_0_30s
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/llava_video_178k_30_60_s_activitynetqa_oe_qa_processed_chunks_combined_batches_combined_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/llava_video_178k/activitynetqa_30_60s
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-vqa-clevrerqa_chunks_combined_batches_combined_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/clevrer
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-groundvqa-anet-rtl_chunks_combined_batches_combined_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/anet
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/llava_video_178k_0_30_s_nextqa_oe_qa_processed_chunks_combined_batches_combined_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/llava_video_178k/nextqa_0_30s
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/llava_video_178k_30_60_s_nextqa_oe_qa_processed_chunks_combined_batches_combined_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/llava_video_178k/nextqa_30_60s
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/egoprocel_mcq_30s.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/egoprocel_30s
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-vqa-egoexolearn-video-mcq_chunks_combined_batches_combined_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/EgoExoLearn
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-tal-ego4d-mq-train_chunks_combined_batches_combined_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/ego4d_mq_short448_30fps
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/egoprocel_open_30s_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/egoprocel_30s
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-vqa-clevrerqa_chunks_combined_batches_combined_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/clevrer
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-vtg-youcook2-train_chunks_combined_batches_combined_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/youcook2
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-vqa-egoexolearn-video-oe_chunks_combined_batches_combined_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/EgoExoLearn
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-vtg-didemo-train_chunks_combined_batches_combined_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/didemo
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-dvpc-hirest-step-train_chunks_combined_batches_combined_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/hirest
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-cls-videochat2-k710_chunks_combined_batches_combined_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/videochat2_k710
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-cap-egoexolearn-ego-untrimmed_chunks_combined_batches_combined_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/EgoExoLearn
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-tas-breakfast-train_chunks_combined_batches_combined_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/breakfast_h264
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/crosstask_mcq_30s_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/crosstask_30s
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-tal-fineaction-train_chunks_combined_batches_combined_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/fineaction
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/llava_video_178k_2_3_m_nextqa_oe_qa_processed_chunks_combined_batches_combined_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/llava_video_178k/nextqa_2_3m
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/egoprocel_mcq_30s_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/egoprocel_30s
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/llava_video_178k_2_3_m_activitynetqa_oe_qa_processed_chunks_combined_batches_combined_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/llava_video_178k/activitynetqa_2_3m
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/llava_video_178k_1_2_m_activitynetqa_oe_qa_processed_chunks_combined_batches_combined_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/llava_video_178k/activitynetqa_1_2m
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-dvfc-anet-caption-train_chunks_combined_batches_combined_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/anet
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-vqa-tvqa-long-mcq-multiturn-shuffle-repeat-2_chunks_combined_batches_combined_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/tvqa_fps3_mp4
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-vqa-egoexolearn-video-mcq_chunks_combined_batches_combined_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/EgoExoLearn
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/HC-STVG_mcq_30s.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/HC-STVG_30s
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-dvfc-anet-caption-train_chunks_combined_batches_combined_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/anet
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-cls-videochat2-sthv2_chunks_combined_batches_combined_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/sthv2_mp4
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/llava_video_178k_30_60_s_nextqa_oe_qa_processed_chunks_combined_batches_combined_corrected_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/llava_video_178k/nextqa_30_60s
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/crosstask_mcq_30s.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/crosstask_30s
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/tapos_open_30s.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/tapos_30s
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/video_qa_v1_and_v2_final/video-vtg-didemo-train_chunks_combined_batches_combined_energon.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/vids/didemo
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/llava_video_caps/llava_video_academic_caps_qwen3.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_video_raw/academic_source
+      repetitions: 1
+
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_video_raw/llava_video_caps/llava_video_youtube_caps_qwen3_clean_safetyfix0323.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/avlm_video_raw/liwei_youtube_videos
+      repetitions: 1

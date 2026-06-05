@@ -1,0 +1,62 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+      # Base vision data
+      - path: eagle_sft_v13.77_safetyfix.yaml
+        repetitions: 1
+      # Extra video data from Arushi
+      - path: short_video_qa_0318_newreps.yaml
+        repetitions: 1.0
+      - path: video_qa_v1_v2_all_0314_safetyfix.yaml
+        repetitions: 1.0
+      ## Qwen3.5 video reasoning
+      - path: mar4_video_qa_short_reasoning_newreps.yaml
+        repetitions: 1.0
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/PLM_video_data/reasoning/yt1b_qa_plm_sampled_thinking_traces_safetyfix0323.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/yttemporal180m-youtube-dataset
+        repetitions: 1.0
+      ## Correct data, Yt1B PLM QA 900k sample dense captions with thinking traces
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/PLM_video_data/reasoning/yt1b_qa_plm_sampled_dense_captions_no_think_safetyfix0323.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/yttemporal180m-youtube-dataset
+        repetitions: 1.0
+      ## Additional data from Arushi (TODO: reduce reps?)
+      - path: short_dense_captions_no_think_0310_safetyfix.yaml
+        repetitions: 1
+      # Text data from Matthieu (18.9M samples -> 3786 tokens per sample -> 71B tokens); updated to use abs paths
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/ultra-sft/epoch-0-032026-energon/ultra_txt_materialized_0407_median_le_16384.yaml
+        repetitions: 0.25
+      # Safety data
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/safety/filtered_textsafety_energon_dataset.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        repetitions: 2
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/fixed_datasets/safety/nemotron_omni_safety_image_text_sft_blend_v0.1.0.jsonl
+        aux:
+          media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/omni_data/data/images
+        subflavors:
+          cook: general_conversations_jsonl
+        repetitions: 2
+      # SFT-0.5 addmix: benchfit_qa
+      - repetitions: 0.6
+        path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/benchfit_qa/03-10a_stage5_output.jsonl
+        subflavors:
+          name: benchfit_qa
+          cook: conversation
+        aux:
+          media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/sft-0.5/mint_200/input/image_shards
+      # SFT-0.5 addmix: dense_ocr_qa
+      - repetitions: 0.6
+        path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/dense_ocr/03-10a_stage5_qa_output.jsonl
+        subflavors:
+          name: dense_ocr_qa
+          cook: conversation
+        aux:
+          media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/sft-0.5/mint_200/input/image_shards

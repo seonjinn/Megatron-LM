@@ -32,9 +32,11 @@ DURATION_HRS=""
 DURATION_MINS=""
 NODES=""
 PARTITION=""
+EXCLUDE=""
 DEBUG=0
 TEST_NRT=0
 TEST_NRT_32N=0
+TEST_SVG=0
 
 while [[ "$#" -gt 0 ]]; do
     case $1 in
@@ -47,12 +49,14 @@ while [[ "$#" -gt 0 ]]; do
         --duration-mins) DURATION_MINS="$2"; shift ;;
         --nodes) NODES="$2"; shift ;;
         --partition) PARTITION="$2"; shift ;;
+        --exclude) EXCLUDE="$2"; shift ;;
         --overwrite-code-snapshot) OVERWRITE_CODE_SNAPSHOT=1 ;;
         --snapshot-folder) CODE_SNAPSHOT_FOLDER="$2"; shift ;;
         --dry-run) DRY_RUN=1 ;;
         --debug) DEBUG=1 ;;
         --test-nrt) TEST_NRT=1 ;;
         --test-nrt-32n) TEST_NRT_32N=1 ;;
+        --test-svg) TEST_SVG=1 ;;
         *)
             echo "Unknown parameter passed: $1"
             echo "Usage: $0 [args...]"
@@ -62,7 +66,7 @@ while [[ "$#" -gt 0 ]]; do
     shift
 done
 
-if [[ $TEST_NRT -eq 1 || $TEST_NRT_32N -eq 1 ]]; then
+if [[ $TEST_NRT -eq 1 || $TEST_NRT_32N -eq 1 || $TEST_SVG -eq 1 ]]; then
     NUM_JOBS=1
     if [[ -z "$DURATION_MINS" ]]; then
         DURATION_MINS=15
@@ -70,9 +74,13 @@ if [[ $TEST_NRT -eq 1 || $TEST_NRT_32N -eq 1 ]]; then
     if [[ $TEST_NRT_32N -eq 1 ]]; then
         NODES=32
         PARTITION="backfill,batch_block1"
-    else
+    elif [[ $TEST_NRT -eq 1 ]]; then
         NODES=4
         PARTITION="backfill,batch_short,batch_block1"
+    elif [[ $TEST_SVG -eq 1 ]]; then
+        # EP=64 MoE needs at least 8 nodes with 8 GPUs/node for TP=2, PP=1.
+        NODES=8
+        PARTITION="batch"
     fi
     MODEL_NAME="${MODEL_NAME}_test"
 
@@ -93,6 +101,7 @@ if [[ -z "$SBATCH_FILE" || -z "$MODEL_NAME" ]]; then
     echo "  --dependency <job_id> (default: none)"
     echo "  --num-jobs <num_jobs> (default: 1)"
     echo "  --source <source_dir> (default: current directory)"
+    echo "  --exclude <nodelist> (default: none)"
     echo "  --overwrite-code-snapshot (default: no)"
     echo "  --snapshot-folder <snapshot_folder> (default: code_snapshot)"
     echo "  --update-code-only (default: no)"
@@ -149,6 +158,10 @@ fi
 
 if [[ ! -z "$PARTITION" ]]; then
     echo "  partition: ${PARTITION}"
+fi
+
+if [[ ! -z "$EXCLUDE" ]]; then
+    echo "  exclude: ${EXCLUDE}"
 fi
 
 # Verify script supports MODEL_NAME by checking `MODEL_NAME=${MODEL_NAME:-`
@@ -260,6 +273,10 @@ else
 
         if [[ ! -z "$PARTITION" ]]; then
             EXTRA_SBATCH_ARGS+="--partition=${PARTITION} "
+        fi
+
+        if [[ ! -z "$EXCLUDE" ]]; then
+            EXTRA_SBATCH_ARGS+="--exclude=${EXCLUDE} "
         fi
 
         sbatch \

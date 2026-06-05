@@ -431,6 +431,8 @@ class HybridModel(LanguageModule, GraphableMegatronModule):
         if in_inference_mode:
             assert runtime_gather_output, "Inference must always gather TP logits"
 
+        use_precomputed_mtp_embeddings = decoder_input is not None
+
         # Decoder embedding.
         if decoder_input is not None:
             pass
@@ -521,6 +523,7 @@ class HybridModel(LanguageModule, GraphableMegatronModule):
                 rotary_pos_emb=rotary_pos_emb,
                 packed_seq_params=packed_seq_params,
                 embedding=self.embedding,
+                decoder_input=decoder_input if use_precomputed_mtp_embeddings else None,
             )
 
         if not self.post_process:

@@ -1,0 +1,10 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/flac_clean_max1200s
+      repetitions: 1
+      dataset_config: dataset.yaml
+      subflavors:
+        cook: granary_english_webdataset

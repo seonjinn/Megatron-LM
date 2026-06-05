@@ -239,12 +239,31 @@ def _roll_tensor_packed_seq(tensor, shifts, dims, packed_seq_params, cp_group=No
 
     # Notice: This is a naive implementation to test the correctness,
     # a better solution will only sync the boundary tokens once.
+    ndim = tensor.dim()
+    norm_dims = dims if dims >= 0 else ndim + dims
     assert (
-        dims == -1 or dims == tensor.dim() - 1
-    ), "Packed sequence roll only supports the last dimension."
+        norm_dims == 0 or norm_dims == ndim - 1
+    ), f"Packed sequence roll only supports dim 0 or last dimension, got dims={dims}."
     assert shifts == -1, "Packed sequence roll only supports a single-token left shift."
     cu_seqlens = packed_seq_params.cu_seqlens_q
     assert cu_seqlens is not None, "Packed sequence parameters must provide cu_seqlens_q."
+
+    def slice_seq_dim(t, start, end):
+        if norm_dims == 0:
+            return t[start:end]
+        return t[..., start:end]
+
+    def assign_seq_dim(t, start, end, value):
+        if norm_dims == 0:
+            t[start:end] = value
+        else:
+            t[..., start:end] = value
+
+    def zero_boundary(t):
+        if norm_dims == 0:
+            t[shifts:] = 0
+        else:
+            t[..., shifts:] = 0
 
     rolled_tensor = tensor.clone()
 
@@ -254,11 +273,11 @@ def _roll_tensor_packed_seq(tensor, shifts, dims, packed_seq_params, cp_group=No
         for i in range(len(cu_seqlens) - 1):
             start_idx = cu_seqlens[i]
             end_idx = cu_seqlens[i + 1]
-            seq_slice = tensor[..., start_idx:end_idx]
-            rolled_seq = torch.roll(seq_slice, shifts=shifts, dims=dims)
+            seq_slice = slice_seq_dim(tensor, start_idx, end_idx)
+            rolled_seq = torch.roll(seq_slice, shifts=shifts, dims=norm_dims)
             # Zero out the last position(s) that would cross sequence boundaries
-            rolled_seq[..., shifts:] = 0
-            rolled_tensor[..., start_idx:end_idx] = rolled_seq
+            zero_boundary(rolled_seq)
+            assign_seq_dim(rolled_tensor, start_idx, end_idx, rolled_seq)
         return rolled_tensor, rolled_tensor.sum()
 
     # CP enabled: each rank owns two chunks per sequence (front and mirrored tail).
@@ -282,25 +301,27 @@ def _roll_tensor_packed_seq(tensor, shifts, dims, packed_seq_params, cp_group=No
         if local_seq_len == 0:
             continue
 
-        tensor_slice = rolled_tensor[..., local_start_idx:local_end_idx].clone()
+        tensor_slice = slice_seq_dim(rolled_tensor, local_start_idx, local_end_idx).clone()
 
         # The following code is very similar as the code in roll_tensor function
-        local_chunks = tensor_slice.chunk(2, dim=dims)
-        rolled_chunks = [torch.roll(chunk, shifts=shifts, dims=dims) for chunk in local_chunks]
+        local_chunks = tensor_slice.chunk(2, dim=norm_dims)
+        rolled_chunks = [torch.roll(chunk, shifts=shifts, dims=norm_dims) for chunk in local_chunks]
 
         tensor_send_list = []
         tensor_recv_list = []
         for chunk in rolled_chunks:
             # Skip empty chunks that can occur when the sequence slice is very small
-            if chunk.size(dims) == 0:
+            if chunk.size(norm_dims) == 0:
+                boundary_shape = list(chunk.shape)
+                del boundary_shape[norm_dims]
                 tensor_send_list.append(
-                    torch.empty(chunk.shape[:-1], dtype=chunk.dtype, device=chunk.device)
+                    torch.empty(boundary_shape, dtype=chunk.dtype, device=chunk.device)
                 )
                 tensor_recv_list.append(
-                    torch.empty(chunk.shape[:-1], dtype=chunk.dtype, device=chunk.device)
+                    torch.empty(boundary_shape, dtype=chunk.dtype, device=chunk.device)
                 )
                 continue
-            boundary = chunk.select(dims, shifts).contiguous().clone()
+            boundary = chunk.select(norm_dims, shifts).contiguous().clone()
             tensor_send_list.append(boundary)
             tensor_recv_list.append(torch.empty_like(boundary))
 
@@ -321,19 +342,48 @@ def _roll_tensor_packed_seq(tensor, shifts, dims, packed_seq_params, cp_group=No
             op.wait()
 
         index = [slice(None)] * rolled_chunks[0].dim()
-        index[dims] = shifts
+        index[norm_dims] = shifts
         for chunk, recv in zip(rolled_chunks, tensor_recv_list):
             # Skip empty chunks
-            if chunk.size(dims) == 0:
+            if chunk.size(norm_dims) == 0:
                 continue
             chunk[tuple(index)] = recv
 
-        seq_result = torch.cat(rolled_chunks, dim=dims)
+        seq_result = torch.cat(rolled_chunks, dim=norm_dims)
 
         # update the rolled tensor
-        rolled_tensor[..., local_start_idx:local_end_idx] = seq_result
+        assign_seq_dim(rolled_tensor, local_start_idx, local_end_idx, seq_result)
 
     return rolled_tensor, rolled_tensor.sum()
+
+
+def roll_tensor_precomputed_embeddings(
+    tensor, shifts=-1, dims=0, sp_group=None, cp_group=None, packed_seq_params=None
+):
+    """Roll pre-computed decoder embeddings, preserving SP and packed sequence boundaries."""
+    sp_enabled = sp_group is not None and sp_group.size() > 1
+
+    if not sp_enabled:
+        return roll_tensor(tensor, shifts, dims, cp_group, packed_seq_params)
+
+    sp_size = sp_group.size()
+    sp_rank = torch.distributed.get_rank(group=sp_group)
+    gathered_shape = list(tensor.shape)
+    gathered_shape[dims] *= sp_size
+    full_tensor = torch.empty(gathered_shape, dtype=tensor.dtype, device=tensor.device)
+
+    dist_all_gather_func(full_tensor, tensor.contiguous(), group=sp_group)
+
+    if packed_seq_params is not None:
+        rolled_full, sum_val = _roll_tensor_packed_seq(
+            full_tensor, shifts, dims, packed_seq_params, cp_group
+        )
+    else:
+        rolled_full, sum_val = roll_tensor(
+            full_tensor, shifts, dims, cp_group, packed_seq_params=None
+        )
+
+    return rolled_full.chunk(sp_size, dim=dims)[sp_rank].contiguous(), sum_val
 
 
 class MTPLossLoggingHelper:
@@ -348,54 +398,68 @@ class MTPLossLoggingHelper:
         num_layers: int,
         reduce_group: Optional[torch.distributed.ProcessGroup] = None,
         avg_group: Optional[torch.distributed.ProcessGroup] = None,
+        loss_count: Optional[torch.Tensor] = None,
     ):
         """Save the mtp loss for logging.
         Args:
-            loss (torch.Tensor): The loss tensor.
+            loss (torch.Tensor): The summed loss tensor.
+            loss_count (torch.Tensor): The denominator for the summed loss tensor.
             layer_number (int): Layer index of the loss.
             num_layers (int): The number of total layers.
             reduce_group (torch.distributed.ProcessGroup): The group for reducing the loss.
-            mean_group (torch.distributed.ProcessGroup): The group for averaging the loss.
+            avg_group (torch.distributed.ProcessGroup): The group for second-stage reduction.
         """
         # Skip mtp loss logging if layer_number is None.
         if layer_number is None:
             return
 
         tracker = MTPLossLoggingHelper.tracker
-        if "values" not in tracker:
-            tracker["values"] = torch.zeros(num_layers, device=torch.cuda.current_device())
-        tracker["values"][layer_number] += loss.detach()
+        if "loss_values" not in tracker:
+            tracker["loss_values"] = torch.zeros(num_layers, device=torch.cuda.current_device())
+        if "loss_counts" not in tracker:
+            tracker["loss_counts"] = torch.zeros(num_layers, device=torch.cuda.current_device())
+        if loss_count is None:
+            loss_count = torch.ones_like(loss)
+
+        tracker["loss_values"][layer_number] += loss.detach()
+        tracker["loss_counts"][layer_number] += loss_count.detach().float()
         tracker["reduce_group"] = reduce_group
         tracker["avg_group"] = avg_group
 
     def clean_loss_in_tracker():
         """Clear the mtp losses."""
         tracker = MTPLossLoggingHelper.tracker
-        tracker["values"].zero_()
+        tracker["loss_values"].zero_()
+        tracker["loss_counts"].zero_()
         tracker["reduce_group"] = None
         tracker["avg_group"] = None
 
     def reduce_loss_in_tracker():
         """Collect and reduce the mtp losses across ranks."""
         tracker = MTPLossLoggingHelper.tracker
-        if "values" not in tracker:
+        if "loss_values" not in tracker or "loss_counts" not in tracker:
             return
-        values = tracker["values"]
-        # Reduce mtp losses across ranks.
-        if tracker.get('reduce_group') is not None:
-            torch.distributed.all_reduce(values, group=tracker.get('reduce_group'))
-        if tracker.get('avg_group') is not None:
-            torch.distributed.all_reduce(
-                values, group=tracker['avg_group'], op=torch.distributed.ReduceOp.AVG
-            )
+        for key in ["loss_values", "loss_counts"]:
+            values = tracker[key]
+            if tracker.get('reduce_group') is not None:
+                torch.distributed.all_reduce(values, group=tracker.get('reduce_group'))
+            if tracker.get('avg_group') is not None:
+                torch.distributed.all_reduce(
+                    values, group=tracker['avg_group'], op=torch.distributed.ReduceOp.SUM
+                )
 
     def track_mtp_metrics(loss_scale, iteration, writer, wandb_writer=None, total_loss_dict=None):
         """Track the Multi-Token Prediction (MTP) metrics for logging."""
         MTPLossLoggingHelper.reduce_loss_in_tracker()
         tracker = MTPLossLoggingHelper.tracker
-        if "values" not in tracker:
+        if "loss_values" not in tracker or "loss_counts" not in tracker:
             return
-        mtp_losses = tracker["values"] * loss_scale
+        mtp_loss_counts = tracker["loss_counts"]
+        mtp_losses = torch.where(
+            mtp_loss_counts > 0,
+            tracker["loss_values"] / torch.clamp(mtp_loss_counts, min=1.0),
+            torch.zeros_like(tracker["loss_values"]),
+        ) * loss_scale
         mtp_num_layers = mtp_losses.shape[0]
         for i in range(mtp_num_layers):
             name = f"mtp_{i + 1} loss"
@@ -687,15 +751,12 @@ def process_mtp_loss(
         mtp_loss = compute_language_model_loss(mtp_labels, mtp_logits)
         mtp_loss = loss_mask * mtp_loss
         if is_training:
-            # Safe divide without sync: mask numerator when num_tokens==0, divide by clamp(min=1)
-            mtp_loss_for_log = (
-                torch.sum(mtp_loss) * (num_tokens > 0).to(mtp_loss.dtype)
-            ) / num_tokens.clamp(min=1)
             MTPLossLoggingHelper.save_loss_to_tracker(
-                mtp_loss_for_log,
+                torch.sum(mtp_loss),
                 mtp_layer_number,
                 config.mtp_num_layers,
                 avg_group=parallel_state.get_data_parallel_group(with_context_parallel=True),
+                loss_count=num_tokens.detach().float(),
             )
         mtp_loss_scale = config.mtp_loss_scaling_factor / config.mtp_num_layers
         if config.calculate_per_token_loss:
@@ -756,6 +817,12 @@ class MultiTokenPredictionLayer(MegatronModule):
         Args:
             name (str | None): module instance name passed top-down from its paranet module
         """
+        if config.keep_mtp_spec_in_bf16:
+            import copy
+
+            config = copy.deepcopy(config)
+            config.fp4 = None
+            config.fp8 = None
         super().__init__(config=config)
         if mamba_submodules is not None:
             if hybrid_submodules is not None:
@@ -932,6 +999,34 @@ class MultiTokenPredictionLayer(MegatronModule):
 
         return input_ids, position_ids, padding_mask, decoder_input, hidden_states
 
+    def _get_precomputed_embeddings(
+        self,
+        decoder_input: torch.Tensor,
+        hidden_states: torch.Tensor,
+        packed_seq_params: Optional[PackedSeqParams] = None,
+    ):
+        decoder_input, _ = roll_tensor_precomputed_embeddings(
+            decoder_input,
+            shifts=-1,
+            dims=0,
+            sp_group=self.tp_group if self.sequence_parallel else None,
+            cp_group=self.cp_group,
+            packed_seq_params=packed_seq_params,
+        )
+
+        row_norms = decoder_input.norm(dim=-1)
+        zero_norm_mask = row_norms < 1e-6
+        if zero_norm_mask.any():
+            non_zero_mask = ~zero_norm_mask
+            if non_zero_mask.any():
+                fill_embedding = decoder_input[non_zero_mask].mean(dim=0)
+                decoder_input = decoder_input.clone()
+                decoder_input[zero_norm_mask] = fill_embedding
+
+        hidden_states = make_viewless_tensor(inp=hidden_states, requires_grad=True, keep_graph=True)
+
+        return decoder_input, hidden_states
+
     def _concat_embeddings(self, hidden_states: torch.Tensor, decoder_input: torch.Tensor):
         """
         Concatenate the tokens before sending to transformer layer.
@@ -1104,6 +1199,7 @@ class MultiTokenPredictionLayer(MegatronModule):
         inference_params: Optional[InferenceParams] = None,
         packed_seq_params: Optional[PackedSeqParams] = None,
         sequence_len_offset: Optional[Tensor] = None,
+        padding_mask: Optional[Tensor] = None,
     ):
         """Forward through ``_proj_and_transformer_layer`` with activation
         recomputation.
@@ -1130,6 +1226,7 @@ class MultiTokenPredictionLayer(MegatronModule):
             hidden_states,
             decoder_input,
             attention_mask,
+            padding_mask,
             context,
             context_mask,
             rotary_pos_emb,
@@ -1141,6 +1238,7 @@ class MultiTokenPredictionLayer(MegatronModule):
                 hidden_states=hidden_states,
                 decoder_input=decoder_input,
                 attention_mask=attention_mask,
+                padding_mask=padding_mask,
                 context=context,
                 context_mask=context_mask,
                 rotary_pos_emb=rotary_pos_emb,
@@ -1187,6 +1285,7 @@ class MultiTokenPredictionLayer(MegatronModule):
                     hidden_states,
                     decoder_input,
                     attention_mask,
+                    padding_mask,
                     context,
                     context_mask,
                     rotary_pos_emb,
@@ -1206,6 +1305,7 @@ class MultiTokenPredictionLayer(MegatronModule):
                     hidden_states,
                     decoder_input,
                     attention_mask,
+                    padding_mask,
                     context,
                     context_mask,
                     rotary_pos_emb,
@@ -1264,6 +1364,7 @@ class MultiTokenPredictionLayer(MegatronModule):
         packed_seq_params: Optional[PackedSeqParams] = None,
         sequence_len_offset: Optional[Tensor] = None,
         embedding=None,
+        decoder_input: Optional[Tensor] = None,
     ):
         """
         Execute the forward pass through the Multi-Token Prediction (MTP) layer.
@@ -1288,14 +1389,23 @@ class MultiTokenPredictionLayer(MegatronModule):
             [s, b, h], and optionally the updated context tensor if cross-attention is used.
         """
         assert context is None, "multi token prediction + cross attention is not yet supported."
-        input_ids, position_ids, padding_mask, decoder_input, hidden_states = self._get_embeddings(
-            input_ids=input_ids,
-            position_ids=position_ids,
-            padding_mask=padding_mask,
-            embedding=embedding,
-            hidden_states=hidden_states,
-            packed_seq_params=packed_seq_params,
-        )
+        if decoder_input is None:
+            input_ids, position_ids, padding_mask, decoder_input, hidden_states = (
+                self._get_embeddings(
+                    input_ids=input_ids,
+                    position_ids=position_ids,
+                    padding_mask=padding_mask,
+                    embedding=embedding,
+                    hidden_states=hidden_states,
+                    packed_seq_params=packed_seq_params,
+                )
+            )
+        else:
+            decoder_input, hidden_states = self._get_precomputed_embeddings(
+                decoder_input=decoder_input,
+                hidden_states=hidden_states,
+                packed_seq_params=packed_seq_params,
+            )
 
         if self.config.recompute_granularity == 'full' and self.training:
             hidden_states = self._checkpointed_forward(
@@ -1330,7 +1440,7 @@ class MultiTokenPredictionLayer(MegatronModule):
                 sequence_len_offset=sequence_len_offset,
             )
 
-        return hidden_states, input_ids, position_ids, padding_mask
+        return hidden_states, input_ids, position_ids, padding_mask, decoder_input
 
     def sharded_state_dict(
         self, prefix: str = '', sharded_offsets: tuple = (), metadata: Optional[dict] = None
@@ -1597,6 +1707,7 @@ class MultiTokenPredictionBlock(MegatronModule):
         sequence_len_offset: Optional[Tensor] = None,
         extra_block_kwargs: Optional[dict] = None,
         embedding=None,
+        decoder_input: Optional[Tensor] = None,
     ) -> Tensor:
         """
         Perform the forward pass through all of the MTP modules.
@@ -1616,7 +1727,7 @@ class MultiTokenPredictionBlock(MegatronModule):
         hidden_states = hidden_states_list[offset]
         for iteration in range(self.config.mtp_num_layers):
             layer_idx = 0 if self.mtp_use_repeated_layer else iteration
-            (hidden_states, input_ids, position_ids, padding_mask) = self.layers[layer_idx](
+            (hidden_states, input_ids, position_ids, padding_mask, decoder_input) = self.layers[layer_idx](
                 input_ids=input_ids,
                 position_ids=position_ids,
                 hidden_states=hidden_states,
@@ -1629,6 +1740,7 @@ class MultiTokenPredictionBlock(MegatronModule):
                 packed_seq_params=packed_seq_params,
                 sequence_len_offset=sequence_len_offset,
                 embedding=embedding,
+                decoder_input=decoder_input,
                 **(extra_block_kwargs or {}),
             )
 

@@ -1,0 +1,185 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+    # YODAS
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/granary_en/yodas/0/manifest_filepath_pred/manifest_no_skipme.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/granary_en/yodas/0/tarred_audio_filepaths
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/granary_en/yodas/1/manifest_filepath_pred/manifest_no_skipme.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/granary_en/yodas/1/tarred_audio_filepaths
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/granary_en/yodas/2/manifest_filepath_pred/manifest_no_skipme.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/granary_en/yodas/2/tarred_audio_filepaths
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/granary_en/yodas/3/manifest_filepath_pred/manifest_no_skipme.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/granary_en/yodas/3/tarred_audio_filepaths
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/granary_en/yodas/4/manifest_filepath_pred/manifest_no_skipme.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/granary_en/yodas/4/tarred_audio_filepaths
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/granary_en/yodas/5/manifest_filepath_pred/manifest_no_skipme.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/granary_en/yodas/5/tarred_audio_filepaths
+      repetitions: 1
+    
+    # LibriLight
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/ll2/manifest_filepath_pred/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/ll2/tarred_audio_filepaths
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/ll1/manifest_filepath_pred/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/ll1/tarred_audio_filepaths
+      repetitions: 1
+    
+    # YTC
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/granary_en/ytc/0/manifest_filepath_pred/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/granary_en/ytc/0/tarred_audio_filepaths
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/granary_en/ytc/1/manifest_filepath_pred/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/granary_en/ytc/1/tarred_audio_filepaths
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/granary_en/ytc/2/manifest_filepath_pred/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/granary_en/ytc/2/tarred_audio_filepaths
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/granary_en/ytc/3/manifest_filepath_pred/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/granary_en/ytc/3/tarred_audio_filepaths
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/granary_en/ytc/4/manifest_filepath_pred/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/granary_en/ytc/4/tarred_audio_filepaths
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/granary_en/ytc/5/manifest_filepath_pred/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/granary_en/ytc/5/tarred_audio_filepaths
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/granary_en/ytc/6/manifest_filepath_pred/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/granary_en/ytc/6/tarred_audio_filepaths
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/granary_en/ytc/7/manifest_filepath_pred/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/granary_en/ytc/7/tarred_audio_filepaths
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/granary_en/ytc/8/manifest_filepath_pred/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/granary_en/ytc/8/tarred_audio_filepaths
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/granary_en/ytc/9/manifest_filepath_pred/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/granary_en/ytc/9/tarred_audio_filepaths
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/granary_en/ytc/10/manifest_filepath_pred/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/granary_en/ytc/10/tarred_audio_filepaths
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/granary_en/ytc/11/manifest_filepath_pred/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/granary_en/ytc/11/tarred_audio_filepaths
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/granary_en/ytc/13/manifest_filepath_pred/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/granary_en/ytc/13/tarred_audio_filepaths
+      repetitions: 1
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/granary_en/ytc/15/manifest_filepath_pred/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/granary_en/ytc/15/tarred_audio_filepaths
+      repetitions: 1
+
+    # AMI_IHM
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/ami/0/manifest_filepath_pred/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/ami/0/tarred_audio_filepaths
+      repetitions: 20
+
+    # MOSEL
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/mosel/manifest_filepath_pred_noskipme/manifest.jsonl
+      subflavors:
+        cook: granary_english_jsonl
+      aux:
+        media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/media_sources/mosel/0/tarred_audio_filepaths
+      repetitions: 1
+    
+    # FLEURS
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_granary/FLEURS_tarred_en
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: granary_english_webdataset
+      repetitions: 1
+
+    # MMLPC
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_omcat_audio_wds/riva__MMLPC__en_
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: general_conversations_webdataset
+      repetitions: 1
+
+    # MCV
+    - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/avlm_granary/MCV_MCV4_train_tarred_en
+      dataset_config: dataset_crude.yaml
+      subflavors:
+        cook: granary_english_webdataset
+      repetitions: 1
+
+
+  val:
+    path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/omni_stage/datasets/vqa/VQAv2/stage1
+    subflavors:
+      augmentation: False
