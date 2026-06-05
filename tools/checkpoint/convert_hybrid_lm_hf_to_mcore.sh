@@ -1,13 +1,13 @@
 #!/bin/bash
 
 # Slurm script to convert hybrid HF models to mcore format
-#
+# 
 # Usage:
 #   sbatch tools/checkpoint/convert_hf_to_mcore.sh <input_dir> <output_dir> [target_tp]
 #
 # Arguments:
 #   input_dir  - Path to input HF checkpoint directory
-#   output_dir - Path to output mcore checkpoint directory
+#   output_dir - Path to output mcore checkpoint directory  
 #   target_tp  - Target tensor parallel size (optional, default: 1)
 #
 # Examples:
@@ -102,4 +102,4 @@ srun -l --verbose \
 --no-container-mount-home \
 sh -c "${run_cmd}; bash tools/checkpoint/convert_legacy_to_dist.sh ${MCORE_TORCH_CKPT_DIR} ${MCORE_DIST_CKPT_DIR} ${TARGET_TP}"
 
-echo "Conversion completed. Check logs at: ${LOGS_DIR}/"
+echo "Conversion completed. Check logs at: ${LOGS_DIR}/" 

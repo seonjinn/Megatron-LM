@@ -112,7 +112,7 @@ def main():
                                      allow_abbrev=False, conflict_handler='resolve')
 
     parser.add_argument('--model-type', type=str, required=True,
-                        choices=['GPT', 'BERT'],
+                        choices=['GPT', 'BERT', "hybrid"],
                         help='Type of the model')
     parser.add_argument('--loader', type=str, default='megatron',
                         help='Module name to load checkpoint, should be on python path')
@@ -127,12 +127,15 @@ def main():
     parser.add_argument('--no-checking', action='store_false',
                         help='Do not perform checking on the name and ordering of weights',
                         dest='checking')
+    parser.add_argument('--ckpt-step', type=int, default=None, help="The checkpoint step to load.")
 
     known_args, _ = parser.parse_known_args()
 
     # Handle old arg values.
     def update_loader_saver(key):
         old_value = getattr(known_args, key)
+        if old_value == "megatron":
+            setattr(known_args, key, "legacy")
         if old_value == "mcore":
             setattr(known_args, key, "core")
     update_loader_saver("loader")

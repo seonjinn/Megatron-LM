@@ -327,6 +327,26 @@ def validate_segment_layers(segment: str) -> List[str]:
     return layer_type_list
 
 
+def _get_process_group_rank_and_size(
+    group: Optional[torch.distributed.ProcessGroup],
+) -> Tuple[int, int]:
+    """Return rank and size for real or converter fake process groups."""
+    if group is None:
+        return 0, 1
+    if not (torch.distributed.is_available() and torch.distributed.is_initialized()):
+        if hasattr(group, "rank") and hasattr(group, "size"):
+            return group.rank(), group.size()
+    return torch.distributed.get_rank(group), torch.distributed.get_world_size(group)
+
+
+def _log_pipeline_segment(*args, **kwargs) -> None:
+    """Log pipeline segment selection in distributed or converter contexts."""
+    if torch.distributed.is_available() and torch.distributed.is_initialized():
+        log_on_each_pipeline_stage(*args, **kwargs)
+    else:
+        log_single_rank(*args, **kwargs)
+
+
 def select_pipeline_segment(
     main_pattern: str,
     pp_group: Optional[torch.distributed.ProcessGroup],
@@ -366,8 +386,7 @@ def select_pipeline_segment(
     """
     segments = main_pattern.split(Symbols.PIPE) if main_pattern else ['']
 
-    pp_rank = torch.distributed.get_rank(pp_group) if pp_group is not None else 0
-    pp_size = torch.distributed.get_world_size(pp_group) if pp_group is not None else 1
+    pp_rank, pp_size = _get_process_group_rank_and_size(pp_group)
 
     if len(segments) > 1 and (first_stage_layers is not None or last_stage_layers is not None):
         raise ValueError(
@@ -439,7 +458,7 @@ def select_pipeline_segment(
             count = layers_per_rank
 
         selected = layer_type_list[offset : offset + count]
-        log_on_each_pipeline_stage(
+        _log_pipeline_segment(
             logger,
             logging.INFO,
             f"HybridModel: pp_rank={pp_rank}/{pp_size}, vp_stage={vp_stage}, "
@@ -472,7 +491,7 @@ def select_pipeline_segment(
 
     layer_type_list = validate_segment_layers(my_segment)
 
-    log_on_each_pipeline_stage(
+    _log_pipeline_segment(
         logger,
         logging.INFO,
         f"HybridModel: pp_rank={pp_rank}/{pp_size}, vp_stage={vp_rel}, "

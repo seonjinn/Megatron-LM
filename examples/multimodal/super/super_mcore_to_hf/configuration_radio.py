@@ -1,1 +1,1 @@
-../../v3/moe_hf_config/configuration_radio.py
+../../v3/nano_mcore_to_hf/configuration_radio.py

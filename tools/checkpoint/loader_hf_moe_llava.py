@@ -14,7 +14,7 @@ from loader_base import MegatronCheckpointLoaderBase
 def add_arguments(parser):
     """Add command-line arguments relevant to HuggingFace model loading."""
     group = parser.add_argument_group(title='HuggingFace loader')
-
+    
     group.add_argument('--true-vocab-size', type=int, default=None,
                        help='Original size of vocab; if specified, trims padding from embedding table.')
     group.add_argument('--megatron-path', type=str, default=None,
@@ -54,12 +54,12 @@ class HuggingFaceCheckpointLoaderMoELLaVA(HuggingFaceCheckpointLoaderHybrid):
 
         # Load HF config
         self.hf_config = AutoConfig.from_pretrained(self.args.load_dir, trust_remote_code=True)
-
+        
         # Build sys.argv based on HF config
         sys.argv = self.build_sys_argv()
 
         margs = parse_args()
-
+        
         # Create fake checkpoint args based on HF config
         checkpoint_args = types.SimpleNamespace()
         checkpoint_args.fp16 = self.hf_config.torch_dtype == torch.float16
@@ -98,7 +98,7 @@ class HuggingFaceCheckpointLoaderMoELLaVA(HuggingFaceCheckpointLoaderHybrid):
         checkpoint_args.language_model_type = "nemotron6-moe"
         checkpoint_args.vision_model_type = "radio"
         checkpoint_args.pixel_shuffle = True
-
+        
         # Set key attributes from HF config
         margs.num_layers = self.hf_config.llm_config.num_hidden_layers
         margs.hidden_size = self.hf_config.llm_config.hidden_size
@@ -151,7 +151,7 @@ class HuggingFaceCheckpointLoaderMoELLaVA(HuggingFaceCheckpointLoaderHybrid):
         """
         # Build base arguments and add hybrid-specific ones
         base_args = MegatronCheckpointLoaderBase.build_sys_argv(self)
-
+        
         hybrid_args = [
             '--position-embedding-type', 'none',
             '--hybrid-override-pattern', self.hf_config.llm_config.hybrid_override_pattern,
@@ -160,7 +160,7 @@ class HuggingFaceCheckpointLoaderMoELLaVA(HuggingFaceCheckpointLoaderHybrid):
             '--mamba-head-dim', str(self.hf_config.llm_config.mamba_head_dim),
             '--mamba-num-heads', str(self.hf_config.llm_config.mamba_num_heads),
         ]
-
+        
         return base_args + hybrid_args
 
     def build_checkpoint_metadata(self, true_vocab_size):
@@ -199,7 +199,7 @@ class HuggingFaceCheckpointLoaderMoELLaVA(HuggingFaceCheckpointLoaderHybrid):
         md.checkpoint_args = self.checkpoint_args
         md.use_legacy_models = False
         md.use_cpu_initialization = False
-
+        
         # Hybrid-specific metadata
         if self.args.model_type == "hybrid":
             md.hybrid_attention_ratio = None
@@ -225,7 +225,7 @@ class HuggingFaceCheckpointLoaderMoELLaVA(HuggingFaceCheckpointLoaderHybrid):
 
         md.vision_projection_linear_bias = False
         md.conv_merging = False
-
+        
         md.moe_router_topk_scaling_factor = None
         md.moe_router_dtype = None
         md.moe_router_padding_for_fp8 = False
@@ -254,7 +254,7 @@ class HuggingFaceCheckpointLoaderMoELLaVA(HuggingFaceCheckpointLoaderHybrid):
         Send the HuggingFace model over the queue in Megatron format.
         """
         self.send_metadata_over_queue()
-
+        
         self.send_hf_vision_backbone_over_queue()
         self.send_hf_vision_projection_over_queue()
         self.send_hf_moe_lm_over_queue()
@@ -351,7 +351,7 @@ class HuggingFaceCheckpointLoaderMoELLaVA(HuggingFaceCheckpointLoaderHybrid):
         Convert HuggingFace hybrid model weights to Megatron format and send over queue.
         """
         model = self.hf_model.language_model
-
+        
         # 1) Embeddings
         word_embeddings = model.backbone.embeddings.weight
         message = {
@@ -364,12 +364,12 @@ class HuggingFaceCheckpointLoaderMoELLaVA(HuggingFaceCheckpointLoaderHybrid):
         layer_types = []
         for i in range(self.hf_config.llm_config.num_hidden_layers):
             layer_weights = model.backbone.layers[i].mixer
-
+            
             # Determine layer type by checking what weights exist
             if hasattr(layer_weights, 'A_log'):
                 layer_types.append('MAMBA')
             elif hasattr(layer_weights, 'q_proj'):
-                layer_types.append('ATTENTION')
+                layer_types.append('ATTENTION')  
             elif hasattr(layer_weights, 'up_proj'):
                 layer_types.append('MLP')
             elif hasattr(layer_weights, 'gate'):
@@ -394,41 +394,41 @@ class HuggingFaceCheckpointLoaderMoELLaVA(HuggingFaceCheckpointLoaderHybrid):
                 message["conv1d bias"] = layer.mixer.conv1d.bias
                 message["norm weight"] = layer.mixer.norm.weight
                 message["out proj weight"] = layer.mixer.out_proj.weight
-
+                
             elif layer_type == 'ATTENTION':
                 # Attention layer weights
                 message["input norm weight"] = layer.norm.weight
-
+                
                 # Combine q, k, v projections into qkv weight
                 q_weight = layer.mixer.q_proj.weight
-                k_weight = layer.mixer.k_proj.weight
+                k_weight = layer.mixer.k_proj.weight  
                 v_weight = layer.mixer.v_proj.weight
-
+                
                 # Calculate head dimension for attention layers
                 # head_dim = self.hf_config.llm_config.hidden_size // self.hf_config.llm_config.num_attention_heads
                 head_dim = self.hf_config.llm_config.head_dim
                 qkv_weight = self.combine_hf_qkv_weight(q_weight, k_weight, v_weight, self.hf_config.llm_config.num_attention_heads, self.hf_config.llm_config.num_key_value_heads, head_dim, self.args.target_tensor_parallel_size)
-
+                
                 message["qkv weight"] = qkv_weight
                 message["dense weight"] = layer.mixer.o_proj.weight
-
+                
                 # Add bias if present
                 if self.hf_config.llm_config.attention_bias:
                     q_bias = layer.mixer.q_proj.bias if hasattr(layer.mixer.q_proj, 'bias') else None
                     k_bias = layer.mixer.k_proj.bias if hasattr(layer.mixer.k_proj, 'bias') else None
                     v_bias = layer.mixer.v_proj.bias if hasattr(layer.mixer.v_proj, 'bias') else None
-
+                    
                     if q_bias is not None and k_bias is not None and v_bias is not None:
                         qkv_bias = self.combine_hf_qkv_bias(q_bias, k_bias, v_bias, self.hf_config.llm_config.num_attention_heads, self.hf_config.llm_config.num_key_value_heads, head_dim, self.args.target_tensor_parallel_size)
                         message["qkv bias"] = qkv_bias
-
+                        
                 if hasattr(layer.mixer.o_proj, 'bias') and layer.mixer.o_proj.bias is not None:
                     message["dense bias"] = layer.mixer.o_proj.bias
-
+                
             elif layer_type == 'MLP':
                 # MLP layer weights - this model uses ReLU^2 activation, not SwiGLU
                 message["post norm weight"] = layer.norm.weight
-
+                
                 # For this model, it seems to be standard MLP (not SwiGLU)
                 # up_proj corresponds to the first linear layer, down_proj to the second
                 message["mlp l0 weight"] = layer.mixer.up_proj.weight
@@ -485,4 +485,4 @@ def load_checkpoint(queue, args):
         loader.load()
     except Exception as e:
         queue.put("exit")
-        raise e
+        raise e 

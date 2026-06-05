@@ -1,1 +1,1 @@
-../../v3/moe_hf_config/quick_test_image.py
+../../v3/nano_mcore_to_hf/quick_test_image.py

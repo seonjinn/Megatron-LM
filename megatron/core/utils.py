@@ -514,6 +514,16 @@ def get_tensor_model_parallel_group_if_none(tp_group, is_expert=False, check_ini
     """Issue a deprecation warning if tp_group is None and return the default tp group."""
     # TODO(zijiey): remove this function later.
     if not torch.distributed.is_initialized():
+        if tp_group is not None:
+            return tp_group
+        if parallel_state.is_initialized():
+            if is_expert:
+                return parallel_state.get_expert_tensor_parallel_group(
+                    check_initialized=check_initialized
+                )
+            return parallel_state.get_tensor_model_parallel_group(
+                check_initialized=check_initialized
+            )
         return None
 
     # if parallel_state is not initialized, pass `tp_group` thru
@@ -548,8 +558,10 @@ def get_pg_size(group=None):
     Returns:
         int: World size (1 if distributed not initialized or group is None, else group.size())
     """
-    if not torch.distributed.is_initialized() or group is None:
+    if group is None:
         return 1
+    if not torch.distributed.is_initialized():
+        return group.size() if hasattr(group, "size") else 1
     return group.size()
 
 
@@ -562,8 +574,10 @@ def get_pg_rank(group=None):
     Returns:
         int: Rank (0 if distributed not initialized or group is None, else group.rank())
     """
-    if not torch.distributed.is_initialized() or group is None:
+    if group is None:
         return 0
+    if not torch.distributed.is_initialized():
+        return group.rank() if hasattr(group, "rank") else 0
     return group.rank()
 
 

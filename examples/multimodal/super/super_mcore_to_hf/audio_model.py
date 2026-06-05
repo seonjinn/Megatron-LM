@@ -1,1 +1,1 @@
-../../v3/moe_hf_config/audio_model.py
+../../v3/nano_mcore_to_hf/audio_model.py

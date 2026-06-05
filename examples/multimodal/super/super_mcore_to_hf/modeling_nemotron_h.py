@@ -1,1 +1,1 @@
-../../v3/moe_hf_config/modeling_nemotron_h.py
+../../v3/nano_mcore_to_hf/modeling_nemotron_h.py

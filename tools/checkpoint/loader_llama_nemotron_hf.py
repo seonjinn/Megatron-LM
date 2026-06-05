@@ -255,7 +255,6 @@ def _load_checkpoint(queue, args):
         "--no-masked-softmax-fusion",
         "--no-bias-gelu-fusion",
         "--no-bias-dropout-fusion",
-        "--no-async-tensor-model-parallel-allreduce",
         "--use-cpu-initialization",
         "--micro-batch-size",
         "1",
@@ -476,4 +475,4 @@ def load_checkpoint(queue, args):
         _load_checkpoint(queue, args)
     except Exception:
         queue.put("exit")
-        raise
+        raise 

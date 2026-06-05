@@ -3,7 +3,6 @@
 import os
 import sys
 import torch
-from functools import partial
 from importlib.metadata import version
 from packaging.version import Version as PkgVersion
 
@@ -25,6 +24,10 @@ def add_arguments(parser):
                        'in the input checkpoint if provided by the loader, otherwise to 1')
     group.add_argument('--target-expert-parallel-size', type=int, default=1,
                        help='Target expert model parallel size, default to 1')
+    group.add_argument('--target-expert-tensor-parallel-size', type=int, default=1,
+                       help='Target expert tensor model parallel size, default to 1')
+    group.add_argument('--make-vocab-size-divisible-by', type=int, default=None,
+                       help='Value to make vocab size divisible by. Will pad embedding table if necessary')
     group.add_argument('--saver-transformer-impl', default='transformer_engine',
                        choices=['local', 'transformer_engine'],
                        help='Which Transformer implementation to use.')
@@ -39,12 +42,15 @@ class MegatronCheckpointSaverLLM(MegatronCheckpointSaverBase):
             sys.exit(1)
 
         if self.md.model_type == 'GPT':
-            from model_provider import model_provider
-            from gpt_builders import gpt_builder
-            self.model_provider = partial(model_provider, gpt_builder)
+            from pretrain_gpt import model_provider
+            self.model_provider = model_provider
             self.margs.model_type = ModelType.encoder_or_decoder
         elif self.md.model_type == 'BERT':
             from pretrain_bert import model_provider
+            self.model_provider = model_provider
+            self.margs.model_type = ModelType.encoder_or_decoder
+        elif self.args.model_type == 'hybrid':
+            from pretrain_mamba import model_provider
             self.model_provider = model_provider
             self.margs.model_type = ModelType.encoder_or_decoder
         else:

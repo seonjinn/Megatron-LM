@@ -1,1 +1,1 @@
-../../v3/moe_hf_config/image_processing.py
+../../v3/nano_mcore_to_hf/image_processing.py

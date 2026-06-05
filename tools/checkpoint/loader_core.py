@@ -5,7 +5,6 @@ import os
 import sys
 import torch
 import types
-from functools import partial
 
 from schema_core import get_model_schema
 from loader_base import MegatronCheckpointLoaderBase
@@ -55,15 +54,27 @@ class MegatronCheckpointLoaderLLM(MegatronCheckpointLoaderBase):
     def import_model_provider(self):
         """Return the correct model_provider function depending on GPT vs. BERT."""
         if self.args.model_type == 'GPT':
-            from model_provider import model_provider
-            from gpt_builders import gpt_builder
-            self.model_provider = partial(model_provider, gpt_builder)
+            from pretrain_gpt import model_provider
             return model_provider
         elif self.args.model_type == 'BERT':
             from pretrain_bert import model_provider
             return model_provider
+        elif self.args.model_type == 'hybrid':
+            from pretrain_mamba import model_provider
+            return model_provider
         else:
             raise Exception(f"Unrecognized model type: {self.args.model_type}")
+
+    def _maybe_parse_additional_megatron_args(self, margs, checkpoint_args):
+        """
+        Ensure MoE-related flags present in checkpoint args are propagated to Megatron args
+        so model construction matches the training configuration.
+        """
+        # DeepEP backend requirement for MoE token dispatcher
+        if hasattr(checkpoint_args, 'moe_enable_deepep'):
+            margs.moe_enable_deepep = checkpoint_args.moe_enable_deepep
+        # Return possibly updated args
+        return margs
 
 
     def send_model_over_queue(self):
