@@ -367,6 +367,7 @@ def split_to_context_parallel_ranks_dynamic_res(
 
     # Temporal compression requires num_frames for proper tubelet-aware splitting
     use_tubelet_aware_split = temporal_patch_size > 1
+    num_frames_list = None
     split_points = None
     if use_tubelet_aware_split:
         assert num_frames is not None, (
