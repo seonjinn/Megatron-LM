@@ -37,7 +37,9 @@ def save_checkpoint(queue, args):
         from megatron.training.checkpointing import save_checkpoint
         from megatron.training.global_vars import set_global_variables, get_args
         from megatron.core.enums import ModelType
-        from megatron.training.tokenizer.tokenizer import _vocab_size_with_padding
+        from megatron.core.tokenizers.utils.build_tokenizer import (
+            vocab_size_with_padding as _vocab_size_with_padding,
+        )
         from megatron.legacy import fused_kernels
         from megatron.core import mpu
     except ModuleNotFoundError:

@@ -7,6 +7,8 @@ DEFAULT_REPO=$(cd -- "${SCRIPT_DIR}/../../.." && pwd -P)
 DEFAULT_INPUT_PATH="${SUPER_MCORE_INPUT_PATH:-}"
 DEFAULT_SAVE_DIR="${SUPER_HF_SAVE_DIR:-}"
 DEFAULT_CONTAINER="${SUPER_CONTAINER_IMAGE:-}"
+DEFAULT_TOKENIZER_SRC="${SUPER_HF_TOKENIZER_SRC:-}"
+DEFAULT_RADIO_HF_SRC="${SUPER_HF_RADIO_SRC:-}"
 
 usage() {
     cat <<EOF
@@ -28,6 +30,10 @@ Options:
                         Required unless SUPER_CONTAINER_IMAGE is set.
   --hf-config-src PATH  HF config/template directory.
                         Default: <repo>/examples/multimodal/super/super_mcore_to_hf
+  --tokenizer-src PATH  Optional tokenizer asset directory to copy into HF output.
+                        Default: SUPER_HF_TOKENIZER_SRC if set.
+  --radio-hf-src PATH   Optional local nvidia/C-RADIOv2-H HF-code checkout to copy
+                        into HF output for offline loading. Default: SUPER_HF_RADIO_SRC if set.
   --account NAME        Slurm account. Default: llmservice_fm_vision
   --partition NAME      Slurm partition. Default: batch
   --time HH:MM:SS       Slurm time limit. Default: 04:00:00
@@ -49,6 +55,8 @@ SAVE_DIR="${DEFAULT_SAVE_DIR}"
 CKPT_STEP=""
 REPO="${DEFAULT_REPO}"
 CONTAINER_IMAGE="${DEFAULT_CONTAINER}"
+TOKENIZER_SRC="${DEFAULT_TOKENIZER_SRC}"
+RADIO_HF_SRC="${DEFAULT_RADIO_HF_SRC}"
 HF_CONFIG_SRC=""
 ACCOUNT="llmservice_fm_vision"
 PARTITION="batch"
@@ -82,6 +90,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --hf-config-src)
             HF_CONFIG_SRC="$2"
+            shift 2
+            ;;
+        --tokenizer-src)
+            TOKENIZER_SRC="$2"
+            shift 2
+            ;;
+        --radio-hf-src)
+            RADIO_HF_SRC="$2"
             shift 2
             ;;
         --account)
@@ -143,6 +159,12 @@ fi
 REPO=$(readlink -f "$REPO")
 INPUT_PATH=$(readlink -f "$INPUT_PATH")
 SAVE_DIR=${SAVE_DIR%/}
+if [[ -n "$TOKENIZER_SRC" ]]; then
+    TOKENIZER_SRC=$(readlink -f "$TOKENIZER_SRC")
+fi
+if [[ -n "$RADIO_HF_SRC" ]]; then
+    RADIO_HF_SRC=$(readlink -f "$RADIO_HF_SRC")
+fi
 HF_CONFIG_SRC=${HF_CONFIG_SRC:-"${REPO}/examples/multimodal/super/super_mcore_to_hf"}
 
 MCORE_PATH="$INPUT_PATH"
@@ -187,6 +209,14 @@ if [[ ! -d "$HF_CONFIG_SRC" ]]; then
     echo "HF config/template directory not found: $HF_CONFIG_SRC" >&2
     exit 1
 fi
+if [[ -n "$TOKENIZER_SRC" && ! -d "$TOKENIZER_SRC" ]]; then
+    echo "Tokenizer source directory not found: $TOKENIZER_SRC" >&2
+    exit 1
+fi
+if [[ -n "$RADIO_HF_SRC" && ! -d "$RADIO_HF_SRC" ]]; then
+    echo "RADIO HF source directory not found: $RADIO_HF_SRC" >&2
+    exit 1
+fi
 
 mkdir -p "$LOG_DIR"
 
@@ -197,6 +227,8 @@ Resolved conversion settings:
   iteration:      $CKPT_STEP_DEC ($ITER_NAME)
   save dir:       $SAVE_DIR
   HF template:    $HF_CONFIG_SRC
+  tokenizer src:  ${TOKENIZER_SRC:-<none>}
+  RADIO HF src:   ${RADIO_HF_SRC:-<none>}
   container:      $CONTAINER_IMAGE
   account:        $ACCOUNT
   partition:      $PARTITION
@@ -219,7 +251,7 @@ sbatch \
     -t "$TIME_LIMIT" \
     --job-name="$JOB_NAME" \
     --output="${LOG_DIR}/convert_%j.log" \
-    --export=ALL,REPO="$REPO",MCORE_PATH="$MCORE_PATH",CKPT_STEP="$CKPT_STEP_DEC",HF_PATH="$SAVE_DIR",HF_CONFIG_SRC="$HF_CONFIG_SRC",CONTAINER_IMAGE="$CONTAINER_IMAGE",MAX_QUEUE_SIZE="$MAX_QUEUE_SIZE" <<'SBATCH'
+    --export=ALL,REPO="$REPO",MCORE_PATH="$MCORE_PATH",CKPT_STEP="$CKPT_STEP_DEC",HF_PATH="$SAVE_DIR",HF_CONFIG_SRC="$HF_CONFIG_SRC",TOKENIZER_SRC="$TOKENIZER_SRC",RADIO_HF_SRC="$RADIO_HF_SRC",CONTAINER_IMAGE="$CONTAINER_IMAGE",MAX_QUEUE_SIZE="$MAX_QUEUE_SIZE" <<'SBATCH'
 #!/bin/bash
 set -euo pipefail
 
@@ -265,13 +297,91 @@ python -u tools/checkpoint/convert.py \
     --ckpt-step "$CKPT_STEP"
 
 printf "Copying HF template/config files at %s\n" "$(date -Is)"
-rsync -a --exclude="model.safetensors.index.json" "$HF_CONFIG_SRC/" "$HF_PATH/"
+# The template contains relative symlinks into examples/multimodal/v3.  Dereference them so
+# the converted HF checkpoint can be loaded as a standalone directory.
+rsync -aL --exclude="model.safetensors.index.json" "$HF_CONFIG_SRC/" "$HF_PATH/"
 
 printf "Updating HF config from checkpoint args at %s\n" "$(date -Is)"
 python -u examples/multimodal/tools/create_yaml_inference_config.py \
     --ckpt_path "$CKPT_FILE" \
     --output_config "$HF_PATH/config.yaml" \
     --update_hf_config "$HF_PATH"
+
+if [[ -n "${TOKENIZER_SRC:-}" ]]; then
+    printf "Copying tokenizer assets from %s at %s\n" "$TOKENIZER_SRC" "$(date -Is)"
+    rsync -aL --ignore-missing-args \
+        "$TOKENIZER_SRC/tokenizer.json" \
+        "$TOKENIZER_SRC/tokenizer_config.json" \
+        "$TOKENIZER_SRC/special_tokens_map.json" \
+        "$TOKENIZER_SRC/chat_template.jinja" \
+        "$HF_PATH/"
+fi
+
+if [[ -f "$HF_CONFIG_SRC/chat_template.jinja" ]]; then
+    printf "Installing super VLM chat template from %s at %s\n" "$HF_CONFIG_SRC/chat_template.jinja" "$(date -Is)"
+    cp -L "$HF_CONFIG_SRC/chat_template.jinja" "$HF_PATH/chat_template.jinja"
+fi
+
+if [[ -n "${RADIO_HF_SRC:-}" ]]; then
+    printf "Copying RADIO HF code from %s at %s\n" "$RADIO_HF_SRC" "$(date -Is)"
+    rsync -aL --include="*.py" --exclude="*" "$RADIO_HF_SRC/" "$HF_PATH/"
+fi
+
+printf "Normalizing HF config/package metadata at %s\n" "$(date -Is)"
+python -u - "$HF_PATH" <<'"'"'PY'"'"'
+import json
+import sys
+from pathlib import Path
+
+hf_path = Path(sys.argv[1])
+config_path = hf_path / "config.json"
+index_path = hf_path / "model.safetensors.index.json"
+
+with config_path.open() as f:
+    config = json.load(f)
+with index_path.open() as f:
+    weight_map = json.load(f).get("weight_map", {})
+
+if (hf_path / "hf_model.py").exists():
+    vision_config = config.setdefault("vision_config", {})
+    vision_config["auto_map"] = {
+        "AutoConfig": "hf_model.RADIOConfig",
+        "AutoModel": "hf_model.RADIOModel",
+    }
+
+config["max_sequence_length"] = 262144
+config["img_context_token_id"] = 18
+config["sound_context_token_id"] = 27
+
+llm_config = config.setdefault("llm_config", {})
+llm_config["max_position_embeddings"] = 262144
+config["routed_scaling_factor"] = llm_config.get(
+    "routed_scaling_factor", config.get("routed_scaling_factor", 5.0)
+)
+
+sound_config = config.get("sound_config")
+if isinstance(sound_config, dict):
+    sound_config["projection_bias"] = True
+
+if "vision_model.radio_model.model.patch_generator.video_embedder.weight" in weight_map:
+    config.setdefault("video_temporal_patch_size", 2)
+
+with config_path.open("w") as f:
+    json.dump(config, f, indent=2)
+    f.write("\n")
+
+tokenizer_config_path = hf_path / "tokenizer_config.json"
+chat_template_path = hf_path / "chat_template.jinja"
+if tokenizer_config_path.exists() and chat_template_path.exists():
+    with tokenizer_config_path.open() as f:
+        tokenizer_config = json.load(f)
+    tokenizer_config["chat_template"] = chat_template_path.read_text()
+    tokenizer_config["pad_token"] = "<|im_end|>"
+    tokenizer_config["padding_side"] = "left"
+    with tokenizer_config_path.open("w") as f:
+        json.dump(tokenizer_config, f, indent=2)
+        f.write("\n")
+PY
 
 printf "original mcore path: %s at iteration %s\n" "$MCORE_PATH" "$CKPT_STEP" > "$HF_PATH/mcore_to_hf_info.txt"
 printf "Conversion completed at %s\n" "$(date -Is)"

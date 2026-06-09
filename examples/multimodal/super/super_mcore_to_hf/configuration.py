@@ -79,6 +79,7 @@ class NemotronH_Super_Omni_Reasoning_V3_Config(PretrainedConfig):
         vit_hidden_size=1280,
         attn_implementation="flash_attention_2",
         video_pruning_rate: float = 0.0,
+        video_temporal_patch_size: int = 2,
         # Sound/audio settings
         sound_context_token_id: int = None,
         sound_context_token: str = "<so_embedding>",
@@ -112,6 +113,7 @@ class NemotronH_Super_Omni_Reasoning_V3_Config(PretrainedConfig):
         self.projector_hidden_size = projector_hidden_size
         self.vit_hidden_size = vit_hidden_size
         self.video_pruning_rate = video_pruning_rate
+        self.video_temporal_patch_size = video_temporal_patch_size
 
         # Sound/audio token settings
         self.sound_context_token_id = sound_context_token_id

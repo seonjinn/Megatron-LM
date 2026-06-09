@@ -30,16 +30,60 @@ import torch.nn.functional as F
 from torch import nn
 
 import copy
+import importlib
 
-from transformers import initialization as init
+try:
+    from transformers import initialization as init
+except ImportError:
+    from torch.nn import init
+
+    def _copy_(tensor, source):
+        with torch.no_grad():
+            return tensor.copy_(source)
+
+    init.copy_ = _copy_
 from transformers.activations import ACT2FN
 from transformers.generation import GenerationMixin
-from transformers.integrations import (
-    lazy_load_kernel,
-    use_kernel_forward_from_hub,
-    use_kernel_func_from_hub,
-    use_kernelized_func,
-)
+try:
+    from transformers.integrations import use_kernel_forward_from_hub
+except ImportError:
+
+    def use_kernel_forward_from_hub(*_args, **_kwargs):
+        def decorator(obj):
+            return obj
+
+        return decorator
+
+try:
+    from transformers.integrations import use_kernel_func_from_hub
+except ImportError:
+
+    def use_kernel_func_from_hub(*_args, **_kwargs):
+        def decorator(func):
+            return func
+
+        return decorator
+
+try:
+    from transformers.integrations import use_kernelized_func
+except ImportError:
+
+    def use_kernelized_func(*_args, **_kwargs):
+        def decorator(cls):
+            return cls
+
+        return decorator
+
+try:
+    from transformers.integrations import lazy_load_kernel
+except ImportError:
+
+    def lazy_load_kernel(package_name):
+        module_name = package_name.replace("-", "_")
+        try:
+            return importlib.import_module(module_name)
+        except ImportError:
+            return None
 from transformers.masking_utils import create_causal_mask
 from transformers.modeling_layers import GradientCheckpointingLayer
 from transformers.modeling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast
@@ -47,9 +91,51 @@ from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS, PreTrainedModel
 from transformers.models.zamba2.modeling_zamba2 import Zamba2RMSNormGated
 from transformers.processing_utils import Unpack
 from transformers.utils import TransformersKwargs, auto_docstring, can_return_tuple, is_torchdynamo_compiling, logging
-from transformers.utils.generic import merge_with_config_defaults
-from transformers.utils.import_utils import resolve_internal_import
-from transformers.utils.output_capturing import capture_outputs
+
+
+def auto_docstring(obj):
+    return obj
+
+
+try:
+    from transformers.utils.generic import merge_with_config_defaults
+except ImportError:
+
+    def merge_with_config_defaults(func):
+        return func
+try:
+    from transformers.utils.import_utils import resolve_internal_import
+except ImportError:
+
+    def resolve_internal_import(module, chained_path):
+        if module is None:
+            return None
+
+        parts = chained_path.split(".")
+        base_name = getattr(module, "__name__", None)
+        if base_name is not None:
+            for split_idx in range(len(parts), 0, -1):
+                try:
+                    resolved = importlib.import_module(".".join([base_name, *parts[:split_idx]]))
+                    for attr in parts[split_idx:]:
+                        resolved = getattr(resolved, attr)
+                    return resolved
+                except (AttributeError, ImportError):
+                    continue
+
+        resolved = module
+        try:
+            for attr in parts:
+                resolved = getattr(resolved, attr)
+            return resolved
+        except AttributeError:
+            return None
+try:
+    from transformers.utils.output_capturing import capture_outputs
+except ImportError:
+
+    def capture_outputs(func):
+        return func
 from .configuration_nemotron_h import NemotronHConfig
 
 
@@ -1062,9 +1148,7 @@ class NemotronHPreTrainedModel(PreTrainedModel):
         "hidden_states": NemotronHBlock,
         "attentions": NemotronHAttention,
     }
-    _keep_in_fp32_modules_strict = [
-        "e_score_correction_bias",
-    ]
+    _keep_in_fp32_modules_strict = []
     _tied_weights_keys = {}
     _keys_to_ignore_on_load_unexpected = [r"mtp.*"]
 

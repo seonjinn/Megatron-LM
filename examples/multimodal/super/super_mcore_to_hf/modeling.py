@@ -67,10 +67,47 @@ def version_cmp(v1, v2, op='eq'):
     return op_func(version.parse(v1), version.parse(v2))
 
 
+def _load_packaged_radio_model(model_path):
+    import hashlib
+    import importlib.util
+    import sys
+    from pathlib import Path
+
+    model_path = Path(model_path)
+    hf_model_path = model_path / "hf_model.py"
+    if not hf_model_path.exists():
+        return None
+
+    package_name = "_megatron_local_radio_" + hashlib.sha1(str(model_path).encode()).hexdigest()[:12]
+    if package_name not in sys.modules:
+        package_spec = importlib.util.spec_from_loader(package_name, loader=None, is_package=True)
+        package = importlib.util.module_from_spec(package_spec)
+        package.__path__ = [str(model_path)]
+        sys.modules[package_name] = package
+
+    module_name = f"{package_name}.hf_model"
+    module = sys.modules.get(module_name)
+    if module is None:
+        module_spec = importlib.util.spec_from_file_location(module_name, hf_model_path)
+        module = importlib.util.module_from_spec(module_spec)
+        sys.modules[module_name] = module
+        module_spec.loader.exec_module(module)
+    return module.RADIOModel
+
+
+def _build_vision_model(config):
+    if getattr(config, "_name_or_path", None):
+        radio_model_cls = _load_packaged_radio_model(config._name_or_path)
+        if radio_model_cls is not None:
+            return radio_model_cls(config.vision_config)
+    return AutoModel.from_config(config.vision_config, trust_remote_code=True)
+
+
 class NemotronH_Super_Omni_Reasoning_V3(PreTrainedModel):
     config_class = NemotronH_Super_Omni_Reasoning_V3_Config
     main_input_name = 'pixel_values'
     _supports_flash_attn_2 = True
+    _supports_flash_attn = True
     _no_split_modules = ['NemotronHBlock']
 
     def __init__(self, config: NemotronH_Super_Omni_Reasoning_V3_Config):
@@ -93,9 +130,31 @@ class NemotronH_Super_Omni_Reasoning_V3(PreTrainedModel):
 
         # Instantiate LM directly to avoid Hugging Face dynamic module lookup requiring a repo id.
         self.language_model = NemotronHForCausalLM(config.llm_config)
-        self.vision_model = AutoModel.from_config(config.vision_config, trust_remote_code=True)
+        self.vision_model = _build_vision_model(config)
         self.vision_model.model._initialize_weights = self.vision_model.model._init_weights  # WAR for transformers issue 38358
         self.vision_model.radio_model.make_preprocessor_external()
+
+        # Attach a separate 3D patch projection for video frames. The RADIO ViT ships with only a 2D
+        # `embedder` (shape `[embed_dim, C·P²]`); this repo's checkpoint also carries a
+        # `video_embedder` (shape `[embed_dim, T·C·P²]`) used for temporally-packed video patches,
+        # so we construct the module here to make the weight bind. `T = video_temporal_patch_size`
+        # is the number of frames collapsed into each temporal patch.
+        self.video_temporal_patch_dim = config.video_temporal_patch_size
+        pg = self.vision_model.radio_model.model.patch_generator
+        pg.video_embedder = nn.Linear(
+            in_features=self.video_temporal_patch_dim * 3 * pg.patch_size * pg.patch_size,
+            out_features=pg.embed_dim,
+            bias=False,
+        )
+
+        # Align CPE position-embedding interpolation with Megatron training + vLLM inference.
+        # The `nvidia/C-RADIOv2-H` remote code uses `align_corners=True` in eval mode, but the V3
+        # checkpoint was trained against `align_corners=False` (see Megatron's `radio.py`). That
+        # single-flag mismatch shifts every pos_embed by a fraction of a cell, which compounds
+        # through 52 ViT layers and is the main cause of HF/vLLM divergence for video (where CPE
+        # mode is active — dynamic-res tubelets don't match the model's native 2048-sized grid).
+        self._patch_cpe_align_corners(pg)
+
         self.vision_model = self.vision_model.to(self.language_model.config.torch_dtype)
 
         self.drop_vision_class_token = True
@@ -151,6 +210,8 @@ class NemotronH_Super_Omni_Reasoning_V3(PreTrainedModel):
             self.sound_encoder = None
             self.sound_projection = None
             self.sound_feature_extractor = None
+
+        self.all_tied_weights_keys = {}
 
     def forward(
             self,
@@ -239,6 +300,55 @@ class NemotronH_Super_Omni_Reasoning_V3(PreTrainedModel):
             attentions=outputs.attentions,
         )
 
+    @staticmethod
+    def _patch_cpe_align_corners(patch_generator) -> None:
+        """Monkey-patch `patch_generator._get_pos_embeddings` so the CPE-mode eval-path interpolation
+        uses `align_corners=False` (Megatron training + vLLM inference convention) instead of the
+        `align_corners=True` that the `nvidia/C-RADIOv2-H` remote code ships with.
+        """
+        import math
+        import torch.nn.functional as F
+
+        orig_method = patch_generator._get_pos_embeddings.__func__ if hasattr(
+            patch_generator._get_pos_embeddings, "__func__"
+        ) else patch_generator._get_pos_embeddings
+
+        def _get_pos_embeddings_aligned(self, batch_size, input_dims):
+            if (self.num_rows, self.num_cols) == input_dims:
+                return self.pos_embed
+            pos_embed = self.pos_embed.reshape(1, self.num_rows, self.num_cols, -1).permute(0, 3, 1, 2)
+
+            def window_select(pe):
+                if input_dims[0] < pe.shape[-2]:
+                    pe = pe[..., :input_dims[0], :]
+                if input_dims[1] < pe.shape[-1]:
+                    pe = pe[..., :, :input_dims[1]]
+                return pe
+
+            if self.cpe_mode:
+                if self.training:
+                    # Keep the original training-time jitter path (grid_sample + align_corners=True);
+                    # only patch the eval branch, which is what Megatron/vLLM use and where the bug is.
+                    return orig_method(self, batch_size, input_dims)
+                max_dim = max(input_dims)
+                pos_embed = F.interpolate(
+                    pos_embed.float(), size=(max_dim, max_dim), align_corners=False, mode="bilinear"
+                ).to(pos_embed.dtype)
+                pos_embed = window_select(pos_embed)
+            else:
+                pos_embed = window_select(pos_embed)
+
+            if pos_embed.shape[-2:] != input_dims:
+                pos_embed = F.interpolate(
+                    pos_embed.float(), size=input_dims, align_corners=False, mode="bilinear"
+                ).to(pos_embed.dtype)
+
+            pos_embed = pos_embed.flatten(2).permute(0, 2, 1)
+            return pos_embed
+
+        import types
+        patch_generator._get_pos_embeddings = types.MethodType(_get_pos_embeddings_aligned, patch_generator)
+
     def pixel_shuffle(self, x, scale_factor=0.5):
         n, w, h, c = x.size()
         # N, W, H, C --> N, W, H * scale, C // scale
@@ -256,9 +366,82 @@ class NemotronH_Super_Omni_Reasoning_V3(PreTrainedModel):
         return x
 
     def extract_feature(self, pixel_values):
+        """Run the ViT on a batch of image tiles.
+
+        Handles two layouts:
+        - A single 4D tensor `(B, 3, H, W)` with all tiles sharing the same spatial size (legacy
+          fixed-tile path **or** dynamic-resolution path when every image in the batch resizes to
+          the same target).
+        - A list of 4D tensors `[(1, 3, H_i, W_i), …]` when dynamic resolution picks different
+          target sizes per image. Each is run through the ViT independently and the output tokens
+          are concatenated along the sequence dim.
+
+        The patch grid `(h, w)` is computed from the actual input shape, not assumed square — this
+        is required for dynamic resolution where the tile aspect ratio matches the original image.
+        """
+        if isinstance(pixel_values, (list, tuple)):
+            outs = [self._extract_feature_single(pv) for pv in pixel_values]
+            return torch.cat(outs, dim=0)
+        return self._extract_feature_single(pixel_values)
+
+    def _extract_feature_single(self, pixel_values):
         vit_embeds = self.vision_model(pixel_values).features
         vit_embeds = vit_embeds.to(dtype=torch.bfloat16)
-        h = w = int(vit_embeds.shape[1] ** 0.5)
+        # Compute patch grid from the input tile dims; pixel-shuffle needs the real (h, w).
+        patch_size = self.vision_model.radio_model.model.patch_generator.patch_size
+        B, _, H, W = pixel_values.shape
+        h = H // patch_size
+        w = W // patch_size
+        vit_embeds = vit_embeds.reshape(B, h, w, -1)
+        vit_embeds = self.pixel_shuffle(vit_embeds, scale_factor=self.downsample_ratio)
+        vit_embeds = vit_embeds.reshape(B, -1, vit_embeds.shape[-1])
+        vit_embeds = self.mlp1(vit_embeds)
+        return vit_embeds
+
+    def extract_video_feature(self, pixel_values_videos):
+        """
+        Extract features from video frames using the 3D `video_embedder`.
+
+        Consecutive `T = video_temporal_patch_dim` frames are packed into a single temporal patch
+        before the ViT, so the output has `N_frames // T` temporal units (each with the usual number
+        of spatial tokens) instead of one ViT output per frame.
+
+        Implementation trick: RADIO's patch_generator uses a channel-agnostic `Im2Patches` rearrange
+        followed by `self.embedder(patches)`. If we stack the T temporal frames into the channel
+        dim — `(N_frames, C, H, W)` → `(N_frames/T, T·C, H, W)` — the rearrange produces patches of
+        shape `(·, num_patches, T·C·P²)`, which is exactly what `video_embedder` expects. Temporarily
+        swapping `embedder ↔ video_embedder` lets us reuse the full ViT forward without duplicating
+        the transformer blocks, pos-embed handling, cls_token, etc.
+        """
+        pg = self.vision_model.radio_model.model.patch_generator
+        T = self.video_temporal_patch_dim
+        N, C, H, W = pixel_values_videos.shape
+
+        # Pad to a multiple of T by repeating the last frame so frame pairs align cleanly.
+        if N % T != 0:
+            pad = pixel_values_videos[-1:].expand(T - (N % T), -1, -1, -1)
+            pixel_values_videos = torch.cat([pixel_values_videos, pad], dim=0)
+            N = pixel_values_videos.shape[0]
+        num_groups = N // T
+
+        # Stack T frames into the channel dim. `.view` here preserves the (frame,channel) row-major
+        # layout → per-patch feature order is [t=0,c=0..C-1, t=1,c=0..C-1, ...], matching how the
+        # `video_embedder` weights are stored in the checkpoint.
+        x = pixel_values_videos.reshape(num_groups, T * C, H, W)
+
+        orig_embedder = pg.embedder
+        pg.embedder = pg.video_embedder
+        try:
+            vit_embeds = self.vision_model(x).features
+        finally:
+            pg.embedder = orig_embedder
+
+        # Same spatial post-processing as `extract_feature`. Compute `(h, w)` from the reshaped
+        # input so dynamic-res video frames (non-square patch grid) are handled correctly.
+        vit_embeds = vit_embeds.to(dtype=torch.bfloat16)
+        patch_size = pg.patch_size
+        h = H // patch_size
+        w = W // patch_size
         vit_embeds = vit_embeds.reshape(vit_embeds.shape[0], h, w, -1)
         vit_embeds = self.pixel_shuffle(vit_embeds, scale_factor=self.downsample_ratio)
         vit_embeds = vit_embeds.reshape(vit_embeds.shape[0], -1, vit_embeds.shape[-1])
@@ -342,7 +525,7 @@ class NemotronH_Super_Omni_Reasoning_V3(PreTrainedModel):
             # Process videos
             if has_videos:
                 pixel_values_videos = pixel_values_videos.to(dtype=self.vision_model.config.torch_dtype)
-                video_vit_embeds = self.extract_feature(pixel_values_videos)
+                video_vit_embeds = self.extract_video_feature(pixel_values_videos)
 
             # Process sound/audio
             if has_sound:
@@ -413,19 +596,47 @@ class NemotronH_Super_Omni_Reasoning_V3(PreTrainedModel):
                 assert image_mask.sum() != 0, "No image tokens found in input_ids"
                 inputs_embeds[image_mask] = image_vit_embeds.reshape(-1, C).to(inputs_embeds.device, inputs_embeds.dtype)
 
-            # Replace video tokens with video embeddings
+            # Replace video tokens with video embeddings. The tokenizer has no distinct `<video>`
+            # token (`video_context_token_id` in config doesn't decode to any printable string), so
+            # the processor uses `<image>` (id = `img_context_token_id`) as the placeholder for
+            # video positions too. We rely on the caller passing `pixel_values_videos` (not
+            # `pixel_values`) to signal video vs. image — both share the same token id in the prompt.
             if video_vit_embeds is not None:
                 if B > 1:
                     raise NotImplementedError("Video is not supported for batch size > 1")
-                video_mask = (input_ids_copy == self.video_context_token_id)
+                video_mask = (input_ids_copy == self.img_context_token_id)
                 assert video_mask.sum() != 0, "No video tokens found in input_ids"
                 inputs_embeds[video_mask] = video_vit_embeds.reshape(-1, C).to(inputs_embeds.device, inputs_embeds.dtype)
 
-            # Replace sound tokens with sound embeddings
+            # Replace sound tokens with sound embeddings.
+            # `sound_embeds` has shape `(B_sound, T_out_max, C)` where `T_out_max`
+            # is the encoder output length for the longest clip in the batch.
+            # When `B_sound > 1` the shorter clips have padding at the tail, so
+            # we must gather only the valid positions per row before scattering
+            # into `sound_mask`. The encoder's `_get_subsampling_output_length`
+            # converts each input mel-frame count (from the feature extractor's
+            # attention_mask) to its post-subsampling token count.
             if sound_embeds is not None and self.sound_context_token_id is not None:
                 sound_mask = (input_ids_copy == self.sound_context_token_id)
                 assert sound_mask.sum() != 0, "No sound tokens found in input_ids"
-                inputs_embeds[sound_mask] = sound_embeds.reshape(-1, C).to(inputs_embeds.device, inputs_embeds.dtype)
+                if sound_embeds.dim() == 3 and sound_embeds.shape[0] > 1 and sound_attention_mask is not None:
+                    # `attention_mask.sum() = L_i // hop` per row, but
+                    # `ParakeetFeatureExtractor` pads each row to `1 + L_i // hop`
+                    # mel frames in single-call mode (the trailing frame comes
+                    # from STFT center padding) — and the existing batch=1 path
+                    # consumes that frame's embed too. Add 1 here to match.
+                    natural_input_lengths = sound_attention_mask.sum(-1) + 1
+                    output_lengths = self.sound_encoder.encoder._get_subsampling_output_length(natural_input_lengths)
+                    flat = torch.cat(
+                        [sound_embeds[i, : int(n)] for i, n in enumerate(output_lengths.tolist())],
+                        dim=0,
+                    )
+                else:
+                    flat = sound_embeds.reshape(-1, C)
+                assert sound_mask.sum().item() == flat.shape[0], (
+                    f"sound token count ({sound_mask.sum().item()}) != encoder output count ({flat.shape[0]})"
+                )
+                inputs_embeds[sound_mask] = flat.to(inputs_embeds.device, inputs_embeds.dtype)
 
             # Apply video pruning (EVS) if enabled
             if video_vit_embeds is not None and self.video_pruning_rate > 0:  # EVS

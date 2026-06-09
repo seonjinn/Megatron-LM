@@ -34,6 +34,23 @@ class MegatronCheckpointSaverBase:
         self.models = None
         self.model_provider = None   # model_provider function either from pretrain_gpt or pretrain_bert
 
+    @staticmethod
+    def _hybrid_layer_type_list(pattern):
+        from megatron.core.ssm.mamba_hybrid_layer_allocation import Symbols, parse_hybrid_pattern
+
+        parsed = parse_hybrid_pattern(pattern)
+        main_pattern = parsed.main_pattern or ""
+        return [layer_type for layer_type in main_pattern if layer_type != Symbols.PIPE]
+
+    @staticmethod
+    def _hybrid_layer_pattern_with_mtp(main_pattern, mtp_pattern, mtp_num_layers):
+        if not main_pattern or "/" in main_pattern or not mtp_pattern or not mtp_num_layers:
+            return main_pattern
+        mtp_num_layers = int(mtp_num_layers)
+        if mtp_num_layers <= 0:
+            return main_pattern
+        return main_pattern + "/" + "/".join([mtp_pattern] * mtp_num_layers)
+
     def _maybe_parse_additional_megatron_args(self, margs):
         """
         Method used to optionally add arguments from the checkpoint to the main args.
@@ -81,9 +98,12 @@ class MegatronCheckpointSaverBase:
                             'ckpt_format',
                             'ckpt_step',
                             'first_last_layers_bf16', #TODO: does this mess anything up?
+                            'hybrid_layer_pattern', 'hybrid_override_pattern',
             ]
 
             for arg, value in vars(self.md.checkpoint_args).items():
+                if getattr(self.md, 'mtp_num_layers', None) == 0 and arg.startswith('mtp_'):
+                    continue
                 if arg in args_to_keep:
                     continue
                 if not hasattr(margs, arg):
@@ -309,6 +329,13 @@ class MegatronCheckpointSaverBase:
 
         if self.md.model_type == 'BERT' and not self.md.bert_binary_head:
             my_argv.append('--bert-no-binary-head')
+        if self.md.model_type == 'hybrid' and getattr(self.md, 'hybrid_override_pattern', None):
+            hybrid_layer_pattern = self._hybrid_layer_pattern_with_mtp(
+                self.md.hybrid_override_pattern,
+                getattr(self.md, 'mtp_hybrid_override_pattern', None),
+                getattr(self.md, 'mtp_num_layers', None),
+            )
+            my_argv.extend(['--hybrid-layer-pattern', hybrid_layer_pattern])
 
         return my_argv
 
@@ -372,7 +399,9 @@ class MegatronCheckpointSaverBase:
         # set padded vocab before we initialize local models
         if self.md.true_vocab_size is not None:
             try:
-                from megatron.training.tokenizer.tokenizer import _vocab_size_with_padding
+                from megatron.core.tokenizers.utils.build_tokenizer import (
+                    vocab_size_with_padding as _vocab_size_with_padding,
+                )
             except ModuleNotFoundError:
                 print("Unable to import Megatron. Please specify --megatron-path. Exiting.")
                 sys.exit(1)
@@ -902,7 +931,6 @@ class MegatronCheckpointSaverBase:
            MoE layers send "pre mlp norm weight"/"router weight"/etc.)
         """
         from megatron.core.ssm.mamba_hybrid_layer_allocation import Symbols as LayerSymbols
-        from megatron.core.ssm.mamba_hybrid_layer_allocation import allocate_layers
 
         # Pop MTP-specific params (non-parallel)
         enorm_weight = msg.pop("enorm weight")
@@ -932,7 +960,7 @@ class MegatronCheckpointSaverBase:
 
         # Now handle the internal decoder layers using the same logic as main model layers
         mtp_pattern = getattr(self.md, 'mtp_hybrid_override_pattern', None)
-        layer_type_list, _ = allocate_layers(mtp_pattern, vp_stage=None)
+        layer_type_list = self._hybrid_layer_type_list(mtp_pattern)
 
         # Get the internal decoder layers from the MTP model layer
         # We need to process each sub-layer like a main model layer, but targeting
@@ -1172,7 +1200,9 @@ class MegatronCheckpointSaverBase:
         Helper method to pad weight tensors for vocabulary size alignment.
         """
         try:
-            from megatron.training.tokenizer.tokenizer import _vocab_size_with_padding
+            from megatron.core.tokenizers.utils.build_tokenizer import (
+                vocab_size_with_padding as _vocab_size_with_padding,
+            )
         except ModuleNotFoundError as e:
             print(f"Unable to import required Megatron modules: {e}")
             sys.exit(1)
@@ -1309,7 +1339,9 @@ class MegatronCheckpointSaverBase:
         """
         try:
             from megatron.core import mpu
-            from megatron.training.tokenizer.tokenizer import _vocab_size_with_padding
+            from megatron.core.tokenizers.utils.build_tokenizer import (
+                vocab_size_with_padding as _vocab_size_with_padding,
+            )
         except ModuleNotFoundError as e:
             print(f"Unable to import required Megatron modules: {e}")
             sys.exit(1)
@@ -1346,12 +1378,13 @@ class MegatronCheckpointSaverBase:
 
         if self.md.model_type == "hybrid":
             from megatron.core.ssm.mamba_hybrid_layer_allocation import Symbols as LayerSymbols
-            from megatron.core.ssm.mamba_hybrid_layer_allocation import allocate_layers
 
-            layer_type_list, _ = allocate_layers(
-                self.margs.hybrid_override_pattern,
-                vp_stage=None,
+            hybrid_layer_pattern = (
+                getattr(self.margs, 'hybrid_layer_pattern', None)
+                or getattr(self.margs, 'hybrid_override_pattern', None)
+                or getattr(self.md, 'hybrid_override_pattern', None)
             )
+            layer_type_list = self._hybrid_layer_type_list(hybrid_layer_pattern)
             total_layer_num = 0
             for pp_rank in range(self.args.target_pipeline_parallel_size):
                 mpu.set_pipeline_model_parallel_rank(pp_rank)

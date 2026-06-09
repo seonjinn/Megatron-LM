@@ -141,11 +141,21 @@ class SoundEncoder(nn.Module):
             parakeet_config = ParakeetEncoderConfig(**config_dict)
             self.config = parakeet_config
             self.encoder = ParakeetEncoder(parakeet_config)
+            if not config_dict.get('convolution_bias', False):
+                self._zero_conv_biases()
         else:
             raise ValueError(
                 "config must be provided, "
                 "and ParakeetEncoder must be available in transformers."
             )
+
+    def _zero_conv_biases(self) -> None:
+        # The Megatron Parakeet checkpoint has no convolution bias tensors. HF
+        # Parakeet still constructs these parameters, so zero them to preserve
+        # the no-bias behavior when loading a Megatron-converted checkpoint.
+        for module in self.encoder.modules():
+            if isinstance(module, nn.Conv1d) and module.bias is not None:
+                nn.init.zeros_(module.bias)
 
     def forward(
         self,

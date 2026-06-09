@@ -67,6 +67,42 @@ def version_cmp(v1, v2, op='eq'):
     return op_func(version.parse(v1), version.parse(v2))
 
 
+def _load_packaged_radio_model(model_path):
+    import hashlib
+    import importlib.util
+    import sys
+    from pathlib import Path
+
+    model_path = Path(model_path)
+    hf_model_path = model_path / "hf_model.py"
+    if not hf_model_path.exists():
+        return None
+
+    package_name = "_megatron_local_radio_" + hashlib.sha1(str(model_path).encode()).hexdigest()[:12]
+    if package_name not in sys.modules:
+        package_spec = importlib.util.spec_from_loader(package_name, loader=None, is_package=True)
+        package = importlib.util.module_from_spec(package_spec)
+        package.__path__ = [str(model_path)]
+        sys.modules[package_name] = package
+
+    module_name = f"{package_name}.hf_model"
+    module = sys.modules.get(module_name)
+    if module is None:
+        module_spec = importlib.util.spec_from_file_location(module_name, hf_model_path)
+        module = importlib.util.module_from_spec(module_spec)
+        sys.modules[module_name] = module
+        module_spec.loader.exec_module(module)
+    return module.RADIOModel
+
+
+def _build_vision_model(config):
+    if getattr(config, "_name_or_path", None):
+        radio_model_cls = _load_packaged_radio_model(config._name_or_path)
+        if radio_model_cls is not None:
+            return radio_model_cls(config.vision_config)
+    return AutoModel.from_config(config.vision_config, trust_remote_code=True)
+
+
 class NemotronH_Nano_Omni_Reasoning_V3(PreTrainedModel):
     config_class = NemotronH_Nano_Omni_Reasoning_V3_Config
     main_input_name = 'pixel_values'
@@ -94,7 +130,7 @@ class NemotronH_Nano_Omni_Reasoning_V3(PreTrainedModel):
 
         # Instantiate LM directly to avoid Hugging Face dynamic module lookup requiring a repo id.
         self.language_model = NemotronHForCausalLM(config.llm_config)
-        self.vision_model = AutoModel.from_config(config.vision_config, trust_remote_code=True)
+        self.vision_model = _build_vision_model(config)
         self.vision_model.model._initialize_weights = self.vision_model.model._init_weights  # WAR for transformers issue 38358
         self.vision_model.radio_model.make_preprocessor_external()
 

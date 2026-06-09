@@ -383,12 +383,25 @@ class MegatronCheckpointLoaderBase:
         pattern_fused_3d = re.compile(
             r'.*layers\.(\d+)\.mlp\.experts\.linear_fc([12])\.weight$'
         )
+        pattern_mtp_local = re.compile(
+            r'.*mtp\.layers\.(\d+)\.mtp_model_layer\.(?:decoder\.)?layers\.(\d+)'
+            r'\.mlp\.experts\.local_experts\.(\d+)\.linear_fc([12])\.weight$'
+        )
+        pattern_mtp_fused_individual = re.compile(
+            r'.*mtp\.layers\.(\d+)\.mtp_model_layer\.(?:decoder\.)?layers\.(\d+)'
+            r'\.mlp\.experts\.linear_fc([12])\.weight(\d+)$'
+        )
+        pattern_mtp_fused_3d = re.compile(
+            r'.*mtp\.layers\.(\d+)\.mtp_model_layer\.(?:decoder\.)?layers\.(\d+)'
+            r'\.mlp\.experts\.linear_fc([12])\.weight$'
+        )
 
         def cache_tensor(tensor):
             # Keep cached expert weights independent of the module object that is freed below.
             return tensor.detach().cpu().clone()
 
         self.expert_cache = {}
+        self.mtp_expert_cache = {}
 
         for pp_rank in range(pp_size):
             for vp_rank in range(vp_size):
@@ -401,10 +414,46 @@ class MegatronCheckpointLoaderBase:
 
                         cache_key = (pp_rank, vp_rank, ep_rank, tp_rank)
                         layer_data = {}
+                        mtp_layer_data = {}
 
                         for name, param in model.named_parameters():
-                            # Skip MTP parameters: their nested "layers.N" indices
-                            # collide with decoder layer indices in the cache dict.
+                            # MTP experts use their own cache because their nested
+                            # layers.N indices collide with decoder layer indices.
+                            m = pattern_mtp_local.match(name)
+                            if m:
+                                mtp_layer_idx = int(m.group(1))
+                                internal_layer_idx = int(m.group(2))
+                                expert_idx = int(m.group(3))
+                                fc_num = int(m.group(4))
+                                mtp_layer_data.setdefault(mtp_layer_idx, {}).setdefault(
+                                    internal_layer_idx, {}
+                                ).setdefault(expert_idx, {})[fc_num] = cache_tensor(param)
+                                continue
+
+                            m = pattern_mtp_fused_individual.match(name)
+                            if m:
+                                mtp_layer_idx = int(m.group(1))
+                                internal_layer_idx = int(m.group(2))
+                                fc_num = int(m.group(3))
+                                expert_idx = int(m.group(4))
+                                mtp_layer_data.setdefault(mtp_layer_idx, {}).setdefault(
+                                    internal_layer_idx, {}
+                                ).setdefault(expert_idx, {})[fc_num] = cache_tensor(param)
+                                continue
+
+                            m = pattern_mtp_fused_3d.match(name)
+                            if m and param.data.dim() == 3:
+                                mtp_layer_idx = int(m.group(1))
+                                internal_layer_idx = int(m.group(2))
+                                fc_num = int(m.group(3))
+                                for expert_idx in range(param.data.shape[0]):
+                                    mtp_layer_data.setdefault(mtp_layer_idx, {}).setdefault(
+                                        internal_layer_idx, {}
+                                    ).setdefault(expert_idx, {})[fc_num] = cache_tensor(
+                                        param[expert_idx]
+                                    )
+                                continue
+
                             if '.mtp.' in name:
                                 continue
 
@@ -449,6 +498,7 @@ class MegatronCheckpointLoaderBase:
                                     )
 
                         self.expert_cache[cache_key] = layer_data
+                        self.mtp_expert_cache[cache_key] = mtp_layer_data
 
                         self.all_models[pp_rank][vp_rank][ep_rank][tp_rank] = None
                         del model
@@ -562,6 +612,27 @@ class MegatronCheckpointLoaderBase:
         ], dim=0)
         fc2_stack = torch.stack([
             cached_layers[layer_idx][expert_idx][2] for expert_idx in range(num_local_experts)
+        ], dim=0)
+        return fc1_stack, fc2_stack
+
+    def _get_mtp_expert_stacks_from_cache(
+        self,
+        pp_rank,
+        vp_rank,
+        ep_rank,
+        tp_rank,
+        mtp_layer_idx,
+        internal_layer_idx,
+        num_local_experts,
+    ):
+        """Retrieve MTP hybrid MoE expert stacks from the compacted expert cache."""
+        cache_key = (pp_rank, vp_rank, ep_rank, tp_rank)
+        cached_layers = self.mtp_expert_cache[cache_key][mtp_layer_idx][internal_layer_idx]
+        fc1_stack = torch.stack([
+            cached_layers[expert_idx][1] for expert_idx in range(num_local_experts)
+        ], dim=0)
+        fc2_stack = torch.stack([
+            cached_layers[expert_idx][2] for expert_idx in range(num_local_experts)
         ], dim=0)
         return fc1_stack, fc2_stack
 
@@ -858,6 +929,7 @@ class MegatronCheckpointLoaderBase:
         layer_type_list = [c for c in mtp_pattern if c != LayerSymbols.PIPE]
         ep_size = self.margs.expert_model_parallel_size or 1
         tp_size = self.margs.tensor_model_parallel_size
+        etp_size = self.margs.expert_tensor_parallel_size or 1
 
         message = {}
 
@@ -921,23 +993,66 @@ class MegatronCheckpointLoaderBase:
                 if shared_fc2:
                     message["shared mlp l1 weight"] = torch.cat(shared_fc2, dim=1)
 
-                # Expert weights: EP-sharded (gather across EP ranks)
+                # Expert weights: EP-sharded. Gather every EP rank and merge
+                # expert-TP shards per EP, matching the regular MoE path.
                 num_local_experts = self.margs.num_experts // ep_size
+                use_cache = hasattr(self, 'mtp_expert_cache') and self.mtp_expert_cache
                 fc1_ep_parts, fc2_ep_parts = [], []
                 for ep_rank in range(ep_size):
-                    ep_model = self.all_models[pp_rank][vp_rank][ep_rank][0]
-                    ep_internal = mtp_schema.get_mtp_model_layers(ep_model, mtp_layer_idx)
-                    if ep_internal is None:
+                    fc1_tp, fc2_tp = [], []
+                    for etp_rank in range(etp_size):
+                        model = self.all_models[pp_rank][vp_rank][ep_rank][etp_rank]
+                        if model is not None:
+                            ep_internal = mtp_schema.get_mtp_model_layers(model, mtp_layer_idx)
+                            if ep_internal is None:
+                                continue
+                            ep_params = main_schema._get(main_schema["layer"], ep_internal[sub_idx])
+                            fc1_w = [
+                                ep_params.get(f"mlp_fc1_weight.{expert_idx}")
+                                for expert_idx in range(num_local_experts)
+                            ]
+                            fc2_w = [
+                                ep_params.get(f"mlp_fc2_weight.{expert_idx}")
+                                for expert_idx in range(num_local_experts)
+                            ]
+                            fc1_w = [w for w in fc1_w if w is not None]
+                            fc2_w = [w for w in fc2_w if w is not None]
+                            if not fc1_w or not fc2_w:
+                                continue
+                            fc1_stack = torch.stack(fc1_w, dim=0)
+                            fc2_stack = torch.stack(fc2_w, dim=0)
+                        elif use_cache:
+                            fc1_stack, fc2_stack = self._get_mtp_expert_stacks_from_cache(
+                                pp_rank,
+                                vp_rank,
+                                ep_rank,
+                                etp_rank,
+                                mtp_layer_idx,
+                                sub_idx,
+                                num_local_experts,
+                            )
+                        else:
+                            raise RuntimeError(
+                                f"MTP model is None for ep={ep_rank} etp={etp_rank} "
+                                "and no MTP expert cache is available"
+                            )
+                        fc1_tp.append(fc1_stack)
+                        fc2_tp.append(fc2_stack)
+
+                    if not fc1_tp or not fc2_tp:
                         continue
-                    ep_params = main_schema._get(main_schema["layer"], ep_internal[sub_idx])
-                    fc1_w = [ep_params.get(f"mlp_fc1_weight.{e}") for e in range(num_local_experts)]
-                    fc2_w = [ep_params.get(f"mlp_fc2_weight.{e}") for e in range(num_local_experts)]
-                    fc1_w = [w for w in fc1_w if w is not None]
-                    fc2_w = [w for w in fc2_w if w is not None]
-                    if fc1_w:
-                        fc1_ep_parts.append(torch.stack(fc1_w, dim=0))
-                    if fc2_w:
-                        fc2_ep_parts.append(torch.stack(fc2_w, dim=0))
+                    if self.md.swiglu:
+                        fc1_w = [torch.chunk(t, 2, dim=1)[0] for t in fc1_tp]
+                        fc1_v = [torch.chunk(t, 2, dim=1)[1] for t in fc1_tp]
+                        fc1_merged = torch.cat(
+                            [torch.cat(fc1_w, dim=1), torch.cat(fc1_v, dim=1)], dim=1
+                        )
+                    else:
+                        fc1_merged = torch.cat(fc1_tp, dim=1)
+                    fc2_merged = torch.cat(fc2_tp, dim=2)
+
+                    fc1_ep_parts.append(fc1_merged)
+                    fc2_ep_parts.append(fc2_merged)
 
                 if fc1_ep_parts:
                     message["mlp l0 weight"] = torch.cat(fc1_ep_parts, dim=0)
@@ -1168,6 +1283,18 @@ class MegatronCheckpointLoaderBase:
             return None
         return pattern.split('/')[0]
 
+    def _get_mtp_hybrid_layer_pattern(self):
+        pattern = getattr(self.margs, 'hybrid_layer_pattern', None)
+        if pattern is None:
+            pattern = getattr(self.checkpoint_args, 'hybrid_layer_pattern', None)
+        if pattern is None or '/' not in pattern:
+            return None
+
+        from megatron.core.ssm.mamba_hybrid_layer_allocation import parse_hybrid_pattern
+
+        parsed = parse_hybrid_pattern(pattern)
+        return parsed.mtp_pattern
+
     def build_checkpoint_metadata(self, true_vocab_size):
         """
         Construct a simple namespace for all relevant model metadata.
@@ -1222,6 +1349,7 @@ class MegatronCheckpointLoaderBase:
         md.mtp_hybrid_override_pattern = (
             getattr(self.margs, 'mtp_hybrid_override_pattern', None)
             or getattr(self.checkpoint_args, 'mtp_hybrid_override_pattern', None)
+            or self._get_mtp_hybrid_layer_pattern()
         )
 
         return md

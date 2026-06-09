@@ -71,10 +71,13 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
                             'distribute_saved_activations',
                             'train_iters', 'lr_decay_iters', 'lr_warmup_iters', 'lr_warmup_fraction',
                             'start_weight_decay', 'end_weight_decay',
-                            'ckpt_format', 'inference_batch_times_seqlen_threshold', 'ckpt_step'
+                            'ckpt_format', 'inference_batch_times_seqlen_threshold', 'ckpt_step',
+                            'hybrid_layer_pattern', 'hybrid_override_pattern',
             ]
 
             for arg, value in vars(self.md.checkpoint_args).items():
+                if getattr(self.md, 'mtp_num_layers', None) == 0 and arg.startswith('mtp_'):
+                    continue
                 if arg in args_to_keep:
                     continue
                 if not hasattr(margs, arg):
@@ -136,6 +139,13 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
             my_argv.append('--untie-embeddings-and-output-weights')
         if not self.md.linear_bias:
             my_argv.append('--disable-bias-linear')
+        if self.md.model_type == 'hybrid' and getattr(self.md, 'hybrid_override_pattern', None):
+            hybrid_layer_pattern = self._hybrid_layer_pattern_with_mtp(
+                self.md.hybrid_override_pattern,
+                getattr(self.md, 'mtp_hybrid_override_pattern', None),
+                getattr(self.md, 'mtp_num_layers', None),
+            )
+            my_argv.extend(['--hybrid-layer-pattern', hybrid_layer_pattern])
 
         if self.md.model_type == 'BERT' and not self.md.bert_binary_head:
             my_argv.append('--bert-no-binary-head')
@@ -198,7 +208,13 @@ class MegatronCheckpointSaverLLaVA(MegatronCheckpointSaverBase):
         margs.allow_missing_sound_model_checkpoint = getattr(self.md.checkpoint_args, "allow_missing_sound_model_checkpoint", False)
         margs.recompute_sound = getattr(self.md.checkpoint_args, "recompute_sound", False)
         margs.sound_model_type = getattr(self.md.checkpoint_args, "sound_model_type", None)
-        margs.disable_mtp = getattr(self.md.checkpoint_args, "disable_mtp", False)
+        margs.disable_mtp = (
+            getattr(self.md, "mtp_num_layers", None) == 0
+            or getattr(self.md.checkpoint_args, "disable_mtp", False)
+        )
+        if margs.disable_mtp:
+            margs.mtp_num_layers = 0
+            margs.mtp_hybrid_override_pattern = None
 
         return margs
 
