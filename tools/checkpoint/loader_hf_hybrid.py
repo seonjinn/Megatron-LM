@@ -149,9 +149,10 @@ class HuggingFaceCheckpointLoaderHybrid(MegatronCheckpointLoaderBase):
             from pretrain_mamba import model_provider
             return model_provider
         except ImportError:
-            print("Unable to import hybrid model provider. Ensure Megatron supports hybrid models.")
-            self.queue.put("exit")
-            sys.exit(1)
+            from functools import partial
+            from hybrid_builders import hybrid_builder
+            from model_provider import model_provider
+            return partial(model_provider, hybrid_builder)
 
     def load_model_shards(self, model_provider, dtype):
         """

@@ -85,8 +85,17 @@ class HuggingFaceCheckpointLoaderMoE(HuggingFaceCheckpointLoaderHybrid):
         checkpoint_args.moe_router_topk_scaling_factor = self.hf_config.routed_scaling_factor
         checkpoint_args.moe_router_enable_expert_bias = True
         checkpoint_args.moe_router_score_function = "sigmoid"
+        checkpoint_args.moe_latent_size = getattr(self.hf_config, 'moe_latent_size', None)
+        checkpoint_args.expert_tensor_parallel_size = 1
 
         checkpoint_args.language_model_type = "nemotron6-moe"
+
+        if getattr(self.hf_config, 'mtp_hybrid_override_pattern', None):
+            checkpoint_args.mtp_num_layers = 2
+            checkpoint_args.mtp_use_repeated_layer = True
+            checkpoint_args.mtp_hybrid_override_pattern = self.hf_config.mtp_hybrid_override_pattern
+            checkpoint_args.mtp_spec = ['megatron.core.models.mamba.mamba_layer_specs', 'mamba_stack_spec']
+            checkpoint_args.keep_mtp_spec_in_bf16 = True
         
         # Set key attributes from HF config
         margs.num_layers = self.hf_config.num_hidden_layers
@@ -110,6 +119,7 @@ class HuggingFaceCheckpointLoaderMoE(HuggingFaceCheckpointLoaderHybrid):
         margs.make_vocab_size_divisible_by = 128
         margs.vocab_size = self.hf_config.vocab_size
         margs.padded_vocab_size = self.hf_config.vocab_size
+        margs.moe_latent_size = getattr(self.hf_config, 'moe_latent_size', None)
 
         # Adjust world size so validation doesn't fail
         margs.world_size = 1
@@ -128,6 +138,10 @@ class HuggingFaceCheckpointLoaderMoE(HuggingFaceCheckpointLoaderHybrid):
         margs.no_persist_layer_norm = True
 
         margs.use_cpu_initialization = False
+        if getattr(self.hf_config, 'mtp_hybrid_override_pattern', None):
+            margs.mtp_num_layers = 2
+            margs.mtp_use_repeated_layer = True
+            margs.mtp_hybrid_override_pattern = self.hf_config.mtp_hybrid_override_pattern
 
         self.margs = margs
         self.checkpoint_args = checkpoint_args
@@ -147,8 +161,17 @@ class HuggingFaceCheckpointLoaderMoE(HuggingFaceCheckpointLoaderHybrid):
             '--mamba-head-dim', str(self.hf_config.mamba_head_dim),
             '--mamba-num-heads', str(self.hf_config.mamba_num_heads),
         ]
-        
-        return base_args + hybrid_args
+
+        mtp_args = []
+        if getattr(self.hf_config, 'mtp_hybrid_override_pattern', None):
+            mtp_args = [
+                '--mtp-num-layers', '2',
+                '--mtp-use-repeated-layer',
+                '--mtp-hybrid-override-pattern', self.hf_config.mtp_hybrid_override_pattern,
+                '--keep-mtp-spec-in-bf16',
+            ]
+
+        return base_args + hybrid_args + mtp_args
 
     def build_checkpoint_metadata(self, true_vocab_size):
         """
@@ -214,6 +237,12 @@ class HuggingFaceCheckpointLoaderMoE(HuggingFaceCheckpointLoaderHybrid):
         md.moe_router_pre_softmax = False
         md.moe_router_enable_expert_bias = True
         md.moe_router_score_function = "sigmoid"
+        md.moe_latent_size = getattr(self.hf_config, 'moe_latent_size', None)
+
+        if getattr(self.hf_config, 'mtp_hybrid_override_pattern', None):
+            md.mtp_num_layers = 2
+            md.mtp_use_repeated_layer = True
+            md.mtp_hybrid_override_pattern = self.hf_config.mtp_hybrid_override_pattern
         return md
 
     def compute_true_vocab_size(self):
@@ -344,18 +373,98 @@ class HuggingFaceCheckpointLoaderMoE(HuggingFaceCheckpointLoaderHybrid):
             message = {k: v.detach() for k, v in message.items()}
             self.queue_put(f"transformer layer {layer_idx}", message)
 
-        # 4) Final norm
+        # 4) MTP layers - load directly from safetensors since the HF model ignores them
+        if getattr(self.md, 'mtp_num_layers', 0):
+            self.send_mtp_over_queue()
+
+        # 5) Final norm
         message = {
             "weight": model.backbone.norm_f.weight
         }
         self.queue_put("final norm", message)
 
-        # 5) Output layer
+        # 6) Output layer
         if self.md.output_layer:
             message = {
                 "weight": model.lm_head.weight
             }
             self.queue_put("output layer", message)
+
+    def send_mtp_over_queue(self):
+        """Load MTP weights from safetensors and send over the conversion queue."""
+        from safetensors import safe_open
+
+        if self.hf_config.mtp_hybrid_override_pattern != "*E":
+            raise NotImplementedError(
+                f"HF MoE MTP conversion currently supports '*E', got "
+                f"{self.hf_config.mtp_hybrid_override_pattern!r}"
+            )
+
+        index_path = os.path.join(self.args.load_dir, 'model.safetensors.index.json')
+        with open(index_path) as f:
+            index = json.load(f)
+
+        mtp_keys = {k: v for k, v in index['weight_map'].items() if k.startswith('mtp.')}
+        if not mtp_keys:
+            raise RuntimeError(f"No MTP tensors found in HF checkpoint index: {index_path}")
+
+        shards = {}
+        for key, shard in mtp_keys.items():
+            shards.setdefault(shard, []).append(key)
+
+        mtp_tensors = {}
+        for shard_name, keys in shards.items():
+            shard_path = os.path.join(self.args.load_dir, shard_name)
+            with safe_open(shard_path, framework="pt", device="cpu") as f:
+                for key in keys:
+                    mtp_tensors[key] = f.get_tensor(key)
+
+        print(f"Loaded {len(mtp_tensors)} MTP tensors from {len(shards)} shard(s)")
+
+        message = {}
+
+        # MTP-specific parameters.
+        message["enorm weight"] = mtp_tensors["mtp.layers.0.enorm.weight"]
+        message["hnorm weight"] = mtp_tensors["mtp.layers.0.hnorm.weight"]
+        message["eh proj weight"] = mtp_tensors["mtp.layers.0.eh_proj.weight"]
+        message["final layernorm weight"] = mtp_tensors["mtp.layers.1.final_layernorm.weight"]
+
+        # Attention sub-layer (the "*" in "*E").
+        message["input norm weight"] = mtp_tensors["mtp.layers.0.norm.weight"]
+        q_weight = mtp_tensors["mtp.layers.0.mixer.q_proj.weight"]
+        k_weight = mtp_tensors["mtp.layers.0.mixer.k_proj.weight"]
+        v_weight = mtp_tensors["mtp.layers.0.mixer.v_proj.weight"]
+        head_dim = self.hf_config.head_dim
+        qkv_weight = self.combine_hf_qkv_weight(
+            q_weight, k_weight, v_weight,
+            self.hf_config.num_attention_heads,
+            self.hf_config.num_key_value_heads,
+            head_dim, self.args.target_tensor_parallel_size)
+        message["qkv weight"] = qkv_weight
+        message["dense weight"] = mtp_tensors["mtp.layers.0.mixer.o_proj.weight"]
+
+        # MoE sub-layer (the "E" in "*E").
+        message["pre mlp norm weight"] = mtp_tensors["mtp.layers.1.norm.weight"]
+        message["router weight"] = mtp_tensors["mtp.layers.1.mixer.gate.weight"]
+        message["router bias"] = mtp_tensors["mtp.layers.1.mixer.gate.e_score_correction_bias"]
+
+        if "mtp.layers.1.mixer.fc1_latent_proj.weight" in mtp_tensors:
+            message["fc1 latent proj weight"] = mtp_tensors["mtp.layers.1.mixer.fc1_latent_proj.weight"]
+            message["fc2 latent proj weight"] = mtp_tensors["mtp.layers.1.mixer.fc2_latent_proj.weight"]
+
+        message["shared mlp l0 weight"] = mtp_tensors["mtp.layers.1.mixer.shared_experts.up_proj.weight"]
+        message["shared mlp l1 weight"] = mtp_tensors["mtp.layers.1.mixer.shared_experts.down_proj.weight"]
+
+        experts_up = []
+        experts_down = []
+        for expert_idx in range(self.hf_config.n_routed_experts):
+            experts_up.append(mtp_tensors[f"mtp.layers.1.mixer.experts.{expert_idx}.up_proj.weight"])
+            experts_down.append(mtp_tensors[f"mtp.layers.1.mixer.experts.{expert_idx}.down_proj.weight"])
+        message["mlp l0 weight"] = torch.stack(experts_up, dim=0)
+        message["mlp l1 weight"] = torch.stack(experts_down, dim=0)
+
+        message = {k: v.detach() for k, v in message.items()}
+        self.queue_put("mtp layer 0", message)
 
 
 
@@ -370,4 +479,3 @@ def load_checkpoint(queue, args):
     except Exception as e:
         queue.put("exit")
         raise e 
-

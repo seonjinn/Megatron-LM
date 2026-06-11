@@ -282,7 +282,6 @@ class MegatronCheckpointSaverBase:
                     '--position-embedding-type', str(self.md.position_embedding_type),
                     '--tokenizer-type', str(self.md.tokenizer_type),
                     '--tensor-model-parallel-size', str(self.args.target_tensor_parallel_size),
-                    '--encoder-tensor-model-parallel-size', str(self.args.target_tensor_parallel_size),
                     '--pipeline-model-parallel-size', str(self.args.target_pipeline_parallel_size),
                     '--expert-model-parallel-size', str(self.args.target_expert_parallel_size),
                     '--no-masked-softmax-fusion',

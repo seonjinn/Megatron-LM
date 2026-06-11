@@ -50,8 +50,14 @@ class MegatronCheckpointSaverLLM(MegatronCheckpointSaverBase):
             self.model_provider = model_provider
             self.margs.model_type = ModelType.encoder_or_decoder
         elif self.args.model_type == 'hybrid':
-            from pretrain_mamba import model_provider
-            self.model_provider = model_provider
+            try:
+                from pretrain_mamba import model_provider
+                self.model_provider = model_provider
+            except ImportError:
+                from functools import partial
+                from hybrid_builders import hybrid_builder
+                from model_provider import model_provider
+                self.model_provider = partial(model_provider, hybrid_builder)
             self.margs.model_type = ModelType.encoder_or_decoder
         else:
             raise Exception(f'unrecognized model type: {self.args.model_type}')
