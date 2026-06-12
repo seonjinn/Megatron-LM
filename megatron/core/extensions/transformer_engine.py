@@ -867,6 +867,10 @@ class TEDotProductAttention(te.pytorch.DotProductAttention):
         self.kept_packed_seq_params = set(
             field.name for field in dataclasses.fields(PackedSeqParams)
         )
+        # These are Megatron runtime metadata fields. Current TE DPA versions in
+        # this branch do not accept them as packed-sequence kwargs.
+        self.kept_packed_seq_params.discard("total_tokens")
+        self.kept_packed_seq_params.discard("seq_idx")
         if get_te_version() < PkgVersion("1.3.0"):
             # TE 1.3.0 introduces precomputing max_seqlen to remove unnecessary kernels and D2H
             # copies (#555)
