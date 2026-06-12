@@ -562,6 +562,8 @@ class RADIOViTModel(VisionModule):
                 max_seqlen_q=max_seqlen,
                 max_seqlen_kv=max_seqlen,
                 qkv_format=packed_seq_params.qkv_format,
+                local_cp_size=packed_seq_params.local_cp_size,
+                cp_group=packed_seq_params.cp_group,
             )
 
         return x_grouped, new_imgs_sizes, new_num_frames, new_packed_seq_params, is_image

@@ -824,6 +824,8 @@ class EVSHelper:
             cu_seqlens_kv=evs_cu_seqlens.to(dtype=torch.int32),
             cu_seqlens_q_padded=evs_cu_seqlens_padded.to(dtype=torch.int32),
             cu_seqlens_kv_padded=evs_cu_seqlens_padded.to(dtype=torch.int32),
+            local_cp_size=packed_seq_params.local_cp_size,
+            cp_group=packed_seq_params.cp_group,
         )
 
         return post_evs_tensor, modified_packed_seq_params

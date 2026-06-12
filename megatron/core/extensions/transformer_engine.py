@@ -910,22 +910,20 @@ class TEDotProductAttention(te.pytorch.DotProductAttention):
     ):
         """Forward."""
         if packed_seq_params is not None:
-            local_cp_size = getattr(packed_seq_params, "local_cp_size", None)
-            local_cp_group = getattr(packed_seq_params, "cp_group", None)
-            if local_cp_size is not None:
-                runtime_cp_comm_type = getattr(self, "cp_comm_type", "p2p")
-                if int(local_cp_size) == 1:
-                    super().set_context_parallel_group(None, None, None, runtime_cp_comm_type)
-                else:
-                    self.cp_group = (
-                        local_cp_group if local_cp_group is not None else self._default_cp_group
-                    )
-                    super().set_context_parallel_group(
-                        self.cp_group,
-                        torch.distributed.get_process_group_ranks(self.cp_group),
-                        TEDotProductAttention.cp_stream,
-                        runtime_cp_comm_type,
-                    )
+            runtime_cp_comm_type = getattr(self, "cp_comm_type", "p2p")
+            if packed_seq_params.cp_group is not None:
+                self.cp_group = packed_seq_params.cp_group
+                super().set_context_parallel_group(
+                    self.cp_group,
+                    torch.distributed.get_process_group_ranks(self.cp_group),
+                    TEDotProductAttention.cp_stream,
+                    runtime_cp_comm_type,
+                )
+            elif packed_seq_params.local_cp_size is not None:
+                assert (
+                    int(packed_seq_params.local_cp_size) == 1
+                ), "local_cp_size must be == 1 if provided without cp_group"
+                super().set_context_parallel_group(None, None, None, runtime_cp_comm_type)
             self.kept_packed_seq_params.discard("cp_group")
             self.kept_packed_seq_params.discard("local_cp_size")
 

@@ -183,6 +183,8 @@ def _apply_rotary_pos_emb_thd(
     multi_latent_attention: bool = False,
     mscale: float = 1.0,
     cp_group: torch.distributed.ProcessGroup = None,
+    cp_size: Optional[int] = None,
+    cp_rank: Optional[int] = None,
 ) -> Tensor:
     """A baseline implementation of applying RoPE for `thd` format.
 
@@ -201,10 +203,15 @@ def _apply_rotary_pos_emb_thd(
         Tensor: Shape [t, h, d]. The input tensor after applying RoPE.
     """
 
-    if cp_group is None:
+    if cp_size is None:
+        if cp_group is None:
+            raise ValueError("cp_group must be provided for THD format RoPE")
+        cp_size = cp_group.size()
+        cp_rank = cp_group.rank()
+    elif cp_rank is None:
+        cp_rank = 0
+    if cp_size > 1 and cp_group is None:
         raise ValueError("cp_group must be provided for THD format RoPE")
-    cp_size = cp_group.size()
-    cp_rank = cp_group.rank()
     seqlens = ((cu_seqlens[1:] - cu_seqlens[:-1]) // cp_size).tolist()
 
     if len(t) == len(freqs):
@@ -269,6 +276,8 @@ def apply_rotary_pos_emb(
     cu_seqlens: Optional[Tensor] = None,
     mscale: float = 1.0,
     cp_group: torch.distributed.ProcessGroup = None,
+    cp_size: Optional[int] = None,
+    cp_rank: Optional[int] = None,
 ):
     """
     Reroute to the appropriate apply_rotary_pos_emb function depending on
@@ -276,19 +285,23 @@ def apply_rotary_pos_emb(
     """
 
     # Keep for backward compatibility. Will deprecate in the future.
-    if cp_group is None:
+    if cp_group is None and cp_size is None:
         cp_group = parallel_state.get_context_parallel_group()
+    if cp_size is None:
+        cp_size = cp_group.size()
+        cp_rank = cp_group.rank()
+    elif cp_rank is None:
+        cp_rank = 0
 
     if config.apply_rope_fusion:
         if cu_seqlens is None:
             return fused_apply_rotary_pos_emb(t, freqs)
         else:
-            cp_size = cp_group.size()
             if cp_size > 1:
                 if not is_te_min_version("1.11.0", check_equality=False):
                     raise ValueError("Only TE >= 1.12 supports RoPE fusion for THD format with CP.")
                 return fused_apply_rotary_pos_emb_thd(
-                    t, cu_seqlens, freqs, cp_size=cp_size, cp_rank=cp_group.rank(),
+                    t, cu_seqlens, freqs, cp_size=cp_size, cp_rank=cp_rank,
                 )
             else:
                 return fused_apply_rotary_pos_emb_thd(t, cu_seqlens, freqs)
@@ -310,6 +323,8 @@ def apply_rotary_pos_emb(
                 multi_latent_attention=config.multi_latent_attention,
                 mscale=mscale,
                 cp_group=cp_group,
+                cp_size=cp_size,
+                cp_rank=cp_rank,
             )
 
 

@@ -637,10 +637,7 @@ class LLaVAModel(MegatronModule):
 
         inference_context = deprecate_inference_params(inference_context, inference_params)
         context_parallel_lm = self.context_parallel_lm
-        if (
-            packed_seq_params is not None
-            and getattr(packed_seq_params, "local_cp_size", None) is not None
-        ):
+        if packed_seq_params is not None and packed_seq_params.local_cp_size is not None:
             context_parallel_lm = int(packed_seq_params.local_cp_size)
 
         assert self.add_decoder, "input text preprocessing is only needed for the language model"
@@ -1150,12 +1147,10 @@ class LLaVAModel(MegatronModule):
 
         cp_group = self.cp_group
         context_parallel_lm = self.context_parallel_lm
-        if (
-            packed_seq_params is not None
-            and getattr(packed_seq_params, "local_cp_size", None) is not None
-        ):
+        if packed_seq_params is not None and packed_seq_params.local_cp_size is not None:
             context_parallel_lm = int(packed_seq_params.local_cp_size)
-            cp_group = getattr(packed_seq_params, "cp_group", cp_group)
+            if packed_seq_params.cp_group is not None:
+                cp_group = packed_seq_params.cp_group
 
         shard_factor, seq_dim = self.calc_shard_factor_and_seq_dim_for_preprocessing(
             context_parallel_lm=context_parallel_lm,
@@ -1415,12 +1410,10 @@ class LLaVAModel(MegatronModule):
         inference_context = deprecate_inference_params(inference_context, inference_params)
         cp_group = self.cp_group
         context_parallel_lm = self.context_parallel_lm
-        if (
-            packed_seq_params is not None
-            and getattr(packed_seq_params, "local_cp_size", None) is not None
-        ):
+        if packed_seq_params is not None and packed_seq_params.local_cp_size is not None:
             context_parallel_lm = int(packed_seq_params.local_cp_size)
-            cp_group = getattr(packed_seq_params, "cp_group", cp_group)
+            if packed_seq_params.cp_group is not None:
+                cp_group = packed_seq_params.cp_group
 
         # Keep a copy of the original imgs_sizes and num_frames in case we split to context parallel ranks later.
         global_imgs_sizes = imgs_sizes.clone() if imgs_sizes is not None else None

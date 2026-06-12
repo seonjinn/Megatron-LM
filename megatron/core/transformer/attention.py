@@ -619,8 +619,18 @@ class Attention(MegatronModule, ABC):
             self.config.no_rope_freq[self.layer_number - 1] if self.config.no_rope_freq else False
         )
         cp_group = self.model_comm_pgs.cp
+        cp_size = None
+        cp_rank = None
         if packed_seq_params is not None:
-            cp_group = getattr(packed_seq_params, "cp_group", None) or cp_group
+            if packed_seq_params.cp_group is not None:
+                cp_group = packed_seq_params.cp_group
+            elif packed_seq_params.local_cp_size is not None:
+                assert (
+                    int(packed_seq_params.local_cp_size) == 1
+                ), "local_cp_size must be == 1 if provided without cp_group"
+                cp_group = None
+                cp_size = 1
+                cp_rank = 0
 
         if no_rope:
             rotary_pos_emb = None
@@ -740,6 +750,8 @@ class Attention(MegatronModule, ABC):
                         config=self.config,
                         cu_seqlens=cu_seqlens_q,
                         cp_group=cp_group,
+                        cp_size=cp_size,
+                        cp_rank=cp_rank,
                     )
                 else:
                     query = inference_context.apply_rotary_emb_query(
@@ -752,6 +764,8 @@ class Attention(MegatronModule, ABC):
                     config=self.config,
                     cu_seqlens=cu_seqlens_kv,
                     cp_group=cp_group,
+                    cp_size=cp_size,
+                    cp_rank=cp_rank,
                 )
 
             # TODO, can apply positional embedding to value_layer so it has

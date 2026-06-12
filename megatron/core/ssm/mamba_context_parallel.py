@@ -150,8 +150,11 @@ class MambaContextParallel:
         cp_size = None
 
         if packed_seq_params is not None:
-            cp_group = getattr(packed_seq_params, "cp_group", None) or cp_group
-            cp_size = getattr(packed_seq_params, "local_cp_size", None)
+            cp_size = packed_seq_params.local_cp_size
+            if packed_seq_params.cp_group is not None:
+                cp_group = packed_seq_params.cp_group
+            elif cp_size is not None:
+                assert int(cp_size) == 1, "local_cp_size must be == 1 if provided without cp_group"
 
         if cp_size is None:
             cp_size = cp_group.size()

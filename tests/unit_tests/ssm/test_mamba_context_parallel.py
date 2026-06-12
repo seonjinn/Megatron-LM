@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 
 from megatron.core import parallel_state
+from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.ssm.mamba_context_parallel import MambaContextParallel
 from tests.unit_tests.test_utilities import Utils
 
@@ -149,3 +150,12 @@ class TestMambaContextParallel:
                 D_has_hdim=False,
             )
         Utils.destroy_model_parallel()
+
+    def test_dynamic_cp_requires_group_when_local_cp_size_gt_one(self):
+        cp = MambaContextParallel.__new__(MambaContextParallel)
+        cp._default_cp_group = object()
+
+        with pytest.raises(
+            AssertionError, match="local_cp_size must be == 1 if provided without cp_group"
+        ):
+            cp._activate_cp_group(PackedSeqParams(local_cp_size=2))

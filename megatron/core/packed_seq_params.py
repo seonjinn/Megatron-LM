@@ -1,6 +1,8 @@
 # Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
 from dataclasses import dataclass
 
+import torch
+import torch.distributed as dist
 from torch import Tensor
 
 
@@ -18,3 +20,28 @@ class PackedSeqParams:
     cu_seqlens_kv_padded: Tensor = None
     max_seqlen_q: Tensor = None
     max_seqlen_kv: Tensor = None
+    local_cp_size: int = None
+    cp_group: dist.ProcessGroup = None
+    total_tokens: int = None
+    seq_idx: Tensor = None
+
+    def __post_init__(self):
+        """Pre-compute seq_idx for Mamba mixer CUDA graph compatibility."""
+        cu_seqlens = (
+            self.cu_seqlens_q_padded if self.cu_seqlens_q_padded is not None else self.cu_seqlens_q
+        )
+        if isinstance(cu_seqlens, Tensor) and self.total_tokens is not None:
+            total_tokens_tensor = torch.tensor(
+                [self.total_tokens], dtype=cu_seqlens.dtype, device=cu_seqlens.device
+            )
+            cu_seqlens = torch.minimum(cu_seqlens, total_tokens_tensor)
+            cu_seqlens_with_max = torch.cat([cu_seqlens, total_tokens_tensor])
+            seq_lengths = cu_seqlens_with_max[1:] - cu_seqlens_with_max[:-1]
+            seq_lengths = seq_lengths.clamp(min=0)
+            self.seq_idx = (
+                torch.repeat_interleave(
+                    torch.arange(seq_lengths.numel(), device=cu_seqlens.device), seq_lengths
+                )
+                .to(torch.int32)
+                .unsqueeze(0)
+            )

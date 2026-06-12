@@ -479,9 +479,9 @@ def split_to_context_parallel_ranks_dynamic_res(
         cu_seqlens_kv=cu_seqlens_local,
         cu_seqlens_q_padded=None,
         cu_seqlens_kv_padded=None,
+        local_cp_size=cp_size,
+        cp_group=_resolve_cp_group(cp_group),
     )
-    local_packed_seq_params.local_cp_size = cp_size
-    local_packed_seq_params.cp_group = _resolve_cp_group(cp_group)
 
     max_seqlen_local = max(seqlens_local).to(torch.int32)
     local_packed_seq_params.max_seqlen_q = max_seqlen_local
