@@ -77,6 +77,19 @@ VIDEO_TOKEN = "<video>"
 SOUND_TOKEN = "<so_embedding>"
 
 
+def _resolve_dynamic_cp_runtime(context_parallel_lm, cp_group, packed_seq_params):
+    if packed_seq_params is None or packed_seq_params.local_cp_size is None:
+        return context_parallel_lm, cp_group
+
+    context_parallel_lm = int(packed_seq_params.local_cp_size)
+    if packed_seq_params.cp_group is not None:
+        cp_group = packed_seq_params.cp_group
+    else:
+        assert context_parallel_lm == 1, "local_cp_size must be == 1 if provided without cp_group"
+        cp_group = None
+    return context_parallel_lm, cp_group
+
+
 # Note: This is under development and may be missing features.
 class LLaVAModel(MegatronModule):
     """LLaVA multi-modal model.
@@ -636,9 +649,9 @@ class LLaVAModel(MegatronModule):
         """
 
         inference_context = deprecate_inference_params(inference_context, inference_params)
-        context_parallel_lm = self.context_parallel_lm
-        if packed_seq_params is not None and packed_seq_params.local_cp_size is not None:
-            context_parallel_lm = int(packed_seq_params.local_cp_size)
+        context_parallel_lm, _ = _resolve_dynamic_cp_runtime(
+            self.context_parallel_lm, getattr(self, "cp_group", None), packed_seq_params
+        )
 
         assert self.add_decoder, "input text preprocessing is only needed for the language model"
 
@@ -1145,12 +1158,9 @@ class LLaVAModel(MegatronModule):
         if not self.pre_process and not self.post_process:
             return combined_embeddings, new_labels, new_loss_mask, position_ids, packed_seq_params
 
-        cp_group = self.cp_group
-        context_parallel_lm = self.context_parallel_lm
-        if packed_seq_params is not None and packed_seq_params.local_cp_size is not None:
-            context_parallel_lm = int(packed_seq_params.local_cp_size)
-            if packed_seq_params.cp_group is not None:
-                cp_group = packed_seq_params.cp_group
+        context_parallel_lm, cp_group = _resolve_dynamic_cp_runtime(
+            self.context_parallel_lm, getattr(self, "cp_group", None), packed_seq_params
+        )
 
         shard_factor, seq_dim = self.calc_shard_factor_and_seq_dim_for_preprocessing(
             context_parallel_lm=context_parallel_lm,
@@ -1408,12 +1418,9 @@ class LLaVAModel(MegatronModule):
             loss_mask (torch.Tensor): Loss mask expanded to combined sequence length. Shape [b, s].
         """
         inference_context = deprecate_inference_params(inference_context, inference_params)
-        cp_group = self.cp_group
-        context_parallel_lm = self.context_parallel_lm
-        if packed_seq_params is not None and packed_seq_params.local_cp_size is not None:
-            context_parallel_lm = int(packed_seq_params.local_cp_size)
-            if packed_seq_params.cp_group is not None:
-                cp_group = packed_seq_params.cp_group
+        context_parallel_lm, cp_group = _resolve_dynamic_cp_runtime(
+            self.context_parallel_lm, getattr(self, "cp_group", None), packed_seq_params
+        )
 
         # Keep a copy of the original imgs_sizes and num_frames in case we split to context parallel ranks later.
         global_imgs_sizes = imgs_sizes.clone() if imgs_sizes is not None else None
