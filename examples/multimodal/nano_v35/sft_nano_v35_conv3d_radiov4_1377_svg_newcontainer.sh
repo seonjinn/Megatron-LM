@@ -112,12 +112,9 @@ MIN_LR=${MIN_LR:-0.0}
 
 DECODER_SEQ_LEN=${DECODER_SEQ_LEN:-16384}
 PACKING_SEQ_LEN=${PACKING_SEQ_LEN:-${DECODER_SEQ_LEN}}
-PBS=${PBS:-1000}
-BZ=${BZ:-512}
-LR=${LR:-1e-5}
-MIN_LR=${MIN_LR:-0.0}
+PBS=${PBS:-3247}
 WEIGHT_DECAY=${WEIGHT_DECAY:-0.05}
-SAVE_INTERVAL=${SAVE_INTERVAL:-10000}
+SAVE_INTERVAL=${SAVE_INTERVAL:-5000}
 
 if [[ "${BATCH}" -eq 0 ]]; then
     SPECIAL_TOKENS=" --special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
@@ -134,7 +131,7 @@ fi
 EXTRA_ARGS=""
 
 if [[ -n "${WANDB_API_KEY}" ]]; then
-    EXTRA_ARGS+=" --wandb-project ${WANDB_PROJECT} --wandb-exp-name ${MODEL_NAME} --wandb-save-dir ${WANDB_DIR}"
+    EXTRA_ARGS+=" --wandb-project ${WANDB_PROJECT} --wandb-exp-name ${MODEL_NAME} --wandb-save-dir ${WANDB_DIR} --wandb-resume-same-run"
 fi
 
 if [[ "${USE_FP8}" -eq 1 ]]; then
@@ -332,6 +329,7 @@ OPTIONS=" \
     --tokenizer-type MultimodalTokenizer \
     --tokenizer-model ${TOKENIZER_MODEL} \
     --tokenizer-prompt-format ${TOKENIZER_PROMPT_FORMAT} \
+    --tokenizer-keep-history-thinking \
     ${CHECKPOINT_ARGS} \
     --log-progress \
     --timing-log-option minmax \

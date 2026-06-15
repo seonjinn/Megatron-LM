@@ -113,13 +113,6 @@ PBS=${PBS:-512}
 BZ=${BZ:-64}
 LR=${LR:-1e-6}
 MIN_LR=${MIN_LR:-0.0}
-
-DECODER_SEQ_LEN=${DECODER_SEQ_LEN:-16384}
-PACKING_SEQ_LEN=${PACKING_SEQ_LEN:-${DECODER_SEQ_LEN}}
-PBS=${PBS:-1000}
-BZ=${BZ:-512}
-LR=${LR:-1e-5}
-MIN_LR=${MIN_LR:-0.0}
 WEIGHT_DECAY=${WEIGHT_DECAY:-0.05}
 SAVE_INTERVAL=${SAVE_INTERVAL:-10000}
 
@@ -138,7 +131,7 @@ fi
 EXTRA_ARGS=""
 
 if [[ -n "${WANDB_API_KEY}" ]]; then
-    EXTRA_ARGS+=" --wandb-project ${WANDB_PROJECT} --wandb-exp-name ${MODEL_NAME} --wandb-save-dir ${WANDB_DIR}"
+    EXTRA_ARGS+=" --wandb-project ${WANDB_PROJECT} --wandb-exp-name ${MODEL_NAME} --wandb-save-dir ${WANDB_DIR} --wandb-resume-same-run"
 fi
 
 if [[ "${USE_FP8}" -eq 1 ]]; then
@@ -193,7 +186,7 @@ if [[ "${USE_PACKING}" -eq 1 ]]; then
 fi
 
 if [[ "${INCLUDE_VIDEO}" -eq 1 ]]; then
-    VIDEO_MAX_NUM_FRAMES=${VIDEO_MAX_NUM_FRAMES:-64}
+    VIDEO_MAX_NUM_FRAMES=${VIDEO_MAX_NUM_FRAMES:-256}
     VIDEO_TARGET_NUM_PATCHES=${VIDEO_TARGET_NUM_PATCHES:-1024}
     VIDEO_AUG_SCALE_FRAMES_UP=${VIDEO_AUG_SCALE_FRAMES_UP:-4}
     VIDEO_AUG_SCALE_RESOLUTION_UP=${VIDEO_AUG_SCALE_RESOLUTION_UP:-None}
@@ -233,7 +226,7 @@ if [[ "${USE_LOSS_SCALING}" -eq 1 ]]; then
 fi
 
 EXTRA_ARGS+=" --recompute-granularity selective --recompute-modules mlp moe"
-EXTRA_ARGS+=" --recompute-vision --recompute-method-vision block --recompute-granularity-vision full --recompute-vision-num-layers 16"
+EXTRA_ARGS+=" --recompute-vision --recompute-method-vision block --recompute-granularity-vision full --recompute-vision-num-layers 32"
 EXTRA_ARGS+=" ${STAGE_EXTRA_ARGS} ${CUSTOM_ARGS:-}"
 
 CHECKPOINT_ARGS=" \

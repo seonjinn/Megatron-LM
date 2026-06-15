@@ -92,7 +92,7 @@ PBS=${PBS:-}
 BZ=${BZ:-}
 LR=${LR:-}
 MIN_LR=${MIN_LR:-}
-LR_WARMUP_FRACTION=${LR_WARMUP_FRACTION:-0.1}
+LR_WARMUP_FRACTION=${LR_WARMUP_FRACTION:-0.01}
 WEIGHT_DECAY=${WEIGHT_DECAY:-}
 SAVE_INTERVAL=${SAVE_INTERVAL:-}
 MOE_AUX_LOSS_COEFF=${MOE_AUX_LOSS_COEFF:-1e-8}
@@ -104,7 +104,7 @@ ALLOW_MISSING_VISION_PROJECTION=0
 ALLOW_MISSING_SOUND=0
 FREEZE_ARGS=""
 CP_SIZE=${CP_SIZE:-2}
-STAGE_EXTRA_ARGS=" --context-parallel-size ${CP_SIZE} --tokenizer-keep-history-thinking "
+STAGE_EXTRA_ARGS=" --context-parallel-size ${CP_SIZE} --recompute-vision-projection --tokenizer-keep-history-thinking "
 CHECKPOINT_DIR=${CHECKPOINT_DIR:-"${WORKSPACE}/output/nano_v35_omni_16k_svg_0611/checkpoints"}
 DATA_TRAIN=${DATA_TRAIN:-"${SOURCE}/examples/multimodal/super/data_config/yamls/sft.long_context.49k.ehsan.v13p77.2x.0330.yaml"}
 DECODER_SEQ_LEN=${DECODER_SEQ_LEN:-49152}
@@ -112,13 +112,6 @@ PACKING_SEQ_LEN=${PACKING_SEQ_LEN:-${DECODER_SEQ_LEN}}
 PBS=${PBS:-500}
 BZ=${BZ:-256}
 LR=${LR:-1e-6}
-MIN_LR=${MIN_LR:-0.0}
-
-DECODER_SEQ_LEN=${DECODER_SEQ_LEN:-16384}
-PACKING_SEQ_LEN=${PACKING_SEQ_LEN:-${DECODER_SEQ_LEN}}
-PBS=${PBS:-1000}
-BZ=${BZ:-512}
-LR=${LR:-1e-5}
 MIN_LR=${MIN_LR:-0.0}
 WEIGHT_DECAY=${WEIGHT_DECAY:-0.05}
 SAVE_INTERVAL=${SAVE_INTERVAL:-10000}
@@ -138,7 +131,7 @@ fi
 EXTRA_ARGS=""
 
 if [[ -n "${WANDB_API_KEY}" ]]; then
-    EXTRA_ARGS+=" --wandb-project ${WANDB_PROJECT} --wandb-exp-name ${MODEL_NAME} --wandb-save-dir ${WANDB_DIR}"
+    EXTRA_ARGS+=" --wandb-project ${WANDB_PROJECT} --wandb-exp-name ${MODEL_NAME} --wandb-save-dir ${WANDB_DIR} --wandb-resume-same-run"
 fi
 
 if [[ "${USE_FP8}" -eq 1 ]]; then
@@ -193,7 +186,7 @@ if [[ "${USE_PACKING}" -eq 1 ]]; then
 fi
 
 if [[ "${INCLUDE_VIDEO}" -eq 1 ]]; then
-    VIDEO_MAX_NUM_FRAMES=${VIDEO_MAX_NUM_FRAMES:-64}
+    VIDEO_MAX_NUM_FRAMES=${VIDEO_MAX_NUM_FRAMES:-256}
     VIDEO_TARGET_NUM_PATCHES=${VIDEO_TARGET_NUM_PATCHES:-1024}
     VIDEO_AUG_SCALE_FRAMES_UP=${VIDEO_AUG_SCALE_FRAMES_UP:-4}
     VIDEO_AUG_SCALE_RESOLUTION_UP=${VIDEO_AUG_SCALE_RESOLUTION_UP:-None}
@@ -233,7 +226,7 @@ if [[ "${USE_LOSS_SCALING}" -eq 1 ]]; then
 fi
 
 EXTRA_ARGS+=" --recompute-granularity selective --recompute-modules mlp moe"
-EXTRA_ARGS+=" --recompute-vision --recompute-method-vision block --recompute-granularity-vision full --recompute-vision-num-layers 16"
+EXTRA_ARGS+=" --recompute-vision --recompute-method-vision block --recompute-granularity-vision full --recompute-vision-num-layers 32"
 EXTRA_ARGS+=" ${STAGE_EXTRA_ARGS} ${CUSTOM_ARGS:-}"
 
 CHECKPOINT_ARGS=" \

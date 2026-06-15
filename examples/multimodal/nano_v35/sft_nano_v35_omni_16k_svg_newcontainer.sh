@@ -92,7 +92,7 @@ PBS=${PBS:-}
 BZ=${BZ:-}
 LR=${LR:-}
 MIN_LR=${MIN_LR:-}
-LR_WARMUP_FRACTION=${LR_WARMUP_FRACTION:-0.1}
+LR_WARMUP_FRACTION=${LR_WARMUP_FRACTION:-0.05}
 WEIGHT_DECAY=${WEIGHT_DECAY:-}
 SAVE_INTERVAL=${SAVE_INTERVAL:-}
 MOE_AUX_LOSS_COEFF=${MOE_AUX_LOSS_COEFF:-1e-8}
@@ -109,15 +109,12 @@ DATA_TRAIN=${DATA_TRAIN:-"${SOURCE}/examples/multimodal/super/data_config/yamls/
 BZ=${BZ:-512}
 LR=${LR:-1e-5}
 MIN_LR=${MIN_LR:-1e-7}
+WEIGHT_DECAY=${WEIGHT_DECAY:-0.05}
+SAVE_INTERVAL=${SAVE_INTERVAL:-10000}
 
 DECODER_SEQ_LEN=${DECODER_SEQ_LEN:-16384}
 PACKING_SEQ_LEN=${PACKING_SEQ_LEN:-${DECODER_SEQ_LEN}}
-PBS=${PBS:-1000}
-BZ=${BZ:-512}
-LR=${LR:-1e-5}
-MIN_LR=${MIN_LR:-0.0}
-WEIGHT_DECAY=${WEIGHT_DECAY:-0.05}
-SAVE_INTERVAL=${SAVE_INTERVAL:-10000}
+PBS=${PBS:-5000}
 
 if [[ "${BATCH}" -eq 0 ]]; then
     SPECIAL_TOKENS=" --special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
@@ -134,7 +131,7 @@ fi
 EXTRA_ARGS=""
 
 if [[ -n "${WANDB_API_KEY}" ]]; then
-    EXTRA_ARGS+=" --wandb-project ${WANDB_PROJECT} --wandb-exp-name ${MODEL_NAME} --wandb-save-dir ${WANDB_DIR}"
+    EXTRA_ARGS+=" --wandb-project ${WANDB_PROJECT} --wandb-exp-name ${MODEL_NAME} --wandb-save-dir ${WANDB_DIR} --wandb-resume-same-run"
 fi
 
 if [[ "${USE_FP8}" -eq 1 ]]; then
