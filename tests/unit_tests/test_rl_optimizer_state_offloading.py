@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 
 from megatron.core.distributed import DistributedDataParallel, DistributedDataParallelConfig
-from megatron.core.optimizer import OptimizerConfig, get_megatron_optimizer
+from megatron.core.optimizer import ChainedOptimizer, OptimizerConfig, get_megatron_optimizer
 from megatron.core.optimizer.cpu_offloading.optimizer_state_offloader import OptimizerStateOffloader
 from megatron.core.transformer import TransformerConfig
 from tests.unit_tests.test_utilities import Utils
@@ -62,6 +62,7 @@ def test_cyclic_rl_offload_preserves_state_tensor_and_parameter_identity():
     try:
         model, optimizer = _create_model_and_optimizer()
         _train_step(model, optimizer)
+        assert isinstance(optimizer, ChainedOptimizer)
         distributed_optimizer = optimizer.chained_optimizers[0]
         offloader = OptimizerStateOffloader(distributed_optimizer)
         offloader.mark_optimizer_states_initialized()
@@ -78,6 +79,11 @@ def test_cyclic_rl_offload_preserves_state_tensor_and_parameter_identity():
             if key in (*offloader.OPTIMIZER_STATE_KEYS, offloader.MASTER_WEIGHT_KEY)
             and isinstance(value, torch.Tensor)
         }
+        state_keys = {key for _, key in state_tensor_ids}
+        assert parameter_ids
+        assert {"exp_avg", "exp_avg_sq"} <= state_keys
+        if offloader.optimizer_contains_master_weights:
+            assert offloader.MASTER_WEIGHT_KEY in state_keys
 
         for _ in range(5):
             expected = {
