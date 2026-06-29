@@ -94,6 +94,11 @@ def test_cyclic_rl_offload_preserves_state_tensor_and_parameter_identity():
             torch.cuda.synchronize()
             offloader.release_gpu_memory()
 
+            assert offloader.is_offloaded
+            for slot in state_tensor_ids:
+                offloaded = distributed_optimizer.optimizer.state[slot[0]][slot[1]]
+                assert offloaded.untyped_storage().size() == 0
+
             assert all(
                 buffer.is_pinned()
                 for buffers in offloader._opt_state_cpu_buffers.values()
@@ -102,6 +107,7 @@ def test_cyclic_rl_offload_preserves_state_tensor_and_parameter_identity():
 
             offloader.reload()
             offloader.sync_before_step()
+            assert not offloader.is_offloaded
             for slot, tensor_id in state_tensor_ids.items():
                 restored = distributed_optimizer.optimizer.state[slot[0]][slot[1]]
                 assert id(restored) == tensor_id

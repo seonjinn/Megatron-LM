@@ -70,6 +70,11 @@ class OptimizerStateOffloader:
         # Master weights (shard_fp32_from_float16_groups) are available from the start.
         self._optimizer_states_initialized = False
 
+    @property
+    def is_offloaded(self) -> bool:
+        """Whether optimizer state storage is currently offloaded."""
+        return self._offloaded
+
     def mark_optimizer_states_initialized(self):
         """
         Mark that optimizer states (exp_avg, exp_avg_sq) are now available.
