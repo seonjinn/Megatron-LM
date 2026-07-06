@@ -1,11 +1,11 @@
 # Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
 
 """Multimodal tokenizer."""
-from dataclasses import dataclass
 import json
 import os
 import time
 import uuid
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
@@ -552,16 +552,67 @@ class MegatronMultimodalTokenizer:
                 return True
         return False
 
-    def _tokenize_raw_conversation(
+    def _tokenize_text_with_offsets(
+        self, text: str, boundary_offsets: List[int]
+    ) -> Optional[tuple[List[int], List[int]]]:
+        """Tokenize text once and map character boundaries to token boundaries.
+
+        Returns None when the tokenizer cannot provide reliable offsets, or when
+        a requested boundary falls inside a token. In that case callers must use
+        the cumulative-prefix path to preserve legacy behavior.
+        """
+        try:
+            encoding = self._tokenizer(
+                text,
+                add_special_tokens=False,
+                return_offsets_mapping=True,
+            )
+        except (NotImplementedError, TypeError, ValueError):
+            return None
+
+        if "input_ids" not in encoding or "offset_mapping" not in encoding:
+            return None
+
+        token_ids = encoding["input_ids"]
+        offsets = encoding["offset_mapping"]
+        if token_ids and isinstance(token_ids[0], list):
+            if len(token_ids) != 1 or len(offsets) != 1:
+                return None
+            token_ids = token_ids[0]
+            offsets = offsets[0]
+
+        if len(token_ids) != len(offsets):
+            return None
+
+        cumulative_lengths: List[int] = []
+        token_index = 0
+        for boundary in boundary_offsets:
+            while token_index < len(offsets):
+                offset = offsets[token_index]
+                if offset is None or len(offset) != 2:
+                    return None
+                start, end = int(offset[0]), int(offset[1])
+                if start == end:
+                    return None
+                if end <= boundary:
+                    token_index += 1
+                    continue
+                if start < boundary:
+                    return None
+                break
+            cumulative_lengths.append(token_index)
+
+        if cumulative_lengths and cumulative_lengths[-1] != len(token_ids):
+            return None
+
+        return list(token_ids), cumulative_lengths
+
+    def _tokenize_raw_conversation_slow(
         self,
         rendered_turns: List[Dict[str, Any]],
         replacements_per_turn: List[List[List[int]]],
         return_target: bool,
     ):
-        """Tokenize a pre-rendered conversation without applying a chat template."""
-        if any(turn["content"] == "" for turn in rendered_turns):
-            raise ValueError(f"empty turn in conversation: {rendered_turns}. Skipping.")
-
         cumulative_text = ""
         cumulative_replacements: List[List[int]] = []
         cumulative_lengths: List[int] = []
@@ -575,6 +626,49 @@ class MegatronMultimodalTokenizer:
         tokens = np.asarray(
             self._encode_with_markers(cumulative_text, cumulative_replacements), dtype=np.int64
         )
+
+        if not return_target:
+            return tokens
+
+        target = np.full_like(tokens, IGNORE_INDEX)
+        start = 0
+        for turn, end in zip(rendered_turns, cumulative_lengths):
+            if turn["role"].lower() == "assistant":
+                target[start:end] = tokens[start:end]
+            start = end
+
+        return tokens, target
+
+    def _tokenize_raw_conversation(
+        self,
+        rendered_turns: List[Dict[str, Any]],
+        replacements_per_turn: List[List[List[int]]],
+        return_target: bool,
+    ):
+        """Tokenize a pre-rendered conversation without applying a chat template."""
+        if any(turn["content"] == "" for turn in rendered_turns):
+            raise ValueError(f"empty turn in conversation: {rendered_turns}. Skipping.")
+
+        if any(turn_replacements for turn_replacements in replacements_per_turn):
+            return self._tokenize_raw_conversation_slow(
+                rendered_turns, replacements_per_turn, return_target
+            )
+
+        turn_texts = [turn["content"] for turn in rendered_turns]
+        cumulative_offset = 0
+        boundary_offsets: List[int] = []
+        for turn_text in turn_texts:
+            cumulative_offset += len(turn_text)
+            boundary_offsets.append(cumulative_offset)
+
+        tokenized = self._tokenize_text_with_offsets("".join(turn_texts), boundary_offsets)
+        if tokenized is None:
+            return self._tokenize_raw_conversation_slow(
+                rendered_turns, replacements_per_turn, return_target
+            )
+
+        token_ids, cumulative_lengths = tokenized
+        tokens = np.asarray(token_ids, dtype=np.int64)
 
         if not return_target:
             return tokens

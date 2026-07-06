@@ -116,6 +116,34 @@ def add_multimodal_extra_args(parser):
         ),
     )
     group.add_argument(
+        "--packing-algorithm-parameters",
+        type=str,
+        default="",
+        help=(
+            "Optional packing algorithm parameters as a JSON/Python dict or "
+            "comma-separated key=value string. Supported key: balanced_knapsack_delta "
+            "(default: 20 for balanced_greedy_knapsack)."
+        ),
+    )
+    group.add_argument(
+        "--max-samples-per-sequence",
+        type=int,
+        default=100,
+        help="Maximum number of raw samples per Energon source slice.",
+    )
+    group.add_argument(
+        "--shuffle-buffer-size",
+        type=int,
+        default=100,
+        help="Energon sample shuffle buffer size before task encoding and packing.",
+    )
+    group.add_argument(
+        "--filter-identity-keywords",
+        action="store_true",
+        default=False,
+        help="Drop samples from configured datasets when assistant text contains filtered identity keywords.",
+    )
+    group.add_argument(
         "--recompute-vision", action="store_true", default=False, help="Enable activation checkpointing in the vision model"
     )
     group.add_argument(

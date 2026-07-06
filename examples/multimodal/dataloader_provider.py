@@ -3,8 +3,8 @@ import os
 from typing import Any
 
 import torch
-from dataset_helpers import TaskEncoder
 from data_loading.task_encoder import MultiModalTaskEncoder
+from dataset_helpers import TaskEncoder
 
 from megatron.core import parallel_state
 from megatron.core.num_microbatches_calculator import get_num_microbatches
@@ -17,12 +17,12 @@ from megatron.energon import (
     FileStoreCachePool,
     LimitDataset,
     RepeatDataset,
+    SourceInfo,
     WorkerConfig,
     get_loader,
     get_savable_loader,
     get_train_dataset,
     get_val_datasets,
-    SourceInfo,
 )
 from megatron.energon.errors import log_exception
 from megatron.training import get_args
@@ -50,8 +50,8 @@ def datasets_provider(task_encoder,worker_config=None):
         dname,
         batch_size=args.micro_batch_size,
         task_encoder=train_task_encoder,
-        max_samples_per_sequence=100,
-        shuffle_buffer_size=100,
+        max_samples_per_sequence=args.max_samples_per_sequence,
+        shuffle_buffer_size=args.shuffle_buffer_size,
         worker_config=worker_config,
         packing_buffer_size=args.packing_buffer_size,
     )
@@ -171,15 +171,16 @@ def train_valid_test_dataloaders_provider(train_val_test_num_samples, task_encod
                 pipeline_rank=0,    # Only the first pipeline parallel rank stores the dataloader checkpoint.
                 basename=f"train_dataloader_dprank{dp_rank:03d}.pt",
             )
-            if os.path.exists(data_save_name):
-                try:
-                    dataset_state_dict = torch.load(data_save_name, map_location="cpu", weights_only=False)
-                    train_dataloader.restore_state_rank(dataset_state_dict["dataloader_state_dict"])
-                    print(f"restored dataset state from {data_save_name}")
-                except Exception as e:
-                    print("loading dataset state failed. Skipping. " + str(e))
-            else:
-                print(f"dataset state {data_save_name} does not exist")
+            if not os.path.exists(data_save_name):
+                raise FileNotFoundError(
+                    f"Dataset state {data_save_name} does not exist; refusing to resume without dataloader state."
+                )
+            try:
+                dataset_state_dict = torch.load(data_save_name, map_location="cpu", weights_only=False)
+                train_dataloader.restore_state_rank(dataset_state_dict["dataloader_state_dict"])
+                print(f"restored dataset state from {data_save_name}")
+            except Exception as e:
+                raise RuntimeError(f"Failed to restore dataloader state from {data_save_name}") from e
 
     valid_dataloader = None
     if valid_ds1 is not None:
@@ -238,8 +239,8 @@ def compact_sample_error_handler(
     global FIRST_TIME_EXCEPTION_INFO
 
     if sources is not None:
-        import urllib.parse
         import json
+        import urllib.parse
 
         # Create an energon viewer url:
         # vscode://nvidia.energon-sample-viewer/open?data=<URL-encoded-JSON>

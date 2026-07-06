@@ -1,4 +1,5 @@
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+import ast
 import dataclasses
 import hashlib
 import json
@@ -6,6 +7,7 @@ import os
 import random
 import re
 from collections import defaultdict
+from functools import partial
 from typing import List, Literal, Tuple, TypedDict, Union
 
 import numpy as np
@@ -60,6 +62,70 @@ from .knapsacks import (
 
 AUDIO_MIN_DURATION_SECONDS = 0.1
 AUDIO_MAX_DURATION_SECONDS = 1800
+IDENTITY_FILTER_DATASETS = ("apps, taco", "new sft problems", "NemotronX RL")
+IDENTITY_FILTER_KEYWORDS = ("gptoss", "gpt-oss", "chatgpt", "openai")
+PACKING_ALGORITHM_PARAMETER_ALIASES = {
+    "balannced_knapsack_delta": "balanced_knapsack_delta",
+}
+
+
+def _parse_packing_algorithm_parameters(raw_parameters: object) -> dict[str, str]:
+    """Parse packing algorithm parameters from a dict-like or key=value string."""
+    if raw_parameters is None:
+        return {}
+    if isinstance(raw_parameters, dict):
+        parameters = raw_parameters
+    elif isinstance(raw_parameters, str):
+        raw_parameters = raw_parameters.strip()
+        if not raw_parameters:
+            return {}
+        if raw_parameters.startswith("{"):
+            try:
+                parameters = json.loads(raw_parameters)
+            except json.JSONDecodeError:
+                try:
+                    parameters = ast.literal_eval(raw_parameters)
+                except (SyntaxError, ValueError) as exc:
+                    raise ValueError(
+                        "packing_algorithm_parameters must be a JSON/Python dict or "
+                        "a comma-separated key=value string"
+                    ) from exc
+            if not isinstance(parameters, dict):
+                raise ValueError("packing_algorithm_parameters dict input must parse to a dict")
+        else:
+            parameters = {}
+            for item in raw_parameters.replace(",", " ").split():
+                if "=" not in item:
+                    raise ValueError(
+                        "packing_algorithm_parameters entries must use key=value syntax"
+                    )
+                key, value = item.split("=", 1)
+                parameters[key] = value
+    else:
+        raise TypeError("packing_algorithm_parameters must be a string or dict")
+
+    normalized_parameters = {}
+    for key, value in parameters.items():
+        normalized_key = PACKING_ALGORITHM_PARAMETER_ALIASES.get(str(key).strip(), str(key).strip())
+        if not normalized_key:
+            raise ValueError("packing_algorithm_parameters contains an empty key")
+        normalized_parameters[normalized_key] = str(value).strip()
+    return normalized_parameters
+
+
+def _pop_int_packing_algorithm_parameter(
+    parameters: dict[str, str], key: str, default: int
+) -> int:
+    raw_value = parameters.pop(key, None)
+    if raw_value is None:
+        return default
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise ValueError(f"packing algorithm parameter {key} must be an integer") from exc
+    if value < 0:
+        raise ValueError(f"packing algorithm parameter {key} must be non-negative")
+    return value
 
 
 def _clean_think(match: re.Match) -> str:
@@ -68,6 +134,22 @@ def _clean_think(match: re.Match) -> str:
     if clean_content:
         clean_content = "\n" + clean_content + "\n"
     return f"<think>{clean_content}</think>"
+
+
+def _has_filtered_identity_keyword(sample: ConversationSample) -> bool:
+    """Match the Nano offline packer's dataset-specific identity filter."""
+    if sample.__subflavors__.get("dataset") not in IDENTITY_FILTER_DATASETS:
+        return False
+
+    for message in sample.conversation:
+        if message.sender != "assistant":
+            continue
+        for fragment in message.fragments:
+            if isinstance(fragment, str):
+                content_lower = fragment.lower()
+                if any(keyword in content_lower for keyword in IDENTITY_FILTER_KEYWORDS):
+                    return True
+    return False
 
 
 try:
@@ -295,10 +377,18 @@ class MultiModalTaskEncoder(
                 f"video_temporal_patch_size ({temporal_patch_size})"
             )
 
+        packing_algorithm_parameters = _parse_packing_algorithm_parameters(
+            getattr(self.args, "packing_algorithm_parameters", "")
+        )
         if self.args.packing_knapsack_algorithm == "greedy_knapsack":
             self.packing_knapsack_algorithm = greedy_knapsack
         elif self.args.packing_knapsack_algorithm == "balanced_greedy_knapsack":
-            self.packing_knapsack_algorithm = balanced_greedy_knapsack
+            balanced_knapsack_delta = _pop_int_packing_algorithm_parameter(
+                packing_algorithm_parameters, "balanced_knapsack_delta", 20
+            )
+            self.packing_knapsack_algorithm = partial(
+                balanced_greedy_knapsack, delta=balanced_knapsack_delta
+            )
         elif self.args.packing_knapsack_algorithm == "bucketing_greedy_knapsack":
             self.packing_knapsack_algorithm = bucketing_greedy_knapsack
         elif self.args.packing_knapsack_algorithm == "streaming_prompt_dedup_first_fit_knapsack":
@@ -306,6 +396,9 @@ class MultiModalTaskEncoder(
         else:
             raise ValueError(
                 f"Unknown knapsack algorithm: {self.args.packing_knapsack_algorithm}")
+        if packing_algorithm_parameters:
+            unused_parameters = ", ".join(sorted(packing_algorithm_parameters))
+            raise ValueError(f"Unused packing algorithm parameter(s): {unused_parameters}")
         self.shuffle_packed_samples = (
             self.args.packing_knapsack_algorithm != "streaming_prompt_dedup_first_fit_knapsack"
         )
@@ -588,6 +681,12 @@ class MultiModalTaskEncoder(
             text sample for ``openai_messages_offline_packed_jsonl`` rows.
         """
 
+        if getattr(self.args, "filter_identity_keywords", False) and _has_filtered_identity_keyword(sample):
+            raise ValueError(
+                "Sample from identity-filtered dataset contains a filtered "
+                f"assistant identity keyword: {sample.__key__}"
+            )
+
         if sample.__subflavors__.get("offline_packed_messages", False):
             return self._preencode_offline_packed_text_sample(sample)
 
@@ -751,10 +850,11 @@ class MultiModalTaskEncoder(
         )
         input_ids = torch.as_tensor(input_ids)
         target = torch.as_tensor(target)
-        assert len(target) > 0 and (target != IGNORE_INDEX).any(), (
-            f"target is empty: {target}, DETOKENIZED:\n\n{self.tokenizer.detokenize(input_ids)}\n\nCONVERSATION:\n\n"
-            + "".join([f"{m.sender}: {m.fragments}\n" for m in sample.conversation])
-        )
+        if len(target) == 0 or not bool((target != IGNORE_INDEX).any().item()):
+            raise NoTrainableTokensError(
+                f"target is empty: {target}, DETOKENIZED:\n\n{self.tokenizer.detokenize(input_ids)}\n\nCONVERSATION:\n\n"
+                + "".join([f"{m.sender}: {m.fragments}\n" for m in sample.conversation])
+            )
 
         max_image_token_allowed = self.args.decoder_seq_length - len(input_ids) - 4
         image_media_params = self.image_tiling_strategy.compute_params(
@@ -807,7 +907,8 @@ class MultiModalTaskEncoder(
             input_ids, target, grouped_params_for_tokens, audio_media_params
         )
 
-        assert has_trainable_tokens, f"Sample has no trainable tokens: {self.tokenizer.detokenize(input_ids)}"
+        if not has_trainable_tokens:
+            raise NoTrainableTokensError(f"Sample has no trainable tokens: {self.tokenizer.detokenize(input_ids)}")
 
         total_len, total_len_padded, input_ids, target = self._pad_for_context_parallel_and_fp8(
             input_ids, target, grouped_params_for_tokens, audio_media_params
@@ -1650,8 +1751,18 @@ class MultiModalTaskEncoder(
                 self.args.decoder_seq_length,
                 fp8_enabled=False,
             )
-            padding1 = torch.ones(padding_needed) * self.tokenizer.pad
-            padding2 = torch.ones(padding_needed) * IGNORE_INDEX
+            padding1 = torch.full(
+                (padding_needed,),
+                self.tokenizer.pad,
+                dtype=input_ids.dtype,
+                device=input_ids.device,
+            )
+            padding2 = torch.full(
+                (padding_needed,),
+                IGNORE_INDEX,
+                dtype=target.dtype,
+                device=target.device,
+            )
             input_ids = torch.cat([input_ids, padding1])
             target = torch.cat([target, padding2])
 
@@ -1720,7 +1831,7 @@ class MultiModalTaskEncoder(
 
         # If truncate causes all labels to be ignored, then skip the sample
         if len(truncated_target) == 0 or (truncated_target == IGNORE_INDEX).all():
-            raise ValueError(
+            raise NoTrainableTokensError(
                 "All targets will be ignored after truncation: \n"
                 f"sample_key: {sample_key} \n"
                 f"sample_subflavors: {sample_subflavors} \n"

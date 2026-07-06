@@ -202,6 +202,17 @@ def cook_openai_messages_offline_packed_jsonl(
     return ConversationSample(conversation=conversation, **sample_keys)
 
 
+def _basic_sample_keys_with_json_dataset(sample: dict, data: dict) -> dict:
+    """Preserve optional raw JSONL dataset metadata for task-encoder filters."""
+    sample_keys = basic_sample_keys(sample)
+    dataset_name = data.get("dataset")
+    if dataset_name is not None:
+        subflavors = dict(sample_keys.get("__subflavors__", {}) or {})
+        subflavors["dataset"] = dataset_name
+        sample_keys["__subflavors__"] = subflavors
+    return sample_keys
+
+
 @stateless
 @cooker(need_cache=True)
 def cook_conversation(
@@ -212,7 +223,7 @@ def cook_conversation(
     global warn_about_slow_media_loading
 
     data = sample["json"]
-    cs = ConversationSample.from_json(data, **basic_sample_keys(sample))
+    cs = ConversationSample.from_json(data, **_basic_sample_keys_with_json_dataset(sample, data))
 
     for msg in cs.conversation:
         for frag in msg.fragments:
