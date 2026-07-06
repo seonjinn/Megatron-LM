@@ -4,22 +4,203 @@ from collections import defaultdict
 
 from megatron.energon import CachePool, FileStore, SourceInfo, basic_sample_keys, cooker, stateless
 
+from ..conversation_base import (
+    conversation_convert_message,
+    conversation_post_processing,
+    conversation_tags_mapping_sample_to_allowed,
+)
 from ..conversation_sample import (
     AudioMedia,
     ConversationSample,
     ImageMedia,
+    Message,
     VideoFrameMedia,
     VideoMedia,
-    Message,
-)
-
-from ..conversation_base import (
-    conversation_tags_mapping_sample_to_allowed,
-    conversation_convert_message,
-    conversation_post_processing,
 )
 
 warn_about_slow_media_loading = defaultdict(lambda: True)
+
+NO_TOOL_SYSTEM_CONTENT = (
+    "<|im_start|>system\n"
+    "You are a helpful and harmless assistant.\n\n"
+    "You are not allowed to use any tools.<|im_end|>\n"
+)
+LEGACY_SYSTEM_CONTENT = (
+    "<|im_start|>system\nYou are a helpful and harmless assistant.<|im_end|>\n"
+)
+EMPTY_SYSTEM_CONTENT = "<|im_start|>system\n<|im_end|>\n"
+
+
+def _openai_message_content_to_fragments(content) -> list[str]:
+    """Convert OpenAI-style message content into text fragments."""
+    if content is None:
+        return [""]
+    if isinstance(content, str):
+        return [content]
+    if isinstance(content, list):
+        fragments: list[str] = []
+        for part in content:
+            if isinstance(part, str):
+                fragments.append(part)
+            elif isinstance(part, dict):
+                part_type = part.get("type") or part.get("t")
+                if part_type in (None, "text"):
+                    fragments.append(part.get("text") or part.get("content") or part.get("value") or "")
+                else:
+                    raise ValueError(
+                        "openai_messages_jsonl only supports text content parts, "
+                        f"got type={part_type!r}"
+                    )
+            else:
+                raise ValueError(f"Unsupported OpenAI message content part: {type(part)}")
+        return fragments
+    raise ValueError(f"Unsupported OpenAI message content: {type(content)}")
+
+
+def _openai_role_to_sender(role: str) -> str:
+    if role in ("system", "user", "assistant", "tool"):
+        return role
+    if role == "function":
+        return "tool"
+    if role == "human":
+        return "user"
+    if role == "gpt":
+        return "assistant"
+    raise ValueError(f"Unsupported OpenAI message role: {role!r}")
+
+
+def _normalize_nano_sft_text_messages(messages: list[dict]) -> list[Message]:
+    """Match the text cleanup used by the Nano 3.5 offline SFT packer."""
+    conversation = []
+    for msg in messages:
+        if not isinstance(msg, dict):
+            raise ValueError(f"OpenAI messages entries must be objects, got {type(msg)}")
+        sender = _openai_role_to_sender(msg["role"])
+        content = "".join(_openai_message_content_to_fragments(msg.get("content")))
+        conversation.append(Message(sender=sender, fragments=[content]))
+
+    if conversation[0].sender != "system":
+        first_content = conversation[0].fragments[0]
+        if first_content.startswith(EMPTY_SYSTEM_CONTENT):
+            conversation[0].fragments[0] = first_content.replace(EMPTY_SYSTEM_CONTENT, "")
+        conversation = [Message(sender="system", fragments=[EMPTY_SYSTEM_CONTENT])] + conversation
+    elif conversation[0].fragments[0] in (NO_TOOL_SYSTEM_CONTENT, LEGACY_SYSTEM_CONTENT):
+        conversation[0].fragments[0] = EMPTY_SYSTEM_CONTENT
+
+    for message in conversation:
+        if message.sender == "tool":
+            message.sender = "user"
+
+        content = message.fragments[0]
+        if (
+            message.sender == "user"
+            and "<|im_end|>\n<|im_start|>assistant\n<think></think>\n" in content
+        ):
+            message.fragments[0] = content.replace(
+                "<|im_end|>\n<|im_start|>assistant\n<think></think>\n",
+                "<|im_end|>\n<|im_start|>assistant\n<think></think>",
+            )
+        elif message.sender == "assistant":
+            message.fragments[0] = content.rstrip() + "\n"
+
+    for idx, message in enumerate(conversation):
+        content = message.fragments[0]
+        if message.sender == "user" and idx < len(conversation) - 1:
+            next_message = conversation[idx + 1]
+            if (
+                content.endswith("<|im_end|>\n<|im_start|>assistant\n<think>\n")
+                and next_message.fragments[0].startswith("\n</think>")
+            ):
+                message.fragments[0] = content.replace(
+                    "<|im_end|>\n<|im_start|>assistant\n<think>\n",
+                    "<|im_end|>\n<|im_start|>assistant\n<think></think>",
+                )
+                next_message.fragments[0] = next_message.fragments[0][len("\n</think>") :].lstrip()
+        elif (
+            message.sender == "assistant"
+            and idx > 0
+            and content.startswith("\n")
+            and conversation[idx - 1].fragments[0].endswith("\n")
+        ):
+            message.fragments[0] = content.lstrip()
+
+    return conversation
+
+
+def _split_openai_messages_at_system(messages: list[dict]) -> list[list[dict]]:
+    """Split an offline-packed Nano SFT row into original conversations."""
+    conversations: list[list[dict]] = []
+    current: list[dict] = []
+    for message in messages:
+        if not isinstance(message, dict):
+            raise ValueError(f"OpenAI messages entries must be objects, got {type(message)}")
+        if message.get("role") == "system" and current:
+            conversations.append(current)
+            current = []
+        current.append(message)
+    if current:
+        conversations.append(current)
+    return conversations
+
+
+@stateless
+@cooker(need_cache=True)
+def cook_openai_messages_jsonl(
+    sample: dict,
+    cache: CachePool,
+    media_source: FileStore | None = None,
+) -> ConversationSample:
+    """Load OpenAI-style JSONL rows with messages[*].role/content."""
+    data = sample["json"]
+    messages = data.get("messages")
+    if not isinstance(messages, list) or not messages:
+        raise ValueError("openai_messages_jsonl requires a non-empty messages list")
+
+    conversation = _normalize_nano_sft_text_messages(messages)
+    for idx, msg in enumerate(conversation):
+        sender = msg.sender
+        if sender == "system" and idx > 0:
+            raise ValueError(
+                "openai_messages_jsonl only supports a leading system message. "
+                "Split rows with repeated system prompts before using this cooker."
+            )
+
+    return ConversationSample(conversation=conversation, **basic_sample_keys(sample))
+
+
+@stateless
+@cooker(need_cache=True)
+def cook_openai_messages_offline_packed_jsonl(
+    sample: dict,
+    cache: CachePool,
+    media_source: FileStore | None = None,
+) -> ConversationSample:
+    """Load Nano-style offline-packed JSONL rows with merged ``messages``.
+
+    Each row is one already-packed training item. The row may contain multiple
+    conversations concatenated together, separated by repeated ``system`` turns.
+    Unlike ``openai_messages_jsonl``, this cooker preserves those repeated
+    systems so the task encoder can tokenize each original conversation
+    separately and emit packed ``cu_lengths`` without running online packing.
+    """
+    data = sample["json"]
+    messages = data.get("messages")
+    if not isinstance(messages, list) or not messages:
+        raise ValueError("openai_messages_offline_packed_jsonl requires a non-empty messages list")
+
+    conversation: list[Message] = []
+    for split_messages in _split_openai_messages_at_system(messages):
+        conversation.extend(_normalize_nano_sft_text_messages(split_messages))
+
+    if not conversation:
+        raise ValueError("openai_messages_offline_packed_jsonl produced an empty conversation")
+
+    sample_keys = basic_sample_keys(sample)
+    subflavors = dict(sample_keys.get("__subflavors__", {}) or {})
+    subflavors["offline_packed_messages"] = True
+    sample_keys["__subflavors__"] = subflavors
+    return ConversationSample(conversation=conversation, **sample_keys)
+
 
 @stateless
 @cooker(need_cache=True)

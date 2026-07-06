@@ -5,36 +5,23 @@ import os
 import random
 import re
 from collections import defaultdict
-from typing import List, Literal, TypedDict, Union, Tuple
-import numpy as np
+from typing import List, Literal, Tuple, TypedDict, Union
 
-from .cookers.audio_conversation import cook_audio_conversation
-from .cookers.granary import (
-    cook_granary_english_webdataset,
-    cook_granary_english_jsonl,
-)
-from .cookers.omcat_legacy_audio_conversation import cook_omcat_legacy_conversation_monolithic
+import numpy as np
 import torch
 from PIL import Image
 from torchvision.transforms import ToPILImage
 
 from megatron.core.models.multimodal.llava_model import IGNORE_INDEX, SOUND_TOKEN
 from megatron.core.models.vision.clip_vit_model import get_num_image_embeddings
-from megatron.energon import (
-    Batch,
-    Cooker,
-    DefaultTaskEncoder,
-    Lazy,
-    Sample,
-    SampleDecoder,
-    stateless,
-    __version__ as energon_version,
-)
-from megatron.energon.edataclass import edataclass
+from megatron.energon import Batch, Cooker, DefaultTaskEncoder, Lazy, Sample, SampleDecoder
+from megatron.energon import __version__ as energon_version
+from megatron.energon import stateless
 from megatron.energon.av import AVDecoder
+from megatron.energon.edataclass import edataclass
 from megatron.training import get_args, get_tokenizer
 
-from .audio_processing import AudioParams, AudioTransformStrategy, AudioTransformParakeetStrategy
+from .audio_processing import AudioParams, AudioTransformParakeetStrategy, AudioTransformStrategy
 from .conversation_sample import (
     AudioMedia,
     ConversationSample,
@@ -43,23 +30,19 @@ from .conversation_sample import (
     VideoFrameMedia,
     VideoMedia,
 )
+from .cookers.audio_conversation import cook_audio_conversation
 from .cookers.conversation import (
     cook_conversation,
-    cook_general_conversations_webdataset,
     cook_general_conversations_jsonl,
+    cook_general_conversations_webdataset,
+    cook_openai_messages_jsonl,
+    cook_openai_messages_offline_packed_jsonl,
 )
-from .cookers.audio_conversation import cook_audio_conversation
 from .cookers.eagle import cook_eagle
-from .image_processing import (
-    ImageTilingParams,
-    create_image_tiling_strategy,
-)
-from .knapsacks import (
-    balanced_greedy_knapsack,
-    bucketing_greedy_knapsack,
-    greedy_knapsack,
-)
-
+from .cookers.granary import cook_granary_english_jsonl, cook_granary_english_webdataset
+from .cookers.omcat_legacy_audio_conversation import cook_omcat_legacy_conversation_monolithic
+from .image_processing import ImageTilingParams, create_image_tiling_strategy
+from .knapsacks import balanced_greedy_knapsack, bucketing_greedy_knapsack, greedy_knapsack
 
 AUDIO_MIN_DURATION_SECONDS = 0.1
 AUDIO_MAX_DURATION_SECONDS = 1800
@@ -77,6 +60,10 @@ try:
     from megatron.core.models.multimodal.context_parallel import get_padding
 except ImportError:
     get_padding = None
+
+
+class NoTrainableTokensError(ValueError):
+    """Raised when an SFT sample has no labels that should contribute to loss."""
 
 
 @edataclass
@@ -99,6 +86,17 @@ class PreEncodedTaskSample(Sample):
     total_len: int
     total_len_padded: int
     num_frames: list[int]
+
+
+@edataclass
+class PreEncodedOfflinePackedTextSample(Sample):
+    tokens: torch.Tensor
+    labels: torch.Tensor
+    max_length: int
+    cu_lengths: torch.Tensor
+    cu_lengths_padded: torch.Tensor
+    samples_seen: torch.Tensor
+    sample_lengths: torch.Tensor
 
 
 @edataclass
@@ -220,6 +218,11 @@ class MultiModalTaskEncoder(
         Cooker(cook_omcat_legacy_conversation_monolithic, has_subflavors={"cook": "omcat_legacy_conversation_monolithic"}),
         Cooker(cook_general_conversations_webdataset, has_subflavors={"cook": "general_conversations_webdataset"}),
         Cooker(cook_general_conversations_jsonl, has_subflavors={"cook": "general_conversations_jsonl"}),
+        Cooker(cook_openai_messages_jsonl, has_subflavors={"cook": "openai_messages_jsonl"}),
+        Cooker(
+            cook_openai_messages_offline_packed_jsonl,
+            has_subflavors={"cook": "openai_messages_offline_packed_jsonl"},
+        ),
     ]
 
     def __init__(self, is_val: bool = False, tiling_augment_prob: float = 0.4):
@@ -538,8 +541,13 @@ class MultiModalTaskEncoder(
             )
 
     @stateless(restore_seeds=True)
-    def preencode_sample(self, sample: ConversationSample) -> PreEncodedTaskSample:
+    def preencode_sample(
+        self, sample: ConversationSample
+    ) -> PreEncodedTaskSample | PreEncodedOfflinePackedTextSample:
         """Encode sample."""
+
+        if sample.__subflavors__.get("offline_packed_messages", False):
+            return self._preencode_offline_packed_text_sample(sample)
 
         # In-place convert VideoMedia to VideoFrameMedia (and text)
         # Some really large video files cause decoding to take a long time potentially leading to issues.
@@ -784,8 +792,144 @@ class MultiModalTaskEncoder(
             num_frames=aggregated_num_frames,  # UNGROUPED (need per-image metadata for vision encoder)
         )
 
-    @stateless(restore_seeds=True)
-    def postencode_sample(self, sample: PreEncodedTaskSample) -> PackedTaskSample:
+    def _split_offline_packed_conversations(
+        self, sample: ConversationSample
+    ) -> list[list[ConversationTurn]]:
+        conversations: list[list[ConversationTurn]] = []
+        current: list[ConversationTurn] = []
+
+        for message in sample.conversation:
+            if message.sender == "system" and current:
+                conversations.append(current)
+                current = []
+
+            if any(not isinstance(fragment, str) for fragment in message.fragments):
+                raise ValueError(
+                    "openai_messages_offline_packed_jsonl supports text-only messages; "
+                    f"got {message.fragments!r} in sample {sample.__key__}"
+                )
+            current.append(
+                {
+                    "role": message.sender,
+                    "content": "".join(message.fragments),
+                }
+            )
+
+        if current:
+            conversations.append(current)
+        if not conversations:
+            raise ValueError(f"Offline packed sample has no conversations: {sample.__key__}")
+        return conversations
+
+    def _preencode_offline_packed_text_sample(
+        self, sample: ConversationSample
+    ) -> PreEncodedOfflinePackedTextSample:
+        """Tokenize one already-packed Nano SFT row without online repacking."""
+        assert not self.is_packing_enabled, (
+            "openai_messages_offline_packed_jsonl rows are already packed; "
+            "do not pass --packing-buffer-size with this cooker."
+        )
+
+        pack_length = self.args.decoder_seq_length
+        pad = self.tokenizer.pad
+
+        pack_tokens: list[int] = []
+        pack_targets: list[int] = []
+        cu_lengths = [0]
+        sample_lengths: list[int] = []
+
+        for conversation in self._split_offline_packed_conversations(sample):
+            tokens, targets = self.tokenizer.tokenize_conversation(
+                conversation,
+                True,
+                False,
+                train_only_on_last_assistant_turn=sample.__subflavors__.get(
+                    "train_only_on_last_assistant_turn", False
+                ),
+                skip_chat_template=sample.__subflavors__.get("skip_chat_template", False),
+            )
+            tokens = torch.as_tensor(tokens, dtype=torch.int64)
+            targets = torch.as_tensor(targets, dtype=torch.int64)
+            if len(targets) == 0 or (targets != IGNORE_INDEX).sum() == 0:
+                continue
+
+            tokens_list = [int(token) for token in tokens.tolist()]
+            targets_list = [int(target) for target in targets.tolist()]
+            pack_tokens.extend(tokens_list)
+            pack_targets.extend(targets_list)
+
+            if getattr(self.args, "context_parallel_size", 1) > 1:
+                pad_granularity = self.args.context_parallel_size * 2
+                mod_token_count = len(pack_tokens) % pad_granularity
+                if mod_token_count != 0:
+                    pad_len = pad_granularity - mod_token_count
+                    pack_tokens.extend([pad] * pad_len)
+                    pack_targets.extend([pad] * pad_len)
+
+            current_length = len(pack_tokens)
+            cu_lengths.append(current_length)
+            sample_lengths.append(current_length - cu_lengths[-2])
+
+            if len(pack_tokens) >= pack_length + 1:
+                pack_tokens = pack_tokens[:pack_length]
+                pack_targets = pack_targets[:pack_length]
+                pack_tokens.append(pad)
+                pack_targets.append(pad)
+                cu_lengths[-1] = len(pack_tokens) - 1
+                sample_lengths[-1] = cu_lengths[-1] - cu_lengths[-2]
+                break
+
+        if len(cu_lengths) < 2:
+            raise NoTrainableTokensError(f"Offline packed sample has no trainable conversations: {sample.__key__}")
+
+        if len(pack_tokens) < pack_length + 1:
+            pad_len = pack_length + 1 - len(pack_tokens)
+            pack_tokens.extend([pad] * pad_len)
+            pack_targets.extend([pad] * pad_len)
+            cu_lengths[-1] = len(pack_tokens) - 1
+            sample_lengths[-1] = cu_lengths[-1] - cu_lengths[-2]
+
+        assert len(pack_tokens) == pack_length + 1
+        assert len(pack_targets) == pack_length + 1
+
+        cu_lengths_tensor = torch.tensor(cu_lengths, dtype=torch.int32)
+        adjacent_diffs = cu_lengths_tensor[1:] - cu_lengths_tensor[:-1]
+        max_length = int(adjacent_diffs.max().item())
+
+        return PreEncodedOfflinePackedTextSample.derive_from(
+            sample,
+            tokens=torch.tensor(pack_tokens[:-1], dtype=torch.int64),
+            labels=torch.tensor(pack_targets, dtype=torch.int64),
+            max_length=max_length,
+            cu_lengths=cu_lengths_tensor,
+            cu_lengths_padded=cu_lengths_tensor.clone(),
+            samples_seen=torch.tensor(len(sample_lengths), dtype=torch.int32),
+            sample_lengths=torch.tensor(sample_lengths, dtype=torch.int32),
+        )
+
+    def postencode_sample(
+        self,
+        sample: PreEncodedTaskSample | PreEncodedOfflinePackedTextSample,
+    ) -> PackedTaskSample:
+        if isinstance(sample, PreEncodedOfflinePackedTextSample):
+            return PackedTaskSample.derive_from(
+                sample,
+                __key__=[sample.__key__],
+                tokens=sample.tokens,
+                labels=sample.labels,
+                imgs=[],
+                num_tiles=[],
+                num_frames=[],
+                max_length=sample.max_length,
+                cu_lengths=sample.cu_lengths,
+                cu_lengths_padded=sample.cu_lengths_padded,
+                sound_clips=[],
+                sound_length=[],
+                sound_timestamps=[],
+                num_sound_clips=[],
+                samples_seen=sample.samples_seen,
+            )
+
         self._load_media(sample)
 
         data_augment = sample.__subflavors__.get("data_augment", False) and not self.is_val
@@ -836,9 +980,10 @@ class MultiModalTaskEncoder(
 
     def _debug_save_image(self, media, media_idx, sample_key, data_augment):
         """Save debug images with original and transformed sizes."""
-        import matplotlib.pyplot as plt
-        import matplotlib.patches as patches
         from datetime import datetime
+
+        import matplotlib.patches as patches
+        import matplotlib.pyplot as plt
 
         # Create debug directory if it doesn't exist
         debug_dir = os.environ.get("DEBUG_DATALOADER_DIR", os.path.join(os.getcwd(), "debug_images"))
