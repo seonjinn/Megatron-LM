@@ -81,6 +81,9 @@ class TransformerConfig(ModelParallelConfig):
     mtp_use_repeated_layer: bool = False
     """Use a single MTP layer repeatedly instead of multiple separate layers."""
 
+    scale_mtp_moe_aux_loss: bool = False
+    """Scale MTP-layer MoE auxiliary losses by the number of MTP layers when using repeated MTP layers."""
+
     mtp_hybrid_override_pattern: Optional[str] = None
     """DEPRECATED: Use unified hybrid_layer_pattern instead.
     Legacy argument for loading old checkpoints.

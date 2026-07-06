@@ -447,12 +447,12 @@ class TopKRouter(Router):
                 padding tokens. Can be a Python int or a torch.Tensor (typically 0-d tensor).
                 If None, uses activation.shape[0]. Defaults to None.
         """
-        # When using repeated MTP layers, the loss is counted "mtp_num_layers" times.
-        # To avoid accumulating the load balancing loss multiple times, we scale it by
-        # 1/mtp_num_layers so the total loss is correct.
+        # Optionally scale repeated-MTP MoE aux loss by 1/mtp_num_layers. Leave this
+        # disabled to preserve legacy repeated-MTP aux-loss behavior.
         if (
             self.is_mtp_layer
             and self.config.mtp_use_repeated_layer
+            and self.config.scale_mtp_moe_aux_loss
             and self.config.mtp_num_layers is not None
         ):
             aux_loss = aux_loss / self.config.mtp_num_layers
@@ -524,12 +524,12 @@ class TopKRouter(Router):
             else:
                 logits = MoEAuxLossAutoScaler.apply(logits, z_loss)
 
-            # When using repeated MTP layers, the same MTP layer is called mtp_num_layers times.
-            # To avoid accumulating the z_loss multiple times, we scale it by 1/mtp_num_layers
-            # so the total loss is correct.
+            # Optionally scale repeated-MTP MoE z-loss by 1/mtp_num_layers. Leave this
+            # disabled to preserve legacy repeated-MTP z-loss logging behavior.
             if (
                 self.is_mtp_layer
                 and self.config.mtp_use_repeated_layer
+                and self.config.scale_mtp_moe_aux_loss
                 and self.config.mtp_num_layers is not None
             ):
                 z_loss = z_loss / self.config.mtp_num_layers

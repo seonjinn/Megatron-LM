@@ -2361,7 +2361,12 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
 
     # Update learning rate.
     if update_successful:
-        opt_param_scheduler.step(increment=samples_seen_in_iteration)
+        scheduler_increment = (
+            get_current_global_batch_size()
+            if args.train_iters and args.train_samples is None
+            else samples_seen_in_iteration
+        )
+        opt_param_scheduler.step(increment=scheduler_increment)
         skipped_iter = 0
     else:
         skipped_iter = 1
