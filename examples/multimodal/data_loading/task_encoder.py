@@ -544,7 +544,15 @@ class MultiModalTaskEncoder(
     def preencode_sample(
         self, sample: ConversationSample
     ) -> PreEncodedTaskSample | PreEncodedOfflinePackedTextSample:
-        """Encode sample."""
+        """Tokenize a conversation sample before media loading and final packing.
+
+        Args:
+            sample: Energon conversation sample produced by one of the registered cookers.
+
+        Returns:
+            A regular pre-encoded sample for normal conversation rows, or an already-packed
+            text sample for ``openai_messages_offline_packed_jsonl`` rows.
+        """
 
         if sample.__subflavors__.get("offline_packed_messages", False):
             return self._preencode_offline_packed_text_sample(sample)
@@ -911,6 +919,15 @@ class MultiModalTaskEncoder(
         self,
         sample: PreEncodedTaskSample | PreEncodedOfflinePackedTextSample,
     ) -> PackedTaskSample:
+        """Convert a pre-encoded sample into the packed-sample representation.
+
+        Args:
+            sample: Either a normal pre-encoded multimodal sample or an offline-packed
+                text sample that already contains packed ``cu_lengths`` metadata.
+
+        Returns:
+            A ``PackedTaskSample`` ready for batching by the task encoder.
+        """
         if isinstance(sample, PreEncodedOfflinePackedTextSample):
             return PackedTaskSample.derive_from(
                 sample,
