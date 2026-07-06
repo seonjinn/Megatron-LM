@@ -86,6 +86,15 @@ def add_multimodal_extra_args(parser):
         required=True,
         help="Prompt format to use with the tokenizer.",
     )
+    group.add_argument(
+        "--reset-position-ids-from-packed-metadata",
+        action="store_true",
+        default=False,
+        help=(
+            "For packed text samples, rebuild position IDs from packed cu_seqlens "
+            "metadata instead of using the default left-to-right position IDs."
+        ),
+    )
     group.add_argument("--pixel-shuffle", action="store_true", default=False)
     group.add_argument(
         "--image-tag-type",

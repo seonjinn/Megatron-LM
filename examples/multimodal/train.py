@@ -179,6 +179,7 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
         cu_lengths = cu_lengths[0]
         cu_lengths_padded = cu_lengths_padded[0]
         max_lengths = max_lengths[0]
+        cu_lengths_for_params = cu_lengths_padded if cu_lengths_padded is not None else cu_lengths
 
         packed_seq_params = PackedSeqParams(
             qkv_format="thd",
@@ -188,6 +189,7 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
             cu_seqlens_kv_padded=cu_lengths_padded,
             max_seqlen_q=max_lengths,
             max_seqlen_kv=max_lengths,
+            total_tokens=int(cu_lengths_for_params[-1].item()),
         )
 
     # If cu_lengths and max_lengths are non-dummy, construct PackedSeqParams. Otherwise, leave it at None.
@@ -222,6 +224,12 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
 
     nvtx_range_push("get_ltor_masks_and_position_ids")
     loss_mask, position_ids = get_ltor_masks_and_position_ids(tokens, labels, tokenizer.pad)
+    if packed_seq_params is not None and getattr(args, "reset_position_ids_from_packed_metadata", False):
+        position_ids = build_position_ids_from_packed_metadata(
+            tokens,
+            packed_seq_params.cu_seqlens_q,
+            packed_seq_params.cu_seqlens_q_padded,
+        )
     nvtx_range_pop("get_ltor_masks_and_position_ids")
 
     return (
@@ -259,6 +267,35 @@ def get_ltor_masks_and_position_ids(input_ids, target, pad_token):
     loss_mask[target == IGNORE_INDEX] = 0.0  # mask prompts
 
     return loss_mask, position_ids
+
+
+def build_position_ids_from_packed_metadata(
+    tokens: torch.Tensor, cu_seqlens: torch.Tensor | None, cu_seqlens_padded: torch.Tensor | None
+) -> torch.Tensor:
+    """Build SFT-style position ids that reset for each member of a packed sample."""
+    position_ids = torch.arange(tokens.shape[1], dtype=torch.long, device=tokens.device)
+    position_ids = position_ids.unsqueeze(0).expand_as(tokens).clone()
+    if cu_seqlens is None:
+        return position_ids
+
+    if cu_seqlens.dim() == 1:
+        cu_seqlens = cu_seqlens.unsqueeze(0)
+    if cu_seqlens_padded is None:
+        cu_seqlens_padded = cu_seqlens
+    elif cu_seqlens_padded.dim() == 1:
+        cu_seqlens_padded = cu_seqlens_padded.unsqueeze(0)
+
+    for batch_idx in range(tokens.shape[0]):
+        packed_offsets = cu_seqlens_padded[batch_idx].detach().cpu().tolist()
+        for start, end in zip(packed_offsets[:-1], packed_offsets[1:]):
+            start = int(start)
+            end = min(int(end), tokens.shape[1])
+            if end > start:
+                position_ids[batch_idx, start:end] = torch.arange(
+                    end - start, dtype=torch.long, device=tokens.device
+                )
+
+    return position_ids
 
 
 def get_mask_start_and_end_idx(arr):

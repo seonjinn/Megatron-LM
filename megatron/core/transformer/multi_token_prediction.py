@@ -1332,6 +1332,7 @@ class MultiTokenPredictionLayer(MegatronModule):
                 hidden_states=hidden_states,
                 decoder_input=decoder_input,
                 attention_mask=attention_mask,
+                padding_mask=padding_mask,
                 context=context,
                 context_mask=context_mask,
                 rotary_pos_emb=rotary_pos_emb,
