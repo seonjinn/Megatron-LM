@@ -1,4 +1,5 @@
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+import bisect
 from typing import List, TypeVar
 
 T = TypeVar("T")
@@ -157,3 +158,122 @@ def bucketing_greedy_knapsack(
         batches.append(current_batch)
 
     return batches
+
+
+def _sample_prompt_hash(sample: T, sample_idx: int) -> str:
+    prompt_hash = getattr(sample, "prompt_hash", None)
+    if prompt_hash is not None:
+        return str(prompt_hash)
+
+    sample_key = getattr(sample, "__key__", None)
+    if sample_key is not None:
+        return f"key:{sample_key}"
+
+    return f"idx:{sample_idx}"
+
+
+def streaming_prompt_dedup_first_fit_knapsack(
+    item_sizes: List[int], samples: List[T], max_capacity: int, tolerance: int = 1000
+) -> List[List[T]]:
+    """Streaming first-fit packing modeled after Nano 3.5 text SFT offline packing.
+
+    The algorithm preserves the incoming sample stream order more than the sorted
+    knapsack variants. It keeps one current pack and a sorted list of unfinished
+    packs, first trying to place a sample into the tightest unfinished pack that
+    has enough remaining capacity. A sample is not placed into a pack that already
+    contains the same prompt hash.
+    """
+    assert len(item_sizes) == len(samples), (
+        "sample lengths and samples must have the same length."
+    )
+
+    full_packs: list[list[T]] = []
+    unfinished_packs: list[dict] = []
+    current_pack: list[T] = []
+    current_prompt_hashes: set[str] = set()
+    current_pack_tokens = 0
+
+    def insert_unfinished_pack(
+        pack: list[T], pack_tokens: int, prompt_hashes: set[str]
+    ) -> None:
+        if not pack:
+            return
+        remaining = max_capacity - pack_tokens
+        ranks = [unfinished_pack["num_tokens_to_full"] for unfinished_pack in unfinished_packs]
+        insert_idx = bisect.bisect(ranks, remaining)
+        unfinished_packs.insert(
+            insert_idx,
+            {
+                "current_pack": pack,
+                "current_pack_tokens": pack_tokens,
+                "num_tokens_to_full": remaining,
+                "current_prompt_hashes": prompt_hashes,
+            },
+        )
+
+    for sample_idx, (current_sample_tokens, sample) in enumerate(zip(item_sizes, samples)):
+        if current_sample_tokens > max_capacity:
+            raise ValueError(
+                "streaming_prompt_dedup_first_fit_knapsack: A sample has size "
+                f"{current_sample_tokens} which exceeds max_capacity {max_capacity}."
+            )
+
+        prompt_hash = _sample_prompt_hash(sample, sample_idx)
+
+        filled_unfinished_pack = None
+        for unfinished_idx, unfinished_pack in enumerate(unfinished_packs):
+            if (
+                unfinished_pack["num_tokens_to_full"] >= current_sample_tokens
+                and prompt_hash not in unfinished_pack["current_prompt_hashes"]
+            ):
+                unfinished_pack["current_pack"].append(sample)
+                unfinished_pack["current_pack_tokens"] += current_sample_tokens
+                unfinished_pack["num_tokens_to_full"] -= current_sample_tokens
+                unfinished_pack["current_prompt_hashes"].add(prompt_hash)
+                filled_unfinished_pack = unfinished_packs.pop(unfinished_idx)
+                break
+
+        if filled_unfinished_pack is not None:
+            if filled_unfinished_pack["num_tokens_to_full"] < tolerance:
+                full_packs.append(filled_unfinished_pack["current_pack"])
+            else:
+                insert_unfinished_pack(
+                    filled_unfinished_pack["current_pack"],
+                    filled_unfinished_pack["current_pack_tokens"],
+                    filled_unfinished_pack["current_prompt_hashes"],
+                )
+            continue
+
+        if current_pack and current_pack_tokens + current_sample_tokens > max_capacity:
+            num_tokens_to_full = max_capacity - current_pack_tokens
+            if num_tokens_to_full < tolerance:
+                full_packs.append(current_pack)
+            else:
+                insert_unfinished_pack(
+                    current_pack, current_pack_tokens, current_prompt_hashes
+                )
+
+            current_pack = []
+            current_prompt_hashes = set()
+            current_pack_tokens = 0
+
+        if prompt_hash not in current_prompt_hashes:
+            current_prompt_hashes.add(prompt_hash)
+            current_pack.append(sample)
+            current_pack_tokens += current_sample_tokens
+        else:
+            insert_unfinished_pack(
+                current_pack, current_pack_tokens, current_prompt_hashes
+            )
+            current_pack = [sample]
+            current_prompt_hashes = {prompt_hash}
+            current_pack_tokens = current_sample_tokens
+
+    if current_pack:
+        full_packs.append(current_pack)
+
+    full_packs.extend(
+        unfinished_pack["current_pack"] for unfinished_pack in unfinished_packs
+    )
+
+    return full_packs

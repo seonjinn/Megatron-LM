@@ -106,7 +106,14 @@ def add_multimodal_extra_args(parser):
         "--packing-seq-length", type=int, default=0, help="Packing sequence length. Must be > 0 if using packing."
     )
     group.add_argument(
-        "--packing-knapsack-algorithm", type=str, default="greedy_knapsack", help="Knapsack algorithm to use for packing."
+        "--packing-knapsack-algorithm",
+        type=str,
+        default="greedy_knapsack",
+        help=(
+            "Knapsack algorithm to use for packing. Supported values: greedy_knapsack, "
+            "balanced_greedy_knapsack, bucketing_greedy_knapsack, "
+            "streaming_prompt_dedup_first_fit_knapsack."
+        ),
     )
     group.add_argument(
         "--recompute-vision", action="store_true", default=False, help="Enable activation checkpointing in the vision model"

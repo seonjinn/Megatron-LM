@@ -1,5 +1,6 @@
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 import dataclasses
+import hashlib
 import json
 import os
 import random
@@ -14,9 +15,17 @@ from torchvision.transforms import ToPILImage
 
 from megatron.core.models.multimodal.llava_model import IGNORE_INDEX, SOUND_TOKEN
 from megatron.core.models.vision.clip_vit_model import get_num_image_embeddings
-from megatron.energon import Batch, Cooker, DefaultTaskEncoder, Lazy, Sample, SampleDecoder
-from megatron.energon import __version__ as energon_version
-from megatron.energon import stateless
+from megatron.energon import (
+    Batch,
+    Cooker,
+    DefaultTaskEncoder,
+    Lazy,
+    MapDataset,
+    Sample,
+    SampleDecoder,
+    __version__ as energon_version,
+    stateless,
+)
 from megatron.energon.av import AVDecoder
 from megatron.energon.edataclass import edataclass
 from megatron.training import get_args, get_tokenizer
@@ -42,7 +51,12 @@ from .cookers.eagle import cook_eagle
 from .cookers.granary import cook_granary_english_jsonl, cook_granary_english_webdataset
 from .cookers.omcat_legacy_audio_conversation import cook_omcat_legacy_conversation_monolithic
 from .image_processing import ImageTilingParams, create_image_tiling_strategy
-from .knapsacks import balanced_greedy_knapsack, bucketing_greedy_knapsack, greedy_knapsack
+from .knapsacks import (
+    balanced_greedy_knapsack,
+    bucketing_greedy_knapsack,
+    greedy_knapsack,
+    streaming_prompt_dedup_first_fit_knapsack,
+)
 
 AUDIO_MIN_DURATION_SECONDS = 0.1
 AUDIO_MAX_DURATION_SECONDS = 1800
@@ -86,6 +100,7 @@ class PreEncodedTaskSample(Sample):
     total_len: int
     total_len_padded: int
     num_frames: list[int]
+    prompt_hash: str
 
 
 @edataclass
@@ -286,9 +301,14 @@ class MultiModalTaskEncoder(
             self.packing_knapsack_algorithm = balanced_greedy_knapsack
         elif self.args.packing_knapsack_algorithm == "bucketing_greedy_knapsack":
             self.packing_knapsack_algorithm = bucketing_greedy_knapsack
+        elif self.args.packing_knapsack_algorithm == "streaming_prompt_dedup_first_fit_knapsack":
+            self.packing_knapsack_algorithm = streaming_prompt_dedup_first_fit_knapsack
         else:
             raise ValueError(
                 f"Unknown knapsack algorithm: {self.args.packing_knapsack_algorithm}")
+        self.shuffle_packed_samples = (
+            self.args.packing_knapsack_algorithm != "streaming_prompt_dedup_first_fit_knapsack"
+        )
 
         if getattr(self.args, "sound_model_type", None) is not None:
             self.sound_token_id = self.tokenizer.sound_token_index
@@ -542,6 +562,18 @@ class MultiModalTaskEncoder(
                 f" temporal patch size {temporal_patch_size} is not implemented"
             )
 
+    @staticmethod
+    def _get_prompt_hash(sample: ConversationSample) -> str:
+        prompt_text_parts = []
+        for message in sample.conversation:
+            if message.sender not in ("user", "tool"):
+                continue
+            prompt_text_parts.extend(
+                fragment for fragment in message.fragments if isinstance(fragment, str)
+            )
+        prompt_text = "".join(prompt_text_parts)
+        return hashlib.md5(prompt_text.encode("utf-8")).hexdigest()
+
     @stateless(restore_seeds=True)
     def preencode_sample(
         self, sample: ConversationSample
@@ -567,6 +599,7 @@ class MultiModalTaskEncoder(
         train_only_on_last_assistant_turn = sample.__subflavors__.get("train_only_on_last_assistant_turn", False)
         skip_chat_template = sample.__subflavors__.get("skip_chat_template", False)
         aggregated_num_frames = []
+        prompt_hash = self._get_prompt_hash(sample)
 
         # We tentatively extract the first message if it's a system prompt and use this rather than
         # the default. After this, we expect no system prompt in the conversation.
@@ -800,6 +833,7 @@ class MultiModalTaskEncoder(
             total_len=total_len,  # Grouped
             total_len_padded=total_len_padded,  # Grouped
             num_frames=aggregated_num_frames,  # UNGROUPED (need per-image metadata for vision encoder)
+            prompt_hash=prompt_hash,
         )
 
     def _split_offline_packed_conversations(
@@ -917,6 +951,26 @@ class MultiModalTaskEncoder(
             sample_lengths=torch.tensor(sample_lengths, dtype=torch.int32),
         )
 
+    @stateless(restore_seeds=True)
+    def preencode_sample_for_packing(self, sample: ConversationSample):
+        encoded_sample = self.preencode_sample(sample)
+        samples = getattr(encoded_sample, "samples", None)
+        if samples is not None:
+            yield from samples
+        else:
+            yield encoded_sample
+
+    def build_encode_sample(self, dataset, *, worker_config):
+        if self.is_packing_enabled:
+            return MapDataset(
+                dataset,
+                self.preencode_sample_for_packing,
+                worker_config=worker_config,
+                stateless_map_fn=True,
+            )
+        return super().build_encode_sample(dataset, worker_config=worker_config)
+
+    @stateless(restore_seeds=True)
     def postencode_sample(
         self,
         sample: PreEncodedTaskSample | PreEncodedOfflinePackedTextSample,
@@ -1102,8 +1156,8 @@ class MultiModalTaskEncoder(
         packed_samples = self.packing_knapsack_algorithm(
             lengths, samples, self.packing_seq_length
         )
-        # Shuffle the packed samples
-        random.shuffle(packed_samples)
+        if self.shuffle_packed_samples:
+            random.shuffle(packed_samples)
 
         # TODO: Save iterated samples
         # with open(f"tmpdata/packed_samples_{os.getpid()}.json", "a") as f:
