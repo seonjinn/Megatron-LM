@@ -447,8 +447,8 @@ class TopKRouter(Router):
                 padding tokens. Can be a Python int or a torch.Tensor (typically 0-d tensor).
                 If None, uses activation.shape[0]. Defaults to None.
         """
-        # Optionally scale repeated-MTP MoE aux loss by 1/mtp_num_layers. Leave this
-        # disabled to preserve legacy repeated-MTP aux-loss behavior.
+        # Scale repeated-MTP MoE aux loss by 1/mtp_num_layers by default to match
+        # the target branch; --no-scale-mtp-moe-aux-loss restores legacy behavior.
         if (
             self.is_mtp_layer
             and self.config.mtp_use_repeated_layer
@@ -524,8 +524,8 @@ class TopKRouter(Router):
             else:
                 logits = MoEAuxLossAutoScaler.apply(logits, z_loss)
 
-            # Optionally scale repeated-MTP MoE z-loss by 1/mtp_num_layers. Leave this
-            # disabled to preserve legacy repeated-MTP z-loss logging behavior.
+            # Scale repeated-MTP MoE z-loss by 1/mtp_num_layers by default to match
+            # the target branch; --no-scale-mtp-moe-aux-loss restores legacy logging.
             if (
                 self.is_mtp_layer
                 and self.config.mtp_use_repeated_layer

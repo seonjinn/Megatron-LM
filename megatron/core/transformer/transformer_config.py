@@ -1,5 +1,6 @@
 # Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
+import argparse
 import logging
 import math
 import warnings
@@ -81,7 +82,15 @@ class TransformerConfig(ModelParallelConfig):
     mtp_use_repeated_layer: bool = False
     """Use a single MTP layer repeatedly instead of multiple separate layers."""
 
-    scale_mtp_moe_aux_loss: bool = False
+    scale_mtp_moe_aux_loss: bool = field(
+        default=True,
+        metadata={
+            "argparse_meta": {
+                "arg_names": ["--scale-mtp-moe-aux-loss"],
+                "action": argparse.BooleanOptionalAction,
+            }
+        },
+    )
     """Scale MTP-layer MoE auxiliary losses by the number of MTP layers when using repeated MTP layers."""
 
     mtp_hybrid_override_pattern: Optional[str] = None
