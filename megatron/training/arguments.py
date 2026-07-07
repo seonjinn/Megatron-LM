@@ -3366,6 +3366,14 @@ def _add_sft_args(parser):
     group.add_argument('--sft', action="store_true", help='Megatron SFT training')
     group.add_argument('--sft-tokenizer-prompt-format', type=str, default="nemotron-h-aligned",
                        help='SFT prompt format.')
+    group.add_argument(
+        '--sft-loss-log-mode',
+        type=str,
+        default='token-weighted',
+        choices=['token-weighted', 'microbatch'],
+        help='SFT loss logging reduction mode. token-weighted averages over trainable tokens '
+        'across the global batch; microbatch averages valid microbatch losses.',
+    )
     return parser
 
 

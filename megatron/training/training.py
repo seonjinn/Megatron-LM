@@ -2383,45 +2383,65 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
             val = [x[key].view(-1) for x in losses_reduced]
             if val[0].numel() == 2:
                 if args.sft:
-                    # For SFT we report the average microbatch loss. With context parallelism,
-                    # some local shards can legitimately have zero trainable tokens, so we
-                    # ignore zero-denominator entries when reducing the logging value.
-                    val = torch.vstack(val)
-                    numerators = val[:, 0]
-                    denominators = val[:, 1]
-                    valid = denominators > 0
-
-                    if valid.any():
-                        local_sum = (numerators[valid] / denominators[valid]).sum()
-                        local_count = torch.tensor(
-                            float(valid.sum().item()),
-                            dtype=local_sum.dtype,
-                            device=local_sum.device,
+                    if args.sft_loss_log_mode == 'token-weighted':
+                        # Average over trainable tokens across the global batch.
+                        # This avoids biasing packed SFT toward microbatches with
+                        # fewer trainable tokens.
+                        val = torch.vstack(val).sum(dim=0)
+                        torch.distributed.all_reduce(
+                            val,
+                            group=mpu.get_data_parallel_group(with_context_parallel=True)
                         )
+                        denominator = torch.clamp(val[1], min=1.0)
+                        loss_reduced[key] = torch.where(
+                            val[1] > 0,
+                            val[0] / denominator,
+                            torch.zeros_like(val[0]),
+                        )
+                    elif args.sft_loss_log_mode == 'microbatch':
+                        # Average valid microbatch losses. With context
+                        # parallelism, some local shards can legitimately have
+                        # zero trainable tokens, so ignore zero-denominator
+                        # entries when reducing the logging value.
+                        val = torch.vstack(val)
+                        numerators = val[:, 0]
+                        denominators = val[:, 1]
+                        valid = denominators > 0
+
+                        if valid.any():
+                            local_sum = (numerators[valid] / denominators[valid]).sum()
+                            local_count = torch.tensor(
+                                float(valid.sum().item()),
+                                dtype=local_sum.dtype,
+                                device=local_sum.device,
+                            )
+                        else:
+                            local_sum = torch.tensor(
+                                0.0, dtype=numerators.dtype, device=numerators.device
+                            )
+                            local_count = torch.tensor(
+                                0.0, dtype=numerators.dtype, device=numerators.device
+                            )
+
+                        torch.distributed.all_reduce(
+                            local_sum,
+                            group=mpu.get_data_parallel_group(with_context_parallel=True)
+                        )
+                        torch.distributed.all_reduce(
+                            local_count,
+                            group=mpu.get_data_parallel_group(with_context_parallel=True)
+                        )
+
+                        if local_count.item() > 0:
+                            loss_reduced[key] = local_sum / local_count
+                        else:
+                            loss_reduced[key] = torch.tensor(
+                                0.0, dtype=numerators.dtype, device=numerators.device
+                            )
                     else:
-                        local_sum = torch.tensor(
-                            0.0, dtype=numerators.dtype, device=numerators.device
+                        raise ValueError(
+                            f"Invalid SFT loss logging mode: {args.sft_loss_log_mode}"
                         )
-                        local_count = torch.tensor(
-                            0.0, dtype=numerators.dtype, device=numerators.device
-                        )
-
-                    torch.distributed.all_reduce(
-                        local_sum,
-                        group=mpu.get_data_parallel_group(with_context_parallel=True)
-                    )
-                    torch.distributed.all_reduce(
-                        local_count,
-                        group=mpu.get_data_parallel_group(with_context_parallel=True)
-                    )
-
-                    if local_count.item() > 0:
-                        val = local_sum / local_count
-                    else:
-                        val = torch.tensor(
-                            0.0, dtype=numerators.dtype, device=numerators.device
-                        )
-                    loss_reduced[key] = val
                 else:
                     # there is one dict per microbatch. in new reporting, we average
                     # over the total number of tokens across the global batch.
@@ -2459,6 +2479,12 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
         log_max_attention_logit,
         samples_seen_in_iteration,
     )
+
+
+def _scalar_for_log(value):
+    if isinstance(value, torch.Tensor) and value.numel() == 1:
+        return value.item()
+    return value
 
 
 def training_log(
@@ -2775,11 +2801,11 @@ def training_log(
             log_string += moe_log_string
         log_string += f' loss scale: {loss_scale:.1f} |'
         if grad_norm is not None:
-            log_string += f' grad norm: {grad_norm:.3f} |'
+            log_string += f' grad norm: {_scalar_for_log(grad_norm):.3f} |'
         if num_zeros_in_grad is not None:
             log_string += f' num zeros: {num_zeros_in_grad} |'
         if params_norm is not None:
-            log_string += f' params norm: {params_norm:.3f} |'
+            log_string += f' params norm: {_scalar_for_log(params_norm):.3f} |'
         log_string += ' number of skipped iterations: {:3d} |'.format(
             total_loss_dict[skipped_iters_key]
         )
