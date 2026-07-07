@@ -19,6 +19,7 @@ from megatron.energon.flavors.jsonl.ijsonl import (
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse CLI options for JSONL index and metadataset generation."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "paths",
@@ -88,6 +89,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def iter_jsonl_paths(paths: list[str], pattern: str) -> list[Path]:
+    """Expand input files and directories into the JSONL files to index."""
     jsonl_paths: list[Path] = []
     for path_arg in paths:
         path = Path(path_arg)
@@ -101,6 +103,7 @@ def iter_jsonl_paths(paths: list[str], pattern: str) -> list[Path]:
 
 
 def prepare_index_target(source_path: Path, link_root: Path | None) -> Path:
+    """Return the path that should receive the sidecar index for a source JSONL."""
     if link_root is None:
         return source_path
 
@@ -122,6 +125,7 @@ def prepare_index_target(source_path: Path, link_root: Path | None) -> Path:
 
 
 def build_index(jsonl_path: Path, force: bool = False) -> int:
+    """Build an Energon sidecar index for one JSONL file and return its sample count."""
     index_path = EPath(str(jsonl_path)).with_suffix(IJSONL_SUFFIX)
     if index_path.is_file() and not force:
         print(f"index_exists={index_path}")
@@ -148,16 +152,19 @@ def build_index(jsonl_path: Path, force: bool = False) -> int:
 
 
 def yaml_scalar(value) -> str:
+    """Render a Python value as a YAML-safe scalar."""
     return json.dumps(value, ensure_ascii=False)
 
 
 def absolute_path_without_resolving_symlinks(path: Path) -> Path:
+    """Convert a path to absolute form while preserving any symlink components."""
     if path.is_absolute():
         return path
     return Path.cwd() / path
 
 
 def yaml_dataset_path(jsonl_path: Path, output_yaml: Path, absolute_paths: bool) -> str:
+    """Format the dataset path written into a generated MetadatasetV2 YAML."""
     jsonl_path = absolute_path_without_resolving_symlinks(jsonl_path)
     if absolute_paths:
         return str(jsonl_path)
@@ -175,6 +182,7 @@ def write_metadataset_yaml(
     skip_chat_template: bool,
     absolute_paths: bool,
 ) -> None:
+    """Write a MetadatasetV2 YAML that references indexed JSONL shards."""
     output_yaml.parent.mkdir(parents=True, exist_ok=True)
     lines = [
         "__module__: megatron.energon",
@@ -208,6 +216,7 @@ def write_metadataset_yaml(
 
 
 def main() -> int:
+    """Run the JSONL index builder."""
     args = parse_args()
     if args.workers < 1:
         raise ValueError("--workers must be at least 1")

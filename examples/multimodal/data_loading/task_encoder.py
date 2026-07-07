@@ -90,6 +90,8 @@ class PreEncodedTaskSample(Sample):
 
 @edataclass
 class PreEncodedOfflinePackedTextSample(Sample):
+    """Pre-tokenized Nano text row that was already packed before Energon loading."""
+
     tokens: torch.Tensor
     labels: torch.Tensor
     max_length: int
