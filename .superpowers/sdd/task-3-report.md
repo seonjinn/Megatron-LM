@@ -8,29 +8,32 @@
 
 ## Changed Files
 
-- `megatron/training/sft_comparison_metrics.py`: frozen typed observation and pure training/validation payload builders with finite-value validation.
+- `megatron/training/sft_comparison_metrics.py`: frozen typed observations, strict scalar normalization, configuration validation, pure payload builders, and event-scoped W&B emission.
 - `megatron/training/arguments.py`: opt-in `--log-comparison-metrics` SFT flag, default false.
 - `megatron/training/training.py`: custom W&B axis setup, native scalar capture, in-loop validation wall timing, coherent per-event payload logging, and final-validation exclusion.
-- `tests/unit_tests/training/test_sft_comparison_metrics.py`: pure adapter, CLI, SFT-only gating, W&B axis/merge, and duplicate-final-evaluation regression tests.
+- `tests/unit_tests/training/test_sft_comparison_metrics.py`: pure adapter, configuration, scalar contract, executable fake-writer event behavior, CLI, W&B axis/merge, and final/incomplete-evaluation regression tests.
 - `.superpowers/sdd/task-3-report.md`: this report.
 
 ## Exact Logging Semantics
 
 - Enabled only when `--sft` and `--log-comparison-metrics` are set, W&B is configured on the last rank, and RL mode is not active.
+- `--log-comparison-metrics` requires `--log-interval 1`; any larger interval raises `ValueError` immediately after argument initialization and before model/training setup.
 - `comparison/step`: one-based Megatron-LM training iteration.
-- `performance/train_step_time_s`: existing `interval-time` elapsed iteration average in seconds. Validation is excluded by the native timer stop/start around evaluation.
+- `performance/train_step_time_s`: existing `interval-time` elapsed iteration value in seconds for exactly one step. Validation is excluded by the native timer stop/start around evaluation.
 - `performance/validation_time_s`: last-rank `time.perf_counter()` wall duration around the existing in-loop `evaluate(...)` call. Multiple validation sets use the sum of those call durations.
 - `performance/e2e_step_time_s`: training time on non-validation events; training time plus validation wall duration on in-loop validation events.
-- `accuracy/main_lm_loss`: existing native interval-averaged `lm loss` scalar already materialized for stdout logging.
+- `accuracy/main_lm_loss`: existing native `lm loss` scalar already materialized for stdout logging; the required log interval makes this a one-step average.
 - `accuracy/validation_loss`: existing native `lm loss` validation scalar for a single validation set. It is omitted for multiple validation sets because no unambiguous common scalar exists.
 - `accuracy/grad_norm` and `accuracy/learning_rate`: existing native training scalars; unavailable values are omitted.
 - `context/is_validation_step`: `0` for training-only events and `1` for in-loop validation events.
-- One common payload is sent per native log event. W&B 0.28.0 receives `step=iteration, commit=False`, matching native Megatron-LM calls and merging the common keys into the current history row.
+- One common payload is sent per completed training event. W&B 0.28.0 receives `step=iteration, commit=False`, matching native Megatron-LM calls and merging the common keys into the current history row.
 - `comparison/step` is defined as the custom axis for `performance/*`, `accuracy/*`, and `context/*`, exactly matching NeMo-RL.
+- An in-loop validation outcome explicitly records whether evaluation was attempted and completed. Attempted-but-incomplete validation, including the timelimit path, suppresses the entire common row instead of emitting a misleading training-only row.
 - The post-training final validation and test calls explicitly set `collect_comparison_metrics=False`. Their native logs remain unchanged and can merge at step 200 without a stale-step conflict; no second common performance row is emitted.
+- The adapter accepts only exact built-in Python `int`/`float` measurements and an exact built-in `int` step. It rejects booleans, `Decimal`, non-Python numeric scalar objects, and non-finite values; every emitted measurement is normalized to built-in `float` and step/context values remain built-in `int`.
 - No collective, barrier, CUDA synchronization, or timer synchronization was added. The only new measurement is `perf_counter()` around the existing in-loop evaluation, and existing `.item()` scalar conversions are reused (validation conversions were reduced from repeated calls to one).
 
-Comparison rows are available at native Megatron-LM log events. A validation event whose iteration is not a native log event has no native elapsed iteration scalar, so the common row is omitted rather than using a stale or synthesized training time.
+Comparison rows are exact per-step because enabling the feature requires native per-step logging.
 
 ## TDD Evidence
 
@@ -48,15 +51,27 @@ Comparison rows are available at native Megatron-LM log events. A validation eve
 
 5. Step-200 merge regression run: 1 failure because the comparison call used a committed implicit step instead of explicit `step=iteration, commit=False`.
 
+6. Review follow-up configuration run: 7 failures because exact per-step configuration validation did not exist; the pretrain wiring check also failed before the validator call was added.
+
+7. Review follow-up scalar run: 16 failures because booleans, `Decimal`, and float steps were accepted and integer measurements were not normalized to float.
+
+8. Review follow-up event run: 5 failures because the typed validation result/event logger did not exist and `train()` still logged directly. Supplemental wiring tests then failed until timelimit returned an explicit incomplete result and the loop delegated to the pure event helper.
+
 ### GREEN
 
 Final pure suite:
 
 `python3 -m pytest --rootdir=tests/unit_tests/training --confcutdir=tests/unit_tests/training --import-mode=prepend tests/unit_tests/training/test_sft_comparison_metrics.py -q`
 
-Result: `20 passed in 0.15s` in the final verification run.
+Result before the follow-up review: `20 passed in 0.15s`.
 
-The step-20 test proves a single payload contains train time `55.28`, validation time `58.645`, combined E2E time `113.925`, both losses, grad norm, learning rate, and validation marker `1`.
+Latest follow-up pure run:
+
+`python3 -m pytest --rootdir=tests/unit_tests/training --confcutdir=tests/unit_tests/training --import-mode=prepend tests/unit_tests/training/test_sft_comparison_metrics.py -q`
+
+Result: `49 passed in 0.18s` in the final follow-up verification run.
+
+Executable fake-writer tests prove that step 20 produces one call containing train time `55.28`, validation time `58.645`, combined E2E time `113.925`, both losses, grad norm, learning rate, validation marker `1`, `step=20`, and `commit=False`. They also prove training-only emission, final-validation omission, and timelimit/incomplete-validation suppression. AST tests remain only as supplemental production-wiring checks.
 
 ## Commands and Results
 
@@ -69,8 +84,9 @@ The step-20 test proves a single payload contains train time `55.28`, validation
   - Environment/pre-existing blocker: 728 errors headed by unresolved `torch`, `torch.distributed`, `torch_memory_saver`, `modelopt`, `flashinfer`, and NVIDIA resiliency packages, plus existing typing cascades in the large legacy files.
 - `ruff check megatron/training/sft_comparison_metrics.py megatron/training/training.py megatron/training/arguments.py tests/unit_tests/training/test_sft_comparison_metrics.py`
   - No issues found.
-- `uv run --isolated --with isort isort --check-only ...`
-  - Passed.
+- `uv run --isolated --with isort isort --check-only megatron/training/sft_comparison_metrics.py megatron/training/training.py tests/unit_tests/training/test_sft_comparison_metrics.py`
+  - Passed for every Python file edited by the follow-up.
+- Adding the unchanged `megatron/training/arguments.py` to the isort command reports broad pre-existing import-order drift throughout that file. The follow-up leaves it untouched; its Task 3 change is the two-line CLI option and `ruff check` passes it.
 - `python3 -m compileall -q ...`
   - Passed.
 - `git diff --check`

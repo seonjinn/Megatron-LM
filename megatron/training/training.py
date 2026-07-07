@@ -175,8 +175,9 @@ from .global_vars import (
 )
 from .sft_comparison_metrics import (
     SFTComparisonObservation,
-    build_training_comparison_metrics,
-    build_validation_comparison_metrics,
+    SFTValidationResult,
+    log_sft_comparison_event,
+    validate_sft_comparison_configuration,
 )
 from .theoretical_memory_usage import report_theoretical_memory
 from .utils import (
@@ -265,12 +266,6 @@ MAX_NUM_CHECKPOINTS_MEMORY_REPORTED = 3
 @dataclasses.dataclass
 class _SFTComparisonState:
     pending_observation: SFTComparisonObservation | None = None
-
-
-@dataclasses.dataclass(frozen=True)
-class _SFTValidationResult:
-    validation_time_s: float
-    validation_loss: float | None
 
 
 def _sft_comparison_metrics_enabled(args: object) -> bool:
@@ -1119,6 +1114,10 @@ def pretrain(
 
     args = get_args()
     timers = get_timers()
+    validate_sft_comparison_configuration(
+        enabled=bool(getattr(args, 'log_comparison_metrics', False)),
+        log_interval=args.log_interval,
+    )
 
     if args.fine_grained_activation_offloading:
         from megatron.core.pipeline_parallel.utils import set_ideal_affinity_for_current_gpu
@@ -3941,7 +3940,11 @@ def train(
         is_first_iteration = False
 
         # Evaluation.
-        comparison_validation_result = None
+        comparison_validation_result = (
+            SFTValidationResult(attempted=False, completed=False)
+            if comparison_state is not None
+            else None
+        )
         if args.eval_interval and iteration % args.eval_interval == 0 and args.do_valid \
                 and (args.start_eval_at_iter is None or iteration >= args.start_eval_at_iter):
             if args.log_energy:
@@ -4014,20 +4017,15 @@ def train(
                 get_moe_metrics_tracker().clear()
 
         if comparison_state is not None and comparison_state.pending_observation is not None:
-            observation = comparison_state.pending_observation
-            if comparison_validation_result is None:
-                comparison_payload = build_training_comparison_metrics(observation)
-            else:
-                comparison_payload = build_validation_comparison_metrics(
-                    dataclasses.replace(
-                        observation,
-                        validation_time_s=comparison_validation_result.validation_time_s,
-                        validation_loss=comparison_validation_result.validation_loss,
-                    )
-                )
             wandb_writer = get_wandb_writer()
             assert wandb_writer is not None
-            wandb_writer.log(comparison_payload, step=iteration, commit=False)
+            assert comparison_validation_result is not None
+            log_sft_comparison_event(
+                writer=wandb_writer,
+                observation=comparison_state.pending_observation,
+                validation_result=comparison_validation_result,
+                event_scope="training",
+            )
             comparison_state.pending_observation = None
 
         # Miscellaneous post-training-step functions (e.g., FT heartbeats, GC).
@@ -4372,6 +4370,8 @@ def evaluate_and_print_results(
             comparison_validation_time_s += time.perf_counter() - comparison_validation_start
         # Timelimit hit during evaluation
         if timelimit:
+            if collect_comparison_metrics:
+                return SFTValidationResult(attempted=True, completed=False)
             return
         string = f' validation{suffix} loss at {prefix} | '
         for key in total_loss_dict:
@@ -4407,7 +4407,9 @@ def evaluate_and_print_results(
         print_rank_last('-' * length)
 
     if collect_comparison_metrics:
-        return _SFTValidationResult(
+        return SFTValidationResult(
+            attempted=True,
+            completed=True,
             validation_time_s=comparison_validation_time_s,
             validation_loss=comparison_validation_loss,
         )
