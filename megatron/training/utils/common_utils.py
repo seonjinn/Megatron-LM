@@ -268,11 +268,12 @@ def reduce_max_stat_across_model_parallel_group(
         stat = -1.0
     stat = torch.tensor([stat], dtype=torch.float32, device=torch.cuda.current_device())
     torch.distributed.all_reduce(stat, op=torch.distributed.ReduceOp.MAX, group=group)
-    if stat.item() == -1.0:
+    stat_value = stat.item()
+    if stat_value == -1.0:
         # No rank has a valid stat, so return None to indicate that it is None across all ranks.
         return None
     else:
-        return stat.item()
+        return stat_value
 
 
 def logical_and_across_model_parallel_group(

@@ -16,6 +16,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _ADAPTER_PATH = _REPO_ROOT / "megatron/training/sft_comparison_metrics.py"
 _ARGUMENTS_PATH = _REPO_ROOT / "megatron/training/arguments.py"
 _TRAINING_PATH = _REPO_ROOT / "megatron/training/training.py"
+_TRAINING_UTILS_PATH = _REPO_ROOT / "megatron/training/utils/common_utils.py"
 
 
 class _FakeWandbWriter:
@@ -30,6 +31,16 @@ class _FakeWandbWriter:
         commit: bool,
     ) -> None:
         self.log_calls.append((dict(data), step, commit))
+
+
+class _TensorLikeScalar:
+    def __init__(self, value: float) -> None:
+        self.value = value
+        self.item_calls = 0
+
+    def item(self) -> float:
+        self.item_calls += 1
+        return self.value
 
 
 def _load_adapter() -> ModuleType:
@@ -152,6 +163,98 @@ def test_normalizes_accepted_python_numbers_to_schema_types() -> None:
         for name, value in metrics.items()
         if name not in {"comparison/step", "context/is_validation_step"}
     )
+
+
+def test_materializes_tensor_like_grad_norm_once_for_native_and_comparison() -> None:
+    adapter = _load_adapter()
+    producer_value = _TensorLikeScalar(42.25)
+
+    grad_norm = adapter.normalize_sft_metric_producer_scalar(
+        "grad_norm",
+        producer_value,
+    )
+    native_wandb_payload = {"grad-norm": grad_norm}
+    observation = adapter.capture_sft_comparison_step(
+        state=adapter.SFTComparisonStepState(),
+        step=1,
+        train_active_time_s=4.5,
+        advanced=True,
+        main_lm_loss=2.5,
+        grad_norm=grad_norm,
+        learning_rate=1e-5,
+    )
+    comparison_payload = adapter.build_training_comparison_metrics(observation)
+
+    assert producer_value.item_calls == 1
+    assert type(grad_norm) is float
+    assert native_wandb_payload["grad-norm"] == 42.25
+    assert comparison_payload["accuracy/grad_norm"] == 42.25
+
+
+def test_reduced_logging_scalar_is_materialized_once_at_producer() -> None:
+    reducer = _function_node(
+        _TRAINING_UTILS_PATH,
+        "reduce_max_stat_across_model_parallel_group",
+    )
+    item_calls = [
+        node
+        for node in ast.walk(reducer)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "item"
+    ]
+
+    assert len(item_calls) == 1
+
+
+def test_captures_independent_first_and_second_step_time_and_loss() -> None:
+    adapter = _load_adapter()
+    state = adapter.SFTComparisonStepState()
+
+    first = adapter.capture_sft_comparison_step(
+        state=state,
+        step=1,
+        train_active_time_s=10.0,
+        advanced=True,
+        main_lm_loss=2.75,
+        grad_norm=4.0,
+        learning_rate=1e-5,
+    )
+    second = adapter.capture_sft_comparison_step(
+        state=state,
+        step=2,
+        train_active_time_s=16.5,
+        advanced=True,
+        main_lm_loss=1.25,
+        grad_norm=3.0,
+        learning_rate=2e-5,
+    )
+
+    assert first.train_step_time_s == 10.0
+    assert first.main_lm_loss == 2.75
+    assert second.train_step_time_s == 6.5
+    assert second.main_lm_loss == 1.25
+
+
+def test_skipped_step_omits_loss_without_losing_timer_progress() -> None:
+    adapter = _load_adapter()
+    state = adapter.SFTComparisonStepState(train_active_time_s=16.5)
+
+    skipped = adapter.capture_sft_comparison_step(
+        state=state,
+        step=3,
+        train_active_time_s=21.0,
+        advanced=False,
+        main_lm_loss=0.0,
+        grad_norm=None,
+        learning_rate=2e-5,
+    )
+    payload = adapter.build_training_comparison_metrics(skipped)
+
+    assert skipped.train_step_time_s == 4.5
+    assert skipped.main_lm_loss is None
+    assert state.train_active_time_s == 21.0
+    assert "accuracy/main_lm_loss" not in payload
 
 
 @pytest.mark.parametrize(
@@ -465,6 +568,33 @@ def test_wandb_comparison_axis_matches_nemo_rl() -> None:
     ]
 
 
+def test_wandb_config_describes_exact_per_event_train_time() -> None:
+    pretrain = _function_node(_TRAINING_PATH, "pretrain")
+    config_updates = [
+        ast.literal_eval(update)
+        for node in ast.walk(pretrain)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "update"
+        and node.args
+        and isinstance((update := node.args[0]), ast.Dict)
+        and any(
+            isinstance(key, ast.Constant) and key.value == "comparison_metric_scopes"
+            for key in update.keys
+        )
+    ]
+    comparison_config = next(
+        update["comparison_metric_scopes"]
+        for update in config_updates
+        if "comparison_metric_scopes" in update
+    )
+
+    assert (
+        comparison_config["train_step_time_s"]
+        == "native interval-time per-event active-time delta excluding validation"
+    )
+
+
 def test_training_loop_delegates_common_event_logging_once() -> None:
     train = _function_node(_TRAINING_PATH, "train")
     evaluate_and_print_results = _function_node(_TRAINING_PATH, "evaluate_and_print_results")
@@ -487,6 +617,34 @@ def test_training_loop_delegates_common_event_logging_once() -> None:
         isinstance(node, ast.Name) and node.id == "comparison_payload"
         for node in ast.walk(evaluate_and_print_results)
     )
+
+
+def test_training_log_uses_exact_current_step_producers() -> None:
+    training_log = _function_node(_TRAINING_PATH, "training_log")
+    calls = [
+        ast.unparse(node)
+        for node in ast.walk(training_log)
+        if isinstance(node, ast.Call)
+        and (
+            isinstance(node.func, ast.Name)
+            and node.func.id
+            in {
+                "capture_sft_comparison_step",
+                "normalize_sft_metric_producer_scalar",
+            }
+            or isinstance(node.func, ast.Attribute)
+            and node.func.attr == "active_time"
+        )
+    ]
+
+    assert "normalize_sft_metric_producer_scalar('grad_norm', grad_norm)" in calls
+    assert "normalize_sft_metric_producer_scalar('main_lm_loss', loss_dict[key])" in calls
+    assert "timers('interval-time').active_time()" in calls
+    capture_call = next(call for call in calls if call.startswith("capture_sft_comparison_step("))
+    assert "train_active_time_s=comparison_train_active_time_s" in capture_call
+    assert "advanced=not bool(skipped_iter)" in capture_call
+    assert "main_lm_loss=comparison_main_lm_loss" in capture_call
+    assert "grad_norm=grad_norm" in capture_call
 
 
 def test_timelimit_returns_explicit_incomplete_validation_result() -> None:
