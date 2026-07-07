@@ -173,6 +173,11 @@ from .global_vars import (
     get_tokenizer,
     get_wandb_writer,
 )
+from .sft_comparison_metrics import (
+    SFTComparisonObservation,
+    build_training_comparison_metrics,
+    build_validation_comparison_metrics,
+)
 from .theoretical_memory_usage import report_theoretical_memory
 from .utils import (
     append_to_progress_log,
@@ -255,6 +260,25 @@ _seqlen_stats_active: bool = False
 # Only report memory for first 3 checkpoint saves.
 num_checkpoints_memory_reported = 0
 MAX_NUM_CHECKPOINTS_MEMORY_REPORTED = 3
+
+
+@dataclasses.dataclass
+class _SFTComparisonState:
+    pending_observation: SFTComparisonObservation | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class _SFTValidationResult:
+    validation_time_s: float
+    validation_loss: float | None
+
+
+def _sft_comparison_metrics_enabled(args: object) -> bool:
+    return bool(
+        getattr(args, 'sft', False)
+        and getattr(args, 'log_comparison_metrics', False)
+        and not getattr(args, 'perform_rl_step', False)
+    )
 
 
 def set_startup_timestamps(program_start=None, main_entry=None):
@@ -1376,6 +1400,20 @@ def pretrain(
     if wandb_writer:
         # Add job name to the wandb config to make it easier to run more singleton dependency jobs.
         wandb_writer.config.update({'slurm_job_name': os.getenv("SLURM_JOB_NAME", "N/A")})
+        if _sft_comparison_metrics_enabled(args):
+            wandb_writer.config.update(
+                {
+                    'comparison_metric_scopes': {
+                        'train_step_time_s': 'native interval-time average excluding validation',
+                        'validation_time_s': 'rank-last perf_counter wall time around in-loop evaluate()',
+                        'e2e_step_time_s': 'train_step_time_s plus validation_time_s when validation runs',
+                    }
+                }
+            )
+            wandb_writer.define_metric('comparison/step')
+            wandb_writer.define_metric('performance/*', step_metric='comparison/step')
+            wandb_writer.define_metric('accuracy/*', step_metric='comparison/step')
+            wandb_writer.define_metric('context/*', step_metric='comparison/step')
 
     # Initialize RL profiler if enabled
     if args.rl_profile:
@@ -1476,7 +1514,8 @@ def pretrain(
                 iteration, process_non_loss_data_func, model_cfg,
                 verbose=True, write_to_tensorboard=not cfg_container.validation.skip_train,
                 non_loss_data_func=non_loss_data_func,
-                pg_collection=pg_collection, p2p_communicator=p2p_communicator
+                pg_collection=pg_collection, p2p_communicator=p2p_communicator,
+                collect_comparison_metrics=False,
             )
 
     if args.do_test:
@@ -1494,6 +1533,7 @@ def pretrain(
             non_loss_data_func=non_loss_data_func,
             pg_collection=pg_collection,
             p2p_communicator=p2p_communicator,
+            collect_comparison_metrics=False,
         )
 
     wandb_writer = get_wandb_writer()
@@ -2509,6 +2549,7 @@ def training_log(
     is_first_iteration=False,
     seqlen_squared_sum_in_batch: float | None = None,
     total_real_tokens_in_batch: float | None = None,
+    comparison_state: _SFTComparisonState | None = None,
 ):
     """Log training information such as losses, timing, ...."""
     args = get_args()
@@ -2520,6 +2561,8 @@ def training_log(
 
     # On first iteration, log stats but don't reset accumulators so normal interval stats remain accurate.
     should_reset = not is_first_iteration
+    if comparison_state is not None:
+        comparison_state.pending_observation = None
 
     # Advanced, skipped, and Nan iterations.
     advanced_iters_key = 'advanced iterations'
@@ -2794,15 +2837,26 @@ def training_log(
         if learning_rate is not None:
             log_string += f' learning rate: {learning_rate:.6E} |'
         log_string += f' global batch size: {batch_size:5d} |'
+        main_lm_loss = None
         for key in total_loss_dict:
             if key not in [advanced_iters_key, skipped_iters_key, nan_iters_key]:
                 avg = total_loss_dict[key].item() / float(
                     max(1, total_loss_dict[advanced_iters_key])
                 )
+                if key == 'lm loss':
+                    main_lm_loss = avg
                 if avg >= 0.0:
                     log_string += ' {}: {:.6E} |'.format(key, avg)
                 if should_reset:
                     total_loss_dict[key] = torch.tensor([0.0], dtype=torch.float, device='cuda')
+        if comparison_state is not None and wandb_writer:
+            comparison_state.pending_observation = SFTComparisonObservation(
+                step=iteration,
+                train_step_time_s=elapsed_time_per_iteration,
+                main_lm_loss=main_lm_loss,
+                grad_norm=grad_norm,
+                learning_rate=learning_rate,
+            )
         if args.num_experts is not None and moe_log_string:
             log_string += moe_log_string
         log_string += f' loss scale: {loss_scale:.1f} |'
@@ -3397,6 +3451,11 @@ def train(
 
     # Tracking loss.
     total_loss_dict = {}
+    comparison_state = (
+        _SFTComparisonState()
+        if _sft_comparison_metrics_enabled(args) and get_wandb_writer() is not None
+        else None
+    )
 
     # Iterations.
     iteration = args.iteration
@@ -3877,10 +3936,12 @@ def train(
             is_first_iteration=is_first_iteration,
             seqlen_squared_sum_in_batch=seqlen_squared_sum_in_batch,
             total_real_tokens_in_batch=total_real_tokens_in_batch,
+            comparison_state=comparison_state,
         )
         is_first_iteration = False
 
         # Evaluation.
+        comparison_validation_result = None
         if args.eval_interval and iteration % args.eval_interval == 0 and args.do_valid \
                 and (args.start_eval_at_iter is None or iteration >= args.start_eval_at_iter):
             if args.log_energy:
@@ -3916,13 +3977,24 @@ def train(
                     training_model=rl_training_model,
                 )
             else:
-                evaluate_and_print_results(prefix, forward_step_func,
-                                       valid_data_iterator, model,
-                                       iteration, process_non_loss_data_func,
-                                       config, verbose=False, write_to_tensorboard=True,
-                                       non_loss_data_func=non_loss_data_func,
-                                       pg_collection=pg_collection,
-                                       p2p_communicator=p2p_communicator)
+                comparison_validation_result = evaluate_and_print_results(
+                    prefix,
+                    forward_step_func,
+                    valid_data_iterator,
+                    model,
+                    iteration,
+                    process_non_loss_data_func,
+                    config,
+                    verbose=False,
+                    write_to_tensorboard=True,
+                    non_loss_data_func=non_loss_data_func,
+                    pg_collection=pg_collection,
+                    p2p_communicator=p2p_communicator,
+                    collect_comparison_metrics=(
+                        comparison_state is not None
+                        and comparison_state.pending_observation is not None
+                    ),
+                )
 
             eval_duration += timers('eval-time').elapsed()
             eval_iterations += sum(args.eval_iters) if isinstance(args.eval_iters, list) else args.eval_iters
@@ -3940,6 +4012,23 @@ def train(
                 energy_monitor.resume()
             if args.num_experts is not None:
                 get_moe_metrics_tracker().clear()
+
+        if comparison_state is not None and comparison_state.pending_observation is not None:
+            observation = comparison_state.pending_observation
+            if comparison_validation_result is None:
+                comparison_payload = build_training_comparison_metrics(observation)
+            else:
+                comparison_payload = build_validation_comparison_metrics(
+                    dataclasses.replace(
+                        observation,
+                        validation_time_s=comparison_validation_result.validation_time_s,
+                        validation_loss=comparison_validation_result.validation_loss,
+                    )
+                )
+            wandb_writer = get_wandb_writer()
+            assert wandb_writer is not None
+            wandb_writer.log(comparison_payload, step=iteration, commit=False)
+            comparison_state.pending_observation = None
 
         # Miscellaneous post-training-step functions (e.g., FT heartbeats, GC).
         # Some of these only happen at specific iterations. Capture updated FLOPs accumulator
@@ -4216,6 +4305,7 @@ def evaluate_and_print_results(
     non_loss_data_func=None,
     pg_collection=None,
     p2p_communicator=None,
+    collect_comparison_metrics: bool = False,
 ):
     """Helper function to evaluate and dump results on screen."""
     args = get_args()
@@ -4225,6 +4315,8 @@ def evaluate_and_print_results(
         writer = None
 
     wandb_writer = get_wandb_writer()
+    comparison_validation_time_s = 0.0
+    comparison_validation_loss = None
 
     data_iterators = data_iterator if args.multiple_validation_sets else [data_iterator]
 
@@ -4263,6 +4355,7 @@ def evaluate_and_print_results(
                 suffix = f"-{args.validation_set_names[index]}"
             else:
                 suffix = f"-{index}"
+        comparison_validation_start = time.perf_counter() if collect_comparison_metrics else None
         total_loss_dict, collected_non_loss_data, timelimit = evaluate(
             forward_step_func,
             iterator,
@@ -4275,19 +4368,24 @@ def evaluate_and_print_results(
             pg_collection=pg_collection,
             p2p_communicator=p2p_communicator,
         )
+        if comparison_validation_start is not None:
+            comparison_validation_time_s += time.perf_counter() - comparison_validation_start
         # Timelimit hit during evaluation
         if timelimit:
             return
         string = f' validation{suffix} loss at {prefix} | '
         for key in total_loss_dict:
-            string += '{} value: {:.6E} | '.format(key, total_loss_dict[key].item())
-            ppl = math.exp(min(20, total_loss_dict[key].item()))
+            loss_value = total_loss_dict[key].item()
+            if collect_comparison_metrics and not args.multiple_validation_sets and key == 'lm loss':
+                comparison_validation_loss = loss_value
+            string += '{} value: {:.6E} | '.format(key, loss_value)
+            ppl = math.exp(min(20, loss_value))
             string += '{} PPL: {:.6E} | '.format(key, ppl)
             if writer:
-                writer.add_scalar('{} validation{}'.format(key, suffix), total_loss_dict[key].item(), iteration)
+                writer.add_scalar('{} validation{}'.format(key, suffix), loss_value, iteration)
                 writer.add_scalar(
                     '{} validation{} vs samples'.format(key, suffix),
-                    total_loss_dict[key].item(),
+                    loss_value,
                     args.consumed_train_samples,
                 )
                 if args.log_validation_ppl_to_tensorboard:
@@ -4297,7 +4395,7 @@ def evaluate_and_print_results(
                     )
                 if wandb_writer and is_last_rank():
                     wandb_writer.log(
-                        {'{} validation{}'.format(key, suffix): total_loss_dict[key].item()}, iteration
+                        {'{} validation{}'.format(key, suffix): loss_value}, iteration
                     )
 
         if process_non_loss_data_func is not None and writer and is_last_rank():
@@ -4307,6 +4405,12 @@ def evaluate_and_print_results(
         print_rank_last('-' * length)
         print_rank_last(string)
         print_rank_last('-' * length)
+
+    if collect_comparison_metrics:
+        return _SFTValidationResult(
+            validation_time_s=comparison_validation_time_s,
+            validation_loss=comparison_validation_loss,
+        )
 
 
 def cyclic_iter(iterable):
