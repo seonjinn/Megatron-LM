@@ -321,7 +321,7 @@ def print_datetime(string, override_timestamp=None):
     print_rank_0(f'[{string}] datetime: {time_str} ')
 
 
-def update_seqlen_stats_from_cu_seqlens(cu_seqlens):
+def update_seqlen_stats_from_cu_seqlens(cu_seqlens, vp_stage: int | None = None):
     """Add ``sum(L_i)`` and ``sum(L_i ** 2)`` from one micro-batch's REAL ``cu_seqlens``.
 
     Args:
@@ -330,6 +330,8 @@ def update_seqlen_stats_from_cu_seqlens(cu_seqlens):
             ``cu_seqlens`` rather than ``cu_seqlens_padded`` so the FLOPs
             metric reports useful work only, not work on CP-alignment or
             end-of-sequence padding tokens.
+        vp_stage: Virtual pipeline stage for the forward call. Only the first
+            virtual chunk contributes because every chunk sees the same batch.
 
     Every rank in the same data-parallel group sees the same ``cu_seqlens`` (it is
     broadcast across TP/CP/PP). The per-micro-batch reduction stays on device --
@@ -340,6 +342,11 @@ def update_seqlen_stats_from_cu_seqlens(cu_seqlens):
     """
     global _seqlen_stats_in_iteration, _seqlen_stats_active
     if cu_seqlens is None or cu_seqlens.numel() < 2:
+        return
+    if not is_vp_first_stage(
+        vp_stage,
+        mpu.get_virtual_pipeline_model_parallel_world_size(),
+    ):
         return
     # Pin the accumulator to the current CUDA device when available so the
     # eventual all-reduce can use NCCL even if a caller passed a CPU tensor
@@ -357,6 +364,15 @@ def update_seqlen_stats_from_cu_seqlens(cu_seqlens):
     _seqlen_stats_in_iteration[0] += seqlens.sum()
     _seqlen_stats_in_iteration[1] += (seqlens * seqlens).sum()
     _seqlen_stats_active = True
+
+
+def reset_seqlen_stats_in_iteration() -> None:
+    """Discard packed-sequence stats before a native training call."""
+
+    global _seqlen_stats_active
+    if _seqlen_stats_in_iteration is not None:
+        _seqlen_stats_in_iteration.zero_()
+    _seqlen_stats_active = False
 
 
 def consume_seqlen_stats_in_iteration() -> Tuple[Optional[float], Optional[float]]:
@@ -3832,6 +3848,7 @@ def train(
             max_attention_logit = None
         else:
             ft_integration.on_training_step_start()
+            reset_seqlen_stats_in_iteration()
             if comparison_state is not None:
                 comparison_train_step_start_time_s = time.perf_counter()
             (

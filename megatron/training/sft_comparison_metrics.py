@@ -261,6 +261,18 @@ def _build_training_metrics(
     train_step_time_s = _normalize_float(
         "train_step_time_s", observation.train_step_time_s
     )
+    throughput_group = (
+        observation.throughput_denominator_time_s,
+        observation.processed_tokens,
+        observation.num_gpus,
+    )
+    if any(value is None for value in throughput_group) and any(
+        value is not None for value in throughput_group
+    ):
+        raise ValueError(
+            "throughput_denominator_time_s, processed_tokens, and num_gpus "
+            "must be all provided or all omitted"
+        )
     throughput_denominator_time_s = (
         _normalize_float(
             "throughput_denominator_time_s", observation.throughput_denominator_time_s
@@ -280,10 +292,6 @@ def _build_training_metrics(
                 f"got {throughput_denominator_time_s}"
             )
         metrics["performance/throughput_denominator_time_s"] = throughput_denominator_time_s
-    if observation.processed_tokens is None and observation.num_gpus is not None:
-        raise ValueError("processed_tokens is required when num_gpus is provided")
-    if observation.processed_tokens is not None and observation.num_gpus is None:
-        raise ValueError("num_gpus is required when processed_tokens is provided")
     if observation.processed_tokens is not None and observation.num_gpus is not None:
         if type(observation.processed_tokens) is not int:
             raise TypeError(
@@ -296,10 +304,7 @@ def _build_training_metrics(
                 f"got {observation.processed_tokens}"
             )
         num_gpus = _normalize_positive_int("num_gpus", observation.num_gpus)
-        if throughput_denominator_time_s is None:
-            raise ValueError(
-                "throughput_denominator_time_s is required when token throughput is emitted"
-            )
+        assert throughput_denominator_time_s is not None
         processed_tokens_per_second = observation.processed_tokens / throughput_denominator_time_s
         metrics["throughput/processed_tokens_per_second"] = processed_tokens_per_second
         metrics["throughput/processed_tokens_per_second_per_gpu"] = (

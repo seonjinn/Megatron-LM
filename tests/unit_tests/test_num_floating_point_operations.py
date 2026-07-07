@@ -406,6 +406,35 @@ class TestAccumulator:
         # the closed-form defaults.
         assert consume_seqlen_stats_in_iteration() == (None, None)
 
+    def test_reset_discards_startup_validation_tokens_before_first_train_step(self):
+        update_seqlen_stats_from_cu_seqlens(torch.tensor([0, 100], dtype=torch.int32))
+
+        training_module.reset_seqlen_stats_in_iteration()
+        update_seqlen_stats_from_cu_seqlens(torch.tensor([0, 20, 50], dtype=torch.int32))
+
+        assert consume_seqlen_stats_in_iteration() == (50, 1_300)
+
+    def test_reset_discards_prior_validation_tokens_before_next_train_step(self):
+        update_seqlen_stats_from_cu_seqlens(torch.tensor([0, 40, 100], dtype=torch.int32))
+
+        training_module.reset_seqlen_stats_in_iteration()
+        update_seqlen_stats_from_cu_seqlens(torch.tensor([0, 25, 60], dtype=torch.int32))
+
+        assert consume_seqlen_stats_in_iteration() == (60, 1_850)
+
+    def test_vpp_two_counts_only_the_first_virtual_chunk(self, monkeypatch):
+        monkeypatch.setattr(
+            training_module.mpu,
+            "get_virtual_pipeline_model_parallel_world_size",
+            lambda: 2,
+        )
+        cu = torch.tensor([0, 100, 300], dtype=torch.int32)
+
+        update_seqlen_stats_from_cu_seqlens(cu, vp_stage=0)
+        update_seqlen_stats_from_cu_seqlens(cu, vp_stage=1)
+
+        assert consume_seqlen_stats_in_iteration() == (300, 50_000)
+
     def test_no_updates_returns_none(self):
         """BSHD path: never calling update must NOT issue a collective. The
         flag stays ``False`` and consume returns ``(None, None)``."""

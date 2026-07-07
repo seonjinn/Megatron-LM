@@ -17,6 +17,8 @@ _ADAPTER_PATH = _REPO_ROOT / "megatron/training/sft_comparison_metrics.py"
 _ARGUMENTS_PATH = _REPO_ROOT / "megatron/training/arguments.py"
 _TRAINING_PATH = _REPO_ROOT / "megatron/training/training.py"
 _TRAINING_UTILS_PATH = _REPO_ROOT / "megatron/training/utils/common_utils.py"
+_PRETRAIN_GPT_PATH = _REPO_ROOT / "pretrain_gpt.py"
+_PRETRAIN_HYBRID_PATH = _REPO_ROOT / "pretrain_hybrid.py"
 
 
 class _FakeWandbWriter:
@@ -606,11 +608,14 @@ def test_rejects_non_finite_combined_e2e_time() -> None:
 @pytest.mark.parametrize(
     ("processed_tokens", "num_gpus", "throughput_denominator_time_s", "field_name"),
     [
-        (None, 512, 50.0, "processed_tokens"),
-        (16_631_382, None, 50.0, "num_gpus"),
+        (None, None, 50.0, "throughput_denominator_time_s, processed_tokens, and num_gpus"),
+        (16_631_382, None, None, "throughput_denominator_time_s, processed_tokens, and num_gpus"),
+        (None, 512, None, "throughput_denominator_time_s, processed_tokens, and num_gpus"),
+        (16_631_382, None, 50.0, "throughput_denominator_time_s, processed_tokens, and num_gpus"),
+        (None, 512, 50.0, "throughput_denominator_time_s, processed_tokens, and num_gpus"),
+        (16_631_382, 512, None, "throughput_denominator_time_s, processed_tokens, and num_gpus"),
         (-1, 512, 50.0, "processed_tokens"),
         (16_631_382, 0, 50.0, "num_gpus"),
-        (16_631_382, 512, None, "throughput_denominator_time_s"),
         (16_631_382, 512, -1.0, "throughput_denominator_time_s"),
         (16_631_382, 512, 0.0, "throughput_denominator_time_s"),
         (16_631_382, 512, math.nan, "throughput_denominator_time_s"),
@@ -1054,6 +1059,52 @@ def test_training_log_uses_real_global_tokens_for_throughput() -> None:
         "else batch_size * args.seq_length"
     )
     assert ast.unparse(capture_keywords["num_gpus"]) == "args.world_size"
+
+
+def test_training_resets_packed_stats_before_each_native_train_step() -> None:
+    train = _function_node(_TRAINING_PATH, "train")
+    train_step_call = next(
+        node
+        for node in ast.walk(train)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "train_step"
+    )
+    skip_train_branch = next(
+        node
+        for node in ast.walk(train)
+        if isinstance(node, ast.If)
+        and ast.unparse(node.test) == "args.skip_train"
+        and train_step_call in ast.walk(ast.Module(body=node.orelse, type_ignores=[]))
+    )
+    reset_statements = [
+        statement
+        for statement in skip_train_branch.orelse
+        if isinstance(statement, ast.Expr)
+        and isinstance(statement.value, ast.Call)
+        and isinstance(statement.value.func, ast.Name)
+        and statement.value.func.id == "reset_seqlen_stats_in_iteration"
+    ]
+
+    assert len(reset_statements) == 1
+    assert reset_statements[0].lineno < train_step_call.lineno
+
+
+@pytest.mark.parametrize("path", [_PRETRAIN_GPT_PATH, _PRETRAIN_HYBRID_PATH])
+def test_packed_forward_step_records_only_the_first_virtual_pipeline_chunk(path: Path) -> None:
+    forward_step = _function_node(path, "forward_step")
+    update_call = next(
+        node
+        for node in ast.walk(forward_step)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "update_seqlen_stats_from_cu_seqlens"
+    )
+
+    assert ast.unparse(update_call.args[0]) == "cu_seqlens"
+    assert {keyword.arg: ast.unparse(keyword.value) for keyword in update_call.keywords} == {
+        "vp_stage": "vp_stage"
+    }
 
 
 def test_dummy_train_step_invalidates_comparison_timer_before_continue() -> None:
