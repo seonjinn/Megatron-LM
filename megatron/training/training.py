@@ -160,12 +160,6 @@ from megatron.core.process_groups_config import ProcessGroupCollection
 from megatron.core.transformer.cuda_graphs import TECudaGraphHelper
 from megatron.core.transformer.module import Float16Module
 from megatron.core.transformer.moe.paged_stash import PagedStashRunner
-from megatron.core.distributed import DistributedDataParallelConfig, TorchFullyShardedDataParallelConfig
-from megatron.core.distributed import DistributedDataParallel as DDP
-from megatron.core.distributed.fsdp.mcore_fsdp_adapter import FullyShardedDataParallel as megatron_FSDP
-from megatron.core.optimizer.optimizer import param_group_identifier_keys
-
-from megatron.core.optimizer.qk_clip import clip_qk
 from megatron.core.utils import (
     StragglerDetector,
     check_param_hashes_across_dp_replicas,

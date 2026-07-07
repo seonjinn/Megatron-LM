@@ -25,9 +25,9 @@ from megatron.energon import (
     MapDataset,
     Sample,
     SampleDecoder,
-    __version__ as energon_version,
-    stateless,
 )
+from megatron.energon import __version__ as energon_version
+from megatron.energon import stateless
 from megatron.energon.av import AVDecoder
 from megatron.energon.edataclass import edataclass
 from megatron.training import get_args, get_tokenizer

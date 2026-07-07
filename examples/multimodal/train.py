@@ -12,19 +12,18 @@ sys.path.append(
     os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, os.path.pardir))
 )
 
-from dataloader_provider import train_valid_test_dataloaders_provider, is_first_or_last_stage
+from dataloader_provider import is_first_or_last_stage, train_valid_test_dataloaders_provider
 from model import model_provider
 from multimodal_args import add_multimodal_extra_args
 
-from megatron.core import mpu, tensor_parallel
+from megatron.core import mpu, parallel_state, tensor_parallel
 from megatron.core.enums import ModelType
 from megatron.core.models.multimodal import context_parallel
 from megatron.core.models.multimodal.llava_model import IGNORE_INDEX, LLaVAModel
 from megatron.core.packed_seq_params import PackedSeqParams
-from megatron.core import parallel_state
 from megatron.core.parallel_state import (
-    get_tensor_model_parallel_rank,
     get_pipeline_model_parallel_world_size,
+    get_tensor_model_parallel_rank,
     is_pipeline_last_stage,
 )
 from megatron.core.utils import get_batch_on_this_cp_rank, nvtx_range_pop, nvtx_range_push
@@ -33,7 +32,6 @@ from megatron.training.argument_utils import pretrain_cfg_container_from_args
 from megatron.training.arguments import parse_and_validate_args
 from megatron.training.training import update_packed_sequence_stats
 from megatron.training.utils import is_last_rank
-
 
 _BROADCAST_DATA_SUPPORTS_OPTIMIZE = "optimize" in inspect.signature(
     tensor_parallel.broadcast_data
@@ -552,6 +550,7 @@ def run_online_eval(model):
         return []
 
     from config import EvaluationConfig
+
     # Import the common evaluation functions
     from run_text_generation import get_evaluation_configs, run_evaluation_loop
 
@@ -607,8 +606,9 @@ def post_init_func():
             raise ValueError("Expected LOCAL_RANK to be set from torch.distributed.run when using DEBUG_RANK")
 
         if int(local_rank) == int(debug_rank):
-            import debugpy
             import socket
+
+            import debugpy
             hostname = socket.gethostname()
             debug_port = int(os.environ.get('DEBUG_PORT', 3009))
             debugpy.listen(("0.0.0.0", debug_port))
