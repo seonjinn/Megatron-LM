@@ -175,6 +175,7 @@ def test_builds_training_comparison_metrics() -> None:
     observation = adapter.SFTComparisonObservation(
         step=19,
         train_step_time_s=55.28,
+        throughput_denominator_time_s=50.0,
         processed_tokens=16_631_382,
         num_gpus=512,
         main_lm_loss=2.5176,
@@ -185,10 +186,11 @@ def test_builds_training_comparison_metrics() -> None:
     assert adapter.build_training_comparison_metrics(observation) == {
         "comparison/step": 19,
         "performance/train_step_time_s": 55.28,
+        "performance/throughput_denominator_time_s": 50.0,
         "performance/e2e_step_time_s": 55.28,
-        "throughput/processed_tokens_per_second": pytest.approx(16_631_382 / 55.28),
+        "throughput/processed_tokens_per_second": pytest.approx(16_631_382 / 50.0),
         "throughput/processed_tokens_per_second_per_gpu": pytest.approx(
-            16_631_382 / 55.28 / 512
+            16_631_382 / 50.0 / 512
         ),
         "accuracy/main_lm_loss": 2.5176,
         "accuracy/grad_norm": 42.0,
@@ -204,6 +206,7 @@ def test_builds_one_coherent_validation_step_payload() -> None:
     observation = adapter.SFTComparisonObservation(
         step=20,
         train_step_time_s=55.28,
+        throughput_denominator_time_s=50.0,
         processed_tokens=16_631_382,
         num_gpus=512,
         validation_time_s=58.645,
@@ -216,11 +219,12 @@ def test_builds_one_coherent_validation_step_payload() -> None:
     assert adapter.build_validation_comparison_metrics(observation) == {
         "comparison/step": 20,
         "performance/train_step_time_s": 55.28,
+        "performance/throughput_denominator_time_s": 50.0,
         "performance/e2e_step_time_s": pytest.approx(113.925),
         "performance/validation_time_s": 58.645,
-        "throughput/processed_tokens_per_second": pytest.approx(16_631_382 / 55.28),
+        "throughput/processed_tokens_per_second": pytest.approx(16_631_382 / 50.0),
         "throughput/processed_tokens_per_second_per_gpu": pytest.approx(
-            16_631_382 / 55.28 / 512
+            16_631_382 / 50.0 / 512
         ),
         "accuracy/main_lm_loss": 2.5176,
         "accuracy/validation_loss": 2.5803,
@@ -300,6 +304,7 @@ def test_materializes_tensor_like_grad_norm_once_for_native_and_comparison() -> 
         learning_rate=1e-5,
         processed_tokens=64,
         num_gpus=8,
+        throughput_denominator_time_s=4.5,
     )
     comparison_payload = adapter.build_training_comparison_metrics(observation)
 
@@ -397,6 +402,7 @@ def test_captures_independent_first_and_second_step_time_and_loss() -> None:
         learning_rate=1e-5,
         processed_tokens=64,
         num_gpus=8,
+        throughput_denominator_time_s=10.0,
     )
     second = adapter.capture_sft_comparison_step(
         state=state,
@@ -408,6 +414,7 @@ def test_captures_independent_first_and_second_step_time_and_loss() -> None:
         learning_rate=2e-5,
         processed_tokens=64,
         num_gpus=8,
+        throughput_denominator_time_s=4.5,
     )
 
     assert first.train_step_time_s == 10.0
@@ -429,6 +436,7 @@ def test_capture_normalizes_exact_real_token_count_to_int() -> None:
         learning_rate=1e-5,
         processed_tokens=64.0,
         num_gpus=8,
+        throughput_denominator_time_s=10.0,
     )
 
     assert observation is not None
@@ -450,6 +458,7 @@ def test_skipped_step_omits_loss_without_losing_timer_progress() -> None:
         learning_rate=2e-5,
         processed_tokens=64,
         num_gpus=8,
+        throughput_denominator_time_s=4.5,
     )
     payload = adapter.build_training_comparison_metrics(skipped)
 
@@ -472,6 +481,7 @@ def test_dummy_skip_suppresses_and_rebaselines_next_comparison_step() -> None:
         learning_rate=1e-5,
         processed_tokens=64,
         num_gpus=8,
+        throughput_denominator_time_s=10.0,
     )
 
     adapter.invalidate_sft_comparison_step_timer(state)
@@ -485,6 +495,7 @@ def test_dummy_skip_suppresses_and_rebaselines_next_comparison_step() -> None:
         learning_rate=1e-5,
         processed_tokens=64,
         num_gpus=8,
+        throughput_denominator_time_s=7.5,
     )
     resumed = adapter.capture_sft_comparison_step(
         state=state,
@@ -496,6 +507,7 @@ def test_dummy_skip_suppresses_and_rebaselines_next_comparison_step() -> None:
         learning_rate=1e-5,
         processed_tokens=64,
         num_gpus=8,
+        throughput_denominator_time_s=6.5,
     )
 
     assert first is not None
@@ -592,25 +604,26 @@ def test_rejects_non_finite_combined_e2e_time() -> None:
 
 
 @pytest.mark.parametrize(
-    ("processed_tokens", "num_gpus", "train_step_time_s", "field_name"),
+    ("processed_tokens", "num_gpus", "throughput_denominator_time_s", "field_name"),
     [
-        (None, 512, 55.28, "processed_tokens"),
-        (16_631_382, None, 55.28, "num_gpus"),
-        (-1, 512, 55.28, "processed_tokens"),
-        (16_631_382, 0, 55.28, "num_gpus"),
-        (16_631_382, 512, 0.0, "train_step_time_s"),
+        (None, 512, 50.0, "processed_tokens"),
+        (16_631_382, None, 50.0, "num_gpus"),
+        (16_631_382, 512, None, "throughput_denominator_time_s"),
+        (16_631_382, 512, 0.0, "throughput_denominator_time_s"),
+        (16_631_382, 512, math.nan, "throughput_denominator_time_s"),
     ],
 )
 def test_rejects_invalid_token_throughput_boundaries(
     processed_tokens: int | None,
     num_gpus: int | None,
-    train_step_time_s: float,
+    throughput_denominator_time_s: float | None,
     field_name: str,
 ) -> None:
     adapter = _load_adapter()
     observation = adapter.SFTComparisonObservation(
         step=20,
-        train_step_time_s=train_step_time_s,
+        train_step_time_s=55.28,
+        throughput_denominator_time_s=throughput_denominator_time_s,
         processed_tokens=processed_tokens,
         num_gpus=num_gpus,
     )
@@ -744,6 +757,7 @@ def test_logs_one_validation_event_with_combined_e2e() -> None:
     observation = adapter.SFTComparisonObservation(
         step=20,
         train_step_time_s=55.28,
+        throughput_denominator_time_s=50.0,
         processed_tokens=16_631_382,
         num_gpus=512,
         main_lm_loss=2.5176,
@@ -770,11 +784,12 @@ def test_logs_one_validation_event_with_combined_e2e() -> None:
     assert payload == {
         "comparison/step": 20,
         "performance/train_step_time_s": 55.28,
+        "performance/throughput_denominator_time_s": 50.0,
         "performance/e2e_step_time_s": pytest.approx(113.925),
         "performance/validation_time_s": 58.645,
-        "throughput/processed_tokens_per_second": pytest.approx(16_631_382 / 55.28),
+        "throughput/processed_tokens_per_second": pytest.approx(16_631_382 / 50.0),
         "throughput/processed_tokens_per_second_per_gpu": pytest.approx(
-            16_631_382 / 55.28 / 512
+            16_631_382 / 50.0 / 512
         ),
         "accuracy/main_lm_loss": 2.5176,
         "accuracy/validation_loss": 2.5803,
@@ -906,9 +921,71 @@ def test_training_loop_delegates_common_event_logging_once() -> None:
         for node in ast.walk(evaluate_and_print_results)
     )
 
+    train_step_call = next(
+        node
+        for node in ast.walk(train)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "train_step"
+    )
+    enclosing_statements = min(
+        (
+            statements
+            for parent in ast.walk(train)
+            for statements in (getattr(parent, "body", []), getattr(parent, "orelse", []))
+            if any(
+                statement is train_step_call
+                for statement in ast.walk(ast.Module(body=statements, type_ignores=[]))
+            )
+        ),
+        key=len,
+    )
+    train_step_statement = next(
+        statement
+        for statement in enclosing_statements
+        if train_step_call in ast.walk(statement)
+    )
+    train_step_index = enclosing_statements.index(train_step_statement)
+    preceding_statement = enclosing_statements[train_step_index - 1]
+    following_statement = enclosing_statements[train_step_index + 1]
+
+    assert ast.unparse(preceding_statement) == (
+        "if comparison_state is not None:\n"
+        "    comparison_train_step_start_time_s = time.perf_counter()"
+    )
+    assert ast.unparse(following_statement) == (
+        "if comparison_state is not None:\n"
+        "    comparison_train_step_wall_time_s = time.perf_counter() - comparison_train_step_start_time_s"
+    )
+    timing_calls = [
+        ast.unparse(node)
+        for statement in (preceding_statement, following_statement)
+        for node in ast.walk(statement)
+        if isinstance(node, ast.Call)
+    ]
+    assert timing_calls == ["time.perf_counter()", "time.perf_counter()"]
+
+    training_log_call = next(
+        node
+        for node in ast.walk(train)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "training_log"
+    )
+    training_log_keywords = {
+        keyword.arg: ast.unparse(keyword.value) for keyword in training_log_call.keywords
+    }
+    assert (
+        training_log_keywords["comparison_train_step_wall_time_s"]
+        == "comparison_train_step_wall_time_s"
+    )
+
 
 def test_training_log_uses_exact_current_step_producers() -> None:
     training_log = _function_node(_TRAINING_PATH, "training_log")
+    assert "comparison_train_step_wall_time_s" in {
+        argument.arg for argument in training_log.args.args
+    }
     calls = [
         ast.unparse(node)
         for node in ast.walk(training_log)
@@ -930,6 +1007,9 @@ def test_training_log_uses_exact_current_step_producers() -> None:
     assert "timers('interval-time').active_time()" in calls
     capture_call = next(call for call in calls if call.startswith("capture_sft_comparison_step("))
     assert "train_active_time_s=comparison_train_active_time_s" in capture_call
+    assert (
+        "throughput_denominator_time_s=comparison_train_step_wall_time_s" in capture_call
+    )
     assert "advanced=not bool(skipped_iter)" in capture_call
     assert "main_lm_loss=comparison_main_lm_loss" in capture_call
     assert "grad_norm=grad_norm" in capture_call

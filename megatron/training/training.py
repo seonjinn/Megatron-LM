@@ -2559,6 +2559,7 @@ def training_log(
     seqlen_squared_sum_in_batch: float | None = None,
     total_real_tokens_in_batch: float | None = None,
     comparison_state: _SFTComparisonState | None = None,
+    comparison_train_step_wall_time_s: float | None = None,
 ):
     """Log training information such as losses, timing, ...."""
     args = get_args()
@@ -2890,6 +2891,7 @@ def training_log(
                 state=comparison_state.step_state,
                 step=iteration,
                 train_active_time_s=comparison_train_active_time_s,
+                throughput_denominator_time_s=comparison_train_step_wall_time_s,
                 advanced=not bool(skipped_iter),
                 main_lm_loss=comparison_main_lm_loss,
                 grad_norm=grad_norm,
@@ -3388,6 +3390,7 @@ def train(
 
     # Additional variable initialization for RL training
     if args.perform_rl_step:
+        comparison_train_step_wall_time_s = None
         if args.skip_train:
             # In inference-only mode, use current weights as reference.
             print_rank_0("> RL inference-only: using current weights as reference.")
@@ -3829,6 +3832,8 @@ def train(
             max_attention_logit = None
         else:
             ft_integration.on_training_step_start()
+            if comparison_state is not None:
+                comparison_train_step_start_time_s = time.perf_counter()
             (
                 loss_dict,
                 skipped_iter,
@@ -3843,6 +3848,10 @@ def train(
                 pg_collection=pg_collection,
                 p2p_communicator=p2p_communicator,
             )
+            if comparison_state is not None:
+                comparison_train_step_wall_time_s = (
+                    time.perf_counter() - comparison_train_step_start_time_s
+                )
             ft_integration.on_training_step_end()
             if _maybe_raise_workload_exception is not None and iteration != start_iteration:
                 _maybe_raise_workload_exception()
@@ -3984,6 +3993,7 @@ def train(
             seqlen_squared_sum_in_batch=seqlen_squared_sum_in_batch,
             total_real_tokens_in_batch=total_real_tokens_in_batch,
             comparison_state=comparison_state,
+            comparison_train_step_wall_time_s=comparison_train_step_wall_time_s,
         )
         is_first_iteration = False
 

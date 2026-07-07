@@ -14,6 +14,7 @@ class SFTComparisonObservation:
     Attributes:
         step: One-based Megatron-LM training iteration.
         train_step_time_s: Native per-event active iteration time, excluding validation.
+        throughput_denominator_time_s: Direct wall duration around native train_step().
         processed_tokens: Total real tokens processed by the global batch.
         num_gpus: Number of GPUs participating in the global batch.
         validation_time_s: Rank-last wall time around the in-loop evaluation call.
@@ -25,6 +26,7 @@ class SFTComparisonObservation:
 
     step: int
     train_step_time_s: int | float
+    throughput_denominator_time_s: int | float | None = None
     processed_tokens: int | None = None
     num_gpus: int | None = None
     validation_time_s: int | float | None = None
@@ -173,6 +175,7 @@ def capture_sft_comparison_step(
     learning_rate: int | float | None,
     processed_tokens: int | float,
     num_gpus: int,
+    throughput_denominator_time_s: int | float | None = None,
 ) -> SFTComparisonObservation | None:
     """Capture exact current-step scalars from producer-normalized values."""
 
@@ -199,6 +202,9 @@ def capture_sft_comparison_step(
             "train_active_time_s must not decrease: "
             f"{current_active_time_s} < {previous_active_time_s}"
         )
+    if throughput_denominator_time_s is None:
+        state.train_active_time_s = current_active_time_s
+        return None
 
     normalized_main_lm_loss = (
         _normalize_float("main_lm_loss", main_lm_loss)
@@ -217,10 +223,16 @@ def capture_sft_comparison_step(
         processed_tokens
     )
     normalized_num_gpus = _normalize_positive_int("num_gpus", num_gpus)
+    normalized_throughput_denominator_time_s = (
+        _normalize_float("throughput_denominator_time_s", throughput_denominator_time_s)
+        if throughput_denominator_time_s is not None
+        else None
+    )
 
     observation = SFTComparisonObservation(
         step=normalized_step,
         train_step_time_s=train_step_time_s,
+        throughput_denominator_time_s=normalized_throughput_denominator_time_s,
         processed_tokens=normalized_processed_tokens,
         num_gpus=normalized_num_gpus,
         main_lm_loss=normalized_main_lm_loss,
@@ -249,11 +261,25 @@ def _build_training_metrics(
     train_step_time_s = _normalize_float(
         "train_step_time_s", observation.train_step_time_s
     )
+    throughput_denominator_time_s = (
+        _normalize_float(
+            "throughput_denominator_time_s", observation.throughput_denominator_time_s
+        )
+        if observation.throughput_denominator_time_s is not None
+        else None
+    )
 
     metrics: dict[str, float | int] = {
         "comparison/step": step,
         "performance/train_step_time_s": train_step_time_s,
     }
+    if throughput_denominator_time_s is not None:
+        if throughput_denominator_time_s <= 0.0:
+            raise ValueError(
+                "throughput_denominator_time_s must be positive when emitted, "
+                f"got {throughput_denominator_time_s}"
+            )
+        metrics["performance/throughput_denominator_time_s"] = throughput_denominator_time_s
     if observation.processed_tokens is None and observation.num_gpus is not None:
         raise ValueError("processed_tokens is required when num_gpus is provided")
     if observation.processed_tokens is not None and observation.num_gpus is None:
@@ -270,12 +296,11 @@ def _build_training_metrics(
                 f"got {observation.processed_tokens}"
             )
         num_gpus = _normalize_positive_int("num_gpus", observation.num_gpus)
-        if train_step_time_s <= 0.0:
+        if throughput_denominator_time_s is None:
             raise ValueError(
-                "train_step_time_s must be positive when token throughput is emitted, "
-                f"got {train_step_time_s}"
+                "throughput_denominator_time_s is required when token throughput is emitted"
             )
-        processed_tokens_per_second = observation.processed_tokens / train_step_time_s
+        processed_tokens_per_second = observation.processed_tokens / throughput_denominator_time_s
         metrics["throughput/processed_tokens_per_second"] = processed_tokens_per_second
         metrics["throughput/processed_tokens_per_second_per_gpu"] = (
             processed_tokens_per_second / num_gpus
