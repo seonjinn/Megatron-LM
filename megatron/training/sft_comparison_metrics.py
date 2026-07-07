@@ -14,6 +14,8 @@ class SFTComparisonObservation:
     Attributes:
         step: One-based Megatron-LM training iteration.
         train_step_time_s: Native per-event active iteration time, excluding validation.
+        processed_tokens: Total real tokens processed by the global batch.
+        num_gpus: Number of GPUs participating in the global batch.
         validation_time_s: Rank-last wall time around the in-loop evaluation call.
         main_lm_loss: Native current-iteration language-model training loss.
         validation_loss: Native language-model validation loss.
@@ -23,6 +25,8 @@ class SFTComparisonObservation:
 
     step: int
     train_step_time_s: int | float
+    processed_tokens: int | None = None
+    num_gpus: int | None = None
     validation_time_s: int | float | None = None
     main_lm_loss: int | float | None = None
     validation_loss: int | float | None = None
@@ -103,6 +107,35 @@ def _normalize_float(field_name: str, value: object) -> float:
     return normalized
 
 
+def _normalize_processed_token_count_from_producer(value: object) -> int:
+    """Normalize the exact count returned by the packed-token producer."""
+
+    if type(value) is int:
+        normalized = int(value)
+    elif type(value) is float:
+        normalized_float = _normalize_float("processed_tokens", value)
+        if not normalized_float.is_integer():
+            raise ValueError(f"processed_tokens must be integral, got {value!r}")
+        normalized = int(normalized_float)
+    else:
+        raise TypeError(
+            "processed_tokens producer must be a Python int or exact integral float, "
+            f"got {type(value).__name__}"
+        )
+    if normalized < 0:
+        raise ValueError(f"processed_tokens must be non-negative, got {normalized}")
+    return normalized
+
+
+def _normalize_positive_int(field_name: str, value: object) -> int:
+    if type(value) is not int:
+        raise TypeError(f"{field_name} must be a Python int, got {type(value).__name__}")
+    normalized = int(value)
+    if normalized <= 0:
+        raise ValueError(f"{field_name} must be positive, got {normalized}")
+    return normalized
+
+
 def normalize_sft_metric_producer_scalar(
     field_name: str,
     value: object | None,
@@ -138,6 +171,8 @@ def capture_sft_comparison_step(
     main_lm_loss: int | float | None,
     grad_norm: int | float | None,
     learning_rate: int | float | None,
+    processed_tokens: int | float,
+    num_gpus: int,
 ) -> SFTComparisonObservation | None:
     """Capture exact current-step scalars from producer-normalized values."""
 
@@ -178,10 +213,16 @@ def capture_sft_comparison_step(
         if learning_rate is not None
         else None
     )
+    normalized_processed_tokens = _normalize_processed_token_count_from_producer(
+        processed_tokens
+    )
+    normalized_num_gpus = _normalize_positive_int("num_gpus", num_gpus)
 
     observation = SFTComparisonObservation(
         step=normalized_step,
         train_step_time_s=train_step_time_s,
+        processed_tokens=normalized_processed_tokens,
+        num_gpus=normalized_num_gpus,
         main_lm_loss=normalized_main_lm_loss,
         grad_norm=normalized_grad_norm,
         learning_rate=normalized_learning_rate,
@@ -213,6 +254,34 @@ def _build_training_metrics(
         "comparison/step": step,
         "performance/train_step_time_s": train_step_time_s,
     }
+    if observation.processed_tokens is None and observation.num_gpus is not None:
+        raise ValueError("processed_tokens is required when num_gpus is provided")
+    if observation.processed_tokens is not None and observation.num_gpus is None:
+        raise ValueError("num_gpus is required when processed_tokens is provided")
+    if observation.processed_tokens is not None and observation.num_gpus is not None:
+        if type(observation.processed_tokens) is not int:
+            raise TypeError(
+                "processed_tokens must be a Python int, "
+                f"got {type(observation.processed_tokens).__name__}"
+            )
+        if observation.processed_tokens < 0:
+            raise ValueError(
+                "processed_tokens must be non-negative, "
+                f"got {observation.processed_tokens}"
+            )
+        num_gpus = _normalize_positive_int("num_gpus", observation.num_gpus)
+        if train_step_time_s <= 0.0:
+            raise ValueError(
+                "train_step_time_s must be positive when token throughput is emitted, "
+                f"got {train_step_time_s}"
+            )
+        processed_tokens_per_second = observation.processed_tokens / train_step_time_s
+        metrics["throughput/processed_tokens_per_second"] = processed_tokens_per_second
+        metrics["throughput/processed_tokens_per_second_per_gpu"] = (
+            processed_tokens_per_second / num_gpus
+        )
+        metrics["context/processed_tokens"] = observation.processed_tokens
+        metrics["context/num_gpus"] = num_gpus
     optional_metrics = (
         ("accuracy/main_lm_loss", "main_lm_loss", observation.main_lm_loss),
         ("accuracy/grad_norm", "grad_norm", observation.grad_norm),

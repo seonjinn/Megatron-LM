@@ -175,6 +175,8 @@ def test_builds_training_comparison_metrics() -> None:
     observation = adapter.SFTComparisonObservation(
         step=19,
         train_step_time_s=55.28,
+        processed_tokens=16_631_382,
+        num_gpus=512,
         main_lm_loss=2.5176,
         grad_norm=42.0,
         learning_rate=4.2e-7,
@@ -184,9 +186,15 @@ def test_builds_training_comparison_metrics() -> None:
         "comparison/step": 19,
         "performance/train_step_time_s": 55.28,
         "performance/e2e_step_time_s": 55.28,
+        "throughput/processed_tokens_per_second": pytest.approx(16_631_382 / 55.28),
+        "throughput/processed_tokens_per_second_per_gpu": pytest.approx(
+            16_631_382 / 55.28 / 512
+        ),
         "accuracy/main_lm_loss": 2.5176,
         "accuracy/grad_norm": 42.0,
         "accuracy/learning_rate": 4.2e-7,
+        "context/processed_tokens": 16_631_382,
+        "context/num_gpus": 512,
         "context/is_validation_step": 0,
     }
 
@@ -196,6 +204,8 @@ def test_builds_one_coherent_validation_step_payload() -> None:
     observation = adapter.SFTComparisonObservation(
         step=20,
         train_step_time_s=55.28,
+        processed_tokens=16_631_382,
+        num_gpus=512,
         validation_time_s=58.645,
         main_lm_loss=2.5176,
         validation_loss=2.5803,
@@ -208,10 +218,16 @@ def test_builds_one_coherent_validation_step_payload() -> None:
         "performance/train_step_time_s": 55.28,
         "performance/e2e_step_time_s": pytest.approx(113.925),
         "performance/validation_time_s": 58.645,
+        "throughput/processed_tokens_per_second": pytest.approx(16_631_382 / 55.28),
+        "throughput/processed_tokens_per_second_per_gpu": pytest.approx(
+            16_631_382 / 55.28 / 512
+        ),
         "accuracy/main_lm_loss": 2.5176,
         "accuracy/validation_loss": 2.5803,
         "accuracy/grad_norm": 42.0,
         "accuracy/learning_rate": 4.2e-7,
+        "context/processed_tokens": 16_631_382,
+        "context/num_gpus": 512,
         "context/is_validation_step": 1,
     }
 
@@ -282,6 +298,8 @@ def test_materializes_tensor_like_grad_norm_once_for_native_and_comparison() -> 
         main_lm_loss=2.5,
         grad_norm=grad_norm,
         learning_rate=1e-5,
+        processed_tokens=64,
+        num_gpus=8,
     )
     comparison_payload = adapter.build_training_comparison_metrics(observation)
 
@@ -377,6 +395,8 @@ def test_captures_independent_first_and_second_step_time_and_loss() -> None:
         main_lm_loss=2.75,
         grad_norm=4.0,
         learning_rate=1e-5,
+        processed_tokens=64,
+        num_gpus=8,
     )
     second = adapter.capture_sft_comparison_step(
         state=state,
@@ -386,12 +406,34 @@ def test_captures_independent_first_and_second_step_time_and_loss() -> None:
         main_lm_loss=1.25,
         grad_norm=3.0,
         learning_rate=2e-5,
+        processed_tokens=64,
+        num_gpus=8,
     )
 
     assert first.train_step_time_s == 10.0
     assert first.main_lm_loss == 2.75
     assert second.train_step_time_s == 6.5
     assert second.main_lm_loss == 1.25
+
+
+def test_capture_normalizes_exact_real_token_count_to_int() -> None:
+    adapter = _load_adapter()
+
+    observation = adapter.capture_sft_comparison_step(
+        state=adapter.SFTComparisonStepState(),
+        step=1,
+        train_active_time_s=10.0,
+        advanced=True,
+        main_lm_loss=2.75,
+        grad_norm=4.0,
+        learning_rate=1e-5,
+        processed_tokens=64.0,
+        num_gpus=8,
+    )
+
+    assert observation is not None
+    assert observation.processed_tokens == 64
+    assert type(observation.processed_tokens) is int
 
 
 def test_skipped_step_omits_loss_without_losing_timer_progress() -> None:
@@ -406,6 +448,8 @@ def test_skipped_step_omits_loss_without_losing_timer_progress() -> None:
         main_lm_loss=0.0,
         grad_norm=None,
         learning_rate=2e-5,
+        processed_tokens=64,
+        num_gpus=8,
     )
     payload = adapter.build_training_comparison_metrics(skipped)
 
@@ -426,6 +470,8 @@ def test_dummy_skip_suppresses_and_rebaselines_next_comparison_step() -> None:
         main_lm_loss=2.75,
         grad_norm=4.0,
         learning_rate=1e-5,
+        processed_tokens=64,
+        num_gpus=8,
     )
 
     adapter.invalidate_sft_comparison_step_timer(state)
@@ -437,6 +483,8 @@ def test_dummy_skip_suppresses_and_rebaselines_next_comparison_step() -> None:
         main_lm_loss=2.25,
         grad_norm=3.5,
         learning_rate=1e-5,
+        processed_tokens=64,
+        num_gpus=8,
     )
     resumed = adapter.capture_sft_comparison_step(
         state=state,
@@ -446,6 +494,8 @@ def test_dummy_skip_suppresses_and_rebaselines_next_comparison_step() -> None:
         main_lm_loss=2.0,
         grad_norm=3.0,
         learning_rate=1e-5,
+        processed_tokens=64,
+        num_gpus=8,
     )
 
     assert first is not None
@@ -539,6 +589,34 @@ def test_rejects_non_finite_combined_e2e_time() -> None:
 
     with pytest.raises(ValueError, match="e2e_step_time_s"):
         adapter.build_validation_comparison_metrics(observation)
+
+
+@pytest.mark.parametrize(
+    ("processed_tokens", "num_gpus", "train_step_time_s", "field_name"),
+    [
+        (None, 512, 55.28, "processed_tokens"),
+        (16_631_382, None, 55.28, "num_gpus"),
+        (-1, 512, 55.28, "processed_tokens"),
+        (16_631_382, 0, 55.28, "num_gpus"),
+        (16_631_382, 512, 0.0, "train_step_time_s"),
+    ],
+)
+def test_rejects_invalid_token_throughput_boundaries(
+    processed_tokens: int | None,
+    num_gpus: int | None,
+    train_step_time_s: float,
+    field_name: str,
+) -> None:
+    adapter = _load_adapter()
+    observation = adapter.SFTComparisonObservation(
+        step=20,
+        train_step_time_s=train_step_time_s,
+        processed_tokens=processed_tokens,
+        num_gpus=num_gpus,
+    )
+
+    with pytest.raises(ValueError, match=field_name):
+        adapter.build_training_comparison_metrics(observation)
 
 
 def test_comparison_metric_argument_is_opt_in() -> None:
@@ -846,6 +924,24 @@ def test_training_log_uses_exact_current_step_producers() -> None:
     assert "advanced=not bool(skipped_iter)" in capture_call
     assert "main_lm_loss=comparison_main_lm_loss" in capture_call
     assert "grad_norm=grad_norm" in capture_call
+
+
+def test_training_log_uses_real_global_tokens_for_throughput() -> None:
+    training_log = _function_node(_TRAINING_PATH, "training_log")
+    capture_call = next(
+        node
+        for node in ast.walk(training_log)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "capture_sft_comparison_step"
+    )
+    capture_keywords = {keyword.arg: keyword.value for keyword in capture_call.keywords}
+
+    assert ast.unparse(capture_keywords["processed_tokens"]) == (
+        "total_real_tokens_in_batch if total_real_tokens_in_batch is not None "
+        "else batch_size * args.seq_length"
+    )
+    assert ast.unparse(capture_keywords["num_gpus"]) == "args.world_size"
 
 
 def test_dummy_train_step_invalidates_comparison_timer_before_continue() -> None:

@@ -2893,6 +2893,12 @@ def training_log(
                 main_lm_loss=comparison_main_lm_loss,
                 grad_norm=grad_norm,
                 learning_rate=learning_rate,
+                processed_tokens=(
+                    total_real_tokens_in_batch
+                    if total_real_tokens_in_batch is not None
+                    else batch_size * args.seq_length
+                ),
+                num_gpus=args.world_size,
             )
         if args.num_experts is not None and moe_log_string:
             log_string += moe_log_string
