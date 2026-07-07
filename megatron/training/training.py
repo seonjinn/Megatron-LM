@@ -3362,6 +3362,7 @@ def train(
     """
     args = get_args()
     timers = get_timers()
+    comparison_train_step_wall_time_s = None
     fault_injector_kwargs = {}
     for f in dataclasses.fields(FaultInjectorConfig):
         if hasattr(args, f.name):
@@ -3390,7 +3391,6 @@ def train(
 
     # Additional variable initialization for RL training
     if args.perform_rl_step:
-        comparison_train_step_wall_time_s = None
         if args.skip_train:
             # In inference-only mode, use current weights as reference.
             print_rank_0("> RL inference-only: using current weights as reference.")

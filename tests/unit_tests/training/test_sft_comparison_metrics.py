@@ -608,7 +608,10 @@ def test_rejects_non_finite_combined_e2e_time() -> None:
     [
         (None, 512, 50.0, "processed_tokens"),
         (16_631_382, None, 50.0, "num_gpus"),
+        (-1, 512, 50.0, "processed_tokens"),
+        (16_631_382, 0, 50.0, "num_gpus"),
         (16_631_382, 512, None, "throughput_denominator_time_s"),
+        (16_631_382, 512, -1.0, "throughput_denominator_time_s"),
         (16_631_382, 512, 0.0, "throughput_denominator_time_s"),
         (16_631_382, 512, math.nan, "throughput_denominator_time_s"),
     ],
@@ -979,6 +982,26 @@ def test_training_loop_delegates_common_event_logging_once() -> None:
         training_log_keywords["comparison_train_step_wall_time_s"]
         == "comparison_train_step_wall_time_s"
     )
+
+
+def test_training_loop_initializes_comparison_wall_time_for_non_rl_training() -> None:
+    train = _function_node(_TRAINING_PATH, "train")
+    statements = train.body
+    initialization_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if isinstance(statement, ast.Assign)
+        and len(statement.targets) == 1
+        and isinstance(statement.targets[0], ast.Name)
+        and statement.targets[0].id == "comparison_train_step_wall_time_s"
+        and isinstance(statement.value, ast.Constant)
+        and statement.value.value is None
+    )
+    train_loop_index = next(
+        index for index, statement in enumerate(statements) if isinstance(statement, ast.While)
+    )
+
+    assert initialization_index < train_loop_index
 
 
 def test_training_log_uses_exact_current_step_producers() -> None:
