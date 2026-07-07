@@ -229,6 +229,8 @@ class PackedTaskSample(Sample):
 
     # Number of samples in the packed sample
     samples_seen: int
+    # Real lengths of the original samples before they were packed.
+    sample_lengths: torch.Tensor
 
     # Sound
     sound_clips: list[torch.Tensor]
@@ -272,6 +274,8 @@ class BatchedPackedTaskSample(Batch):
 
     # Number of samples in the packed batch
     samples_seen: int
+    # Real lengths of the original samples in each packed sample, padded with 0s.
+    sample_lengths: torch.Tensor
 
     # Whether the batch has a padded image
     has_pad_img: bool
@@ -1150,6 +1154,7 @@ class MultiModalTaskEncoder(
             sound_timestamps=sound_timestamp,
             num_sound_clips=num_sound_clips,
             samples_seen=torch.tensor(1, dtype=torch.int32),
+            sample_lengths=torch.tensor([sample.total_len], dtype=torch.int32),
         )
 
     def _debug_save_image(self, media, media_idx, sample_key, data_augment):
@@ -1367,6 +1372,7 @@ class MultiModalTaskEncoder(
             sound_timestamps=[st for sample in samples for st in sample.sound_timestamps],
             num_sound_clips=[ns for sample in samples for ns in sample.num_sound_clips],
             samples_seen=sum(s.samples_seen for s in samples),
+            sample_lengths=torch.cat([s.sample_lengths for s in samples], dim=0),
         )
 
     def batch(self, samples: List[PackedTaskSample]) -> BatchedPackedTaskSample:
@@ -1455,6 +1461,11 @@ class MultiModalTaskEncoder(
         cu_lengths = torch.stack([s.cu_lengths for s in samples])
         cu_lengths_padded = torch.stack([s.cu_lengths_padded for s in samples])
         max_lengths = torch.tensor([s.max_length for s in samples], dtype=torch.int32)
+        sample_lengths = torch.nn.utils.rnn.pad_sequence(
+            [s.sample_lengths.to(dtype=torch.int32) for s in samples],
+            batch_first=True,
+            padding_value=0,
+        )
 
         if self.dataloader_seq_length is not None:
             cu_lengths[0][-1] = self.dataloader_seq_length
@@ -1523,6 +1534,7 @@ class MultiModalTaskEncoder(
             sound_timestamps=sound_timestamps,
             num_sound_clips=num_sound_clips,
             samples_seen=sum(s.samples_seen for s in samples),
+            sample_lengths=sample_lengths,
         )
 
     def encode_batch(self, batch: BatchedPackedTaskSample) -> dict:

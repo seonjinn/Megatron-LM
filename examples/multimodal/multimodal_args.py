@@ -157,6 +157,12 @@ def add_multimodal_extra_args(parser):
         ),
     )
     group.add_argument(
+        "--log-packed-sequence-stats",
+        action="store_true",
+        default=False,
+        help="Log per-global-batch packed SFT sequence statistics to Weights & Biases.",
+    )
+    group.add_argument(
         "--recompute-vision", action="store_true", default=False, help="Enable activation checkpointing in the vision model"
     )
     group.add_argument(

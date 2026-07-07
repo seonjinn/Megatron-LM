@@ -1,6 +1,7 @@
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 
-import atexit, json
+import atexit
+import json
 from collections import Counter
 from typing import Any, Dict, Optional
 
@@ -105,6 +106,7 @@ class SFTDataset(MegatronDataset):
         pack_targets = []
         pack_positions = []
         cu_seqlens = [0]
+        sample_lengths = []
         eod = tokenizer.eod
         pad = tokenizer.pad
         # TODO(duncan): Track number of convs dropped and/or truncated and amount of end-padding
@@ -117,6 +119,8 @@ class SFTDataset(MegatronDataset):
             tokens_list = tokens.tolist()
             targets_list = targets.tolist()
 
+            sample_start = len(pack_tokens)
+            sample_lengths.append(len(tokens_list))
 
             pack_tokens.extend(tokens_list)
             pack_targets.extend(targets_list)
@@ -147,6 +151,10 @@ class SFTDataset(MegatronDataset):
                 pack_positions = pack_positions[:pack_length+1]
                 # Note len({pack_tokens, pack_targets, pack_positions}) should be pack_length + 1
                 cu_seqlens[-1] = len(pack_tokens) - 1
+                sample_lengths[-1] = max(
+                    0,
+                    min(sample_start + sample_lengths[-1], cu_seqlens[-1]) - sample_start,
+                )
                 break
 
         # Handle any necessary padding
@@ -188,5 +196,6 @@ class SFTDataset(MegatronDataset):
             'loss_mask': loss_mask,
             'position_ids': position_ids,
             'cu_seqlens': cu_seqlens,
+            'sample_lengths': torch.tensor(sample_lengths, dtype=torch.int32),
             'max_seqlen': max_seqlen,
         }

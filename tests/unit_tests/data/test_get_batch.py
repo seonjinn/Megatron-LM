@@ -10,6 +10,7 @@ from megatron.core import mpu
 from megatron.core.num_microbatches_calculator import destroy_num_microbatches_calculator
 from megatron.training.arguments import parse_args, validate_args
 from megatron.training.global_vars import destroy_global_vars, set_global_variables
+from megatron.training.training import consume_packed_sequence_stats_in_iteration
 from pretrain_hybrid import get_batch
 from tests.unit_tests.test_utilities import Utils
 
@@ -25,6 +26,7 @@ def initialize_test_environment(
     hybrid_context_parallel: bool = False,
     max_seqlen_per_cp_rank: int = 1024,
     create_attention_mask: bool = False,
+    log_packed_sequence_stats: bool = False,
 ):
     destroy_global_vars()
     destroy_num_microbatches_calculator()
@@ -41,6 +43,7 @@ def initialize_test_environment(
     args.sft = sft
     args.micro_batch_size = micro_batch_size
     args.create_attention_mask_in_dataloader = create_attention_mask
+    args.log_packed_sequence_stats = log_packed_sequence_stats
     args.global_batch_size = global_batch_size
     args.calculate_per_token_loss = True
     args.vocab_size = 1024
@@ -69,13 +72,16 @@ def create_sft_data_iterator(max_seq_length: int = 1024):
     """Create a mock SFT data iterator matching the old SFTDataset output after DataLoader collation.
 
     The old SFTDataset (megatron/training/datasets/sft_dataset.py) returns per-sample dicts with
-    keys: tokens, labels, loss_mask, position_ids, cu_seqlens, max_seqlen — all padded to
-    seq_length.  After PyTorch DataLoader default_collate, tensors get a leading batch dim of 1.
+    keys: tokens, labels, loss_mask, position_ids, cu_seqlens, sample_lengths, max_seqlen —
+    all padded to seq_length. After PyTorch DataLoader default_collate, tensors get a leading
+    batch dim of 1.
     """
-    min_len = max(1, int(0.1 * max_seq_length))
-    max_len = max(2, int(0.4 * max_seq_length))
-    candidate_lengths = [torch.randint(min_len, max_len + 1, (1,)).item() for _ in range(10)]
-
+    candidate_lengths = [
+        max(1, max_seq_length // 5),
+        max(1, max_seq_length // 7),
+        max(1, max_seq_length // 11),
+        max(1, max_seq_length // 13),
+    ]
     lengths = []
     total = 0
     for l in candidate_lengths:
@@ -143,9 +149,10 @@ def create_sft_data_iterator(max_seq_length: int = 1024):
         "loss_mask": loss_mask.unsqueeze(0),
         "position_ids": position_ids.unsqueeze(0),
         "cu_seqlens": cu_seqlens.unsqueeze(0),
+        "sample_lengths": torch.tensor(lengths, dtype=torch.int32).unsqueeze(0),
         "max_seqlen": max_seqlen,
     }
-    return iter([batch]), num_real_tokens
+    return iter([batch]), num_real_tokens, len(lengths)
 
 
 @pytest.mark.parametrize("tp_size", [1, 2, 4])
@@ -167,12 +174,10 @@ def test_sft_batch(tp_size, pp_size, cp_size, seq_length):
         micro_batch_size=1,
         global_batch_size=global_batch_size,
         sft=True,
+        log_packed_sequence_stats=True,
     )
 
-    data_iterator = None
-    num_real_tokens = 0
-    if mpu.get_tensor_model_parallel_rank() == 0:
-        data_iterator, num_real_tokens = create_sft_data_iterator(seq_length)
+    data_iterator, num_real_tokens, num_original_samples = create_sft_data_iterator(seq_length)
 
     (
         attention_mask,
@@ -337,6 +342,18 @@ def test_sft_batch(tp_size, pp_size, cp_size, seq_length):
         assert max_seqlen.shape == (1,)
         assert max_seqlen.dtype == torch.int32
         assert 0 < max_seqlen.item() <= seq_length
+
+    stats = consume_packed_sequence_stats_in_iteration()
+    assert stats is not None
+    assert stats["packed_sequence/total_tokens"] == pytest.approx(
+        float(num_real_tokens * global_batch_size)
+    )
+    assert stats["packed_sequence/trained_tokens"] == pytest.approx(
+        float(num_real_tokens * global_batch_size)
+    )
+    assert stats["packed_sequence/original_samples"] == pytest.approx(
+        float(num_original_samples * global_batch_size)
+    )
 
     Utils.destroy_model_parallel()
 

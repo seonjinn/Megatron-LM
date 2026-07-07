@@ -319,6 +319,13 @@ def print_datetime(string, override_timestamp=None):
 _seqlen_stats_in_iteration: Optional[torch.Tensor] = None
 _seqlen_stats_active: bool = False
 
+# Optional per-iteration packed SFT stats accumulator. Unlike the FLOPs
+# accumulator above, this keeps the individual original-sample lengths so the
+# logged median is exact for the global batch.
+_packed_sequence_lengths_in_iteration: list[torch.Tensor] = []
+_packed_sequence_trained_tokens_in_iteration: Optional[torch.Tensor] = None
+_packed_sequence_stats_active: bool = False
+
 
 def update_seqlen_stats_from_cu_seqlens(cu_seqlens):
     """Add ``sum(L_i)`` and ``sum(L_i ** 2)`` from one micro-batch's REAL ``cu_seqlens``.
@@ -406,6 +413,133 @@ def consume_seqlen_stats_in_iteration() -> Tuple[Optional[float], Optional[float
     t.zero_()
     _seqlen_stats_active = False
     return total_real_tokens / dedup, seqlen_squared_sum / dedup
+
+
+def update_packed_sequence_stats(sample_lengths, loss_mask):
+    """Accumulate packed SFT sequence statistics for one local microbatch.
+
+    ``sample_lengths`` contains the real lengths of the original samples inside
+    each packed sample, padded with zeros. ``loss_mask`` is used to count trained
+    tokens. Only one model-parallel replica per DP rank contributes so the
+    global gather in ``consume_packed_sequence_stats_in_iteration`` does not need
+    TP/CP/PP de-duplication.
+    """
+    global _packed_sequence_lengths_in_iteration
+    global _packed_sequence_trained_tokens_in_iteration
+    global _packed_sequence_stats_active
+
+    if sample_lengths is None or loss_mask is None:
+        return
+
+    if torch.distributed.is_initialized() and mpu.model_parallel_is_initialized():
+        if (
+            not mpu.is_pipeline_last_stage(ignore_virtual=True)
+            or mpu.get_tensor_model_parallel_rank() != 0
+            or mpu.get_context_parallel_rank() != 0
+        ):
+            return
+
+    device = (
+        torch.device(f'cuda:{torch.cuda.current_device()}')
+        if torch.cuda.is_available()
+        else sample_lengths.device
+    )
+    lengths = sample_lengths.detach().reshape(-1)
+    lengths = lengths[lengths > 0]
+    if lengths.numel() == 0:
+        return
+
+    _packed_sequence_lengths_in_iteration.append(lengths.to(device=device, dtype=torch.float64))
+    trained_tokens = loss_mask.detach().to(device=device, dtype=torch.float64).sum()
+    if _packed_sequence_trained_tokens_in_iteration is None:
+        _packed_sequence_trained_tokens_in_iteration = torch.zeros(
+            (), dtype=torch.float64, device=device
+        )
+    _packed_sequence_trained_tokens_in_iteration += trained_tokens
+    _packed_sequence_stats_active = True
+
+
+def _reset_packed_sequence_stats_in_iteration():
+    global _packed_sequence_lengths_in_iteration
+    global _packed_sequence_trained_tokens_in_iteration
+    global _packed_sequence_stats_active
+    _packed_sequence_lengths_in_iteration = []
+    _packed_sequence_trained_tokens_in_iteration = None
+    _packed_sequence_stats_active = False
+
+
+def consume_packed_sequence_stats_in_iteration() -> Optional[Dict[str, float]]:
+    """Read, reset, and globally gather packed SFT stats for the current batch."""
+    global _packed_sequence_lengths_in_iteration
+    global _packed_sequence_trained_tokens_in_iteration
+    global _packed_sequence_stats_active
+
+    device = (
+        torch.device(f'cuda:{torch.cuda.current_device()}')
+        if torch.cuda.is_available()
+        else torch.device('cpu')
+    )
+    if _packed_sequence_lengths_in_iteration:
+        local_lengths = torch.cat(_packed_sequence_lengths_in_iteration).to(
+            device=device, dtype=torch.float64
+        )
+    else:
+        local_lengths = torch.empty(0, dtype=torch.float64, device=device)
+
+    if _packed_sequence_trained_tokens_in_iteration is None:
+        trained_tokens = torch.zeros((), dtype=torch.float64, device=device)
+    else:
+        trained_tokens = _packed_sequence_trained_tokens_in_iteration.to(
+            device=device, dtype=torch.float64
+        )
+
+    if torch.distributed.is_initialized():
+        local_count = torch.tensor([local_lengths.numel()], dtype=torch.int64, device=device)
+        counts = [torch.empty_like(local_count) for _ in range(torch.distributed.get_world_size())]
+        torch.distributed.all_gather(counts, local_count)
+        counts = torch.cat(counts)
+        torch.distributed.all_reduce(trained_tokens, op=torch.distributed.ReduceOp.SUM)
+
+        total_count = int(counts.sum().item())
+        if total_count == 0:
+            _reset_packed_sequence_stats_in_iteration()
+            return None
+
+        max_count = int(counts.max().item())
+        padded_lengths = torch.zeros(max_count, dtype=torch.float64, device=device)
+        if local_lengths.numel() > 0:
+            padded_lengths[: local_lengths.numel()] = local_lengths
+        gathered_lengths = [torch.empty_like(padded_lengths) for _ in range(counts.numel())]
+        torch.distributed.all_gather(gathered_lengths, padded_lengths)
+        lengths = torch.cat(
+            [
+                gathered[: int(count.item())]
+                for gathered, count in zip(gathered_lengths, counts)
+                if int(count.item()) > 0
+            ]
+        )
+    else:
+        if not _packed_sequence_stats_active:
+            _reset_packed_sequence_stats_in_iteration()
+            return None
+        lengths = local_lengths
+
+    if lengths.numel() == 0:
+        _reset_packed_sequence_stats_in_iteration()
+        return None
+
+    stats = {
+        'packed_sequence/total_tokens': lengths.sum().item(),
+        'packed_sequence/trained_tokens': trained_tokens.item(),
+        'packed_sequence/original_samples': float(lengths.numel()),
+        'packed_sequence/original_sample_length_min': lengths.min().item(),
+        'packed_sequence/original_sample_length_mean': lengths.mean().item(),
+        'packed_sequence/original_sample_length_max': lengths.max().item(),
+        'packed_sequence/original_sample_length_median': torch.quantile(lengths, 0.5).item(),
+        'packed_sequence/original_sample_length_stdv': lengths.std(unbiased=False).item(),
+    }
+    _reset_packed_sequence_stats_in_iteration()
+    return stats
 
 
 def num_floating_point_operations(
@@ -2503,6 +2637,7 @@ def training_log(
     is_first_iteration=False,
     seqlen_squared_sum_in_batch: float | None = None,
     total_real_tokens_in_batch: float | None = None,
+    packed_sequence_stats: Optional[Dict[str, float]] = None,
 ):
     """Log training information such as losses, timing, ...."""
     args = get_args()
@@ -2584,6 +2719,8 @@ def training_log(
     one_logger_utils.track_app_tag(batch_size, args.world_size, args.seq_length)
 
     total_iterations = total_loss_dict[advanced_iters_key] + total_loss_dict[skipped_iters_key]
+    if packed_sequence_stats and wandb_writer:
+        wandb_writer.log(packed_sequence_stats, iteration)
 
     # learning rate will be None on ranks without trainable params, so we must gather across mp ranks
     learning_rate: float | None = reduce_max_stat_across_model_parallel_group(learning_rate)
@@ -3793,6 +3930,9 @@ def train(
         total_real_tokens_in_batch, seqlen_squared_sum_in_batch = (
             consume_seqlen_stats_in_iteration()
         )
+        packed_sequence_stats = None
+        if getattr(args, 'log_packed_sequence_stats', False):
+            packed_sequence_stats = consume_packed_sequence_stats_in_iteration()
         num_floating_point_operations_in_batch = num_floating_point_operations(
             args,
             batch_size,
@@ -3831,6 +3971,7 @@ def train(
             is_first_iteration=is_first_iteration,
             seqlen_squared_sum_in_batch=seqlen_squared_sum_in_batch,
             total_real_tokens_in_batch=total_real_tokens_in_batch,
+            packed_sequence_stats=packed_sequence_stats,
         )
         is_first_iteration = False
 

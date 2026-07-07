@@ -58,7 +58,10 @@ from megatron.training.argument_utils import (
 )
 from megatron.training.arguments import core_transformer_config_from_args, parse_and_validate_args
 from megatron.training.datasets.sft_dataset import SFTDataset
-from megatron.training.training import update_seqlen_stats_from_cu_seqlens
+from megatron.training.training import (
+    update_packed_sequence_stats,
+    update_seqlen_stats_from_cu_seqlens,
+)
 from megatron.training.utils import get_blend_and_blend_per_split, is_first_or_last_pipeline_stage
 from model_provider import model_provider
 
@@ -72,10 +75,24 @@ except ImportError:
 stimer = StragglerDetector()
 
 
+def _sample_lengths_for_packed_stats(batch: dict[str, torch.Tensor | None]) -> torch.Tensor | None:
+    sample_lengths = batch.get("sample_lengths")
+    if sample_lengths is not None:
+        return sample_lengths
+
+    cu_seqlens = batch.get("cu_seqlens")
+    if cu_seqlens is None:
+        return None
+    if cu_seqlens.dim() == 1:
+        return cu_seqlens[1:] - cu_seqlens[:-1]
+    return cu_seqlens[:, 1:] - cu_seqlens[:, :-1]
+
+
 def get_batch(data_iterator, vp_stage=None):
     """Generate a batch."""
 
     BATCH_KEYS = ["attention_mask", "cu_seqlens", "cu_seqlens_padded", "hybrid_cp_group", "labels", "local_cp_size", "loss_mask", "max_seqlen", "position_ids", "tokens"]
+    DATALOADER_BATCH_KEYS = BATCH_KEYS + ["sample_lengths"]
 
     args = get_args()
     config = core_transformer_config_from_args(args)
@@ -93,8 +110,14 @@ def get_batch(data_iterator, vp_stage=None):
     batch = {}
     if tp_rank == 0:
         batch = next(data_iterator)
-        for key in BATCH_KEYS:
+        for key in DATALOADER_BATCH_KEYS:
             batch[key] = batch[key].cuda(non_blocking=True) if key in batch and batch[key] is not None else None
+        if is_sft and getattr(args, "log_packed_sequence_stats", False):
+            update_packed_sequence_stats(
+                _sample_lengths_for_packed_stats(batch),
+                batch.get("loss_mask"),
+            )
+        batch = {key: batch[key] for key in BATCH_KEYS}
 
     batch = get_batch_on_this_tp_rank(batch, broadcast_src_rank=mpu.get_tensor_model_parallel_src_rank(), broadcast_group=mpu.get_tensor_model_parallel_group(), is_sft=is_sft, is_hybrid_cp=is_hybrid_cp, create_attention_mask_in_dataloader=create_attention_mask_in_dataloader, cp_size=cp_size, tp_rank=tp_rank, micro_batch_size=args.micro_batch_size, seq_length=args.seq_length, mtp_on_this_rank=mtp_on_this_rank, pipeline_model_parallel_size=args.pipeline_model_parallel_size, is_pipeline_first_stage=mpu.is_pipeline_first_stage(), is_pipeline_last_stage=mpu.is_pipeline_last_stage())
 

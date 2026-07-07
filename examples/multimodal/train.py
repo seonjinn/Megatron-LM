@@ -31,6 +31,7 @@ from megatron.core.utils import get_batch_on_this_cp_rank, nvtx_range_pop, nvtx_
 from megatron.training import get_args, get_timers, get_tokenizer, pretrain
 from megatron.training.argument_utils import pretrain_cfg_container_from_args
 from megatron.training.arguments import parse_and_validate_args
+from megatron.training.training import update_packed_sequence_stats
 from megatron.training.utils import is_last_rank
 
 
@@ -68,6 +69,7 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
     sound_timestamps = None
     num_sound_clips = None
     sound_length = None
+    sample_lengths = None
 
     args = get_args()
 
@@ -130,6 +132,22 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
         data['samples_seen'] = torch.tensor(1, dtype=torch.int32, device=data_text.device)
 
     samples_seen = _broadcast_data(["samples_seen"], data, torch.int32, args.optimize_broadcast)["samples_seen"]
+
+    if getattr(args, "log_packed_sequence_stats", False):
+        if get_tensor_model_parallel_rank() == 0 and data is not None and "sample_lengths" not in data:
+            if "cu_lengths" in data and data["cu_lengths"].numel() > 1:
+                cu_lengths_for_stats = data["cu_lengths"]
+                if cu_lengths_for_stats.dim() == 1:
+                    cu_lengths_for_stats = cu_lengths_for_stats.unsqueeze(0)
+                data["sample_lengths"] = (
+                    cu_lengths_for_stats[:, 1:] - cu_lengths_for_stats[:, :-1]
+                ).to(dtype=torch.int32)
+            else:
+                data["sample_lengths"] = torch.zeros((1, 1), dtype=torch.int32)
+
+        sample_lengths = _broadcast_data(
+            ["sample_lengths"], data, torch.int32, args.optimize_broadcast
+        )["sample_lengths"]
 
     imgs_sizes = _broadcast_data(["imgs_sizes"], data, torch.int32, args.optimize_broadcast)["imgs_sizes"]
 
@@ -231,6 +249,9 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
             packed_seq_params.cu_seqlens_q_padded,
         )
     nvtx_range_pop("get_ltor_masks_and_position_ids")
+
+    if getattr(args, "log_packed_sequence_stats", False) and packed_seq_params is not None:
+        update_packed_sequence_stats(sample_lengths, loss_mask)
 
     return (
         tokens,
