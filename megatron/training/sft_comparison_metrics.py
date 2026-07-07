@@ -35,6 +35,7 @@ class SFTComparisonStepState:
     """Cumulative native timer state used to derive exact per-event duration."""
 
     train_active_time_s: float = 0.0
+    requires_rebaseline: bool = False
 
 
 @dataclass(frozen=True)
@@ -122,6 +123,12 @@ def normalize_sft_metric_producer_scalar(
     return _normalize_float(field_name, item())
 
 
+def invalidate_sft_comparison_step_timer(state: SFTComparisonStepState) -> None:
+    """Mark active timer time as contaminated until the next native timer stop."""
+
+    state.requires_rebaseline = True
+
+
 def capture_sft_comparison_step(
     *,
     state: SFTComparisonStepState,
@@ -131,7 +138,7 @@ def capture_sft_comparison_step(
     main_lm_loss: int | float | None,
     grad_norm: int | float | None,
     learning_rate: int | float | None,
-) -> SFTComparisonObservation:
+) -> SFTComparisonObservation | None:
     """Capture exact current-step scalars from producer-normalized values."""
 
     if type(advanced) is not bool:
@@ -146,6 +153,11 @@ def capture_sft_comparison_step(
         "train_active_time_s",
         train_active_time_s,
     )
+    if state.requires_rebaseline:
+        state.train_active_time_s = current_active_time_s
+        state.requires_rebaseline = False
+        return None
+
     train_step_time_s = current_active_time_s - previous_active_time_s
     if train_step_time_s < 0.0:
         raise ValueError(
