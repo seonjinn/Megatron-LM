@@ -175,8 +175,11 @@ from .global_vars import (
 )
 from .sft_comparison_metrics import (
     SFTComparisonObservation,
+    SFTComparisonStepState,
     SFTValidationResult,
+    capture_sft_comparison_step,
     log_sft_comparison_event,
+    normalize_sft_metric_producer_scalar,
     validate_sft_comparison_configuration,
 )
 from .theoretical_memory_usage import report_theoretical_memory
@@ -265,6 +268,9 @@ MAX_NUM_CHECKPOINTS_MEMORY_REPORTED = 3
 
 @dataclasses.dataclass
 class _SFTComparisonState:
+    step_state: SFTComparisonStepState = dataclasses.field(
+        default_factory=SFTComparisonStepState
+    )
     pending_observation: SFTComparisonObservation | None = None
 
 
@@ -1403,7 +1409,9 @@ def pretrain(
             wandb_writer.config.update(
                 {
                     'comparison_metric_scopes': {
-                        'train_step_time_s': 'native interval-time average excluding validation',
+                        'train_step_time_s': (
+                            'native interval-time per-event active-time delta excluding validation'
+                        ),
                         'validation_time_s': 'rank-last perf_counter wall time around in-loop evaluate()',
                         'e2e_step_time_s': 'train_step_time_s plus validation_time_s when validation runs',
                     }
@@ -2560,8 +2568,11 @@ def training_log(
 
     # On first iteration, log stats but don't reset accumulators so normal interval stats remain accurate.
     should_reset = not is_first_iteration
+    comparison_main_lm_loss = None
+    comparison_train_active_time_s = None
     if comparison_state is not None:
         comparison_state.pending_observation = None
+        grad_norm = normalize_sft_metric_producer_scalar("grad_norm", grad_norm)
 
     # Advanced, skipped, and Nan iterations.
     advanced_iters_key = 'advanced iterations'
@@ -2579,10 +2590,21 @@ def training_log(
     got_nan = False
     for key in loss_dict:
         if not skipped_iter:
-            total_loss_dict[key] = (
-                total_loss_dict.get(key, torch.tensor([0.0], dtype=torch.float, device='cuda'))
-                + loss_dict[key]
-            )
+            if comparison_state is not None and key == 'lm loss':
+                comparison_main_lm_loss = normalize_sft_metric_producer_scalar(
+                    "main_lm_loss", loss_dict[key]
+                )
+                assert comparison_main_lm_loss is not None
+                total_loss_dict[key] = (
+                    total_loss_dict.get(key, 0.0) + comparison_main_lm_loss
+                )
+            else:
+                total_loss_dict[key] = (
+                    total_loss_dict.get(
+                        key, torch.tensor([0.0], dtype=torch.float, device='cuda')
+                    )
+                    + loss_dict[key]
+                )
         else:
             value = loss_dict[key].float().sum().item()
             is_nan = value == float('inf') or value == -float('inf') or value != value
@@ -2665,10 +2687,15 @@ def training_log(
             if wandb_writer and packing_metrics:
                 wandb_writer.log(packing_metrics, iteration)
         for key in loss_dict:
-            writer.add_scalar(key, loss_dict[key], iteration)
-            writer.add_scalar(key + ' vs samples', loss_dict[key], args.consumed_train_samples)
+            loss_value = (
+                comparison_main_lm_loss
+                if key == 'lm loss' and comparison_main_lm_loss is not None
+                else loss_dict[key]
+            )
+            writer.add_scalar(key, loss_value, iteration)
+            writer.add_scalar(key + ' vs samples', loss_value, args.consumed_train_samples)
             if wandb_writer:
-                wandb_writer.log({key: loss_dict[key]}, iteration)
+                wandb_writer.log({key: loss_value}, iteration)
         if args.log_loss_scale_to_tensorboard:
             writer.add_scalar('loss-scale', loss_scale, iteration)
             writer.add_scalar('loss-scale vs samples', loss_scale, args.consumed_train_samples)
@@ -2786,6 +2813,8 @@ def training_log(
 
         elapsed_time = timers('interval-time').elapsed(barrier=True, reset=should_reset)
         elapsed_time_per_iteration = elapsed_time / total_iterations
+        if comparison_state is not None:
+            comparison_train_active_time_s = timers('interval-time').active_time()
 
         throughput = num_floating_point_operations(
             args,
@@ -2836,23 +2865,31 @@ def training_log(
         if learning_rate is not None:
             log_string += f' learning rate: {learning_rate:.6E} |'
         log_string += f' global batch size: {batch_size:5d} |'
-        main_lm_loss = None
         for key in total_loss_dict:
             if key not in [advanced_iters_key, skipped_iters_key, nan_iters_key]:
-                avg = total_loss_dict[key].item() / float(
-                    max(1, total_loss_dict[advanced_iters_key])
+                accumulated_loss = total_loss_dict[key]
+                accumulated_loss_value = (
+                    float(accumulated_loss)
+                    if type(accumulated_loss) in (int, float)
+                    else accumulated_loss.item()
                 )
-                if key == 'lm loss':
-                    main_lm_loss = avg
+                avg = accumulated_loss_value / float(max(1, total_loss_dict[advanced_iters_key]))
                 if avg >= 0.0:
                     log_string += ' {}: {:.6E} |'.format(key, avg)
                 if should_reset:
-                    total_loss_dict[key] = torch.tensor([0.0], dtype=torch.float, device='cuda')
-        if comparison_state is not None and wandb_writer:
-            comparison_state.pending_observation = SFTComparisonObservation(
+                    total_loss_dict[key] = (
+                        0.0
+                        if comparison_state is not None and key == 'lm loss'
+                        else torch.tensor([0.0], dtype=torch.float, device='cuda')
+                    )
+        if comparison_state is not None:
+            assert comparison_train_active_time_s is not None
+            comparison_state.pending_observation = capture_sft_comparison_step(
+                state=comparison_state.step_state,
                 step=iteration,
-                train_step_time_s=elapsed_time_per_iteration,
-                main_lm_loss=main_lm_loss,
+                train_active_time_s=comparison_train_active_time_s,
+                advanced=not bool(skipped_iter),
+                main_lm_loss=comparison_main_lm_loss,
                 grad_norm=grad_norm,
                 learning_rate=learning_rate,
             )

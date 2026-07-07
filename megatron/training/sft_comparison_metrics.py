@@ -13,9 +13,9 @@ class SFTComparisonObservation:
 
     Attributes:
         step: One-based Megatron-LM training iteration.
-        train_step_time_s: Native elapsed iteration time in seconds, excluding validation.
+        train_step_time_s: Native per-event active iteration time, excluding validation.
         validation_time_s: Rank-last wall time around the in-loop evaluation call.
-        main_lm_loss: Native interval-averaged language-model training loss.
+        main_lm_loss: Native current-iteration language-model training loss.
         validation_loss: Native language-model validation loss.
         grad_norm: Native training gradient norm.
         learning_rate: Native training learning rate.
@@ -28,6 +28,13 @@ class SFTComparisonObservation:
     validation_loss: int | float | None = None
     grad_norm: int | float | None = None
     learning_rate: int | float | None = None
+
+
+@dataclass
+class SFTComparisonStepState:
+    """Cumulative native timer state used to derive exact per-event duration."""
+
+    train_active_time_s: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -93,6 +100,82 @@ def _normalize_float(field_name: str, value: object) -> float:
     if not math.isfinite(normalized):
         raise ValueError(f"{field_name} must be finite, got {value!r}")
     return normalized
+
+
+def normalize_sft_metric_producer_scalar(
+    field_name: str,
+    value: object | None,
+) -> float | None:
+    """Materialize a producer scalar once before entering the strict adapter."""
+
+    if value is None:
+        return None
+    if type(value) in (int, float):
+        return _normalize_float(field_name, value)
+
+    item = getattr(value, "item", None)
+    if not callable(item):
+        raise TypeError(
+            f"{field_name} producer must be a Python int, float, or scalar with item(), "
+            f"got {type(value).__name__}"
+        )
+    return _normalize_float(field_name, item())
+
+
+def capture_sft_comparison_step(
+    *,
+    state: SFTComparisonStepState,
+    step: int,
+    train_active_time_s: int | float,
+    advanced: bool,
+    main_lm_loss: int | float | None,
+    grad_norm: int | float | None,
+    learning_rate: int | float | None,
+) -> SFTComparisonObservation:
+    """Capture exact current-step scalars from producer-normalized values."""
+
+    if type(advanced) is not bool:
+        raise TypeError(f"advanced must be a Python bool, got {type(advanced).__name__}")
+
+    normalized_step = _normalize_step(step)
+    previous_active_time_s = _normalize_float(
+        "previous_train_active_time_s",
+        state.train_active_time_s,
+    )
+    current_active_time_s = _normalize_float(
+        "train_active_time_s",
+        train_active_time_s,
+    )
+    train_step_time_s = current_active_time_s - previous_active_time_s
+    if train_step_time_s < 0.0:
+        raise ValueError(
+            "train_active_time_s must not decrease: "
+            f"{current_active_time_s} < {previous_active_time_s}"
+        )
+
+    normalized_main_lm_loss = (
+        _normalize_float("main_lm_loss", main_lm_loss)
+        if advanced and main_lm_loss is not None
+        else None
+    )
+    normalized_grad_norm = (
+        _normalize_float("grad_norm", grad_norm) if grad_norm is not None else None
+    )
+    normalized_learning_rate = (
+        _normalize_float("learning_rate", learning_rate)
+        if learning_rate is not None
+        else None
+    )
+
+    observation = SFTComparisonObservation(
+        step=normalized_step,
+        train_step_time_s=train_step_time_s,
+        main_lm_loss=normalized_main_lm_loss,
+        grad_norm=normalized_grad_norm,
+        learning_rate=normalized_learning_rate,
+    )
+    state.train_active_time_s = current_active_time_s
+    return observation
 
 
 def _add_optional_metric(
