@@ -1420,6 +1420,7 @@ def pretrain(
             )
             wandb_writer.define_metric('comparison/step')
             wandb_writer.define_metric('performance/*', step_metric='comparison/step')
+            wandb_writer.define_metric('throughput/*', step_metric='comparison/step')
             wandb_writer.define_metric('accuracy/*', step_metric='comparison/step')
             wandb_writer.define_metric('context/*', step_metric='comparison/step')
 

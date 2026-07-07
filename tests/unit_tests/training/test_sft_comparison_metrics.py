@@ -744,6 +744,8 @@ def test_logs_one_validation_event_with_combined_e2e() -> None:
     observation = adapter.SFTComparisonObservation(
         step=20,
         train_step_time_s=55.28,
+        processed_tokens=16_631_382,
+        num_gpus=512,
         main_lm_loss=2.5176,
         grad_norm=42.0,
         learning_rate=4.2e-7,
@@ -770,10 +772,16 @@ def test_logs_one_validation_event_with_combined_e2e() -> None:
         "performance/train_step_time_s": 55.28,
         "performance/e2e_step_time_s": pytest.approx(113.925),
         "performance/validation_time_s": 58.645,
+        "throughput/processed_tokens_per_second": pytest.approx(16_631_382 / 55.28),
+        "throughput/processed_tokens_per_second_per_gpu": pytest.approx(
+            16_631_382 / 55.28 / 512
+        ),
         "accuracy/main_lm_loss": 2.5176,
         "accuracy/validation_loss": 2.5803,
         "accuracy/grad_norm": 42.0,
         "accuracy/learning_rate": 4.2e-7,
+        "context/processed_tokens": 16_631_382,
+        "context/num_gpus": 512,
         "context/is_validation_step": 1,
     }
     assert step == 20
@@ -842,6 +850,7 @@ def test_wandb_comparison_axis_matches_nemo_rl() -> None:
     assert definitions == [
         "wandb_writer.define_metric('comparison/step')",
         "wandb_writer.define_metric('performance/*', step_metric='comparison/step')",
+        "wandb_writer.define_metric('throughput/*', step_metric='comparison/step')",
         "wandb_writer.define_metric('accuracy/*', step_metric='comparison/step')",
         "wandb_writer.define_metric('context/*', step_metric='comparison/step')",
     ]
