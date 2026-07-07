@@ -63,10 +63,6 @@ from .knapsacks import (
 AUDIO_MIN_DURATION_SECONDS = 0.1
 AUDIO_MAX_DURATION_SECONDS = 1800
 IDENTITY_FILTER_DATASETS = ("apps, taco", "new sft problems", "NemotronX RL")
-IDENTITY_FILTER_KEYWORDS = ("gptoss", "gpt-oss", "chatgpt", "openai")
-PACKING_ALGORITHM_PARAMETER_ALIASES = {
-    "balannced_knapsack_delta": "balanced_knapsack_delta",
-}
 
 
 def _parse_packing_algorithm_parameters(raw_parameters: object) -> dict[str, str]:
@@ -106,7 +102,7 @@ def _parse_packing_algorithm_parameters(raw_parameters: object) -> dict[str, str
 
     normalized_parameters = {}
     for key, value in parameters.items():
-        normalized_key = PACKING_ALGORITHM_PARAMETER_ALIASES.get(str(key).strip(), str(key).strip())
+        normalized_key = str(key).strip()
         if not normalized_key:
             raise ValueError("packing_algorithm_parameters contains an empty key")
         normalized_parameters[normalized_key] = str(value).strip()
@@ -136,8 +132,11 @@ def _clean_think(match: re.Match) -> str:
     return f"<think>{clean_content}</think>"
 
 
-def _has_filtered_identity_keyword(sample: ConversationSample) -> bool:
-    """Match the Nano offline packer's dataset-specific identity filter."""
+def _has_filtered_identity_keyword(sample: ConversationSample, keywords: list[str]) -> bool:
+    """Match configured identity keywords for datasets that need identity filtering."""
+    normalized_keywords = tuple(keyword.lower() for keyword in keywords if keyword)
+    if not normalized_keywords:
+        return False
     if sample.__subflavors__.get("dataset") not in IDENTITY_FILTER_DATASETS:
         return False
 
@@ -147,7 +146,7 @@ def _has_filtered_identity_keyword(sample: ConversationSample) -> bool:
         for fragment in message.fragments:
             if isinstance(fragment, str):
                 content_lower = fragment.lower()
-                if any(keyword in content_lower for keyword in IDENTITY_FILTER_KEYWORDS):
+                if any(keyword in content_lower for keyword in normalized_keywords):
                     return True
     return False
 
@@ -681,7 +680,8 @@ class MultiModalTaskEncoder(
             text sample for ``openai_messages_offline_packed_jsonl`` rows.
         """
 
-        if getattr(self.args, "filter_identity_keywords", False) and _has_filtered_identity_keyword(sample):
+        identity_filter_keywords = getattr(self.args, "filter_identity_keywords", None) or []
+        if _has_filtered_identity_keyword(sample, identity_filter_keywords):
             raise ValueError(
                 "Sample from identity-filtered dataset contains a filtered "
                 f"assistant identity keyword: {sample.__key__}"
@@ -1751,6 +1751,8 @@ class MultiModalTaskEncoder(
                 self.args.decoder_seq_length,
                 fp8_enabled=False,
             )
+            # Build padding directly on the token/label tensors' dtype and device;
+            # torch.ones(...)*value would create default float CPU tensors before cat().
             padding1 = torch.full(
                 (padding_needed,),
                 self.tokenizer.pad,

@@ -139,9 +139,13 @@ def add_multimodal_extra_args(parser):
     )
     group.add_argument(
         "--filter-identity-keywords",
-        action="store_true",
-        default=False,
-        help="Drop samples from configured datasets when assistant text contains filtered identity keywords.",
+        nargs="+",
+        default=[],
+        metavar="KEYWORD",
+        help=(
+            "Drop samples from configured datasets when assistant text contains any of these "
+            "case-insensitive keywords."
+        ),
     )
     group.add_argument(
         "--recompute-vision", action="store_true", default=False, help="Enable activation checkpointing in the vision model"
