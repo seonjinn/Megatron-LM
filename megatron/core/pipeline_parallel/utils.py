@@ -30,7 +30,7 @@ def is_pp_last_stage(pp_group: torch.distributed.ProcessGroup):
     return get_pg_rank(pp_group) == (get_pg_size(pp_group) - 1)
 
 
-def is_vp_first_stage(vp_stage: int, vp_size: int | None):
+def is_vp_first_stage(vp_stage: int | None, vp_size: int | None):
     """Return True if in the first virtual pipeline model-parallel stage, False otherwise."""
     if vp_size is None or vp_size <= 1:
         assert vp_stage is None or vp_stage == 0, (

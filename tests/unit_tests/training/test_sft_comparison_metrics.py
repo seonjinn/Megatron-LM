@@ -19,6 +19,7 @@ _TRAINING_PATH = _REPO_ROOT / "megatron/training/training.py"
 _TRAINING_UTILS_PATH = _REPO_ROOT / "megatron/training/utils/common_utils.py"
 _PRETRAIN_GPT_PATH = _REPO_ROOT / "pretrain_gpt.py"
 _PRETRAIN_HYBRID_PATH = _REPO_ROOT / "pretrain_hybrid.py"
+_PIPELINE_UTILS_PATH = _REPO_ROOT / "megatron/core/pipeline_parallel/utils.py"
 
 
 class _FakeWandbWriter:
@@ -1077,17 +1078,61 @@ def test_training_resets_packed_stats_before_each_native_train_step() -> None:
         and ast.unparse(node.test) == "args.skip_train"
         and train_step_call in ast.walk(ast.Module(body=node.orelse, type_ignores=[]))
     )
-    reset_statements = [
+    reset_guards = [
         statement
         for statement in skip_train_branch.orelse
-        if isinstance(statement, ast.Expr)
-        and isinstance(statement.value, ast.Call)
-        and isinstance(statement.value.func, ast.Name)
-        and statement.value.func.id == "reset_seqlen_stats_in_iteration"
+        if isinstance(statement, ast.If)
+        and ast.unparse(statement.test) == "comparison_metrics_enabled"
     ]
 
-    assert len(reset_statements) == 1
-    assert reset_statements[0].lineno < train_step_call.lineno
+    assert len(reset_guards) == 1
+    assert ast.unparse(reset_guards[0]) == (
+        "if comparison_metrics_enabled:\n    reset_seqlen_stats_in_iteration()"
+    )
+    assert reset_guards[0].lineno < train_step_call.lineno
+
+
+def test_comparison_flag_gates_packed_reset_on_every_rank() -> None:
+    train = _function_node(_TRAINING_PATH, "train")
+    comparison_enabled_assignments = [
+        statement
+        for statement in train.body
+        if isinstance(statement, ast.Assign)
+        and len(statement.targets) == 1
+        and isinstance(statement.targets[0], ast.Name)
+        and statement.targets[0].id == "comparison_metrics_enabled"
+    ]
+
+    assert len(comparison_enabled_assignments) == 1
+    comparison_enabled_assignment = comparison_enabled_assignments[0]
+    assert ast.unparse(comparison_enabled_assignment.value) == "_sft_comparison_metrics_enabled(args)"
+
+    train_step_call = next(
+        node
+        for node in ast.walk(train)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "train_step"
+    )
+    skip_train_branch = next(
+        node
+        for node in ast.walk(train)
+        if isinstance(node, ast.If)
+        and ast.unparse(node.test) == "args.skip_train"
+        and train_step_call in ast.walk(ast.Module(body=node.orelse, type_ignores=[]))
+    )
+    reset_guards = [
+        statement
+        for statement in skip_train_branch.orelse
+        if isinstance(statement, ast.If)
+        and ast.unparse(statement.test) == "comparison_metrics_enabled"
+    ]
+
+    assert len(reset_guards) == 1
+    assert ast.unparse(reset_guards[0]) == (
+        "if comparison_metrics_enabled:\n    reset_seqlen_stats_in_iteration()"
+    )
+    assert reset_guards[0].lineno < train_step_call.lineno
 
 
 @pytest.mark.parametrize("path", [_PRETRAIN_GPT_PATH, _PRETRAIN_HYBRID_PATH])
@@ -1103,8 +1148,25 @@ def test_packed_forward_step_records_only_the_first_virtual_pipeline_chunk(path:
 
     assert ast.unparse(update_call.args[0]) == "cu_seqlens"
     assert {keyword.arg: ast.unparse(keyword.value) for keyword in update_call.keywords} == {
-        "vp_stage": "vp_stage"
+        "vp_stage": "vp_stage",
+        "comparison_metrics_enabled": "comparison_metrics_enabled",
     }
+
+
+def test_virtual_pipeline_first_stage_accepts_none_without_virtual_pipeline() -> None:
+    is_vp_first_stage = _function_node(_PIPELINE_UTILS_PATH, "is_vp_first_stage")
+
+    assert ast.unparse(is_vp_first_stage.args.args[0].annotation) == "int | None"
+    module = ast.fix_missing_locations(
+        ast.Module(body=[is_vp_first_stage], type_ignores=[])
+    )
+    namespace: dict[str, object] = {}
+    exec(compile(module, _PIPELINE_UTILS_PATH, "exec"), namespace)
+    helper = namespace["is_vp_first_stage"]
+
+    assert callable(helper)
+    assert helper(None, None) is True
+    assert helper(0, None) is True
 
 
 def test_dummy_train_step_invalidates_comparison_timer_before_continue() -> None:

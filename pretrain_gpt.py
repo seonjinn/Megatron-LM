@@ -59,7 +59,10 @@ from megatron.training.argument_utils import gpt_config_from_args, pretrain_cfg_
 from megatron.training.arguments import core_transformer_config_from_args, parse_and_validate_args
 from megatron.training.datasets.fim_dataset import GPTFIMDataset, GPTFIMDatasetConfig
 from megatron.training.datasets.sft_dataset import SFTDataset
-from megatron.training.training import update_seqlen_stats_from_cu_seqlens
+from megatron.training.training import (
+    _sft_comparison_metrics_enabled,
+    update_seqlen_stats_from_cu_seqlens,
+)
 from megatron.training.utils import get_blend_and_blend_per_split, is_first_or_last_pipeline_stage
 from model_provider import model_provider
 
@@ -284,6 +287,7 @@ def forward_step(data_iterator, model: GPTModel, return_schedule_plan: bool = Fa
     """
     args = get_args()
     timers = get_timers()
+    comparison_metrics_enabled = _sft_comparison_metrics_enabled(args)
 
     # Get the batch.
     timers('batch-generator', log_level=2).start()
@@ -311,7 +315,11 @@ def forward_step(data_iterator, model: GPTModel, return_schedule_plan: bool = Fa
             cu_seqlens_padded = cu_seqlens_padded.squeeze(0)
         # Use real (unpadded) cu_seqlens to feed the FLOPs accounting: varlen
         # attention only computes work for real tokens within each chunk.
-        update_seqlen_stats_from_cu_seqlens(cu_seqlens, vp_stage=vp_stage)
+        update_seqlen_stats_from_cu_seqlens(
+            cu_seqlens,
+            vp_stage=vp_stage,
+            comparison_metrics_enabled=comparison_metrics_enabled,
+        )
         cu_seqlens_for_params = (
             cu_seqlens_padded if cu_seqlens_padded is not None else cu_seqlens
         )  # TODO(asolergi-nv): Currently there is a bug forcing cu_seqlens to be cu_seqlens_padded

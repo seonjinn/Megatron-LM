@@ -321,7 +321,12 @@ def print_datetime(string, override_timestamp=None):
     print_rank_0(f'[{string}] datetime: {time_str} ')
 
 
-def update_seqlen_stats_from_cu_seqlens(cu_seqlens, vp_stage: int | None = None):
+def update_seqlen_stats_from_cu_seqlens(
+    cu_seqlens,
+    vp_stage: int | None = None,
+    *,
+    comparison_metrics_enabled: bool = False,
+):
     """Add ``sum(L_i)`` and ``sum(L_i ** 2)`` from one micro-batch's REAL ``cu_seqlens``.
 
     Args:
@@ -331,7 +336,10 @@ def update_seqlen_stats_from_cu_seqlens(cu_seqlens, vp_stage: int | None = None)
             metric reports useful work only, not work on CP-alignment or
             end-of-sequence padding tokens.
         vp_stage: Virtual pipeline stage for the forward call. Only the first
-            virtual chunk contributes because every chunk sees the same batch.
+            virtual chunk contributes to comparison metrics because every chunk
+            sees the same batch.
+        comparison_metrics_enabled: Whether comparison-only VPP deduplication
+            should be applied.
 
     Every rank in the same data-parallel group sees the same ``cu_seqlens`` (it is
     broadcast across TP/CP/PP). The per-micro-batch reduction stays on device --
@@ -343,7 +351,7 @@ def update_seqlen_stats_from_cu_seqlens(cu_seqlens, vp_stage: int | None = None)
     global _seqlen_stats_in_iteration, _seqlen_stats_active
     if cu_seqlens is None or cu_seqlens.numel() < 2:
         return
-    if not is_vp_first_stage(
+    if comparison_metrics_enabled and not is_vp_first_stage(
         vp_stage,
         mpu.get_virtual_pipeline_model_parallel_world_size(),
     ):
@@ -3514,9 +3522,10 @@ def train(
 
     # Tracking loss.
     total_loss_dict = {}
+    comparison_metrics_enabled = _sft_comparison_metrics_enabled(args)
     comparison_state = (
         _SFTComparisonState()
-        if _sft_comparison_metrics_enabled(args) and get_wandb_writer() is not None
+        if comparison_metrics_enabled and get_wandb_writer() is not None
         else None
     )
 
@@ -3848,7 +3857,8 @@ def train(
             max_attention_logit = None
         else:
             ft_integration.on_training_step_start()
-            reset_seqlen_stats_in_iteration()
+            if comparison_metrics_enabled:
+                reset_seqlen_stats_in_iteration()
             if comparison_state is not None:
                 comparison_train_step_start_time_s = time.perf_counter()
             (

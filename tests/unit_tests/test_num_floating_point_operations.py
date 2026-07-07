@@ -430,10 +430,31 @@ class TestAccumulator:
         )
         cu = torch.tensor([0, 100, 300], dtype=torch.int32)
 
+        update_seqlen_stats_from_cu_seqlens(
+            cu,
+            vp_stage=0,
+            comparison_metrics_enabled=True,
+        )
+        update_seqlen_stats_from_cu_seqlens(
+            cu,
+            vp_stage=1,
+            comparison_metrics_enabled=True,
+        )
+
+        assert consume_seqlen_stats_in_iteration() == (300, 50_000)
+
+    def test_vpp_two_preserves_native_stats_when_comparison_is_disabled(self, monkeypatch):
+        monkeypatch.setattr(
+            training_module.mpu,
+            "get_virtual_pipeline_model_parallel_world_size",
+            lambda: 2,
+        )
+        cu = torch.tensor([0, 100, 300], dtype=torch.int32)
+
         update_seqlen_stats_from_cu_seqlens(cu, vp_stage=0)
         update_seqlen_stats_from_cu_seqlens(cu, vp_stage=1)
 
-        assert consume_seqlen_stats_in_iteration() == (300, 50_000)
+        assert consume_seqlen_stats_in_iteration() == (600, 100_000)
 
     def test_no_updates_returns_none(self):
         """BSHD path: never calling update must NOT issue a collective. The
