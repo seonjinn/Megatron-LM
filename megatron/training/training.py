@@ -178,6 +178,7 @@ from .sft_comparison_metrics import (
     SFTComparisonStepState,
     SFTValidationResult,
     capture_sft_comparison_step,
+    invalidate_sft_comparison_step_timer,
     log_sft_comparison_event,
     normalize_sft_metric_producer_scalar,
     validate_sft_comparison_configuration,
@@ -3771,6 +3772,9 @@ def train(
         # Completely skip iteration if needed.
         if (iteration + 1) in args.iterations_to_skip:
             # Dummy train_step to fast forward train_data_iterator.
+            if comparison_state is not None:
+                comparison_state.pending_observation = None
+                invalidate_sft_comparison_step_timer(comparison_state.step_state)
             dummy_train_step(train_data_iterator)
             if iteration == start_iteration:
                 start_iteration = iteration + 1

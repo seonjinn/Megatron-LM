@@ -43,6 +43,88 @@ class _TensorLikeScalar:
         return self.value
 
 
+class _FakeCudaScalar:
+    def __init__(
+        self,
+        value: float,
+        operations: list[str],
+        *,
+        is_copy: bool = False,
+    ) -> None:
+        self.value = value
+        self.operations = operations
+        self.is_copy = is_copy
+        self.item_calls = 0
+
+    def numel(self) -> int:
+        self.operations.append("numel")
+        return 1
+
+    def detach(self) -> "_FakeCudaScalar":
+        self.operations.append("detach")
+        return self
+
+    def reshape(self, size: int) -> "_FakeCudaScalar":
+        self.operations.append(f"reshape:{size}")
+        return self
+
+    def clone(self) -> "_FakeCudaScalar":
+        self.operations.append("clone")
+        return _FakeCudaScalar(self.value, self.operations, is_copy=True)
+
+    def to(self, *, dtype: object) -> "_FakeCudaScalar":
+        self.operations.append(f"to:{dtype}")
+        return self
+
+    def item(self) -> float:
+        self.operations.append("item")
+        self.item_calls += 1
+        return self.value
+
+
+class _FakeDistributed:
+    class ReduceOp:
+        MAX = "max"
+
+    def __init__(self, operations: list[str]) -> None:
+        self.operations = operations
+        self.reduced_tensor: _FakeCudaScalar | None = None
+
+    def all_reduce(self, tensor: _FakeCudaScalar, *, op: object, group: object) -> None:
+        assert tensor.is_copy
+        assert op == self.ReduceOp.MAX
+        self.operations.append("all_reduce")
+        self.reduced_tensor = tensor
+
+
+class _FakeCuda:
+    @staticmethod
+    def current_device() -> int:
+        return 0
+
+
+class _FakeTorch:
+    Tensor = _FakeCudaScalar
+    float32 = "float32"
+
+    def __init__(self, operations: list[str]) -> None:
+        self.operations = operations
+        self.distributed = _FakeDistributed(operations)
+        self.cuda = _FakeCuda()
+        self.tensor_calls = 0
+        self.tensor_inputs: list[object] = []
+
+    def tensor(self, value: object, *, dtype: object, device: object) -> _FakeCudaScalar:
+        self.tensor_calls += 1
+        self.tensor_inputs.append(value)
+        self.operations.append("torch.tensor")
+        assert isinstance(value, list)
+        assert len(value) == 1
+        assert dtype == self.float32
+        assert device == 0
+        return _FakeCudaScalar(float(value[0]), self.operations, is_copy=True)
+
+
 def _load_adapter() -> ModuleType:
     spec = importlib.util.spec_from_file_location("sft_comparison_metrics", _ADAPTER_PATH)
     assert spec is not None
@@ -68,6 +150,24 @@ def _load_isolated_function(
     namespace = {"argparse": argparse}
     exec(compile(module, path, "exec"), namespace)
     return namespace[function_name]
+
+
+def _load_reducer(fake_torch: _FakeTorch) -> Callable[..., float | None]:
+    function = _function_node(
+        _TRAINING_UTILS_PATH,
+        "reduce_max_stat_across_model_parallel_group",
+    )
+    future_annotations = ast.ImportFrom(
+        module="__future__",
+        names=[ast.alias(name="annotations")],
+        level=0,
+    )
+    module = ast.fix_missing_locations(
+        ast.Module(body=[future_annotations, function], type_ignores=[])
+    )
+    namespace = {"torch": fake_torch, "mpu": object()}
+    exec(compile(module, _TRAINING_UTILS_PATH, "exec"), namespace)
+    return namespace[function.name]
 
 
 def test_builds_training_comparison_metrics() -> None:
@@ -207,6 +307,64 @@ def test_reduced_logging_scalar_is_materialized_once_at_producer() -> None:
     assert len(item_calls) == 1
 
 
+def test_cuda_logging_scalar_stays_tensor_until_final_materialization() -> None:
+    operations: list[str] = []
+    fake_torch = _FakeTorch(operations)
+    reducer = _load_reducer(fake_torch)
+    producer_tensor = _FakeCudaScalar(42.25, operations)
+
+    result = reducer(producer_tensor, group=object())
+
+    assert result == 42.25
+    assert fake_torch.tensor_calls == 0
+    assert producer_tensor.item_calls == 0
+    assert fake_torch.distributed.reduced_tensor is not producer_tensor
+    assert fake_torch.distributed.reduced_tensor is not None
+    assert fake_torch.distributed.reduced_tensor.item_calls == 1
+    assert operations == [
+        "numel",
+        "detach",
+        "reshape:1",
+        "clone",
+        "to:float32",
+        "all_reduce",
+        "item",
+    ]
+
+
+def test_reducer_type_accepts_tensor_float_or_none() -> None:
+    reducer = _function_node(
+        _TRAINING_UTILS_PATH,
+        "reduce_max_stat_across_model_parallel_group",
+    )
+
+    assert ast.unparse(reducer.args.args[0].annotation) == "torch.Tensor | float | None"
+
+
+@pytest.mark.parametrize(
+    ("producer_value", "expected_result", "expected_tensor_input"),
+    [
+        (3.5, 3.5, [3.5]),
+        (None, None, [-1.0]),
+    ],
+)
+def test_reducer_preserves_python_scalar_and_none_behavior(
+    producer_value: float | None,
+    expected_result: float | None,
+    expected_tensor_input: list[float],
+) -> None:
+    operations: list[str] = []
+    fake_torch = _FakeTorch(operations)
+    reducer = _load_reducer(fake_torch)
+
+    result = reducer(producer_value, group=object())
+
+    assert result == expected_result
+    assert fake_torch.tensor_calls == 1
+    assert fake_torch.tensor_inputs == [expected_tensor_input]
+    assert operations == ["torch.tensor", "all_reduce", "item"]
+
+
 def test_captures_independent_first_and_second_step_time_and_loss() -> None:
     adapter = _load_adapter()
     state = adapter.SFTComparisonStepState()
@@ -255,6 +413,49 @@ def test_skipped_step_omits_loss_without_losing_timer_progress() -> None:
     assert skipped.main_lm_loss is None
     assert state.train_active_time_s == 21.0
     assert "accuracy/main_lm_loss" not in payload
+
+
+def test_dummy_skip_suppresses_and_rebaselines_next_comparison_step() -> None:
+    adapter = _load_adapter()
+    state = adapter.SFTComparisonStepState()
+    first = adapter.capture_sft_comparison_step(
+        state=state,
+        step=1,
+        train_active_time_s=10.0,
+        advanced=True,
+        main_lm_loss=2.75,
+        grad_norm=4.0,
+        learning_rate=1e-5,
+    )
+
+    adapter.invalidate_sft_comparison_step_timer(state)
+    after_skip = adapter.capture_sft_comparison_step(
+        state=state,
+        step=3,
+        train_active_time_s=24.0,
+        advanced=True,
+        main_lm_loss=2.25,
+        grad_norm=3.5,
+        learning_rate=1e-5,
+    )
+    resumed = adapter.capture_sft_comparison_step(
+        state=state,
+        step=4,
+        train_active_time_s=30.5,
+        advanced=True,
+        main_lm_loss=2.0,
+        grad_norm=3.0,
+        learning_rate=1e-5,
+    )
+
+    assert first is not None
+    assert first.train_step_time_s == 10.0
+    assert after_skip is None
+    assert resumed is not None
+    assert resumed.step == 4
+    assert resumed.train_step_time_s == 6.5
+    assert resumed.main_lm_loss == 2.0
+    assert state.train_active_time_s == 30.5
 
 
 @pytest.mark.parametrize(
@@ -645,6 +846,31 @@ def test_training_log_uses_exact_current_step_producers() -> None:
     assert "advanced=not bool(skipped_iter)" in capture_call
     assert "main_lm_loss=comparison_main_lm_loss" in capture_call
     assert "grad_norm=grad_norm" in capture_call
+
+
+def test_dummy_train_step_invalidates_comparison_timer_before_continue() -> None:
+    train = _function_node(_TRAINING_PATH, "train")
+    skip_branch = next(
+        node
+        for node in ast.walk(train)
+        if isinstance(node, ast.If) and "iterations_to_skip" in ast.unparse(node.test)
+    )
+    invalidation_calls = [
+        node
+        for node in ast.walk(skip_branch)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "invalidate_sft_comparison_step_timer"
+    ]
+    continue_node = next(
+        node for node in ast.walk(skip_branch) if isinstance(node, ast.Continue)
+    )
+
+    assert len(invalidation_calls) == 1
+    assert ast.unparse(invalidation_calls[0]) == (
+        "invalidate_sft_comparison_step_timer(comparison_state.step_state)"
+    )
+    assert invalidation_calls[0].lineno < continue_node.lineno
 
 
 def test_timelimit_returns_explicit_incomplete_validation_result() -> None:

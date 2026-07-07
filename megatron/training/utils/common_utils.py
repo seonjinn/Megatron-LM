@@ -251,7 +251,8 @@ def average_losses_across_data_parallel_group(
 
 
 def reduce_max_stat_across_model_parallel_group(
-    stat: float, group: Optional[torch.distributed.ProcessGroup] = None
+    stat: torch.Tensor | float | None,
+    group: Optional[torch.distributed.ProcessGroup] = None,
 ) -> float | None:
     """
     Ranks without an optimizer will have no grad_norm or num_zeros_in_grad stats.
@@ -264,11 +265,22 @@ def reduce_max_stat_across_model_parallel_group(
     """
     if group is None:
         group = mpu.get_model_parallel_group()
-    if stat is None:
-        stat = -1.0
-    stat = torch.tensor([stat], dtype=torch.float32, device=torch.cuda.current_device())
-    torch.distributed.all_reduce(stat, op=torch.distributed.ReduceOp.MAX, group=group)
-    stat_value = stat.item()
+    if isinstance(stat, torch.Tensor):
+        if stat.numel() != 1:
+            raise ValueError(f"logging stat tensor must contain one value, got {stat.numel()}")
+        stat_tensor = stat.detach().reshape(1).clone().to(dtype=torch.float32)
+    else:
+        stat_tensor = torch.tensor(
+            [-1.0 if stat is None else stat],
+            dtype=torch.float32,
+            device=torch.cuda.current_device(),
+        )
+    torch.distributed.all_reduce(
+        stat_tensor,
+        op=torch.distributed.ReduceOp.MAX,
+        group=group,
+    )
+    stat_value = stat_tensor.item()
     if stat_value == -1.0:
         # No rank has a valid stat, so return None to indicate that it is None across all ranks.
         return None
