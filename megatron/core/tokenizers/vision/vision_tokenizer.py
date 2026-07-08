@@ -43,7 +43,7 @@ class MegatronTokenizerVision(MegatronTokenizerBase):
         else:
             return library_class(self.path, **kwargs)
 
-    def tokenize(self, text: Union[str, List[Dict]]) -> List[int]:
+    def tokenize(self, text: Union[str, List[Dict]], **kwargs) -> List[int]:
         """
         Text tokenization.
 
@@ -54,7 +54,7 @@ class MegatronTokenizerVision(MegatronTokenizerBase):
             list: list of ids.
         """
 
-        return self._tokenizer.tokenize(text)
+        return self._tokenizer.tokenize(text, **kwargs)
 
     def detokenize(self, ids: List[int]) -> str:
         """
