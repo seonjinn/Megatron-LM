@@ -45,8 +45,8 @@ ENV CUDA_HOME=/usr/local/cuda
 # =========================
 # Install mamba and causal-conv1d
 # =========================
-# Mamba dependencies.
-RUN pip uninstall -y triton && pip install "triton<3.4.0"
+# Keep the PyTorch container's pytorch-triton build. PyTorch 25.11 uses CUDA 13
+# and its bundled Triton 3.5 has the corresponding PTX compiler support.
 # Build causal-conv1d from source to match the container's PyTorch ABI.
 # MUST use --no-build-isolation so it compiles against the container's PyTorch
 # (nv25.11), not a PyPI torch pulled into the isolated build env. Without this
@@ -63,9 +63,11 @@ RUN unset PIP_CONSTRAINT && cd /tmp && \
     git clone https://github.com/state-spaces/mamba.git && \
     cd mamba && \
     git checkout v2.3.0 && \
-    MAMBA_FORCE_BUILD=TRUE pip install . --no-build-isolation && \
+    MAMBA_FORCE_BUILD=TRUE pip install . --no-build-isolation --no-deps && \
     cd /tmp && \
     rm -rf mamba
+
+RUN python -c "import torch, triton; assert torch.version.cuda == '13.0'; assert tuple(map(int, triton.__version__.split('.')[:2])) >= (3, 5), (torch.__version__, torch.version.cuda, triton.__version__)"
 
 
 # Install miscellaneous packages necessary for pre-training and inference.
