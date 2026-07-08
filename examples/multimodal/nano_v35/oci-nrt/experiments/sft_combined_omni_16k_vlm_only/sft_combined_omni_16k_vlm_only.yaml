@@ -1,0 +1,81 @@
+# VLM-only derivative of:
+# /lustre/fsw/portfolios/llmservice/users/matthieul/data/omni_data_recipes/stages/sft_combined_omni_16k/sft_combined_omni_16k.yaml
+#
+# Retains the combined recipe's image, video, and text entries and weights.
+# Inside eagle_sft_v14, replaces its CharXiv child with the judge-filtered mix.
+# Removes short-omni, ASR, audio-reasoning, and audio-SFT entries.
+# Adds the additional-charts and Hopchain mixes at weight 1.0 each.
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+      # Base Eagle v14 vision mix with judge-filtered CharXiv substituted inside
+      - path: eagle_sft_v14_nano_charxiv.yaml
+        repetitions: 1.2
+
+      # Short video QA data
+      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/data/omni_data_recipes/includes/users/amalasanjayd/eagle_recipe/online_packing/short_video_qa_0318_newreps.yaml
+        repetitions: 1.2
+      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/data/omni_data_recipes/includes/users/amalasanjayd/eagle_recipe/online_packing/video_qa_v1_v2_all_0314_safetyfix.yaml
+        repetitions: 1.2
+
+      # Qwen3.5 video reasoning
+      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/data/omni_data_recipes/includes/users/amalasanjayd/eagle_recipe/online_packing/mar4_video_qa_short_reasoning_newreps.yaml
+        repetitions: 1.2
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/PLM_video_data/reasoning/yt1b_qa_plm_sampled_thinking_traces_safetyfix0323.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem:///lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/ntadevosyan/data/yttemporal180m-youtube-dataset/
+        repetitions: 1.2
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/PLM_video_data/reasoning/yt1b_qa_plm_sampled_dense_captions_no_think_safetyfix0323.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem:///lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/ntadevosyan/data/yttemporal180m-youtube-dataset/
+        repetitions: 1.2
+
+      # Additional short dense-caption video data
+      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/data/omni_data_recipes/includes/users/amalasanjayd/eagle_recipe/online_packing/short_dense_captions_no_think_0310_safetyfix.yaml
+        repetitions: 1.2
+
+      # Text SFT data
+      - path: /lustre/fsw/portfolios/llmservice/users/matthieul/data/omni_data_recipes/includes/ultra_txt_data/ultra_txt_materialized_0407_median_le_16384.yaml
+        repetitions: 0.3
+
+      # Safety data
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/safety/filtered_textsafety_energon_dataset.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        repetitions: 2.4
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/safety/image_safety_energon_dataset.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        repetitions: 2.4
+
+      # SFT-0.5 addmix: benchfit_qa
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/sft-0.5/mint_200/benchfit_qa/03-10a_stage5_output.jsonl
+        subflavors:
+          name: benchfit_qa
+          cook: conversation
+        aux:
+          media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/sft-0.5/mint_200/input/image_shards
+        repetitions: 0.72
+
+      # SFT-0.5 addmix: dense_ocr_qa
+      - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/sft-0.5/mint_30/dense_ocr/03-10a_stage5_qa_output.jsonl
+        subflavors:
+          name: dense_ocr_qa
+          cook: conversation
+        aux:
+          media_source: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/sft-0.5/mint_200/input/image_shards
+        repetitions: 0.72
+
+      # Additional chart data
+      - path: /lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/megatron-lm2/examples/multimodal/v3_baseline/charts_additional.yaml
+        repetitions: 1.0
+
+      # Hopchain document and multipage data
+      - path: /lustre/fsw/portfolios/llmservice/users/kchumachenko/eagle_recipe/hopchain_documents_plusnew_coco_multipagetiny.yaml
+        repetitions: 1.0
