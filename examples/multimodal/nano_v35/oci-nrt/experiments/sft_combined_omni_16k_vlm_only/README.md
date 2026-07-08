@@ -15,12 +15,12 @@ sbatch --dependency="afterok:${pretrain_job}" "${experiment_dir}/sft_vlm.sh"
 ```
 
 The top-level recipe uses a local Eagle v14 derivative that changes only its
-CharXiv child to the judge-filtered, leakage-filtered Nano v3 mix. The recipe
-uses the original HopChain include under
-`/lustre/fsw/portfolios/llmservice/users/kchumachenko/eagle_recipe`. Its two
-multipage JSONL indexes must remain readable by compute jobs. The corrected
-recipe expands to 806 datasets. Compute-side validation currently reports a
-missing ScaleCUA media file in the upstream Eagle v14 mix.
+CharXiv child to the judge-filtered, leakage-filtered Nano v3 mix. Every nested
+recipe YAML is collated under `data_yamls/`; its README records the original
+source of each file. Leaf dataset and media paths remain absolute. In
+particular, the HopChain multipage JSONL indexes must remain readable by compute
+jobs. The corrected recipe expands to 829 datasets. Compute-side validation
+currently reports a missing ScaleCUA media file in the upstream Eagle v14 mix.
 
 `eval_sft_checkpoints.sh` submits the MCore, reasoning-disabled VLM evaluation
 suite for SFT iterations 3284, 5000, and 6435 by default. It generates one TP1

@@ -3,7 +3,7 @@ __class__: MetadatasetV2
 splits:
   train:
     blend_epochized:
-    - path: /lustre/fsw/portfolios/llmservice/users/asohrabizade/workspace/datasets/nano-v3_judge-filtered_keep-leakage-filtered/nano_charxiv_data_train_format.yaml
+    - path: nano_charxiv_data_train_format.yaml
       repetitions: 1
     - repetitions: 2
       path: /lustre/fsw/portfolios/llmservice/users/amalasanjayd/eagle-next/playground/safety_fix/LN_VILA_augment_caption_nmh5r_reanswered_safetyfix0323

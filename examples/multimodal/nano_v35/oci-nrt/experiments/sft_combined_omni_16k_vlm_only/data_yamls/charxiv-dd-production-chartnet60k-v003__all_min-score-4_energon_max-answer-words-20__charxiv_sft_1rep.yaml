@@ -1,0 +1,11 @@
+__module__: megatron.energon
+__class__: MetadatasetV2
+splits:
+  train:
+    blend_epochized:
+    - path: /lustre/fsw/portfolios/llmservice/users/asohrabizade/workspace/datasets/charxiv/charxiv-dd-production-chartnet60k-v003/all_min-score-4_energon_max-answer-words-20/charxiv_sft.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/ChartNet/images
+      repetitions: 1.0

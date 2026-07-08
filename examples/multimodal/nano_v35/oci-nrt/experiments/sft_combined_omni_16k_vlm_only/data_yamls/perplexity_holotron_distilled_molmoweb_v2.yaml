@@ -1,0 +1,59 @@
+__module__: megatron.energon
+__class__: MetadatasetV2
+splits:
+  train:
+    blend_epochized:
+    - repetitions: 2
+      path: /lustre/fsw/portfolios/nvr/users/mingjiel/workspace/data/holotron_distilled_molmoweb/molmoweb_holotron_distilled_task_seeded_om2w.jsonl
+      subflavors:
+        name: holotron_distilled_task_seeded_om2w
+        cook: general_conversations_jsonl
+        train_only_on_last_assistant_turn: true
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/nvr/projects/nvr_lpr_llm/holotron_distilled_molmoweb/task_seeded_om2w
+    - repetitions: 2
+      path: /lustre/fsw/portfolios/nvr/users/mingjiel/workspace/data/holotron_distilled_molmoweb/molmoweb_holotron_distilled_task_seeded_wv.jsonl
+      subflavors:
+        name: holotron_distilled_task_seeded_wv
+        cook: general_conversations_jsonl
+        train_only_on_last_assistant_turn: true
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/nvr/projects/nvr_lpr_llm/holotron_distilled_molmoweb/task_seeded_wv
+    - repetitions: 2
+      path: /lustre/fsw/portfolios/nvr/users/mingjiel/workspace/data/holotron_distilled_molmoweb/molmoweb_v2_holotron_distilled_from_template.jsonl
+      subflavors:
+        name: holotron_distilled_from_template_v2
+        cook: general_conversations_jsonl
+        train_only_on_last_assistant_turn: true
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/users/jinx/workspace/projects/osworld_internal/results/holotron_from_template_fixedscrolldrag
+    - repetitions: 2
+      path: /lustre/fsw/portfolios/nvr/users/mingjiel/workspace/data/holotron_distilled_molmoweb/molmoweb_v2_holotron_distilled_multi_agent.jsonl
+      subflavors:
+        name: holotron_distilled_multi_agent_v2
+        cook: general_conversations_jsonl
+        train_only_on_last_assistant_turn: true
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/users/jinx/workspace/projects/osworld_internal/results/holotron_multi_agent_fixedscrolldrag
+    - repetitions: 2
+      path: /lustre/fsw/portfolios/nvr/users/mingjiel/workspace/data/holotron_distilled_molmoweb/molmoweb_v2_holotron_distilled_task_seeded_om2w.jsonl
+      subflavors:
+        name: holotron_distilled_task_seeded_om2w_v2
+        cook: general_conversations_jsonl
+        train_only_on_last_assistant_turn: true
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/users/jinx/workspace/projects/osworld_internal/results/holotron_task_seeded_om2w_fixedscrolldrag
+    - repetitions: 2
+      path: /lustre/fsw/portfolios/nvr/users/mingjiel/workspace/data/holotron_distilled_molmoweb/molmoweb_v2_holotron_distilled_task_seeded_wv.jsonl
+      subflavors:
+        name: holotron_distilled_task_seeded_wv_v2
+        cook: general_conversations_jsonl
+        train_only_on_last_assistant_turn: true
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/users/jinx/workspace/projects/osworld_internal/results/holotron_task_seeded_wv_fixedscrolldrag
+  val:
+    blend_epochized:
+    - repetitions: 1
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vqa/VQAv2/stage1
+      subflavors:
+        augmentation: False

@@ -1,0 +1,11 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+      - path: /lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/trintamaki/workspace/datasets/charxiv/charxiv-dd-v010-prod-extra200k-missinganchors-s320-async-h256/megatron_heuristic_20k_20260615/charxiv_sft.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem:///lustre/fsw/portfolios/llmservice/users/trintamaki/workspace/datasets/charxiv_arxiv_sdg_sscd_rerender_2m
+        repetitions: 1.0

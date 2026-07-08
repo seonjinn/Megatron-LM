@@ -1,0 +1,91 @@
+__module__: megatron.energon
+__class__: MetadatasetV2
+splits:
+  train:
+    blend_epochized:
+    - repetitions: 2
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_jsonl/HopChain/fintabnet_sft_converted_relpath
+      subflavors:
+        name: hopchain_fintabnet
+        cook: conversation
+        data_augment: false
+        length: 56479
+        orig_length: 26894
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/HopChain/fintabnet-images/train
+    - repetitions: 1
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_jsonl/HopChain/human_annotation_v0_sft_converted_relpath
+      subflavors:
+        name: hopchain_human_v0
+        cook: conversation
+        data_augment: false
+        length: 7328
+        orig_length: 26894
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/HopChain/human_annotation_v0_images/v0
+    - repetitions: 2
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_jsonl/HopChain/nvpdftex_val_sft_converted_relpath
+      subflavors:
+        name: hopchain_nvpdftex12.1_val
+        cook: conversation
+        data_augment: false
+        length: 12170
+        orig_length: 26894
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/HopChain/nvpdftex_val10k_images
+    - repetitions: 4
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_jsonl/HopChain/serpapi_longchain_batch1_1006_converted_relpath
+      subflavors:
+        name: hopchain_long_1006_batch1
+        cook: conversation
+        data_augment: false
+        length: 11521
+        orig_length: 30184
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/SerpAPI
+    - repetitions: 3
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_jsonl/HopChain/serpapi_longchain_batch2_1006_converted_relpath
+      subflavors:
+        name: hopchain_long_1006_batch2
+        cook: conversation
+        data_augment: false
+        length: 10744
+        orig_length: 30184
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/SerpAPI
+    - repetitions: 1
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_jsonl/HopChain/coco_sft_converted_relpath
+      subflavors:
+        name: hopchain_coco2017
+        cook: conversation
+        data_augment: false
+        length: 10771
+        orig_length: 30184
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/HopChain/coco2017_train
+    - repetitions: 2
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_jsonl/HopChain/multipage/tiny_a_sft_converted_relpath.jsonl
+      subflavors:
+        name: hopchain_multipage_tiny_a
+        cook: general_conversations_jsonl
+        data_augment: false
+        length: 7653
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/HopChain/multipage/images/mf_tiny_half_a
+    - repetitions: 2
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_jsonl/HopChain/multipage/tiny_b_sft_converted_relpath.jsonl
+      subflavors:
+        name: hopchain_multipage_tiny_b
+        cook: general_conversations_jsonl
+        data_augment: false
+        length: 8521
+        category: General
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/HopChain/multipage/images/mf_tiny_half_b

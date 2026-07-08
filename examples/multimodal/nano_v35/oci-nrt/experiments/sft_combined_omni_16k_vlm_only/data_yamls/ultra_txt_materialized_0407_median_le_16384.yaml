@@ -1,0 +1,716 @@
+__module__: megatron.energon
+__class__: MetadatasetV2
+splits:
+  train:
+    blend_epochized:
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/18-04-nano-ultra_terminal_bench_sft.filtered.production_kept_kept_20260320_8236.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: 18-04-nano-ultra_terminal_bench_sft.filtered.production_kept_kept_20260320_8236.jsonl
+        cook: conversation
+        length: 635340
+        orig_length: 635340
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/251214_deepseek_838domains_281774_kept_20251221_4791_kept_20260312_9a33.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: 251214_deepseek_838domains_281774_kept_20251221_4791_kept_20260312_9a33.jsonl
+        cook: conversation
+        length: 630239
+        orig_length: 630239
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/251214_deepseek_838domains_281774_kept_20251221_4791_kept_20260312_9a33.shuffled_0.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: 251214_deepseek_838domains_281774_kept_20251221_4791_kept_20260312_9a33.shuffled_0.jsonl
+        cook: conversation
+        length: 630239
+        orig_length: 630239
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/agentic_cuda_traces_kept_kept_20260312_cacd.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: agentic_cuda_traces_kept_kept_20260312_cacd.jsonl
+        cook: conversation
+        length: 2238
+        orig_length: 2238
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/agentless_swe_clean_kept_20260103_c5c9_kept_20260312_814c.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: agentless_swe_clean_kept_20260103_c5c9_kept_20260312_814c.jsonl
+        cook: conversation
+        length: 204497
+        orig_length: 204497
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/agentless_swe_clean_kept_20260103_c5c9_kept_20260312_814c.shuffled_0.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: agentless_swe_clean_kept_20260103_c5c9_kept_20260312_814c.shuffled_0.jsonl
+        cook: conversation
+        length: 204497
+        orig_length: 204497
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/agentless_swe_clean_kept_20260103_c5c9_kept_20260312_814c.shuffled_1.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: agentless_swe_clean_kept_20260103_c5c9_kept_20260312_814c.shuffled_1.jsonl
+        cook: conversation
+        length: 204497
+        orig_length: 204497
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/all_hi_ja_ko_pt_multiling_mix_shuf_v3-1-2_2603_kept_kept_20260312_ad52_chunk_000.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: all_hi_ja_ko_pt_multiling_mix_shuf_v3-1-2_2603_kept_kept_20260312_ad52_chunk_000.jsonl
+        cook: conversation
+        length: 138998
+        orig_length: 138998
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/all_kept_combined.shuf_chunk_000.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: all_kept_combined.shuf_chunk_000.jsonl
+        cook: conversation
+        length: 460999
+        orig_length: 460999
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/all_valid_without_repo_kept_kept_20260312_5e9f.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: all_valid_without_repo_kept_kept_20260312_5e9f.jsonl
+        cook: conversation
+        length: 364283
+        orig_length: 364283
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/all_valid_without_repo_kept_kept_20260312_cef8.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: all_valid_without_repo_kept_kept_20260312_cef8.jsonl
+        cook: conversation
+        length: 54410
+        orig_length: 54410
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/all_valid_without_repo_kept_kept_20260312_e349.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: all_valid_without_repo_kept_kept_20260312_e349.jsonl
+        cook: conversation
+        length: 26374
+        orig_length: 26374
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/all_valid_without_repo_v2_kept_kept_20260312_8fbf.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: all_valid_without_repo_v2_kept_kept_20260312_8fbf.jsonl
+        cook: conversation
+        length: 887884
+        orig_length: 887884
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/aops_so_cot_sft_kept_20260129_c901_kept_20260312_71da.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: aops_so_cot_sft_kept_20260129_c901_kept_20260312_71da.jsonl
+        cook: conversation
+        length: 1850965
+        orig_length: 1850965
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/aops_so_reasoning_medium-no-tool_kept_20260312_dab8_first_half.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: aops_so_reasoning_medium-no-tool_kept_20260312_dab8_first_half.jsonl
+        cook: conversation
+        length: 600908
+        orig_length: 600908
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/aops_so_reasoning_medium-with-tool_kept_20260312_0f07_first_half.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: aops_so_reasoning_medium-with-tool_kept_20260312_0f07_first_half.jsonl
+        cook: conversation
+        length: 647054
+        orig_length: 647054
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/aops_so_tir_sft_kept_20260129_f075_kept_20260312_2c22.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: aops_so_tir_sft_kept_20260129_f075_kept_20260312_2c22.jsonl
+        cook: conversation
+        length: 1789258
+        orig_length: 1789258
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/bash_only_kept_20260312_0080.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: bash_only_kept_20260312_0080.jsonl
+        cook: conversation
+        length: 27555
+        orig_length: 27555
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/bash_with_skill_kept_20260312_b91c.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: bash_with_skill_kept_20260312_b91c.jsonl
+        cook: conversation
+        length: 27629
+        orig_length: 27629
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/clarifying_question_kept_20260312_4a2e.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: clarifying_question_kept_20260312_4a2e.jsonl
+        cook: conversation
+        length: 26269
+        orig_length: 26269
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/coding_dedup_24k_problems_with_python_reasoning_high_rs0-31_chatml_sft_with_messages.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: coding_dedup_24k_problems_with_python_reasoning_high_rs0-31_chatml_sft_with_messages.jsonl
+        cook: conversation
+        length: 623236
+        orig_length: 623236
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/cuda_100k_kept_20251221_29e4_kept_20260312_0190.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: cuda_100k_kept_20251221_29e4_kept_20260312_0190.jsonl
+        cook: conversation
+        length: 93029
+        orig_length: 93029
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/cvdp_cleaned_filtered_kept_kept_20260316_e3e3_first_120k.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: cvdp_cleaned_filtered_kept_kept_20260316_e3e3_first_120k.jsonl
+        cook: conversation
+        length: 120000
+        orig_length: 120000
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/deepseek-with-tool-python-diversity-prompt_kept_20251222_85db_kept_20260312_7e35.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: deepseek-with-tool-python-diversity-prompt_kept_20251222_85db_kept_20260312_7e35.jsonl
+        cook: conversation
+        length: 30305
+        orig_length: 30305
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/deepseek-with-tool-python-hle-prompt_kept_20251222_faa7_kept_20260312_cc28.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: deepseek-with-tool-python-hle-prompt_kept_20251222_faa7_kept_20260312_cc28.jsonl
+        cook: conversation
+        length: 85121
+        orig_length: 85121
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/deepseek-with-tool-python-hle-prompt_kept_20251222_faa7_kept_20260312_cc28.shuffled_0.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: deepseek-with-tool-python-hle-prompt_kept_20251222_faa7_kept_20260312_cc28.shuffled_0.jsonl
+        cook: conversation
+        length: 85121
+        orig_length: 85121
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/deepseek-with-tool-python-hle-prompt_kept_20251222_faa7_kept_20260312_cc28.shuffled_1.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: deepseek-with-tool-python-hle-prompt_kept_20251222_faa7_kept_20260312_cc28.shuffled_1.jsonl
+        cook: conversation
+        length: 85121
+        orig_length: 85121
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/deepseek-with-tool-python-tavily-messages-format_kept_20251222_2688_kept_20260312_3ee7.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: deepseek-with-tool-python-tavily-messages-format_kept_20251222_2688_kept_20260312_3ee7.jsonl
+        cook: conversation
+        length: 6175
+        orig_length: 6175
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/deepseek-with-tool-python-tavily-messages-format_kept_20251222_2688_kept_20260312_3ee7.shuffled_0.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: deepseek-with-tool-python-tavily-messages-format_kept_20251222_2688_kept_20260312_3ee7.shuffled_0.jsonl
+        cook: conversation
+        length: 6175
+        orig_length: 6175
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/deepseek-with-tool-python-tavily-messages-format_kept_20251222_2688_kept_20260312_3ee7.shuffled_1.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: deepseek-with-tool-python-tavily-messages-format_kept_20251222_2688_kept_20260312_3ee7.shuffled_1.jsonl
+        cook: conversation
+        length: 6175
+        orig_length: 6175
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/deepseek-with-tool-tavily-messages-format_kept_20251222_aa9e_kept_20260312_30f0.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: deepseek-with-tool-tavily-messages-format_kept_20251222_aa9e_kept_20260312_30f0.jsonl
+        cook: conversation
+        length: 32544
+        orig_length: 32544
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/exercism_combo_single_round_1_2_gen_prompts_sft_messages_kept_kept_20260312_a734_first_half.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: exercism_combo_single_round_1_2_gen_prompts_sft_messages_kept_kept_20260312_a734_first_half.jsonl
+        cook: conversation
+        length: 532237
+        orig_length: 532237
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/glm_5-chat_data-reasoning_off-03162026_rlhf_prompts_and_safety_and_data_integrity_filtered_kept_kept_20260320_0b99.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: glm_5-chat_data-reasoning_off-03162026_rlhf_prompts_and_safety_and_data_integrity_filtered_kept_kept_20260320_0b99.jsonl
+        cook: conversation
+        length: 646728
+        orig_length: 646728
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/glm_5-chat_data-reasoning_on-03162026_rlhf_prompts_and_safety_and_data_integrity_filtered_kept_kept_20260320_01fc.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: glm_5-chat_data-reasoning_on-03162026_rlhf_prompts_and_safety_and_data_integrity_filtered_kept_kept_20260320_01fc.jsonl
+        cook: conversation
+        length: 1768661
+        orig_length: 1768661
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/gpt-oss-no-tool-diversity-mcq-messages-format_kept_20251222_0cb0_kept_20260312_871e.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: gpt-oss-no-tool-diversity-mcq-messages-format_kept_20251222_0cb0_kept_20260312_871e.jsonl
+        cook: conversation
+        length: 532917
+        orig_length: 532917
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/gpt-oss-no-tool-diversity-openq-messages-format_kept_20251222_5d9a_kept_20260312_b5be.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: gpt-oss-no-tool-diversity-openq-messages-format_kept_20251222_5d9a_kept_20260312_b5be.jsonl
+        cook: conversation
+        length: 131031
+        orig_length: 131031
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/identity_nosys.ultra_v3.sgd_v2.multilingual.SFT_fmt.20260310_kept_kept_20260312_44a8.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: identity_nosys.ultra_v3.sgd_v2.multilingual.SFT_fmt.20260310_kept_kept_20260312_44a8.jsonl
+        cook: conversation
+        length: 25992
+        orig_length: 25992
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/identity_nosys.ultra_v3.sgd_v2.multilingual.SFT_fmt.20260310_kept_kept_20260312_44a8.shuffled_0.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: identity_nosys.ultra_v3.sgd_v2.multilingual.SFT_fmt.20260310_kept_kept_20260312_44a8.shuffled_0.jsonl
+        cook: conversation
+        length: 25992
+        orig_length: 25992
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/identity_nosys.ultra_v3.sgd_v2.multilingual.SFT_fmt.20260310_kept_kept_20260312_44a8.shuffled_1.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: identity_nosys.ultra_v3.sgd_v2.multilingual.SFT_fmt.20260310_kept_kept_20260312_44a8.shuffled_1.jsonl
+        cook: conversation
+        length: 25992
+        orig_length: 25992
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/identity_nosys.ultra_v3.sgd_v2.multilingual.SFT_fmt.20260310_kept_kept_20260312_44a8.shuffled_2.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: identity_nosys.ultra_v3.sgd_v2.multilingual.SFT_fmt.20260310_kept_kept_20260312_44a8.shuffled_2.jsonl
+        cook: conversation
+        length: 25992
+        orig_length: 25992
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/identity_nosys.ultra_v3.sgd_v2.multilingual.SFT_fmt.20260310_kept_kept_20260312_44a8.shuffled_3.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: identity_nosys.ultra_v3.sgd_v2.multilingual.SFT_fmt.20260310_kept_kept_20260312_44a8.shuffled_3.jsonl
+        cook: conversation
+        length: 25992
+        orig_length: 25992
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/infinibyte_kept_20260312_6a78_first_half.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: infinibyte_kept_20260312_6a78_first_half.jsonl
+        cook: conversation
+        length: 587266
+        orig_length: 587266
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/instruction_following-raw_messages_format-reasoning_off-12152025_kept_20251220_860b_kept_20260312_457e.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: instruction_following-raw_messages_format-reasoning_off-12152025_kept_20251220_860b_kept_20260312_457e.jsonl
+        cook: conversation
+        length: 12677
+        orig_length: 12677
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/instruction_following-raw_messages_format-reasoning_on-12152025_kept_20251220_45a2_removed_low_kept_20260312_2cc8.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: instruction_following-raw_messages_format-reasoning_on-12152025_kept_20251220_45a2_removed_low_kept_20260312_2cc8.jsonl
+        cook: conversation
+        length: 226274
+        orig_length: 226274
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/instruction_following-reasoning_on-gpt_oss_medium-opeani_raw-messages-03162026_rlhf_prompts_and_safety_filtered_and_data_integrity_filtered_kept_kept_20260320_8aab.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: instruction_following-reasoning_on-gpt_oss_medium-opeani_raw-messages-03162026_rlhf_prompts_and_safety_filtered_and_data_integrity_filtered_kept_kept_20260320_8aab.jsonl
+        cook: conversation
+        length: 431714
+        orig_length: 431714
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/kimi-k2-no-tool-default-prompts-messages-format_kept_20251222_3137_kept_20260312_7cb0.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: kimi-k2-no-tool-default-prompts-messages-format_kept_20251222_3137_kept_20260312_7cb0.jsonl
+        cook: conversation
+        length: 2085519
+        orig_length: 2085519
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/luogu_uva_spoj_15k_problems_with_python_reasoning_high_rs0-31_chatml_sft_with_messages.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: luogu_uva_spoj_15k_problems_with_python_reasoning_high_rs0-31_chatml_sft_with_messages.jsonl
+        cook: conversation
+        length: 347906
+        orig_length: 347906
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/mmlu_aux_train_nothink_94705_with_tokens.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: mmlu_aux_train_nothink_94705_with_tokens.jsonl
+        cook: conversation
+        length: 94687
+        orig_length: 94687
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/mrcr_200k_oai_kept_20260128_f3af_kept_20260312_6195.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: mrcr_200k_oai_kept_20260128_f3af_kept_20260312_6195.jsonl
+        cook: conversation
+        length: 49698
+        orig_length: 49698
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/mrcr_200k_oai_kept_20260128_f3af_kept_20260312_6195.shuffled_0.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: mrcr_200k_oai_kept_20260128_f3af_kept_20260312_6195.shuffled_0.jsonl
+        cook: conversation
+        length: 49698
+        orig_length: 49698
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/nemotron_math_proofs_v1_aops_dpsk_v32_sp_judged_grading_refine_chatml_kept_kept_20260312_efd6.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: nemotron_math_proofs_v1_aops_dpsk_v32_sp_judged_grading_refine_chatml_kept_kept_20260312_efd6.jsonl
+        cook: conversation
+        length: 820772
+        orig_length: 820772
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/nemotron_safety_sft_blend_v0.3.0_stratified_messages_format_kept_kept_20260312_61af.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: nemotron_safety_sft_blend_v0.3.0_stratified_messages_format_kept_kept_20260312_61af.jsonl
+        cook: conversation
+        length: 44091
+        orig_length: 44091
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/nemotron_safety_sft_blend_v0.3.0_stratified_messages_format_kept_kept_20260312_61af.shuffled_0.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: nemotron_safety_sft_blend_v0.3.0_stratified_messages_format_kept_kept_20260312_61af.shuffled_0.jsonl
+        cook: conversation
+        length: 44091
+        orig_length: 44091
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/nemotron_safety_sft_blend_v0.3.0_stratified_messages_format_kept_kept_20260312_61af.shuffled_1.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: nemotron_safety_sft_blend_v0.3.0_stratified_messages_format_kept_kept_20260312_61af.shuffled_1.jsonl
+        cook: conversation
+        length: 44091
+        orig_length: 44091
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/nemotron_safety_sft_blend_v0.3.1.multilingual-english-reasoning_stratified_messages_format_kept_kept_20260312_9567.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: nemotron_safety_sft_blend_v0.3.1.multilingual-english-reasoning_stratified_messages_format_kept_kept_20260312_9567.jsonl
+        cook: conversation
+        length: 132067
+        orig_length: 132067
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/nemotron_text2sql_v0.messages_kept_20260109_db1d_kept_20260312_e8e7.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: nemotron_text2sql_v0.messages_kept_20260109_db1d_kept_20260312_e8e7.jsonl
+        cook: conversation
+        length: 94293
+        orig_length: 94293
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/ocr_filtered_wo_tool_cpp_chatml_sft_format.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: ocr_filtered_wo_tool_cpp_chatml_sft_format.jsonl
+        cook: conversation
+        length: 277383
+        orig_length: 277383
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/ocr_filtered_wo_tool_stdin_chatml_sft_format.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: ocr_filtered_wo_tool_stdin_chatml_sft_format.jsonl
+        cook: conversation
+        length: 269377
+        orig_length: 269377
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/old_sft_chatml_sft_format.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: old_sft_chatml_sft_format.jsonl
+        cook: conversation
+        length: 187219
+        orig_length: 187219
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/rl_w_tool_chatml_sft_format_new.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: rl_w_tool_chatml_sft_format_new.jsonl
+        cook: conversation
+        length: 300909
+        orig_length: 300909
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/science-reasoning-effort-medium-v1_kept_kept_20260320_162e_first_100k.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: science-reasoning-effort-medium-v1_kept_kept_20260320_162e_first_100k.jsonl
+        cook: conversation
+        length: 100000
+        orig_length: 100000
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/sft-data_kept_20260116_860k_kept_20260128_17cd_kept_20260312_da13_first_half.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: sft-data_kept_20260116_860k_kept_20260128_17cd_kept_20260312_da13_first_half.jsonl
+        cook: conversation
+        length: 430202
+        orig_length: 430202
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/smol_constraints_nothink_34402_with_tokens.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: smol_constraints_nothink_34402_with_tokens.jsonl
+        cook: conversation
+        length: 34402
+        orig_length: 34402
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/smol_rewrite_nothink_53324_with_tokens.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: smol_rewrite_nothink_53324_with_tokens.jsonl
+        cook: conversation
+        length: 53321
+        orig_length: 53321
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/smol_summarize_nothink_50000_with_tokens.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: smol_summarize_nothink_50000_with_tokens.jsonl
+        cook: conversation
+        length: 49979
+        orig_length: 49979
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/startercode_prompts_44k_reasoning_high_rs0-7_chatml_sft_format.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: startercode_prompts_44k_reasoning_high_rs0-7_chatml_sft_format.jsonl
+        cook: conversation
+        length: 332509
+        orig_length: 332509
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/swe_regular_skill_and_no_skill_kept_20260312_353e.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: swe_regular_skill_and_no_skill_kept_20260312_353e.jsonl
+        cook: conversation
+        length: 25209
+        orig_length: 25209
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/taus_plus_news_de_es_it_fr_ja_1620k_balanced_kept_20260103_1317_kept_20260312_3787_chunk_000.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: taus_plus_news_de_es_it_fr_ja_1620k_balanced_kept_20260103_1317_kept_20260312_3787_chunk_000.jsonl
+        cook: conversation
+        length: 404440
+        orig_length: 404440
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/telecom_transfer_chunk_40_448_summary_only.merged.fixed_kept_kept_20260312_55a9.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: telecom_transfer_chunk_40_448_summary_only.merged.fixed_kept_kept_20260312_55a9.jsonl
+        cook: conversation
+        length: 18084
+        orig_length: 18084
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/telecom_transfer_chunk_40_448_summary_only.merged.fixed_kept_kept_20260312_55a9.shuffled_0.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: telecom_transfer_chunk_40_448_summary_only.merged.fixed_kept_kept_20260312_55a9.shuffled_0.jsonl
+        cook: conversation
+        length: 18084
+        orig_length: 18084
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/telecom_transfer_chunk_40_448_summary_only.merged.fixed_kept_kept_20260312_55a9.shuffled_1.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: telecom_transfer_chunk_40_448_summary_only.merged.fixed_kept_kept_20260312_55a9.shuffled_1.jsonl
+        cook: conversation
+        length: 18084
+        orig_length: 18084
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/terminal_bench_combined_kept_kept_20260312_cf72.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: terminal_bench_combined_kept_kept_20260312_cf72.jsonl
+        cook: conversation
+        length: 1204261
+        orig_length: 1204261
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/terminal_bench_combined_kept_kept_20260312_cf72.shuffled_0.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: terminal_bench_combined_kept_kept_20260312_cf72.shuffled_0.jsonl
+        cook: conversation
+        length: 1204261
+        orig_length: 1204261
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/tool_calling-raw_messages_format-reasoning_off-12152025_kept_20251220_9a53_kept_20260312_4c90.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: tool_calling-raw_messages_format-reasoning_off-12152025_kept_20251220_9a53_kept_20260312_4c90.jsonl
+        cook: conversation
+        length: 427914
+        orig_length: 427914
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/tool_calling-raw_messages_format-reasoning_on-12152025_kept_20251220_9f82_kept_20260312_8b02.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: tool_calling-raw_messages_format-reasoning_on-12152025_kept_20251220_9f82_kept_20260312_8b02.jsonl
+        cook: conversation
+        length: 1078103
+        orig_length: 1078103
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/tulu_instruction_following_107480_kept_kept_20260312_4b21.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: tulu_instruction_following_107480_kept_kept_20260312_4b21.jsonl
+        cook: conversation
+        length: 105361
+        orig_length: 105361
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/tulu_instruction_following_107480_kept_kept_20260312_4b21.shuffled_0.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: tulu_instruction_following_107480_kept_kept_20260312_4b21.shuffled_0.jsonl
+        cook: conversation
+        length: 105361
+        orig_length: 105361
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/tulu_instruction_following_nothink_29980_with_tokens.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: tulu_instruction_following_nothink_29980_with_tokens.jsonl
+        cook: conversation
+        length: 29957
+        orig_length: 29957
+        category: ultra_txt_materialized
+    - repetitions: 1.0
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/text_reasoning_ultrav3/ultra_mar12_truncation_think_alex_0_100k.jsonl
+      subflavors:
+        skip_chat_template: true
+        name: ultra_mar12_truncation_think_alex_0_100k.jsonl
+        cook: conversation
+        length: 100000
+        orig_length: 100000
+        category: ultra_txt_materialized

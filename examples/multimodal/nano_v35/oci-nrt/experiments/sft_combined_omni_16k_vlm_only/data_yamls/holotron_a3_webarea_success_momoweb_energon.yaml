@@ -1,0 +1,19 @@
+__module__: megatron.energon
+__class__: MetadatasetV2
+splits:
+  train:
+    blend_epochized:
+      - repetitions: 2
+        path: /lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/shaokunz/osworld_internal/holotron_a3_webarea_distilled_sft/holotron_a3_webarea_success_momoweb.jsonl
+        subflavors:
+          name: s3_distilled_success
+          cook: general_conversations_jsonl
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem:///lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/shaokunz/osworld_internal/holotron_a3_webarea_distilled_sft
+  val:
+    blend_epochized:
+    - repetitions: 1
+      path: /lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/vqa/VQAv2/stage1
+      subflavors:
+        augmentation: False

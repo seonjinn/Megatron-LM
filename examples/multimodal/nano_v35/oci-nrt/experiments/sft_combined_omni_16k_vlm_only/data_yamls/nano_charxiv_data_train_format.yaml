@@ -1,0 +1,69 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+    - path: /lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/asohrabizade/workspace/datasets/nano-v3_judge-filtered_keep-leakage-filtered/chart_image_reasoningv3_qwen_nocot_qwen3p5_cleaned_formatted_fixthink0319_cleaned0320
+      subflavors:
+        cook: conversation
+        length: 55329
+        orig_length: 69322
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data
+      repetitions: 6.0
+    - path: /lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/asohrabizade/workspace/datasets/nano-v3_judge-filtered_keep-leakage-filtered/chart_image_descriptive_task_nonapplicable_ratio22
+      subflavors:
+        cook: conversation
+        length: 35479
+        orig_length: 74263
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data/arxiv_chart_alignment
+      repetitions: 3.0
+    - path: /lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/asohrabizade/workspace/datasets/nano-v3_judge-filtered_keep-leakage-filtered/chart_image_reasoningv4_arxiv_1002_qwen3p5_cleaned_formatted_fixthink0319_cleaned0320
+      subflavors:
+        cook: conversation
+        length: 14866
+        orig_length: 19661
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data
+      repetitions: 6.0
+    - path: /lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/asohrabizade/workspace/datasets/nano-v3_judge-filtered_keep-leakage-filtered/chart_image_reasoningv4_nonarxiv_1002_qwen3p5_cleaned_formatted_fixthink0319_cleaned0320
+      subflavors:
+        cook: conversation
+        length: 18631
+        orig_length: 20770
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data
+      repetitions: 6.0
+    - path: /lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/asohrabizade/workspace/datasets/nano-v3_judge-filtered_keep-leakage-filtered/chart_image_reasoningv4_arxiv_1002_remaining_nonqwen3p5_fixthink0319
+      subflavors:
+        cook: conversation
+        length: 820
+        orig_length: 2424
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data
+      repetitions: 2.0
+    - path: /lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/asohrabizade/workspace/datasets/nano-v3_judge-filtered_keep-leakage-filtered/chart_image_reasoningv4_nonarxiv_1002_remaining_nonqwen3p5
+      subflavors:
+        cook: conversation
+        length: 120
+        orig_length: 444
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_nlp_fm/datasets/eagle-next/image_data/commercial_sft_data
+      repetitions: 2.0
+    - path: /lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/asohrabizade/workspace/datasets/nano-v3_judge-filtered_keep-leakage-filtered/charxiv_1302_qwen3p5_formatted_fixthink0319_cleaned0320
+      subflavors:
+        cook: conversation
+        length: 2196
+        orig_length: 4305
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/users/kchumachenko/datasets/fuxiao-charxiv/code2Img
+      repetitions: 6.0
+    - path: /lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/asohrabizade/workspace/datasets/nano-v3_judge-filtered_keep-leakage-filtered/charxiv_1302_noqwen3p5
+      subflavors:
+        cook: conversation
+        length: 493
+        orig_length: 4442
+      aux:
+        media_source: filesystem:///lustre/fsw/portfolios/llmservice/users/kchumachenko/datasets/fuxiao-charxiv
+      repetitions: 2.0
