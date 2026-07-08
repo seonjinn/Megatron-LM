@@ -206,6 +206,7 @@ INFERENCE_PARAMS = {
 
     # Precision settings
     "bf16": True,                    # Use bfloat16 precision
+    "disable_jit_fuser": True,       # Avoid runtime compilation during evaluation
 
     # Model loading settings
     "no_load_rng": True,             # Don't load RNG state
@@ -286,6 +287,7 @@ EXCLUDED_PARAMS = {
     # Internal state variables
     'consumed_train_samples', 'consumed_valid_samples', 'iteration', 'rank', 'world_size',
     'skipped_train_samples', 'local_rank', 'data_parallel_size', 'iterations_to_skip',
+    '_is_global_batch_size_explicitly_specified',
 
     # Computed/derived values
     'padded_vocab_size', 'params_dtype', 'main_grads_dtype', 'main_params_dtype',
@@ -380,7 +382,15 @@ EXCLUDED_PARAMS = {
     'inprocess_monitor_process_interval', 'inprocess_monitor_thread_interval',
     'inprocess_progress_watchdog_interval', 'inprocess_restart', 'inprocess_soft_timeout',
     'inprocess_termination_grace_time', 'error_injection_rate', 'error_injection_type',
-    'rerun_mode', 'adlr_autoresume', 'adlr_autoresume_interval',
+    'rerun_mode', 'adlr_autoresume', 'adlr_autoresume_interval', 'exit_signal',
+    'inference_cuda_graph_scope', 'ckpt_load_validate_sharding_integrity',
+    'flight_recorder_dump_on_timeout', 'flight_recorder_extra_dump_on_exec',
+    'flight_recorder_include_only_active', 'flight_recorder_include_stack_trace',
+    'flight_recorder_trace_buffer_size', 'layernorm_epsilon', 'muon_split_qkv',
+    'pad_vocab_size', 'strict_fsdp_dtensor_load',
+    'tokenizer_sentencepiece_ignore_extra_whitespaces', 'tokenizer_sentencepiece_legacy',
+    'use_gloo_process_groups', 'use_layer_wise_distributed_optimizer',
+    'use_layer_wise_param_layout', 'use_mamba_mem_eff_path',
 
     # =================================================================
     # BIENCODER/RETRIEVAL (usually not needed for standard inference)
@@ -489,6 +499,12 @@ def namespace_to_dict(namespace):
 
         if value is None:
             return None
+        elif isinstance(value, torch.dtype):
+            return {
+                torch.bfloat16: "bf16",
+                torch.float16: "fp16",
+                torch.float32: "fp32",
+            }.get(value, str(value).removeprefix("torch."))
         elif isinstance(value, (str, int, float, bool)):
             return value
         elif hasattr(value, '__dict__') and not isinstance(value, type):

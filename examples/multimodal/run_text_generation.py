@@ -23,8 +23,17 @@ from megatron.core import parallel_state
 from megatron.core.enums import ModelType
 from megatron.core.models.multimodal.llava_model import IMAGE_TOKEN
 from megatron.core.models.vision.clip_vit_model import get_num_image_embeddings
-from megatron.inference.text_generation.api import generate_and_post_process
-from megatron.inference.text_generation.forward_step import ForwardStep
+from megatron.core.packed_seq_params import PackedSeqParams
+try:
+    from megatron.inference.text_generation.api import generate_and_post_process
+    from megatron.inference.text_generation.forward_step import ForwardStep
+except ModuleNotFoundError:
+    generate_and_post_process = None
+
+    class ForwardStep:
+        """Compatibility base for branches that only ship the MCore inference engine."""
+
+        pass
 from megatron.core.inference.contexts import StaticInferenceContext
 from megatron.core.inference.sampling_params import SamplingParams
 from megatron.core.inference.engines import StaticInferenceEngine
@@ -32,9 +41,12 @@ from megatron.core.inference.inference_request import InferenceRequest, VLMInfer
 from megatron.core.inference.text_generation_controllers.vlm_text_generation_controller import (
     VLMTextGenerationController,
 )
-from megatron.core.inference.model_inference_wrappers.inference_wrapper_config import (
-    InferenceWrapperConfig,
-)
+try:
+    from megatron.core.inference.model_inference_wrappers.inference_wrapper_config import (
+        InferenceWrapperConfig,
+    )
+except ModuleNotFoundError:
+    InferenceWrapperConfig = None
 from megatron.core.inference.model_inference_wrappers.multimodal.vlm_inference_wrapper import (
     VLMInferenceWrapper,
 )
@@ -219,7 +231,20 @@ def generate_samples(model, config: EvaluationConfig, print_output):
         conv = get_conversation(config.task, question, metadata)
 
         if not args.use_mcore_inference:
-            forward_step = partial(VLMForwardStep, num_img_embeddings_per_tile, imgs, num_tiles, args.decoder_seq_length)
+            num_img_embeddings = num_img_embeddings_per_tile * torch.sum(num_tiles).item()
+            forward_step = partial(
+                VLMForwardStep,
+                num_img_embeddings,
+                imgs,
+                num_tiles,
+                [1] * len(num_tiles),
+                args.decoder_seq_length,
+                None,
+                None,
+                None,
+                [],
+                [],
+            )
 
         inference_context = StaticInferenceContext(max_batch_size=1, max_sequence_length=args.inference_max_seq_length)
         if is_first_rank():
@@ -460,25 +485,42 @@ class VLMForwardStep(ForwardStep):
 
     def __init__(
         self,
-        num_img_embeddings_per_tile,
+        num_img_embeddings,
         images,
         num_tiles,
+        num_frames,
         decoder_seq_length,
+        imgs_sizes,
+        vision_cu_lengths,
+        vision_max_lengths,
+        sound_clips,
+        sound_length,
         model,
         inference_context,
     ):
         """Create multimodal forward step."""
-        total_num_tiles = torch.sum(num_tiles).item()
-        num_img_embeddings = num_img_embeddings_per_tile * total_num_tiles
-
         super().__init__(model, inference_context)
         self._images = images
         self._num_tiles = num_tiles
+        self._num_frames = num_frames
         self._num_img_embeddings = num_img_embeddings
         self.decoder_seq_length = decoder_seq_length
+        self._imgs_sizes = imgs_sizes
+
+        self._vision_packed_seq_params = None
+        if vision_cu_lengths is not None:
+            self._vision_packed_seq_params = PackedSeqParams(
+                qkv_format="thd",
+                cu_seqlens_q=vision_cu_lengths,
+                cu_seqlens_kv=vision_cu_lengths,
+                max_seqlen_q=vision_max_lengths,
+                max_seqlen_kv=vision_max_lengths,
+            )
 
         self._recv_only_vision_embeds = False  # TODO: Implement new logic for vision embeddings
         self._encoder_only = False  # TODO: Implement new logic for encoder-only stages
+        self._sound_clips = sound_clips
+        self._sound_length = sound_length
 
     def _forward(self, tokens, position_ids, attention_mask):
         return self.model(
@@ -488,10 +530,19 @@ class VLMForwardStep(ForwardStep):
             attention_mask=None,
             inference_context=self.inference_context,
             num_image_tiles=self._num_tiles,
+            num_frames=self._num_frames,
             runtime_gather_output=True,
+            imgs_sizes=self._imgs_sizes,
+            vision_packed_seq_params=self._vision_packed_seq_params,
+            sound_clips=self._sound_clips,
+            sound_length=self._sound_length,
         )
 
     def __call__(self, tokens, position_ids, attention_mask):
+        if "image_tokens_count" in self.inference_context.key_value_memory_dict:
+            self._num_img_embeddings = self.inference_context.key_value_memory_dict[
+                "image_tokens_count"
+            ]
         num_image_tokens = (tokens == self.model.module.image_token_index).sum().item()
         num_tokens = tokens.size(1)
         recv_buffer_seq_length = None
@@ -668,6 +719,9 @@ def get_prompt_and_generated(prompt_and_generation, prompt_format):
         prompt = splitted[0]
         generated = splitted[1]
         generated = generated.split("<|im_end|>")[0]
+    elif prompt_format == "nemotron6-moe":
+        prompt, generated = prompt_and_generation.rsplit("<|im_start|>assistant\n", 1)
+        generated = generated.split("<|im_end|>", 1)[0]
     elif prompt_format in ("nemotron5"):
         splitted = prompt_and_generation.split("<SPECIAL_14>assistant\n")
         prompt = splitted[0]
@@ -848,9 +902,15 @@ def eval_tasks():
 
     args = get_args()
 
-    def wrapped_model_provider(pre_process, post_process, add_encoder=True, add_decoder=True):
-        return model_provider(pre_process, post_process, add_encoder=add_encoder, add_decoder=add_decoder,
-                              parallel_output=False)
+    def wrapped_model_provider(pre_process, post_process, add_encoder=True, add_decoder=True, **kwargs):
+        return model_provider(
+            pre_process=pre_process,
+            post_process=post_process,
+            add_encoder=add_encoder,
+            add_decoder=add_decoder,
+            parallel_output=False,
+            **kwargs,
+        )
 
     # Set up model and load checkpoint.
     model = get_model(wrapped_model_provider, model_type=ModelType.encoder_or_decoder, wrap_with_ddp=False)
