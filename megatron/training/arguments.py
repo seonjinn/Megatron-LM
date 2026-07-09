@@ -3444,6 +3444,8 @@ def _add_kitchen_quantization_arguments(parser: argparse.ArgumentParser):
 def _add_sft_args(parser):
     group = parser.add_argument_group(title='sft')
     group.add_argument('--sft', action="store_true", help='Megatron SFT training')
+    group.add_argument('--log-comparison-metrics', action='store_true', default=False,
+                       help='Log strict SFT comparison aliases to Weights & Biases.')
     group.add_argument('--sft-tokenizer-prompt-format', type=str, default="nemotron-h-aligned",
                        help='SFT prompt format.')
     return parser

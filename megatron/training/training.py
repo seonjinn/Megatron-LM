@@ -173,6 +173,7 @@ from .global_vars import (
     get_tokenizer,
     get_wandb_writer,
 )
+from .sft_metric_aliases import build_sft_metric_aliases
 from .theoretical_memory_usage import report_theoretical_memory
 from .utils import (
     append_to_progress_log,
@@ -2753,6 +2754,14 @@ def training_log(
         ) / (elapsed_time_per_iteration * 10**12 * args.world_size)
 
         one_logger_utils.track_e2e_metrics(args.log_throughput, throughput)
+
+        if args.sft and args.log_comparison_metrics and wandb_writer:
+            comparison_metrics = build_sft_metric_aliases(
+                enabled=True,
+                e2e_step_time_s=elapsed_time_per_iteration,
+                main_lm_loss=loss_dict.get('lm loss'),
+            )
+            wandb_writer.log(comparison_metrics, iteration)
 
         # We log to stdout after the first iteration (controlled by `is_first_iteration`)
         # to document initialization overhead. Log statistics to TensorBoard and
