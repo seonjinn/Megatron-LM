@@ -15,15 +15,20 @@ class SFTMetricAliasIntegrationTest(unittest.TestCase):
             if not isinstance(node, ast.Call) or not node.args:
                 continue
             first_arg = node.args[0]
-            if isinstance(first_arg, ast.Constant) and first_arg.value == "--log-comparison-metrics":
+            if (
+                isinstance(first_arg, ast.Constant)
+                and first_arg.value == "--log-comparison-metrics"
+            ):
                 matching_calls.append(node)
 
         self.assertEqual(len(matching_calls), 1)
-        keywords = {keyword.arg: keyword.value for keyword in matching_calls[0].keywords}
+        keywords = {
+            keyword.arg: keyword.value for keyword in matching_calls[0].keywords
+        }
         self.assertIsInstance(keywords["default"], ast.Constant)
         self.assertIs(keywords["default"].value, False)
 
-    def test_training_log_uses_existing_timer_and_loss_under_explicit_guard(self):
+    def test_training_log_uses_existing_timer_and_required_loss(self):
         source = TRAINING_PATH.read_text(encoding="utf-8")
         tree = ast.parse(source)
         calls = [
@@ -31,14 +36,18 @@ class SFTMetricAliasIntegrationTest(unittest.TestCase):
             for node in ast.walk(tree)
             if isinstance(node, ast.Call)
             and isinstance(node.func, ast.Name)
-            and node.func.id == "build_sft_metric_aliases"
+            and node.func.id == "log_sft_metric_aliases"
         ]
 
         self.assertEqual(len(calls), 1)
-        keywords = {keyword.arg: ast.unparse(keyword.value) for keyword in calls[0].keywords}
+        keywords = {
+            keyword.arg: ast.unparse(keyword.value) for keyword in calls[0].keywords
+        }
         self.assertEqual(keywords["e2e_step_time_s"], "elapsed_time_per_iteration")
-        self.assertEqual(keywords["main_lm_loss"], "loss_dict.get('lm loss')")
-        self.assertIn("args.sft and args.log_comparison_metrics and wandb_writer", source)
+        self.assertEqual(keywords["loss_dict"], "loss_dict")
+        self.assertEqual(keywords["enabled"], "args.log_comparison_metrics")
+        self.assertEqual(keywords["is_sft"], "args.sft")
+        self.assertEqual(keywords["writer"], "wandb_writer")
 
 
 if __name__ == "__main__":

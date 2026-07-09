@@ -40,6 +40,79 @@ class SFTMetricAliasesTest(unittest.TestCase):
         self.assertEqual(payload["performance/e2e_step_time_s"], 51.25)
         self.assertIs(payload["accuracy/main_lm_loss"], loss)
 
+    def test_log_helper_enforces_the_guard_matrix(self):
+        module = load_module()
+
+        class Writer:
+            def __init__(self):
+                self.calls = []
+
+            def log(self, payload, step):
+                self.calls.append((payload, step))
+
+        for enabled, is_sft, has_writer in [
+            (False, True, True),
+            (True, False, True),
+            (True, True, False),
+        ]:
+            writer = Writer() if has_writer else None
+            emitted = module.log_sft_metric_aliases(
+                writer=writer,
+                enabled=enabled,
+                is_sft=is_sft,
+                iteration=7,
+                e2e_step_time_s=51.25,
+                loss_dict={"lm loss": object()},
+            )
+            self.assertFalse(emitted)
+            if writer is not None:
+                self.assertEqual(writer.calls, [])
+
+    def test_log_helper_emits_one_exact_payload(self):
+        module = load_module()
+
+        class Writer:
+            def __init__(self):
+                self.calls = []
+
+            def log(self, payload, step):
+                self.calls.append((payload, step))
+
+        writer = Writer()
+        loss = object()
+        emitted = module.log_sft_metric_aliases(
+            writer=writer,
+            enabled=True,
+            is_sft=True,
+            iteration=7,
+            e2e_step_time_s=51.25,
+            loss_dict={"lm loss": loss},
+        )
+
+        self.assertTrue(emitted)
+        self.assertEqual(len(writer.calls), 1)
+        payload, step = writer.calls[0]
+        self.assertEqual(step, 7)
+        self.assertEqual(payload["performance/e2e_step_time_s"], 51.25)
+        self.assertIs(payload["accuracy/main_lm_loss"], loss)
+
+    def test_log_helper_fails_when_enabled_sft_loss_is_missing(self):
+        module = load_module()
+
+        class Writer:
+            def log(self, payload, step):
+                raise AssertionError("log must not run without the required loss")
+
+        with self.assertRaises(KeyError):
+            module.log_sft_metric_aliases(
+                writer=Writer(),
+                enabled=True,
+                is_sft=True,
+                iteration=7,
+                e2e_step_time_s=51.25,
+                loss_dict={},
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
