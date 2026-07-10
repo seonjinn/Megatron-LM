@@ -28,6 +28,15 @@ def add_multimodal_extra_args(parser):
         "--dataloader-save", type=str, default=None, help="Energon dataloader state save path"
     )
     group.add_argument(
+        "--strict-dataloader-state-load",
+        action="store_true",
+        default=False,
+        help=(
+            "Fail if Energon dataloader state is missing or cannot be restored. Missing "
+            "dataloader state for an initial finetune/pretrained checkpoint load is still tolerated."
+        ),
+    )
+    group.add_argument(
         "--use-tiling", action="store_true", default=False, help="Use input image tiling"
     )
     group.add_argument("--max-num-tiles", type=int, default=1, help="Maximum number of image tiles")

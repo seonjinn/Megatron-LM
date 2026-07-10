@@ -4,6 +4,10 @@ from typing import Any
 
 import torch
 from data_loading.task_encoder import MultiModalTaskEncoder
+from dataloader_resume import (
+    is_initial_checkpoint_load_without_dataloader_state,
+    should_strictly_load_dataloader_state,
+)
 from dataset_helpers import TaskEncoder
 
 from megatron.core import parallel_state
@@ -164,6 +168,7 @@ def train_valid_test_dataloaders_provider(train_val_test_num_samples, task_encod
     if args.load is not None:
         if getattr(args, "dataloader_save", None):
             dp_rank = parallel_state.get_data_parallel_rank()
+            strict_dataloader_state_load = should_strictly_load_dataloader_state(args)
             data_save_name = get_checkpoint_name(
                 args.dataloader_save,
                 args.iteration,
@@ -172,15 +177,34 @@ def train_valid_test_dataloaders_provider(train_val_test_num_samples, task_encod
                 basename=f"train_dataloader_dprank{dp_rank:03d}.pt",
             )
             if not os.path.exists(data_save_name):
-                raise FileNotFoundError(
-                    f"Dataset state {data_save_name} does not exist; refusing to resume without dataloader state."
-                )
-            try:
-                dataset_state_dict = torch.load(data_save_name, map_location="cpu", weights_only=False)
-                train_dataloader.restore_state_rank(dataset_state_dict["dataloader_state_dict"])
-                print(f"restored dataset state from {data_save_name}")
-            except Exception as e:
-                raise RuntimeError(f"Failed to restore dataloader state from {data_save_name}") from e
+                if is_initial_checkpoint_load_without_dataloader_state(args):
+                    if dp_rank == 0:
+                        print(
+                            f"Dataset state {data_save_name} does not exist for the initial "
+                            "checkpoint load; starting dataloader from the beginning."
+                        )
+                elif strict_dataloader_state_load:
+                    raise FileNotFoundError(
+                        f"Dataset state {data_save_name} does not exist; refusing to resume without dataloader state."
+                    )
+                elif dp_rank == 0:
+                    print(
+                        f"Dataset state {data_save_name} does not exist; "
+                        "continuing without restoring dataloader state."
+                    )
+            else:
+                try:
+                    dataset_state_dict = torch.load(data_save_name, map_location="cpu", weights_only=False)
+                    train_dataloader.restore_state_rank(dataset_state_dict["dataloader_state_dict"])
+                    print(f"restored dataset state from {data_save_name}")
+                except Exception as e:
+                    if strict_dataloader_state_load:
+                        raise RuntimeError(f"Failed to restore dataloader state from {data_save_name}") from e
+                    if dp_rank == 0:
+                        print(
+                            f"Failed to restore dataloader state from {data_save_name}: {e}. "
+                            "Continuing without restoring dataloader state."
+                        )
 
     valid_dataloader = None
     if valid_ds1 is not None:
