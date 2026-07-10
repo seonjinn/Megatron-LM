@@ -1106,6 +1106,7 @@ class MultiModalTaskEncoder(
                 sound_timestamps=[],
                 num_sound_clips=[],
                 samples_seen=sample.samples_seen,
+                sample_lengths=sample.sample_lengths,
             )
 
         self._load_media(sample)
