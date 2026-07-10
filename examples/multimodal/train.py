@@ -30,7 +30,10 @@ from megatron.core.utils import get_batch_on_this_cp_rank, nvtx_range_pop, nvtx_
 from megatron.training import get_args, get_timers, get_tokenizer, pretrain
 from megatron.training.argument_utils import pretrain_cfg_container_from_args
 from megatron.training.arguments import parse_and_validate_args
-from megatron.training.training import update_packed_sequence_stats
+from megatron.training.training import (
+    update_packed_sequence_stats,
+    update_seqlen_stats_from_cu_seqlens,
+)
 from megatron.training.utils import is_last_rank
 
 _BROADCAST_DATA_SUPPORTS_OPTIMIZE = "optimize" in inspect.signature(
@@ -196,6 +199,15 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
         cu_lengths_padded = cu_lengths_padded[0]
         max_lengths = max_lengths[0]
         cu_lengths_for_params = cu_lengths_padded if cu_lengths_padded is not None else cu_lengths
+
+        # Multimodal SFT uses args.seq_length for the vision encoder length and
+        # args.decoder_seq_length for language tokens. For PP=1, feed packed
+        # language boundaries into the common FLOP accumulator so throughput is
+        # based on the packed decoder work instead of batch * seq_length. PP>1
+        # ranks do not all run the multimodal dataloader, so leave them on the
+        # previous fallback path until the accumulator has all-rank participation.
+        if pp_size == 1:
+            update_seqlen_stats_from_cu_seqlens(cu_lengths)
 
         packed_seq_params = PackedSeqParams(
             qkv_format="thd",
