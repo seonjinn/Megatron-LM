@@ -1,0 +1,21 @@
+__module__: megatron.energon
+__class__: MetadatasetV2
+splits:
+  train:
+    blend_epochized:
+      - repetitions: 2
+        path:
+          dss://nano_v35_s3_distilled_success@v0/holotron_a3_webarea_success_momoweb.jsonl
+        subflavors:
+          name: s3_distilled_success
+          cook: general_conversations_jsonl
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source:
+            filesystem+dss://nano_v35_holotron_a3_webarea_distilled_sft@v0
+  val:
+    blend_epochized:
+      - repetitions: 1
+        path: dss://VQAv2@v0
+        subflavors:
+          augmentation: false

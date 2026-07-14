@@ -1,0 +1,40 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+      - path: 1377_video_text_plus_pretrain_unique_dss/pretrain_base.yaml
+        repetitions: 2
+      - path: 1377_video_text_plus_pretrain_unique_dss/pretrain_nvpdftex_clean_v11_120K_synthtabnet_blocks_full.yaml
+        repetitions: 2
+      - path: 1377_video_text_plus_pretrain_unique_dss/pretraining_cc3m.yaml
+        repetitions: 2
+      - path: 1377_video_text_plus_pretrain_unique_dss/pretraining_ocr_guilin_102325_ocr_only.yaml
+        repetitions: 2
+      # A sub-sample of the SFT dataset. The pure-DSS bundle provides v13.77
+      # safetyfix rather than the older local v13.76_cleaned recipe.
+      - path: 1377_video_text_plus_pretrain_unique_dss/eagle_sft_v13.77_safetyfix_dss_exact_overlay.yaml
+        repetitions: 0.025
+      - path: 1377_video_text_plus_pretrain_unique_dss/chinese_pt_0303.yaml
+        repetitions: 1.0
+      # SFT-0.5 addmix: benchfit_qa
+      - repetitions: 1
+        path: dss://benchfit_qa@v0
+        subflavors:
+          name: benchfit_qa
+          cook: conversation
+        aux:
+          media_source: filesystem+dss://image_shards@v0
+      # SFT-0.5 addmix: dense_ocr_qa
+      - repetitions: 1
+        path: dss://dense_ocr_qa@v0
+        subflavors:
+          name: dense_ocr_qa
+          cook: conversation
+        aux:
+          media_source: filesystem+dss://image_shards@v0
+
+# DSS version of pretrain_vision_adaptor_recipe.yaml built from
+# 1377_video_text_plus_pretrain_unique_dss.yaml. The effective sample count is
+# expected to be close to the non-DSS recipe, with the SFT slice using v13.77
+# because no pure-DSS v13.76_cleaned recipe exists in the provided bundle.

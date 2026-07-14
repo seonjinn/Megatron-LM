@@ -1,0 +1,56 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+      # charxiv-dd-v003-prod-250k-s125-energon_filtered-keep-max-answer-words-20
+      - path: charxiv-dd-v003-prod-250k-s125__max-answer-words-20__charxiv_sft_1rep.yaml
+        repetitions: 6.0
+
+      # charxiv-dd-v009-prod-sft-400k-arxiv-disjoint-s320
+      - path: charxiv-dd-v009-prod-sft-400k-arxiv-disjoint-s320__megatron_heuristic_v1__charxiv_finetune.yaml
+        repetitions: 6.0
+
+      # charxiv-dd-production-chartnet33k-v003-min-score-4 max-answer-words-20
+      - path: charxiv-dd-production-chartnet33k-v003__all_min-score-4_energon_max-answer-words-20__charxiv_sft_1rep.yaml
+        repetitions: 6.0
+
+      # charxiv-dd-production-chartnet33k-v003-difficulty-min-score-4 max-answer-words-20
+      - path: charxiv-dd-production-chartnet33k-v003-difficulty__all_min-score-4_energon_max-answer-words-20__charxiv_sft_1rep.yaml
+        repetitions: 6.0
+
+      # # charxiv-dd-production-chartnet89k-v003-min-score-4 max-answer-words-20
+      - path: charxiv-dd-production-chartnet89k-v003__all_min-score-4_energon_max-answer-words-20__charxiv_sft_1rep.yaml
+        repetitions: 6.0
+
+      # charxiv-dd-production-chartnet89k-v003-difficulty-min-score-4 max-answer-words-20
+      - path: charxiv-dd-production-chartnet89k-v003-difficulty__all_min-score-4_energon_max-answer-words-20__charxiv_sft_1rep.yaml
+        repetitions: 6.0
+
+      # charxiv-dd-production-chartnet60k-v003-min-score-4 max-answer-words-20
+      - path: charxiv-dd-production-chartnet60k-v003__all_min-score-4_energon_max-answer-words-20__charxiv_sft_1rep.yaml
+        repetitions: 6.0
+
+      # charxiv-dd-production-chartnet60k-v003-difficulty-min-score-4 max-answer-words-20
+      - path: charxiv-dd-production-chartnet60k-v003-difficulty__all_min-score-4_energon_max-answer-words-20__charxiv_sft_1rep.yaml
+        repetitions: 6.0
+
+      # # charxiv-dd-production-chartnet78k-v003-min-score-4 max-answer-words-20
+      - path: charxiv-dd-production-chartnet78k-v003__all_min-score-4_energon_max-answer-words-20__charxiv_sft_1rep.yaml
+        repetitions: 6.0
+
+      # charxiv-dd-production-chartnet78k-v003-difficulty-min-score-4 max-answer-words-20
+      - path: charxiv-dd-production-chartnet78k-v003-difficulty__all_min-score-4_energon_max-answer-words-20__charxiv_sft_1rep.yaml
+        repetitions: 6.0
+
+      # charxiv-dd-production-chartnet35k-v003-min-score-4 max-answer-words-20
+      - path: charxiv-dd-production-chartnet35k-v003__all_min-score-4_energon_max-answer-words-20__charxiv_sft_1rep.yaml
+        repetitions: 6.0
+
+      # charxiv-dd-production-chartnet35k-v003-difficulty-min-score-4 max-answer-words-20
+      - path: charxiv-dd-production-chartnet35k-v003-difficulty__all_min-score-4_energon_max-answer-words-20__charxiv_sft_1rep.yaml
+        repetitions: 6.0
+
+      # charxiv-dd-production-chartnet103k-v003-difficulty-min-score-4 max-answer-words-20
+      - path: charxiv-dd-production-chartnet103k-v003-difficulty__all_min-score-4_energon_max-answer-words-20__charxiv_sft_1rep.yaml
+        repetitions: 6.0

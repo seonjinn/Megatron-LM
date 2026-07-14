@@ -1,0 +1,69 @@
+__module__: megatron.energon
+__class__: MetadatasetV2
+splits:
+  train:
+    blend_epochized:
+      - repetitions: 2
+        path:
+          dss://nano_v35_holotron_distilled_task_seeded_om2w@v0/molmoweb_holotron_distilled_task_seeded_om2w.jsonl
+        subflavors:
+          name: holotron_distilled_task_seeded_om2w
+          cook: general_conversations_jsonl
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://nano_v35_task_seeded_om2w@v0
+      - repetitions: 2
+        path:
+          dss://nano_v35_holotron_distilled_task_seeded_wv@v0/molmoweb_holotron_distilled_task_seeded_wv.jsonl
+        subflavors:
+          name: holotron_distilled_task_seeded_wv
+          cook: general_conversations_jsonl
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://nano_v35_task_seeded_wv@v0
+      - repetitions: 2
+        path:
+          dss://nano_v35_holotron_distilled_from_template_v2@v0/molmoweb_v2_holotron_distilled_from_template.jsonl
+        subflavors:
+          name: holotron_distilled_from_template_v2
+          cook: general_conversations_jsonl
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source:
+            filesystem+dss://nano_v35_holotron_from_template_fixedscrolldrag@v0
+      - repetitions: 2
+        path:
+          dss://nano_v35_holotron_distilled_multi_agent_v2@v0/molmoweb_v2_holotron_distilled_multi_agent.jsonl
+        subflavors:
+          name: holotron_distilled_multi_agent_v2
+          cook: general_conversations_jsonl
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source:
+            filesystem+dss://nano_v35_holotron_multi_agent_fixedscrolldrag@v0
+      - repetitions: 2
+        path:
+          dss://nano_v35_holotron_distilled_task_seeded_om2w_v2@v0/molmoweb_v2_holotron_distilled_task_seeded_om2w.jsonl
+        subflavors:
+          name: holotron_distilled_task_seeded_om2w_v2
+          cook: general_conversations_jsonl
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source:
+            filesystem+dss://nano_v35_holotron_task_seeded_om2w_fixedscrolldrag@v0
+      - repetitions: 2
+        path:
+          dss://nano_v35_holotron_distilled_task_seeded_wv_v2@v0/molmoweb_v2_holotron_distilled_task_seeded_wv.jsonl
+        subflavors:
+          name: holotron_distilled_task_seeded_wv_v2
+          cook: general_conversations_jsonl
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source:
+            filesystem+dss://nano_v35_holotron_task_seeded_wv_fixedscrolldrag@v0
+  val:
+    blend_epochized:
+      - repetitions: 1
+        path: dss://VQAv2@v0
+        subflavors:
+          augmentation: false

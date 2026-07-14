@@ -1,0 +1,96 @@
+# VLM-only derivative of:
+# /lustre/fsw/portfolios/llmservice/users/matthieul/data/omni_data_recipes/stages/sft_combined_omni_16k/sft_combined_omni_16k.yaml
+#
+# Retains the combined recipe's image, video, and text entries and weights.
+# Inside eagle_sft_v14, replaces its CharXiv child with the judge-filtered mix.
+# Removes short-omni, ASR, audio-reasoning, and audio-SFT entries.
+# Adds the CharXiv 0610, additional-charts, Holotron web-agent, and Hopchain
+# mixes at weight 1.0 each.
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+      # Base Eagle v14 vision mix with judge-filtered CharXiv substituted inside
+      - path: data_yamls/eagle_sft_v14_nano_charxiv.yaml
+        repetitions: 1.2
+
+      # Short video QA data
+      - path: data_yamls/short_video_qa_0318_newreps.yaml
+        repetitions: 1.2
+      - path: data_yamls/video_qa_v1_v2_all_0314_safetyfix.yaml
+        repetitions: 1.2
+
+      # Qwen3.5 video reasoning
+      - path: data_yamls/mar4_video_qa_short_reasoning_newreps.yaml
+        repetitions: 1.2
+      - path: dss://yt1b_qa_plm_sampled_thinking_traces_safetyfix0323@v0
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://yttemporal180m-youtube-dataset@v0
+        repetitions: 1.2
+      - path: dss://yt1b_qa_plm_sampled_dense_captions_no_think_safetyfix0323@v0
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://yttemporal180m-youtube-dataset@v0
+        repetitions: 1.2
+
+      # Additional short dense-caption video data
+      - path: data_yamls/short_dense_captions_no_think_0310_safetyfix.yaml
+        repetitions: 1.2
+
+      # Text SFT data
+      - path: data_yamls/ultra_txt_materialized_0407_median_le_16384.yaml
+        repetitions: 0.3
+
+      # Safety data
+      - path: dss://filtered_textsafety_energon_dataset@v0
+        subflavors:
+          cook: general_conversations_jsonl
+        repetitions: 2.4
+      - path: dss://image_safety_energon_dataset@v0
+        subflavors:
+          cook: general_conversations_jsonl
+        repetitions: 2.4
+
+      # SFT-0.5 addmix: benchfit_qa
+      - path: dss://benchfit_qa@v0
+        subflavors:
+          name: benchfit_qa
+          cook: conversation
+        aux:
+          media_source: filesystem+dss://image_shards@v0
+        repetitions: 0.72
+
+      # SFT-0.5 addmix: dense_ocr_qa
+      - path: dss://dense_ocr_qa@v0
+        subflavors:
+          name: dense_ocr_qa
+          cook: conversation
+        aux:
+          media_source: filesystem+dss://image_shards@v0
+        repetitions: 0.72
+
+      # CharXiv 0610 blend
+      - path: data_yamls/charxiv_blend.yaml
+        repetitions: 1.0
+
+      # Additional chart data
+      - path: data_yamls/charts_additional.yaml
+        repetitions: 1.0
+
+      - path: data_yamls/charts_additional2.yaml
+        repetitions: 1.0
+
+      # Holotron-distilled MolmoWeb and WebArena data
+      - path: data_yamls/perplexity_holotron_distilled_molmoweb_v2.yaml
+        repetitions: 1.0
+
+      - path: data_yamls/holotron_a3_webarea_success_momoweb_energon.yaml
+        repetitions: 1.0
+
+      # Hopchain document and multipage data
+      - path: data_yamls/hopchain_documents_plusnew_coco_multipagetiny.yaml
+        repetitions: 1.0

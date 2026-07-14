@@ -1,0 +1,13 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+      - path:
+          dss://nano_v35_charxiv-dd-v010-chartqa-source-matches-38k-async-h64@v0/charxiv_sft.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source:
+            filesystem+dss://nano_v35_chart_source_matches_chartqa_train_top20pivot_anchor20_sim030_reject088@v0
+        repetitions: 1.0

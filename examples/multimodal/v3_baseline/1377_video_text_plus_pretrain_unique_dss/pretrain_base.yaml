@@ -1,0 +1,251 @@
+__module__: megatron.energon
+__class__: MetadatasetV2
+splits:
+  train:
+    blend_epochized:
+      - repetitions: 0.2
+        path: dss://ln_vila_augment_caption@v0
+        subflavors:
+          name: LN_VILA_augment_caption
+          cook: conversation
+          data_augment: false
+          length: 503275
+          orig_length: 503275
+          category: General
+        aux:
+          media_source: filesystem+dss://openimages@v0
+      - repetitions: 0.1
+        path: dss://oi_vila_caption_1_2m_filt@v0
+        subflavors:
+          name: OI_VILA_caption_1.2M_filt
+          cook: conversation
+          data_augment: false
+          length: 1278221
+          orig_length: 1278221
+          category: General
+        aux:
+          media_source: filesystem+dss://openimages@v0
+      - repetitions: 1
+        path: dss://textcaps@v0
+        subflavors:
+          name: textcaps
+          cook: conversation
+          data_augment: false
+          length: 21953
+          orig_length: 21953
+          category: General
+        aux:
+          media_source: filesystem+dss://Cambrian-10M@v0
+      - repetitions: 1
+        path: dss://textcaps_commercial_new@v0
+        subflavors:
+          name: textcaps_commercial_new
+          cook: conversation
+          data_augment: false
+          length: 109765
+          orig_length: 109765
+          category: General
+        aux:
+          media_source: filesystem+dss://textvqa@v0
+      - repetitions: 1
+        path: dss://textvqa_commercial_new@v0
+        subflavors:
+          name: textvqa_commercial_new
+          cook: conversation
+          data_augment: false
+          length: 34602
+          orig_length: 34602
+          category: General
+        aux:
+          media_source: filesystem+dss://textvqa@v0
+      - repetitions: 1
+        path: dss://refcoco_updated_rewrite@v0/refcoco_updated_rewrite.jsonl
+        subflavors:
+          name: refcoco_updated
+          cook: conversation
+          data_augment: false
+          length: 14694
+          orig_length: 14694
+          category: General
+        aux:
+          media_source: filesystem+dss://coco@v0
+      - repetitions: 1
+        path:
+          dss://vqav2_okvqa_updated_rewrite@v0/vqav2_okvqa_updated_rewrite.jsonl
+        subflavors:
+          name: vqav2_okvqa_updated
+          cook: conversation
+          data_augment: false
+          length: 28555
+          orig_length: 28555
+          category: General
+        aux:
+          media_source: filesystem+dss://coco@v0
+      - repetitions: 1
+        path:
+          dss://a_okvqa_legal_updated_rewrite@v0/a_okvqa_legal_updated_rewrite.jsonl
+        subflavors:
+          name: a_okvqa_legal_updated
+          cook: conversation
+          data_augment: false
+          length: 20832
+          orig_length: 20832
+          category: General
+        aux:
+          media_source: filesystem+dss://coco@v0
+      - repetitions: 1
+        path: dss://gqa_updated_new@v0
+        subflavors:
+          name: gqa_updated_new
+          cook: conversation
+          data_augment: false
+          length: 21433
+          orig_length: 21433
+          category: General
+        aux:
+          media_source: filesystem+dss://Cambrian-10M@v0/gqa/images
+      - repetitions: 1
+        path: dss://aokvqa_commercial_new@v0
+        subflavors:
+          name: aokvqa_commercial_new
+          cook: conversation
+          data_augment: false
+          length: 16131
+          orig_length: 16131
+          category: General
+        aux:
+          media_source: filesystem+dss://coco@v0
+      - repetitions: 1
+        path:
+          dss://clevr_merge_explanation_rewrite@v0/clevr_merge_explanation_rewrite.jsonl
+        subflavors:
+          name: commercial_clevr
+          cook: conversation
+          data_augment: false
+          length: 70000
+          orig_length: 70000
+          category: General
+        aux:
+          media_source: filesystem+dss://clevr_v1_0_train_images@v0
+      - repetitions: 1
+        path: dss://clevr_math_merged_70k@v0
+        subflavors:
+          name: clevr_math
+          cook: conversation
+          data_augment: false
+          length: 70000
+          orig_length: 70000
+          category: Counter
+        aux:
+          media_source: filesystem+dss://clevr_v1_0_train_images@v0
+      - repetitions: 1
+        path:
+          dss://commercial_synthdog_en_rewrite@v0/commercial_synthdog_en_rewrite.jsonl
+        subflavors:
+          name: commercial_synthdog-en
+          cook: conversation
+          data_augment: false
+          length: 29672
+          orig_length: 29765
+          category: General
+        aux:
+          media_source: filesystem+dss://synthdog_en_images@v1
+      - repetitions: 0.3
+        path: dss://approved_20240921@v0
+        subflavors:
+          name: hf_data_approved_20240921
+          cook: conversation
+          data_augment: false
+          length: 302004
+          orig_length: 302004
+          category: General
+        aux:
+          media_source: filesystem+dss://Cambrian-10M@v0
+      - repetitions: 1
+        path: dss://tallyqa_filtered_commercial@v0
+        subflavors:
+          name: tally_qa
+          cook: conversation
+          data_augment: false
+          length: 68775
+          orig_length: 68775
+          category: General
+        aux:
+          media_source: filesystem+dss://Cambrian-10M@v0
+      - repetitions: 1
+        path: dss://invisible@v0
+        subflavors:
+          name: nv_invisible
+          cook: conversation
+          data_augment: false
+          length: 20476
+          orig_length: 20476
+          category: General
+        aux:
+          media_source: filesystem+dss://invisible_vqa@v0
+      - repetitions: 1
+        path: dss://turing@v0
+        subflavors:
+          name: nv_turing
+          cook: conversation
+          data_augment: false
+          length: 20364
+          orig_length: 20364
+          category: General
+        aux:
+          media_source: filesystem+dss://turing_vqa@v0
+      - repetitions: 1
+        path: dss://scale_nv@v0
+        subflavors:
+          name: scale_nv
+          cook: conversation
+          data_augment: false
+          length: 14872
+          orig_length: 14872
+          category: General
+        aux:
+          media_source: filesystem+dss://scale@v0
+      - repetitions: 1
+        path: dss://textbooks_nv@v0
+        subflavors:
+          name: textbooks_nv
+          cook: conversation
+          data_augment: false
+          length: 46745
+          orig_length: 46745
+          category: General
+        aux:
+          media_source: filesystem+dss://textbooks@v0
+      - repetitions: 1
+        path: dss://human_annotation_v0@v0
+        subflavors:
+          name: human_annotation_ocr
+          cook: conversation
+          data_augment: false
+          length: 14309
+          orig_length: 14309
+          category: General
+        aux:
+          media_source: filesystem+dss://human_annotation_v0_images@v0
+      - repetitions: 1
+        path: dss://doclaynet_ro_v4@v0
+        subflavors:
+          name: doclaynet_ro_v4
+          cook: conversation
+          data_augment: false
+          length: 48369
+          orig_length: 48369
+          category: General
+        aux:
+          media_source: filesystem+dss://doclaynet_ro_v4_images@v0
+      - repetitions: 1
+        path: dss://SynthTables@v0
+        subflavors:
+          name: SynthTables
+          cook: conversation
+          data_augment: false
+          length: 4887
+          orig_length: 4887
+          category: General
+        aux:
+          media_source: filesystem+dss://SynthTables@v0

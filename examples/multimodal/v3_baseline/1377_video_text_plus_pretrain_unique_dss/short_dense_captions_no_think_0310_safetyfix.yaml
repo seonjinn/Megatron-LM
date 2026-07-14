@@ -1,0 +1,75 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+      - path:
+          dss://output_boyi_data_custom_safetyfix0323@v1/output_boyi_data_custom_safetyfix0323.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        repetitions: 1
+        aux:
+          media_source: filesystem+dss://videos_crop@v0
+      - path:
+          dss://output_merged_drop3_lita_processed_custom@v1/output_merged_drop3_lita_processed_custom.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        repetitions: 1
+        aux:
+          media_source: filesystem+dss://df_human@v0
+      - path:
+          dss://output_molmo2_video_askmodelanything_custom_safetyfix0323@v1/output_molmo2_video_askmodelanything_custom_safetyfix0323.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        repetitions: 1
+        aux:
+          media_source: filesystem+dss://molmo2_videos@v0
+      - path:
+          dss://output_molmo2_video_capqa_custom_safetyfix0323@v1/output_molmo2_video_capqa_custom_safetyfix0323.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        repetitions: 1
+        aux:
+          media_source: filesystem+dss://molmo2_videos@v0
+      - path:
+          dss://output_molmo2_video_pointqa_custom_safetyfix0323@v1/output_molmo2_video_pointqa_custom_safetyfix0323.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        repetitions: 1
+        aux:
+          media_source: filesystem+dss://molmo2_videos@v0
+      - path:
+          dss://output_short_video_ocr_vggsound_custom@v1/output_short_video_ocr_vggsound_custom.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        repetitions: 1
+        aux:
+          media_source: filesystem+dss://vggsound_video_media@v0
+      - path:
+          dss://output_short_video_qa_vggsound_custom@v1/output_short_video_qa_vggsound_custom.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        repetitions: 1
+        aux:
+          media_source: filesystem+dss://vggsound_video_media@v0
+      - path:
+          dss://output_train_chunked_processed_clean_v2_custom_safetyfix0323@v1/output_train_chunked_processed_clean_v2_custom_safetyfix0323.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://video_chunked_60s@v0
+        repetitions: 1
+      - path:
+          dss://output_yt1b_qa_plm_sampled_custom_safetyfix0323@v1/output_yt1b_qa_plm_sampled_custom_safetyfix0323.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://yttemporal180m-youtube-dataset@v0
+        repetitions: 1
+      - path:
+          dss://output_fgqa_plm_human_relative_custom@v1/output_fgqa_plm_human_relative_custom.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://fgqa_videos@v0
+        repetitions: 1

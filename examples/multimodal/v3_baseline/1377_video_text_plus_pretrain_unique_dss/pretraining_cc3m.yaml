@@ -1,0 +1,16 @@
+__module__: megatron.energon
+__class__: MetadatasetV2
+splits:
+  train:
+    blend_epochized:
+      - repetitions: 1
+        path: dss://combined_data_new_rewrite@v0/combined_data_new_rewrite.jsonl
+        subflavors:
+          name: cc3m_relabelled_byqwen3-30b
+          cook: conversation
+          data_augment: false
+          length: 867065
+          orig_length: 1000000
+          category: General
+        aux:
+          media_source: filesystem+dss://cc3m_img@v0

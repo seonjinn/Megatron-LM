@@ -1,0 +1,16 @@
+__module__: megatron.energon
+__class__: MetadatasetV2
+splits:
+  train:
+    blend_epochized:
+      - repetitions: 1.0
+        path: dss://nvclip_ocr_qwen@v0
+        subflavors:
+          name: NVCLIP_OCR
+          cook: conversation
+          data_augment: false
+          length: 29680
+          orig_length: 29680
+          category: General
+        aux:
+          media_source: filesystem+dss://nvclip_tar@v0

@@ -1,0 +1,20 @@
+# Web-browsing derivative of:
+# /lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/tpoon/repos_nanov35/megatron-lm/examples/multimodal/nano_v35/oci-nrt/experiments/sft_combined_omni_16k_vlm_only/sft_combined_omni_16k_vlm_only.yaml
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+      - path:
+          sft_combined_omni_16k_vlm_only_webbrowse_dss/sft_combined_omni_16k_vlm_only.yaml
+        repetitions: 1
+
+      # Web-browsing / agent data: Holotron distilled MolmoWeb (perplexity v2)
+      - path:
+          sft_combined_omni_16k_vlm_only_webbrowse_dss/data_yamls/perplexity_holotron_distilled_molmoweb_v2.yaml
+        repetitions: 0.5
+
+      # Web-browsing / agent data: Holotron a3 webarea distilled SFT (momoweb success)
+      - path:
+          sft_combined_omni_16k_vlm_only_webbrowse_dss/data_yamls/holotron_a3_webarea_success_momoweb_energon.yaml
+        repetitions: 0.5

@@ -1,0 +1,17 @@
+# Additional charts datasets
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+      # v012 CharXiV SERP sources, quality >= 4, 32k reasoning cap, heuristic filters
+      - path: charxiv-dd-v012-charxiv-serp-all-routed-78517-max100k50k-r450-c20__megatron_heuristic_32k_20260706__charxiv_finetune.yaml
+        repetitions: 3.0
+
+      # v012 ChartQAPro SERP sources, quality >= 4, 32k reasoning cap, heuristic filters
+      - path: charxiv-dd-v012-chartqapro-serp-all-routed-53563-max100k50k-r450-c20__megatron_heuristic_32k_20260706__charxiv_finetune.yaml
+        repetitions: 3.0
+
+      # v012 ChartMuseum SERP sources, quality >= 4, 32k reasoning cap, heuristic filters
+      - path: charxiv-dd-v012-chartmuseum-serp-all-routed-46140-max100k50k-r450-c20__megatron_heuristic_32k_20260706__charxiv_finetune.yaml
+        repetitions: 3.0

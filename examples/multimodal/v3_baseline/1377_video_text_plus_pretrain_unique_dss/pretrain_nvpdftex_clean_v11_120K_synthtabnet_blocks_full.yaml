@@ -1,0 +1,27 @@
+__module__: megatron.energon
+__class__: MetadatasetV2
+splits:
+  train:
+    blend_epochized:
+      - repetitions: 0.1
+        path: dss://synthtabnet_blocks_full@v0
+        subflavors:
+          name: synthtabnet_blocks_full
+          cook: conversation
+          data_augment: false
+          length: 451174
+          orig_length: 200000
+          category: General
+        aux:
+          media_source: filesystem+dss://synthtabnet_blocks@v0
+      - repetitions: 1.0
+        path: dss://nvpdftex_v11@v0
+        subflavors:
+          name: nvpdftex_clean_v11_120K
+          cook: conversation
+          data_augment: false
+          length: 120000
+          orig_length: 120000
+          category: General
+        aux:
+          media_source: filesystem+dss://nvpdftex_v11_images@v0

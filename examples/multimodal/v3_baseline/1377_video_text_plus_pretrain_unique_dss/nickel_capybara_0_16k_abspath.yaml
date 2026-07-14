@@ -1,0 +1,1205 @@
+__module__: megatron.energon
+__class__: MetadatasetV2
+splits:
+  train:
+    blend_epochized:
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0000_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0000_0_16k
+          cook: conversation
+          data_augment: false
+          length: 190266
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0001_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0001_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189735
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0002_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0002_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189033
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0003_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0003_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189646
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0004_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0004_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189699
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0005_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0005_0_16k
+          cook: conversation
+          data_augment: false
+          length: 190354
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0006_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0006_0_16k
+          cook: conversation
+          data_augment: false
+          length: 190006
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0007_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0007_0_16k
+          cook: conversation
+          data_augment: false
+          length: 190332
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0008_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0008_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189844
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0009_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0009_0_16k
+          cook: conversation
+          data_augment: false
+          length: 190134
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0010_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0010_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189506
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0011_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0011_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189552
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0012_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0012_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189621
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0013_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0013_0_16k
+          cook: conversation
+          data_augment: false
+          length: 190059
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0014_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0014_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189506
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0015_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0015_0_16k
+          cook: conversation
+          data_augment: false
+          length: 190139
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0016_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0016_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189729
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0017_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0017_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189834
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0018_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0018_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189960
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0019_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0019_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189439
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0020_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0020_0_16k
+          cook: conversation
+          data_augment: false
+          length: 190195
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0021_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0021_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189584
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0022_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0022_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189200
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0023_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0023_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189356
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0024_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0024_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189287
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0025_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0025_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189095
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0026_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0026_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189735
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0027_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0027_0_16k
+          cook: conversation
+          data_augment: false
+          length: 190147
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0028_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0028_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189498
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0029_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0029_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189603
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0030_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0030_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189507
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0031_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0031_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189797
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0032_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0032_0_16k
+          cook: conversation
+          data_augment: false
+          length: 190108
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0033_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0033_0_16k
+          cook: conversation
+          data_augment: false
+          length: 188915
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0034_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0034_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189833
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0035_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0035_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189361
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0036_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0036_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189251
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0037_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0037_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189277
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0038_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0038_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189937
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0039_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0039_0_16k
+          cook: conversation
+          data_augment: false
+          length: 190095
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0040_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0040_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189295
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0041_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0041_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189169
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0042_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0042_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189498
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0043_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0043_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189229
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0044_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0044_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189426
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0045_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0045_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189564
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0046_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0046_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189145
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0047_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0047_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189503
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0048_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0048_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189827
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0049_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0049_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189612
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0050_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0050_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189649
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0051_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0051_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189571
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0052_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0052_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189690
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0053_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0053_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189224
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0054_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0054_0_16k
+          cook: conversation
+          data_augment: false
+          length: 190162
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0055_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0055_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189578
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0056_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0056_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189406
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0057_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0057_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189466
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0058_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0058_0_16k
+          cook: conversation
+          data_augment: false
+          length: 190102
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0059_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0059_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189121
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0060_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0060_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189827
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0061_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0061_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189217
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0062_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0062_0_16k
+          cook: conversation
+          data_augment: false
+          length: 190029
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0063_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0063_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189375
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0064_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0064_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189560
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0065_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0065_0_16k
+          cook: conversation
+          data_augment: false
+          length: 190011
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0066_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0066_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189408
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0067_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0067_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189810
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0068_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0068_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189091
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0069_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0069_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189544
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0070_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0070_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189827
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0071_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0071_0_16k
+          cook: conversation
+          data_augment: false
+          length: 190066
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0072_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0072_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189334
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0073_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0073_0_16k
+          cook: conversation
+          data_augment: false
+          length: 188599
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0074_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0074_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189481
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0075_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0075_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189416
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0076_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0076_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189484
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0077_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0077_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189350
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0078_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0078_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189477
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0079_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0079_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189767
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0080_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0080_0_16k
+          cook: conversation
+          data_augment: false
+          length: 188993
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0081_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0081_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189455
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0082_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0082_0_16k
+          cook: conversation
+          data_augment: false
+          length: 188848
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0083_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0083_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189905
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0084_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0084_0_16k
+          cook: conversation
+          data_augment: false
+          length: 190037
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0085_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0085_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189861
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0086_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0086_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189186
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0087_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0087_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189514
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0088_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0088_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189322
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0089_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0089_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189231
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0090_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0090_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189822
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0091_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0091_0_16k
+          cook: conversation
+          data_augment: false
+          length: 190117
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0092_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0092_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189768
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0093_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0093_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189388
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0094_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0094_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189600
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0095_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0095_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189479
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0096_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0096_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189618
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0097_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0097_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189273
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0098_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0098_0_16k
+          cook: conversation
+          data_augment: false
+          length: 189654
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
+      - repetitions: 1.0
+        path: dss://nickel-capybara_noncommercial_part_0099_0_16k@v0
+        subflavors:
+          name: nickel-capybara_noncommercial_part_0099_0_16k
+          cook: conversation
+          data_augment: false
+          length: 190208
+          orig_length: 13689438
+          category: General
+          train_only_on_last_assistant_turn: true
+        aux:
+          media_source: filesystem+dss://text_reasoning_nanov3@v0
