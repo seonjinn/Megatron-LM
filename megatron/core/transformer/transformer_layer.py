@@ -1225,6 +1225,14 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
         if not hasattr(self, "_cg_packed_by_hidden_slen"):
             self._cg_packed_by_hidden_slen = {}
         packed = getattr(self.config, "cuda_graph_packed_seq", False)
+        prev = self._cg_packed_by_hidden_slen.get(self._cuda_graph_hidden_slen)
+        assert prev is None or prev["seq_length"] == seq_length, (
+            f"CUDA graph buckets {prev['seq_length'] if prev else '?'} and "
+            f"{seq_length} shard to the same hidden length "
+            f"{self._cuda_graph_hidden_slen}; replay could not tell them apart. "
+            "Make bucket sizes exact multiples of cp*tp so shard lengths are "
+            "unique, or remove one of the buckets."
+        )
         self._cg_packed_by_hidden_slen[self._cuda_graph_hidden_slen] = {
             "bufs": self._cuda_graph_psp_buffers if packed else None,
             "psp": self._cuda_graph_psp if packed else None,
