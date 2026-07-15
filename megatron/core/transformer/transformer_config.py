@@ -927,6 +927,15 @@ class TransformerConfig(ModelParallelConfig):
     cuda_graph_warmup_steps: int = 3
     """Number of warmup steps for CUDA graphs"""
 
+    cuda_graph_packed_seq: bool = False
+    """Enable CUDA graph support for packed (variable-length) sequence training.
+    When True, cu_seqlens tensors are padded to a fixed size and managed via shared
+    static buffers so that TE CUDA graphs can replay with changing sequence layouts."""
+
+    cuda_graph_max_packed_seqs: int = 2048
+    """Maximum number of packed sequences per micro-batch for CUDA graph capture.
+    cu_seqlens are padded to this size + 1. Batches exceeding this fall back to eager."""
+
     external_cuda_graph: bool = False
     """DEPRECATED and replaced by cuda_graph_impl.
     When set to true, TransformerLayer layers are swapped with user provided CUDA graphs."""
@@ -2259,6 +2268,21 @@ class TransformerConfig(ModelParallelConfig):
 
             if self.cpu_offloading and self.cuda_graph_impl != "full_iteration":
                 raise ValueError("CUDA graphs not supported with CPU offloading.")
+
+            if self.cuda_graph_packed_seq:
+                # The packed-seq CG shared cu_seqlens buffers are updated once per
+                # micro-batch at FORWARD replay; captured backward graphs read the
+                # same buffers. Any pipelined schedule interleaves fwd(mb i+1)
+                # before bwd(mb i), so the backward would silently consume the
+                # wrong micro-batch's cu_seqlens.
+                assert self.pipeline_model_parallel_size == 1 and (
+                    self.virtual_pipeline_model_parallel_size is None
+                    or self.virtual_pipeline_model_parallel_size == 1
+                ), (
+                    "cuda_graph_packed_seq requires pipeline_model_parallel_size=1 "
+                    "(no pipelining): shared cu_seqlens buffers are only valid when "
+                    "each micro-batch's backward replays before the next forward."
+                )
 
             # Check cuda graph scopes for per-layer implementations.
             if self.cuda_graph_impl in ("local", "transformer_engine"):
