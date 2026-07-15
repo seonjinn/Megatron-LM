@@ -54,8 +54,15 @@ class PackedSeqParams:
         replays it for all batches that fit within the bucket.
         """
         actual_len = cu_seqlens.shape[0]
-        if actual_len >= target_len:
-            return cu_seqlens[:target_len]
+        if actual_len > target_len:
+            # Truncating cu_seqlens would silently drop trailing sequences from
+            # attention. Callers must fall back to eager before reaching here.
+            raise ValueError(
+                f"cu_seqlens has {actual_len} entries but CUDA graph bucket only "
+                f"supports {target_len}; increase cuda_graph_max_packed_seqs."
+            )
+        if actual_len == target_len:
+            return cu_seqlens
         padded = cu_seqlens.new_empty(target_len)
         padded[:actual_len] = cu_seqlens
         padded[actual_len:] = cu_seqlens[-1]

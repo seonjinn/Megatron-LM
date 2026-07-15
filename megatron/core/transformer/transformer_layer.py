@@ -89,12 +89,16 @@ def _maybe_log_packed_cg_debug(
 
     actual_seqlens = psp.cu_seqlens_q[1:] - psp.cu_seqlens_q[:-1]
     actual_max = int(actual_seqlens.max().item()) if actual_seqlens.numel() > 0 else 0
-    total_tokens = int(psp.cu_seqlens_q[-1].item()) if psp.cu_seqlens_q.numel() > 0 else 0
+    total_tokens = (
+        int(psp.cu_seqlens_q[-1].item()) if psp.cu_seqlens_q.numel() > 0 else 0
+    )
     num_seqs = int(psp.cu_seqlens_q.shape[0] - 1)
     padded_max = None
     if psp.cu_seqlens_q_padded is not None:
         padded_seqlens = psp.cu_seqlens_q_padded[1:] - psp.cu_seqlens_q_padded[:-1]
-        padded_max = int(padded_seqlens.max().item()) if padded_seqlens.numel() > 0 else 0
+        padded_max = (
+            int(padded_seqlens.max().item()) if padded_seqlens.numel() > 0 else 0
+        )
     logging.warning(
         "[CG_PACKED_DEBUG] num_seqs=%d total_tokens=%d actual_max=%d padded_max=%s "
         "psp.max_q=%s psp.max_kv=%s capture_seq=%d target_len=%d replay.max_q=%d replay.max_kv=%d",
@@ -1165,6 +1169,9 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             Dict[str, torch.Tensor]: A dictionary containing the static inputs for the layer.
         """
         static_inputs = super().get_layer_static_inputs(seq_length, micro_batch_size)
+        # Captured hidden_states shard length (seq / (cp * tp-sp)); the replay
+        # preflight compares incoming activations against this, NOT seq_length.
+        self._cuda_graph_hidden_slen = static_inputs["hidden_states"].shape[0]
 
         if not isinstance(self.self_attention, IdentityOp) and (
             not self.config.cuda_graph_scope
@@ -1207,6 +1214,22 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                 max_seqlen_kv_tensor=shared_bufs["max_seqlen_kv_tensor"],
             )
             self._cuda_graph_psp = dummy_psp
+
+        # Per-bucket registry keyed by the captured hidden shard length.
+        # With multiple capture buckets the single attributes above are
+        # overwritten by each capture; replay looks up the entry matching the
+        # incoming activation length so every bucket replays with ITS OWN
+        # cu_seqlens buffers instead of the last-captured bucket's. "bufs" and
+        # "psp" stay None when cuda_graph_packed_seq is off (e.g. mlp-only
+        # scope where attention runs eagerly with the real PackedSeqParams).
+        if not hasattr(self, "_cg_packed_by_hidden_slen"):
+            self._cg_packed_by_hidden_slen = {}
+        packed = getattr(self.config, "cuda_graph_packed_seq", False)
+        self._cg_packed_by_hidden_slen[self._cuda_graph_hidden_slen] = {
+            "bufs": self._cuda_graph_psp_buffers if packed else None,
+            "psp": self._cuda_graph_psp if packed else None,
+            "seq_length": seq_length,
+        }
 
         return static_inputs
 
@@ -1290,6 +1313,25 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             cuda_graph_outputs.append(context)
         return tuple(cuda_graph_outputs)
 
+    def _cg_packed_eager_fallback(self, orig_args, orig_kwargs, reason):
+        """Run this layer eagerly with the ORIGINAL packed-seq inputs.
+
+        Fires cuda_graph_manual_hooks first: forward pre-hooks (e.g. the
+        distributed-optimizer param all-gather with overlap_param_gather) are
+        disabled for graphed modules, so skipping the manual hooks here would
+        run the eager fallback on stale parameters.
+        """
+        global _CG_FALLBACK_COUNT
+        _CG_FALLBACK_COUNT += 1
+        logging.warning("[CG] eager fallback: %s", reason)
+        for hook, hook_args in getattr(self, "cuda_graph_manual_hooks", []):
+            hook(*hook_args)
+        nvtx_range_push(suffix="cg_packed_fallback_forward")
+        try:
+            return self.forward(*orig_args, **orig_kwargs)
+        finally:
+            nvtx_range_pop(suffix="cg_packed_fallback_forward")
+
     def _te_cuda_graph_replay(self, *args, **kwargs):
         """
         CUDA graph replay for this layer using TE interface.
@@ -1301,24 +1343,50 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
         Multi-bucket fallback: if the actual packed-sequence count exceeds the
         CG bucket size, falls back to a non-CG forward pass.
         """
+        # Snapshot the ORIGINAL args/kwargs before any scope-branch rewriting or
+        # PSP popping. All eager fallbacks below must use these, otherwise the
+        # fallback forward silently runs without packed_seq_params (THD data
+        # would be treated as one contiguous sequence -> wrong numerics).
+        orig_args, orig_kwargs = args, dict(kwargs)
+
+        attn_in_scope = (
+            not self.config.cuda_graph_scope
+            or CudaGraphScope.attn in self.config.cuda_graph_scope
+        )
+
         psp = kwargs.get("packed_seq_params")
-        if psp is not None and hasattr(self, "_cuda_graph_psp_buffers"):
-            bucket_max = self._cuda_graph_psp_buffers["cu_seqlens_q"].shape[
-                0
-            ]  # max_seqs + 1
-            if psp.cu_seqlens_q.shape[0] > bucket_max:
-                # Actual N_docs exceeds bucket -> fall back to non-CG forward.
-                global _CG_FALLBACK_COUNT
-                _CG_FALLBACK_COUNT += 1
-                nvtx_range_push(suffix="cg_packed_fallback_forward")
-                try:
-                    return self.forward(*args, **kwargs)
-                finally:
-                    nvtx_range_pop(suffix="cg_packed_fallback_forward")
-        global _CG_REPLAY_COUNT
-        _CG_REPLAY_COUNT += 1
-        if _CG_REPLAY_COUNT % 320 == 0:
-            _cg_count_emit()
+        cg_packed_entry = None
+        if psp is not None:
+            packed_map = getattr(self, "_cg_packed_by_hidden_slen", None)
+            hidden = args[0] if args else kwargs.get("hidden_states")
+            if packed_map and isinstance(hidden, torch.Tensor):
+                cg_packed_entry = packed_map.get(hidden.shape[0])
+            if cg_packed_entry is None:
+                # Incoming activation length matches no captured bucket
+                # (low-fill fallback step padded to a non-bucket length, or a
+                # bucket that was never captured).
+                return self._cg_packed_eager_fallback(
+                    orig_args,
+                    orig_kwargs,
+                    "no captured bucket for hidden length "
+                    f"{hidden.shape[0] if isinstance(hidden, torch.Tensor) else '?'}",
+                )
+            if attn_in_scope and cg_packed_entry["bufs"] is None:
+                raise RuntimeError(
+                    "CUDA graph replay received packed_seq_params but the "
+                    "attention graph was captured without packed-seq support. "
+                    "Set cuda_graph_packed_seq=True when sequence packing is "
+                    "enabled and the CUDA graph scope includes attention."
+                )
+            if cg_packed_entry["bufs"] is not None:
+                bucket_max = cg_packed_entry["bufs"]["cu_seqlens_q"].shape[
+                    0
+                ]  # max_seqs + 1
+                if psp.cu_seqlens_q.shape[0] > bucket_max:
+                    # Actual N_docs exceeds bucket -> fall back to non-CG forward.
+                    return self._cg_packed_eager_fallback(
+                        orig_args, orig_kwargs, "packed sequence count over bucket"
+                    )
 
         context = None
         if (
@@ -1330,8 +1398,14 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             kwargs = {}
 
         psp = kwargs.get("packed_seq_params")
-        if psp is not None and hasattr(self, "_cuda_graph_psp_buffers"):
-            bufs = self._cuda_graph_psp_buffers
+        if (
+            psp is not None
+            and cg_packed_entry is not None
+            and cg_packed_entry["bufs"] is not None
+        ):
+            bufs = cg_packed_entry["bufs"]
+            capture_seq_length = cg_packed_entry["seq_length"]
+            dummy_psp = cg_packed_entry["psp"]
             target_len = bufs["cu_seqlens_q"].shape[0]  # = max_seqs + 1
 
             # PSP-identity gate: shared buffers need only be updated ONCE per
@@ -1344,6 +1418,20 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                     psp.ensure_cg_padded(target_len)
                 finally:
                     nvtx_range_pop(suffix="cg_packed_prepare_psp")
+
+                # The graph was captured with cu_seqlens_*_padded=None (to avoid
+                # TE's torch.equal sync during capture), so replay is only valid
+                # when padded == unpadded. Check once per micro-batch (one host
+                # sync); a mismatch means CP/FP8-style inter-sequence padding is
+                # active and the captured graph would compute wrong offsets.
+                if psp._cg_padded_qp is not None and not torch.equal(
+                    psp._cg_padded_qp, psp._cg_padded_q
+                ):
+                    psp._cg_padded_mismatch = True
+                elif psp._cg_padded_kvp is not None and not torch.equal(
+                    psp._cg_padded_kvp, psp._cg_padded_kv
+                ):
+                    psp._cg_padded_mismatch = True
 
                 nvtx_range_push(suffix="cg_packed_update_shared_buffers")
                 try:
@@ -1361,15 +1449,23 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                     nvtx_range_pop(suffix="cg_packed_update_shared_buffers")
                 bufs["_last_updated_psp"] = psp
 
+            if getattr(psp, "_cg_padded_mismatch", False):
+                return self._cg_packed_eager_fallback(
+                    orig_args,
+                    orig_kwargs,
+                    "cu_seqlens_padded differs from cu_seqlens; captured graph "
+                    "assumes they are equal",
+                )
+
             # Set int constants on dummy PSP (captured as Python constants in graph).
-            self._cuda_graph_psp.max_seqlen_q = self._cuda_graph_seq_length
-            self._cuda_graph_psp.max_seqlen_kv = self._cuda_graph_seq_length
+            dummy_psp.max_seqlen_q = capture_seq_length
+            dummy_psp.max_seqlen_kv = capture_seq_length
             _maybe_log_packed_cg_debug(
                 psp=psp,
                 target_len=target_len,
-                capture_seq_length=self._cuda_graph_seq_length,
-                replay_max_seqlen_q=self._cuda_graph_psp.max_seqlen_q,
-                replay_max_seqlen_kv=self._cuda_graph_psp.max_seqlen_kv,
+                capture_seq_length=capture_seq_length,
+                replay_max_seqlen_q=dummy_psp.max_seqlen_q,
+                replay_max_seqlen_kv=dummy_psp.max_seqlen_kv,
             )
 
             # Remove PSP from kwargs - shared buffers are already updated in-place,
@@ -1395,27 +1491,6 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             *args, **kwargs_filtered
         )
 
-        expected_seq_len = getattr(self, "_cuda_graph_seq_length", None)
-        if (
-            psp is not None
-            and expected_seq_len is not None
-            and len(cudagraph_args) > 0
-            and isinstance(cudagraph_args[0], torch.Tensor)
-            and cudagraph_args[0].shape[0] != expected_seq_len
-        ):
-            _CG_FALLBACK_COUNT += 1
-            logging.warning(
-                "[CG] packed replay preflight mismatch: hidden_states.shape[0]=%d, "
-                "capture_seq=%d; falling back to eager.",
-                cudagraph_args[0].shape[0],
-                expected_seq_len,
-            )
-            nvtx_range_push(suffix="cg_packed_fallback_forward")
-            try:
-                return self.forward(*args, **kwargs)
-            finally:
-                nvtx_range_pop(suffix="cg_packed_fallback_forward")
-
         for hook, hook_args in self.cuda_graph_manual_hooks:
             hook(*hook_args)
         graph_call_range_open = False
@@ -1430,21 +1505,22 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                 nvtx_range_pop(suffix="cg_packed_graph_call")
                 graph_call_range_open = False
             if psp is not None and _is_cg_static_input_shape_mismatch(exc):
-                _CG_FALLBACK_COUNT += 1
-                logging.warning(
-                    "[CG] replay input shape mismatch for packed step; falling back to eager. "
-                    "error=%s",
-                    exc,
+                return self._cg_packed_eager_fallback(
+                    orig_args,
+                    orig_kwargs,
+                    f"replay input shape mismatch for packed step: {exc}",
                 )
-                nvtx_range_push(suffix="cg_packed_fallback_forward")
-                try:
-                    return self.forward(*args, **kwargs)
-                finally:
-                    nvtx_range_pop(suffix="cg_packed_fallback_forward")
             raise
         finally:
             if graph_call_range_open:
                 nvtx_range_pop(suffix="cg_packed_graph_call")
+
+        # Count a replay only after the graph call actually succeeded; late
+        # fallbacks above must not inflate the replay counter.
+        global _CG_REPLAY_COUNT
+        _CG_REPLAY_COUNT += 1
+        if _CG_REPLAY_COUNT % 320 == 0:
+            _cg_count_emit()
 
         if kwargs.get("context") is not None:
             context = cuda_graph_output.pop()

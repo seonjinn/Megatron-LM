@@ -1839,6 +1839,31 @@ class TransformerConfig(ModelParallelConfig):
             if self.cpu_offloading:
                 raise ValueError("CUDA graphs not supported with CPU offloading.")
 
+            if self.cuda_graph_packed_seq:
+                # The packed-seq CG shared cu_seqlens buffers are updated once per
+                # micro-batch at FORWARD replay; captured backward graphs read the
+                # same buffers. Any pipelined schedule interleaves fwd(mb i+1)
+                # before bwd(mb i), so the backward would silently consume the
+                # wrong micro-batch's cu_seqlens.
+                assert self.pipeline_model_parallel_size == 1 and (
+                    self.virtual_pipeline_model_parallel_size is None
+                    or self.virtual_pipeline_model_parallel_size == 1
+                ), (
+                    "cuda_graph_packed_seq requires pipeline_model_parallel_size=1 "
+                    "(no pipelining): shared cu_seqlens buffers are only valid when "
+                    "each micro-batch's backward replays before the next forward."
+                )
+
+            if self.cuda_graph_te_overlap_replay:
+                raise ValueError(
+                    "cuda_graph_te_overlap_replay is experimental and currently "
+                    "broken: the event-record wrapper strips nn.Module identity "
+                    "(TE capture then excludes parameters from the static input "
+                    "surface) and the replay event is not an external event, so "
+                    "the main stream does not reliably wait on side-stream replay. "
+                    "Remove this override."
+                )
+
             if self.cuda_graph_impl == "local":
                 # local impl doesn't currently distinguish between moe_preproocess or moe_router
                 # so just set both if either is specified.
