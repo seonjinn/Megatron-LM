@@ -1163,7 +1163,8 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
 
         When packed sequences are in use (SFT), also prepares shared CUDA graph
         buffer tensors and a dummy PackedSeqParams so the graph captures the THD
-        FlashAttention code path.
+        FlashAttention code path. In that mode the attention_mask static input
+        is omitted: THD kernels derive masking from cu_seqlens.
 
         Returns:
             Dict[str, torch.Tensor]: A dictionary containing the static inputs for the layer.
@@ -1173,9 +1174,16 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
         # preflight compares incoming activations against this, NOT seq_length.
         self._cuda_graph_hidden_slen = static_inputs["hidden_states"].shape[0]
 
-        if not isinstance(self.self_attention, IdentityOp) and (
-            not self.config.cuda_graph_scope
-            or CudaGraphScope.attn in self.config.cuda_graph_scope
+        # Packed-seq graphs skip the attention_mask static input entirely: THD
+        # kernels take masking from cu_seqlens, so capturing an S^2 bool mask
+        # only adds a per-layer D2D copy at every replay.
+        if (
+            not isinstance(self.self_attention, IdentityOp)
+            and (
+                not self.config.cuda_graph_scope
+                or CudaGraphScope.attn in self.config.cuda_graph_scope
+            )
+            and not getattr(self.config, "cuda_graph_packed_seq", False)
         ):
             slen_per_cp = seq_length // self.config.context_parallel_size
             static_inputs["attention_mask"] = ~(
@@ -1652,6 +1660,13 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             "Exactly one positional argument `hidden_states` is expected."
         )
         hidden_states = cudagraph_args[0]
+
+        if getattr(self.config, "cuda_graph_packed_seq", False):
+            # Packed-seq graphs were captured WITHOUT an attention_mask kwarg
+            # (see get_layer_static_inputs), so the captured surface has no
+            # mask slot. Drop any incoming mask (None or Tensor) so replay
+            # kwargs match capture, and skip the zeros-mask injection below.
+            cudagraph_kwargs.pop("attention_mask", None)
 
         try:
             import transformer_engine.pytorch as te  # pylint: disable=unused-import
