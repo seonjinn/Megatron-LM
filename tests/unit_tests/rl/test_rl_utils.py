@@ -344,6 +344,41 @@ class TestRLUtils:
         lang_module.eval.assert_called_once()
         lang_module.train.assert_called_once()
 
+    def test_megatron_rl_inference_mode_preserves_requested_moe_cuda_graph_modules(
+        self, monkeypatch
+    ):
+        requested_modules = [CudaGraphModule.moe_router, CudaGraphModule.moe_preprocess]
+        config = SimpleNamespace(
+            cuda_graph_impl="none",
+            cuda_graph_modules=[CudaGraphModule.attn],
+            inference_cuda_graph_scope=InferenceCudaGraphScope.none,
+        )
+        lang_module = DummyLangModule(config)
+        model = [SimpleNamespace(config=config, module=lang_module)]
+        args = SimpleNamespace(
+            rl_training_cuda_graphs=True,
+            num_experts=128,
+            curr_iteration=11,
+            cuda_graph_impl="transformer_engine",
+            cuda_graph_modules=requested_modules,
+            inference_cuda_graph_scope=InferenceCudaGraphScope.none,
+        )
+        self._patch_rl_inference_mode_deps(monkeypatch, args)
+        transition_moe_cudagraphs = MagicMock()
+        monkeypatch.setattr(rl_utils, "transition_moe_cudagraphs", transition_moe_cudagraphs)
+
+        with rl_utils.megatron_rl_inference_mode(
+            model, MagicMock(), "transformer_engine", False
+        ):
+            assert config.cuda_graph_modules == []
+
+        assert config.cuda_graph_impl == "transformer_engine"
+        assert config.cuda_graph_modules == requested_modules
+        assert transition_moe_cudagraphs.call_args_list == [
+            call(lang_module, "full"),
+            call(lang_module, "partial"),
+        ]
+
     @pytest.mark.parametrize(
         "initialize_model_parallel",
         [
