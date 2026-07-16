@@ -166,7 +166,7 @@ def test_identity_concatenates_exact_message_content(
     )
 
 
-def test_identity_masks_system_and_user_targets(
+def test_identity_supervises_all_literal_content(
     sft_tokenizer_module: ModuleType,
 ) -> None:
     identity_tokenizer = _identity_tokenizer(sft_tokenizer_module)
@@ -181,11 +181,45 @@ def test_identity_masks_system_and_user_targets(
     )
 
     expected_tokens = [ord(character) for character in "syspromptanswer"]
-    expected_targets = [IGNORE_INDEX] * len("sysprompt") + [
-        ord(character) for character in "answer"
-    ]
     np.testing.assert_array_equal(tokens, expected_tokens)
-    np.testing.assert_array_equal(targets, expected_targets)
+    np.testing.assert_array_equal(targets, expected_tokens)
+
+
+@pytest.mark.parametrize(
+    "conversation",
+    [
+        [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "question"},
+            {"role": "assistant", "content": ""},
+        ],
+        [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "question"},
+            {"role": "tool", "content": "result"},
+            {"role": "assistant", "content": "answer"},
+        ],
+        [
+            {"role": "system", "content": "sys"},
+            {"role": "assistant", "content": "first"},
+            {"role": "assistant", "content": "second"},
+        ],
+    ],
+)
+def test_identity_accepts_literal_role_streams(
+    sft_tokenizer_module: ModuleType,
+    conversation: list[dict[str, str]],
+) -> None:
+    identity_tokenizer = _identity_tokenizer(sft_tokenizer_module)
+
+    tokens, targets = identity_tokenizer.tokenize_conversation(
+        conversation, return_target=True, add_generation_prompt=False
+    )
+
+    expected_text = "".join(message["content"] for message in conversation)
+    expected_tokens = [ord(character) for character in expected_text]
+    np.testing.assert_array_equal(tokens, expected_tokens)
+    np.testing.assert_array_equal(targets, expected_tokens)
 
 
 def test_identity_adds_no_generation_prompt(sft_tokenizer_module: ModuleType) -> None:

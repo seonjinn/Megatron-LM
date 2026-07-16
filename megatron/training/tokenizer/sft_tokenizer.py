@@ -107,6 +107,9 @@ class SFTTokenizer(MegatronLegacyTokenizer):
 
         target = tokens.copy()
 
+        if self._prompt_format == "identity":
+            return tokens, target
+
         # Mask system and user tokens in the target.
         idx = 0
         for turn_idx, turn in enumerate(conversation):
