@@ -1204,18 +1204,6 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
            attribute can be set to control the scope of the CUDA graph.
         2. If context is None, it cannot be returned as output.
         """
-        # Record the backward event on cuda graph stream in backward pass.
-        # This is to ensure the main stream waits for computing on cuda graph stream to complete,
-        # and overlaps with the H2D transfer on reload stream.
-        if self.offload_module_in_cuda_graph:
-            if len(args) > 0:
-                hidden_states = args[0]
-                hidden_states = self.off_interface.backward_record(hidden_states)
-                args = (hidden_states,) + args[1:]
-            else:
-                hidden_states = kwargs.pop("hidden_states")
-                hidden_states = self.off_interface.backward_record(hidden_states)
-                kwargs["hidden_states"] = hidden_states
         self._rebuild_te_cuda_graph_packed_seq_params(kwargs)
         context = None
         if (
