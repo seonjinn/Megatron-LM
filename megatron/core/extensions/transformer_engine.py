@@ -84,6 +84,20 @@ except ImportError:
         HAVE_TE = False
 
 _TE_CONFIG_TYPE_KEY = "transformer_engine_config_type"
+_PACKED_SEQ_GRAPH_BUFFER_FIELDS = frozenset(
+    {"max_seqlen_q_tensor", "max_seqlen_kv_tensor"}
+)
+
+
+def build_packed_seq_kwargs(
+    packed_seq_params: PackedSeqParams, kept_packed_seq_params: Set[str]
+) -> Dict[str, Any]:
+    """Build the TE attention kwargs, excluding CUDA-graph-only buffer fields."""
+    return {
+        key: getattr(packed_seq_params, key)
+        for key in kept_packed_seq_params
+        if key not in _PACKED_SEQ_GRAPH_BUFFER_FIELDS
+    }
 
 
 class TransformerEngineConfigType(enum.Enum):
@@ -1824,7 +1838,7 @@ class TEDotProductAttention(te.pytorch.DotProductAttention):
             )
 
         packed_seq_kwargs = (
-            {key: getattr(packed_seq_params, key) for key in self.kept_packed_seq_params}
+            build_packed_seq_kwargs(packed_seq_params, self.kept_packed_seq_params)
             if packed_seq_params is not None
             else {}
         )
