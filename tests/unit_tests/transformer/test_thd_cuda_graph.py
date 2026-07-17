@@ -546,8 +546,8 @@ class TestDecomposeReconstruct:
 
     @pytest.mark.internal
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
-    def test_round_trip_omits_optional_kv_inputs(self):
-        """Self-attention THD replay must not graph-capture absent KV metadata."""
+    def test_round_trip_canonicalizes_optional_kv_inputs(self):
+        """Self-attention THD replay keeps the captured four-tensor ABI."""
         cu = _make_cu([100, 50, 30])
         psp = PackedSeqParams(
             qkv_format='thd',
@@ -563,12 +563,12 @@ class TestDecomposeReconstruct:
 
         TransformerLayer._decompose_packed_seq_params_to_kwargs(kw)
 
-        assert 'cu_seqlens_kv' not in kw
-        assert 'cu_seqlens_kv_padded' not in kw
+        assert torch.equal(kw['cu_seqlens_kv'], cu)
+        assert torch.equal(kw['cu_seqlens_kv_padded'], cu)
         layer._reconstruct_packed_seq_params_from_kwargs(kw)
         reconstructed = kw['packed_seq_params']
-        assert reconstructed.cu_seqlens_kv is None
-        assert reconstructed.cu_seqlens_kv_padded is None
+        assert torch.equal(reconstructed.cu_seqlens_kv, cu)
+        assert torch.equal(reconstructed.cu_seqlens_kv_padded, cu)
 
     @pytest.mark.internal
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
