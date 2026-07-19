@@ -64,6 +64,6 @@ splits:
   val:
     blend_epochized:
       - repetitions: 1
-        path: dss://VQAv2@v0
+        path: dss://vqav2_stage1@v0
         subflavors:
           augmentation: false

@@ -19,20 +19,20 @@ splits:
         repetitions: 1.0
       # SFT-0.5 addmix: benchfit_qa
       - repetitions: 1
-        path: dss://benchfit_qa@v0
+        path: dss://benchfit_qa@v1/03-10a_stage5_output.jsonl
         subflavors:
           name: benchfit_qa
           cook: conversation
         aux:
-          media_source: filesystem+dss://image_shards@v0
+          media_source: dss://image_shards@v0
       # SFT-0.5 addmix: dense_ocr_qa
       - repetitions: 1
-        path: dss://dense_ocr_qa@v0
+        path: dss://dense_ocr_qa@v1/03-10a_stage5_qa_output.jsonl
         subflavors:
           name: dense_ocr_qa
           cook: conversation
         aux:
-          media_source: filesystem+dss://image_shards@v0
+          media_source: dss://image_shards@v0
 
 # DSS version of pretrain_vision_adaptor_recipe.yaml built from
 # 1377_video_text_plus_pretrain_unique_dss.yaml. The effective sample count is

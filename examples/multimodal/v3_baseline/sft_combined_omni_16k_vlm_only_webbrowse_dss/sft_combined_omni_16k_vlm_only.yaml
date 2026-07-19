@@ -24,13 +24,13 @@ splits:
       # Qwen3.5 video reasoning
       - path: data_yamls/mar4_video_qa_short_reasoning_newreps.yaml
         repetitions: 1.2
-      - path: dss://yt1b_qa_plm_sampled_thinking_traces_safetyfix0323@v0
+      - path: dss://yt1b_qa_plm_sampled_thinking_traces_safetyfix0323@v1/yt1b_qa_plm_sampled_thinking_traces_safetyfix0323.jsonl
         subflavors:
           cook: general_conversations_jsonl
         aux:
           media_source: filesystem+dss://yttemporal180m-youtube-dataset@v0
         repetitions: 1.2
-      - path: dss://yt1b_qa_plm_sampled_dense_captions_no_think_safetyfix0323@v0
+      - path: dss://yt1b_qa_plm_sampled_dense_captions_no_think_safetyfix0323@v1/yt1b_qa_plm_sampled_dense_captions_no_think_safetyfix0323.jsonl
         subflavors:
           cook: general_conversations_jsonl
         aux:
@@ -46,31 +46,31 @@ splits:
         repetitions: 0.3
 
       # Safety data
-      - path: dss://filtered_textsafety_energon_dataset@v0
+      - path: dss://filtered_textsafety_energon_dataset@v1/filtered_textsafety_energon_dataset.jsonl
         subflavors:
           cook: general_conversations_jsonl
         repetitions: 2.4
-      - path: dss://image_safety_energon_dataset@v0
+      - path: dss://image_safety_energon_dataset@v1/image_safety_energon_dataset.jsonl
         subflavors:
           cook: general_conversations_jsonl
         repetitions: 2.4
 
       # SFT-0.5 addmix: benchfit_qa
-      - path: dss://benchfit_qa@v0
+      - path: dss://benchfit_qa@v1/03-10a_stage5_output.jsonl
         subflavors:
           name: benchfit_qa
           cook: conversation
         aux:
-          media_source: filesystem+dss://image_shards@v0
+          media_source: dss://image_shards@v0
         repetitions: 0.72
 
       # SFT-0.5 addmix: dense_ocr_qa
-      - path: dss://dense_ocr_qa@v0
+      - path: dss://dense_ocr_qa@v1/03-10a_stage5_qa_output.jsonl
         subflavors:
           name: dense_ocr_qa
           cook: conversation
         aux:
-          media_source: filesystem+dss://image_shards@v0
+          media_source: dss://image_shards@v0
         repetitions: 0.72
 
       # CharXiv 0610 blend

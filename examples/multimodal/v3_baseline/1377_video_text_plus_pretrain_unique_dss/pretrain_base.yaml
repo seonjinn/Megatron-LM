@@ -239,7 +239,7 @@ splits:
         aux:
           media_source: filesystem+dss://doclaynet_ro_v4_images@v0
       - repetitions: 1
-        path: dss://SynthTables@v0
+        path: dss://SynthTables_nmh5r@v0
         subflavors:
           name: SynthTables
           cook: conversation

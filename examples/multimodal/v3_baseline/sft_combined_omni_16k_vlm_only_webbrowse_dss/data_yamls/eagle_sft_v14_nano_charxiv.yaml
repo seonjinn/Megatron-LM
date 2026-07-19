@@ -1845,7 +1845,7 @@ splits:
           media_source: filesystem+dss://internvl@v0/original/RICO
       - repetitions: 1
         path:
-          dss://screen_qa_reason_qwen3.5_safetyfix0323@v1/screen_qa_reason_qwen3.5_safetyfix0323.jsonl
+          dss://screen_qa_reason_qwen3.5_safetyfix0323@v2/screen_qa_reason_qwen3.5_safetyfix0323.jsonl
         subflavors:
           name: screen_qa_reason_qwen3.5_safetyfix0323
           cook: conversation
@@ -6587,6 +6587,6 @@ splits:
   val:
     blend_epochized:
       - repetitions: 1
-        path: dss://VQAv2@v0
+        path: dss://vqav2_stage1@v0
         subflavors:
           augmentation: false
