@@ -1801,6 +1801,33 @@ def _get_te_cuda_graph_rotary_seq_len(
     )
 
 
+def _get_te_cuda_graph_rotary_pos_emb(
+    transformer_module,
+    transformer_input,
+    config,
+    packed_seq_params,
+    rotary_pos_emb_cache=None,
+):
+    """Build a TE CUDA-graph RoPE sample with the replay-time THD layout."""
+    rotary_seq_len = _get_te_cuda_graph_rotary_seq_len(
+        transformer_module,
+        transformer_input,
+        config,
+        packed_seq_params,
+    )
+    if rotary_pos_emb_cache is None:
+        rotary_pos_emb_cache = {}
+    if rotary_seq_len not in rotary_pos_emb_cache:
+        rotary_pos_emb_cache[rotary_seq_len] = transformer_module.rotary_pos_emb(
+            rotary_seq_len,
+            packed_seq=(
+                packed_seq_params is not None and packed_seq_params.qkv_format == 'thd'
+            ),
+            cp_group=packed_seq_params.cp_group if packed_seq_params is not None else None,
+        )
+    return rotary_pos_emb_cache[rotary_seq_len]
+
+
 class TECudaGraphHelper:
     """
     Helper class to capture CUDA Graphs using TE make_graphed_callables().
@@ -2036,17 +2063,13 @@ class TECudaGraphHelper:
                     transformer_module.position_embedding_type == 'rope'
                     and not self.config.multi_latent_attention
                 ):
-                    rotary_seq_len = _get_te_cuda_graph_rotary_seq_len(
+                    return _get_te_cuda_graph_rotary_pos_emb(
                         transformer_module,
                         transformer_input,
                         self.config,
                         self.sample_packed_seq_params,
+                        rotary_pos_emb_cache,
                     )
-                    if rotary_seq_len not in rotary_pos_emb_cache:
-                        rotary_pos_emb_cache[rotary_seq_len] = transformer_module.rotary_pos_emb(
-                            rotary_seq_len
-                        )
-                    return rotary_pos_emb_cache[rotary_seq_len]
                 else:
                     return None
 
