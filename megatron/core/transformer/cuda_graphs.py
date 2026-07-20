@@ -1785,6 +1785,22 @@ def _add_packed_seq_params_to_te_cuda_graph_sample_kwargs(
     sample_kwargs.update(tensor_kwargs)
 
 
+def _get_te_cuda_graph_rotary_seq_len(
+    transformer_module,
+    transformer_input,
+    config,
+    packed_seq_params,
+):
+    """Get the RoPE length used by a Transformer Engine CUDA Graph sample."""
+    return transformer_module.rotary_pos_emb.get_rotary_seq_len(
+        None,
+        transformer_module.decoder,
+        transformer_input,
+        config,
+        packed_seq_params,
+    )
+
+
 class TECudaGraphHelper:
     """
     Helper class to capture CUDA Graphs using TE make_graphed_callables().
@@ -2020,8 +2036,11 @@ class TECudaGraphHelper:
                     transformer_module.position_embedding_type == 'rope'
                     and not self.config.multi_latent_attention
                 ):
-                    rotary_seq_len = transformer_module.rotary_pos_emb.get_rotary_seq_len(
-                        None, transformer_module.decoder, transformer_input, self.config, None
+                    rotary_seq_len = _get_te_cuda_graph_rotary_seq_len(
+                        transformer_module,
+                        transformer_input,
+                        self.config,
+                        self.sample_packed_seq_params,
                     )
                     if rotary_seq_len not in rotary_pos_emb_cache:
                         rotary_pos_emb_cache[rotary_seq_len] = transformer_module.rotary_pos_emb(
