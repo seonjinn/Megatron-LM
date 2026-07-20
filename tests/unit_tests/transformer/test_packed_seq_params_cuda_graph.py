@@ -14,6 +14,7 @@ from megatron.core.packed_seq_params import (
 )
 from megatron.core.transformer.cuda_graphs import (
     _add_packed_seq_params_to_te_cuda_graph_sample_kwargs,
+    _get_te_cuda_graph_rotary_seq_len,
 )
 from megatron.core.transformer.transformer_layer import TransformerLayer
 
@@ -280,3 +281,37 @@ def test_te_cuda_graph_sample_kwargs_reject_overlapping_flattened_keys():
         _add_packed_seq_params_to_te_cuda_graph_sample_kwargs(
             layer, sample_kwargs, packed_seq_params
         )
+
+
+def test_te_cuda_graph_rope_sample_uses_packed_seq_params():
+    """Packed THD capture must use the same global RoPE length as replay."""
+
+    packed_seq_params = _make_packed_seq_params()
+
+    class _RotaryEmbedding:
+        def get_rotary_seq_len(
+            self, inference_context, transformer, transformer_input, config, packed_seq_params_arg
+        ):
+            assert inference_context is None
+            assert transformer is decoder
+            assert transformer_input is transformer_input_sentinel
+            assert config is config_sentinel
+            assert packed_seq_params_arg is packed_seq_params
+            return packed_seq_params_arg.max_seqlen_q
+
+    class _TransformerModule:
+        rotary_pos_emb = _RotaryEmbedding()
+        decoder = object()
+
+    decoder = _TransformerModule.decoder
+    transformer_input_sentinel = object()
+    config_sentinel = object()
+
+    rotary_seq_len = _get_te_cuda_graph_rotary_seq_len(
+        _TransformerModule(),
+        transformer_input_sentinel,
+        config_sentinel,
+        packed_seq_params,
+    )
+
+    assert rotary_seq_len == packed_seq_params.max_seqlen_q
