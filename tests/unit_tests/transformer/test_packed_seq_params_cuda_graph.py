@@ -14,6 +14,7 @@ from megatron.core.packed_seq_params import (
 )
 from megatron.core.transformer.cuda_graphs import (
     _add_packed_seq_params_to_te_cuda_graph_sample_kwargs,
+    _get_te_cuda_graph_rotary_pos_emb,
     _get_te_cuda_graph_rotary_seq_len,
 )
 from megatron.core.transformer.transformer_layer import TransformerLayer
@@ -315,3 +316,30 @@ def test_te_cuda_graph_rope_sample_uses_packed_seq_params():
     )
 
     assert rotary_seq_len == packed_seq_params.max_seqlen_q
+
+
+def test_te_cuda_graph_rope_sample_preserves_thd_cp_layout():
+    """Packed THD capture must not CP-shard the RoPE sample a second time."""
+
+    packed_seq_params = _make_packed_seq_params()
+    packed_seq_params.cp_group = object()
+
+    class _RotaryEmbedding:
+        def __call__(self, seq_len, *, packed_seq, cp_group):
+            return seq_len, packed_seq, cp_group
+
+        def get_rotary_seq_len(
+            self, inference_context, transformer, transformer_input, config, packed_seq_params_arg
+        ):
+            return packed_seq_params_arg.max_seqlen_q
+
+    class _TransformerModule:
+        rotary_pos_emb = _RotaryEmbedding()
+        decoder = object()
+
+    assert _get_te_cuda_graph_rotary_pos_emb(
+        _TransformerModule(),
+        object(),
+        object(),
+        packed_seq_params,
+    ) == (8, True, packed_seq_params.cp_group)
