@@ -14,7 +14,7 @@ class SFTComparisonObservation:
     Attributes:
         step: One-based Megatron-LM training iteration.
         train_step_time_s: Native per-event active iteration time, excluding validation.
-        validation_time_s: Rank-last wall time around the in-loop evaluation call.
+        validation_time_s: Rank-last wall time for the full in-loop validation event.
         main_lm_loss: Native current-iteration language-model training loss.
         validation_loss: Native language-model validation loss.
         grad_norm: Native training gradient norm.
@@ -45,7 +45,7 @@ class SFTValidationResult:
     Attributes:
         attempted: Whether in-loop validation started for the event.
         completed: Whether every requested validation iteration completed.
-        validation_time_s: Last-rank wall duration observed around evaluation.
+        validation_time_s: Last-rank wall duration of the full in-loop validation event.
         validation_loss: Native language-model validation loss, when available.
     """
 

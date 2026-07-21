@@ -1122,7 +1122,7 @@ def pretrain(
     args = get_args()
     timers = get_timers()
     validate_sft_comparison_configuration(
-        enabled=bool(getattr(args, 'log_comparison_metrics', False)),
+        enabled=_sft_comparison_metrics_enabled(args),
         log_interval=args.log_interval,
     )
 
@@ -1413,7 +1413,7 @@ def pretrain(
                         'train_step_time_s': (
                             'native interval-time per-event active-time delta excluding validation'
                         ),
-                        'validation_time_s': 'rank-last perf_counter wall time around in-loop evaluate()',
+                        'validation_time_s': 'rank-last perf_counter wall time for the full in-loop validation event',
                         'e2e_step_time_s': 'train_step_time_s plus validation_time_s when validation runs',
                     }
                 }
@@ -2591,21 +2591,17 @@ def training_log(
     got_nan = False
     for key in loss_dict:
         if not skipped_iter:
+            total_loss_dict[key] = (
+                total_loss_dict.get(
+                    key, torch.tensor([0.0], dtype=torch.float, device='cuda')
+                )
+                + loss_dict[key]
+            )
             if comparison_state is not None and key == 'lm loss':
                 comparison_main_lm_loss = normalize_sft_metric_producer_scalar(
                     "main_lm_loss", loss_dict[key]
                 )
                 assert comparison_main_lm_loss is not None
-                total_loss_dict[key] = (
-                    total_loss_dict.get(key, 0.0) + comparison_main_lm_loss
-                )
-            else:
-                total_loss_dict[key] = (
-                    total_loss_dict.get(
-                        key, torch.tensor([0.0], dtype=torch.float, device='cuda')
-                    )
-                    + loss_dict[key]
-                )
         else:
             value = loss_dict[key].float().sum().item()
             is_nan = value == float('inf') or value == -float('inf') or value != value
@@ -2688,15 +2684,10 @@ def training_log(
             if wandb_writer and packing_metrics:
                 wandb_writer.log(packing_metrics, iteration)
         for key in loss_dict:
-            loss_value = (
-                comparison_main_lm_loss
-                if key == 'lm loss' and comparison_main_lm_loss is not None
-                else loss_dict[key]
-            )
-            writer.add_scalar(key, loss_value, iteration)
-            writer.add_scalar(key + ' vs samples', loss_value, args.consumed_train_samples)
+            writer.add_scalar(key, loss_dict[key], iteration)
+            writer.add_scalar(key + ' vs samples', loss_dict[key], args.consumed_train_samples)
             if wandb_writer:
-                wandb_writer.log({key: loss_value}, iteration)
+                wandb_writer.log({key: loss_dict[key]}, iteration)
         if args.log_loss_scale_to_tensorboard:
             writer.add_scalar('loss-scale', loss_scale, iteration)
             writer.add_scalar('loss-scale vs samples', loss_scale, args.consumed_train_samples)
@@ -2868,20 +2859,14 @@ def training_log(
         log_string += f' global batch size: {batch_size:5d} |'
         for key in total_loss_dict:
             if key not in [advanced_iters_key, skipped_iters_key, nan_iters_key]:
-                accumulated_loss = total_loss_dict[key]
-                accumulated_loss_value = (
-                    float(accumulated_loss)
-                    if type(accumulated_loss) in (int, float)
-                    else accumulated_loss.item()
+                avg = total_loss_dict[key].item() / float(
+                    max(1, total_loss_dict[advanced_iters_key])
                 )
-                avg = accumulated_loss_value / float(max(1, total_loss_dict[advanced_iters_key]))
                 if avg >= 0.0:
                     log_string += ' {}: {:.6E} |'.format(key, avg)
                 if should_reset:
-                    total_loss_dict[key] = (
-                        0.0
-                        if comparison_state is not None and key == 'lm loss'
-                        else torch.tensor([0.0], dtype=torch.float, device='cuda')
+                    total_loss_dict[key] = torch.tensor(
+                        [0.0], dtype=torch.float, device='cuda'
                     )
         if comparison_state is not None:
             assert comparison_train_active_time_s is not None
@@ -3988,6 +3973,12 @@ def train(
         )
         if args.eval_interval and iteration % args.eval_interval == 0 and args.do_valid \
                 and (args.start_eval_at_iter is None or iteration >= args.start_eval_at_iter):
+            comparison_validation_start = (
+                time.perf_counter()
+                if comparison_state is not None
+                and comparison_state.pending_observation is not None
+                else None
+            )
             if args.log_energy:
                 energy_monitor.pause()
             timers('interval-time').stop()
@@ -4034,10 +4025,7 @@ def train(
                     non_loss_data_func=non_loss_data_func,
                     pg_collection=pg_collection,
                     p2p_communicator=p2p_communicator,
-                    collect_comparison_metrics=(
-                        comparison_state is not None
-                        and comparison_state.pending_observation is not None
-                    ),
+                    collect_comparison_metrics=comparison_validation_start is not None,
                 )
 
             eval_duration += timers('eval-time').elapsed()
@@ -4056,6 +4044,12 @@ def train(
                 energy_monitor.resume()
             if args.num_experts is not None:
                 get_moe_metrics_tracker().clear()
+            if comparison_validation_start is not None:
+                assert comparison_validation_result is not None
+                comparison_validation_result = dataclasses.replace(
+                    comparison_validation_result,
+                    validation_time_s=time.perf_counter() - comparison_validation_start,
+                )
 
         if comparison_state is not None and comparison_state.pending_observation is not None:
             wandb_writer = get_wandb_writer()
@@ -4354,7 +4348,6 @@ def evaluate_and_print_results(
         writer = None
 
     wandb_writer = get_wandb_writer()
-    comparison_validation_time_s = 0.0
     comparison_validation_loss = None
 
     data_iterators = data_iterator if args.multiple_validation_sets else [data_iterator]
@@ -4394,7 +4387,6 @@ def evaluate_and_print_results(
                 suffix = f"-{args.validation_set_names[index]}"
             else:
                 suffix = f"-{index}"
-        comparison_validation_start = time.perf_counter() if collect_comparison_metrics else None
         total_loss_dict, collected_non_loss_data, timelimit = evaluate(
             forward_step_func,
             iterator,
@@ -4407,8 +4399,6 @@ def evaluate_and_print_results(
             pg_collection=pg_collection,
             p2p_communicator=p2p_communicator,
         )
-        if comparison_validation_start is not None:
-            comparison_validation_time_s += time.perf_counter() - comparison_validation_start
         # Timelimit hit during evaluation
         if timelimit:
             if collect_comparison_metrics:
@@ -4451,7 +4441,6 @@ def evaluate_and_print_results(
         return SFTValidationResult(
             attempted=True,
             completed=True,
-            validation_time_s=comparison_validation_time_s,
             validation_loss=comparison_validation_loss,
         )
 

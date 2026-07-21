@@ -597,6 +597,22 @@ def test_pretrain_validates_comparison_configuration_before_setup() -> None:
     assert calls["validate_sft_comparison_configuration"] < calls["set_jit_fusion_options"]
 
 
+def test_pretrain_validates_only_when_comparison_metrics_are_enabled() -> None:
+    pretrain = _function_node(_TRAINING_PATH, "pretrain")
+    validation_call = next(
+        node
+        for node in ast.walk(pretrain)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "validate_sft_comparison_configuration"
+    )
+    enabled_keyword = next(
+        keyword for keyword in validation_call.keywords if keyword.arg == "enabled"
+    )
+
+    assert ast.unparse(enabled_keyword.value) == "_sft_comparison_metrics_enabled(args)"
+
+
 @pytest.mark.parametrize(
     ("args", "expected"),
     [
@@ -820,6 +836,70 @@ def test_training_loop_delegates_common_event_logging_once() -> None:
     )
 
 
+def test_validation_timer_brackets_the_complete_in_loop_event() -> None:
+    train = _function_node(_TRAINING_PATH, "train")
+    validation_branch = next(
+        node
+        for node in ast.walk(train)
+        if isinstance(node, ast.If)
+        and "args.eval_interval" in ast.unparse(node.test)
+        and "args.do_valid" in ast.unparse(node.test)
+    )
+    perf_counter_calls = sorted(
+        (
+            node
+            for node in ast.walk(validation_branch)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "time"
+            and node.func.attr == "perf_counter"
+        ),
+        key=lambda node: node.lineno,
+    )
+
+    assert len(perf_counter_calls) == 2
+    setup_call = next(
+        node
+        for node in ast.walk(validation_branch)
+        if isinstance(node, ast.Call) and ast.unparse(node) == "energy_monitor.pause()"
+    )
+    cleanup_call = next(
+        node
+        for node in ast.walk(validation_branch)
+        if isinstance(node, ast.Call)
+        and ast.unparse(node) == "get_moe_metrics_tracker().clear()"
+    )
+    assert perf_counter_calls[0].lineno < setup_call.lineno
+    assert perf_counter_calls[1].lineno > cleanup_call.lineno
+
+    timing_update = next(
+        node
+        for node in ast.walk(validation_branch)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "dataclasses"
+        and node.func.attr == "replace"
+    )
+    validation_time_keyword = next(
+        keyword for keyword in timing_update.keywords if keyword.arg == "validation_time_s"
+    )
+    assert ast.unparse(validation_time_keyword.value) == (
+        "time.perf_counter() - comparison_validation_start"
+    )
+
+    evaluate_and_print_results = _function_node(_TRAINING_PATH, "evaluate_and_print_results")
+    assert not any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "time"
+        and node.func.attr == "perf_counter"
+        for node in ast.walk(evaluate_and_print_results)
+    )
+
+
 def test_training_log_uses_exact_current_step_producers() -> None:
     training_log = _function_node(_TRAINING_PATH, "training_log")
     calls = [
@@ -846,6 +926,30 @@ def test_training_log_uses_exact_current_step_producers() -> None:
     assert "advanced=not bool(skipped_iter)" in capture_call
     assert "main_lm_loss=comparison_main_lm_loss" in capture_call
     assert "grad_norm=grad_norm" in capture_call
+
+
+def test_training_log_preserves_native_lm_loss_paths() -> None:
+    training_log = _function_node(_TRAINING_PATH, "training_log")
+    source = ast.unparse(training_log)
+
+    assert (
+        "total_loss_dict.get(key, torch.tensor([0.0], dtype=torch.float, device='cuda')) "
+        "+ loss_dict[key]"
+    ) in source
+    assert "writer.add_scalar(key, loss_dict[key], iteration)" in source
+    assert (
+        "writer.add_scalar(key + ' vs samples', loss_dict[key], "
+        "args.consumed_train_samples)"
+    ) in source
+    assert "wandb_writer.log({key: loss_dict[key]}, iteration)" in source
+    assert (
+        "avg = total_loss_dict[key].item() / "
+        "float(max(1, total_loss_dict[advanced_iters_key]))"
+    ) in source
+    assert (
+        "normalize_sft_metric_producer_scalar('main_lm_loss', loss_dict[key])"
+    ) in source
+    assert "main_lm_loss=comparison_main_lm_loss" in source
 
 
 def test_dummy_train_step_invalidates_comparison_timer_before_continue() -> None:
