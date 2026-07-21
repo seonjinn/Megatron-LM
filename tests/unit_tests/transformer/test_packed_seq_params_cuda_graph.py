@@ -472,3 +472,33 @@ def test_seq_idx_determinism_across_replays():
     assert params1.seq_idx.shape == params2.seq_idx.shape
     assert params1.seq_idx.dtype == torch.int32
 
+
+def test_te_cuda_graph_rotary_sample_preserves_packed_cp_layout():
+    from megatron.core.transformer.cuda_graphs import _get_te_cuda_graph_rotary_pos_emb
+
+    cp_group = object()
+    packed_seq_params = PackedSeqParams(
+        qkv_format="thd",
+        cu_seqlens_q=torch.IntTensor([0, 8]),
+        cu_seqlens_kv=torch.IntTensor([0, 8]),
+        max_seqlen_q=8,
+        max_seqlen_kv=8,
+        cp_group=cp_group,
+    )
+
+    class Rotary:
+        def get_rotary_seq_len(self, unused, decoder, transformer_input, config, params):
+            assert params is packed_seq_params
+            return 8
+
+        def __call__(self, seq_len, *, packed_seq, cp_group):
+            return seq_len, packed_seq, cp_group
+
+    class Model:
+        position_embedding_type = "rope"
+        rotary_pos_emb = Rotary()
+        decoder = object()
+
+    assert _get_te_cuda_graph_rotary_pos_emb(
+        Model(), torch.ones(8, 1, 4), object(), packed_seq_params
+    ) == (8, True, cp_group)
