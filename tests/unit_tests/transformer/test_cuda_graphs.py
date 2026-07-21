@@ -984,6 +984,7 @@ def _make_packed_mamba_params(lengths, cp_group):
         cu_seqlens_kv=cu_seqlens,
         cu_seqlens_q_padded=cu_seqlens.clone(),
         cu_seqlens_kv_padded=cu_seqlens.clone(),
+        # Keep the graph's bucket metadata constant while changing real document boundaries.
         max_seqlen_q=total_tokens,
         max_seqlen_kv=total_tokens,
         local_cp_size=2,
