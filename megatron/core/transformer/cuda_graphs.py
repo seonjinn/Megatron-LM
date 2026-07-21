@@ -21,7 +21,10 @@ import torch
 from torch.utils._pytree import tree_map as tree_map_pyt
 
 from megatron.core.num_microbatches_calculator import get_num_microbatches
-from megatron.core.packed_seq_params import split_packed_seq_params_for_cuda_graph
+from megatron.core.packed_seq_params import (
+    split_mamba_packed_seq_params_for_cuda_graph,
+    split_packed_seq_params_for_cuda_graph,
+)
 from megatron.core.process_groups_config import ProcessGroupCollection
 from megatron.core.tensor_parallel.random import (
     CudaRNGStatesTracker,
@@ -1694,6 +1697,27 @@ def _add_packed_seq_params_to_te_cuda_graph_sample_kwargs(
     sample_kwargs.update(tensor_kwargs)
 
 
+def _add_mamba_packed_seq_params_to_te_cuda_graph_sample_kwargs(
+    layer, sample_kwargs, sample_packed_seq_params
+):
+    """Add flattened Mamba ``PackedSeqParams`` Tensor inputs to TE graph samples."""
+    if sample_packed_seq_params is None:
+        return
+
+    tensor_kwargs, static_metadata = split_mamba_packed_seq_params_for_cuda_graph(
+        sample_packed_seq_params
+    )
+    duplicate_keys = set(sample_kwargs) & set(tensor_kwargs)
+    assert not duplicate_keys, (
+        "Mamba PackedSeqParams CUDA graph Tensor kwargs overlap with existing sample kwargs: "
+        f"{', '.join(sorted(duplicate_keys))}."
+    )
+    layer._set_te_cuda_graph_mamba_packed_seq_params_static_metadata(
+        static_metadata, tensor_kwargs.keys()
+    )
+    sample_kwargs.update(tensor_kwargs)
+
+
 def _get_te_cuda_graph_rotary_seq_len(
     transformer_module, transformer_input, config, packed_seq_params
 ):
@@ -1970,6 +1994,7 @@ class TECudaGraphHelper:
 
             static_inputs = layer.get_layer_static_inputs(self.seq_length, self.micro_batch_size)
 
+            from megatron.core.ssm.mamba_layer import MambaLayer
             from megatron.core.transformer.identity_op import IdentityOp
             from megatron.core.transformer.transformer_layer import TransformerLayer
 
@@ -1980,6 +2005,10 @@ class TECudaGraphHelper:
                     not self.config.cuda_graph_modules
                     or CudaGraphModule.attn in self.config.cuda_graph_modules
                 )
+            )
+            contains_mamba = (
+                isinstance(layer, MambaLayer)
+                and CudaGraphModule.mamba in self.config.cuda_graph_modules
             )
 
             _sample_kwargs = {}
@@ -1992,6 +2021,10 @@ class TECudaGraphHelper:
                     if rotary_pos_emb is not None:
                         static_inputs["rotary_pos_emb"] = rotary_pos_emb
                     _add_packed_seq_params_to_te_cuda_graph_sample_kwargs(
+                        layer, static_inputs, self.sample_packed_seq_params
+                    )
+                elif contains_mamba:
+                    _add_mamba_packed_seq_params_to_te_cuda_graph_sample_kwargs(
                         layer, static_inputs, self.sample_packed_seq_params
                     )
                 _sample_kwargs = static_inputs
