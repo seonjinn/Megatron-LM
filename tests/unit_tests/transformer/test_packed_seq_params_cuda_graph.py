@@ -153,6 +153,50 @@ def test_split_packed_seq_params_for_cuda_graph_ignores_mamba_only_fields():
     assert "total_tokens" not in static_metadata
 
 
+def test_mamba_packed_cuda_graph_uses_seq_idx_not_total_tokens():
+    from megatron.core.packed_seq_params import split_mamba_packed_seq_params_for_cuda_graph
+
+    params = PackedSeqParams(
+        qkv_format="thd",
+        cu_seqlens_q=torch.IntTensor([0, 2, 5]),
+        cu_seqlens_kv=torch.IntTensor([0, 2, 5]),
+        cu_seqlens_q_padded=torch.IntTensor([0, 2, 5]),
+        cu_seqlens_kv_padded=torch.IntTensor([0, 2, 5]),
+        max_seqlen_q=3,
+        max_seqlen_kv=3,
+        total_tokens=5,
+    )
+    tensor_kwargs, static_metadata = split_mamba_packed_seq_params_for_cuda_graph(params)
+
+    assert "_mamba_packed_seq_params_seq_idx" in tensor_kwargs
+    assert tensor_kwargs["_mamba_packed_seq_params_seq_idx"] is params.seq_idx
+    assert "total_tokens" not in static_metadata
+
+
+def test_mamba_packed_cuda_graph_rebuild_uses_supplied_seq_idx():
+    from megatron.core.packed_seq_params import (
+        build_mamba_packed_seq_params_from_cuda_graph_kwargs,
+        split_mamba_packed_seq_params_for_cuda_graph,
+    )
+
+    params = PackedSeqParams(
+        qkv_format="thd",
+        cu_seqlens_q=torch.IntTensor([0, 2, 5]),
+        cu_seqlens_kv=torch.IntTensor([0, 2, 5]),
+        max_seqlen_q=3,
+        max_seqlen_kv=3,
+        total_tokens=5,
+    )
+    tensor_kwargs, static_metadata = split_mamba_packed_seq_params_for_cuda_graph(params)
+    kwargs = {"hidden_states": torch.ones(5, 1, 4), **tensor_kwargs}
+
+    rebuilt = build_mamba_packed_seq_params_from_cuda_graph_kwargs(kwargs, static_metadata)
+
+    assert rebuilt.total_tokens is None
+    assert rebuilt.seq_idx is params.seq_idx
+    assert set(kwargs) == {"hidden_states"}
+
+
 def test_transformer_layer_rebuilds_flattened_cuda_graph_packed_seq_params():
     layer = _TransformerLayerCudaGraphStub()
     packed_seq_params = _make_packed_seq_params()

@@ -170,3 +170,80 @@ def build_packed_seq_params_from_cuda_graph_kwargs(
         return None
 
     return PackedSeqParams(**packed_seq_params_kwargs)
+
+
+MAMBA_CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX = "_mamba_packed_seq_params_"
+
+MAMBA_PACKED_SEQ_PARAMS_CUDA_GRAPH_TENSOR_FIELDS = (
+    *PACKED_SEQ_PARAMS_CUDA_GRAPH_TENSOR_FIELDS,
+    "seq_idx",
+)
+
+MAMBA_PACKED_SEQ_PARAMS_CUDA_GRAPH_STATIC_FIELDS = (
+    *PACKED_SEQ_PARAMS_CUDA_GRAPH_STATIC_FIELDS,
+)
+
+
+def split_mamba_packed_seq_params_for_cuda_graph(
+    packed_seq_params: PackedSeqParams | None,
+) -> tuple[dict[str, Tensor | None], dict[str, object]]:
+    if packed_seq_params is None:
+        return {}, {}
+    tensor_kwargs = {}
+    for field_name in MAMBA_PACKED_SEQ_PARAMS_CUDA_GRAPH_TENSOR_FIELDS:
+        value = getattr(packed_seq_params, field_name)
+        if value is not None and not isinstance(value, Tensor):
+            raise TypeError(
+                f"PackedSeqParams.{field_name} must be a Tensor or None for Mamba CUDA graphs, "
+                f"got {type(value).__name__}."
+            )
+        if value is not None:
+            tensor_kwargs[
+                _cuda_graph_packed_seq_params_key(
+                    field_name, MAMBA_CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX
+                )
+            ] = value
+    static_metadata = {}
+    for field_name in MAMBA_PACKED_SEQ_PARAMS_CUDA_GRAPH_STATIC_FIELDS:
+        value = getattr(packed_seq_params, field_name)
+        if isinstance(value, Tensor):
+            raise TypeError(
+                f"PackedSeqParams.{field_name} is static Mamba CUDA graph metadata and must not "
+                "be a Tensor."
+            )
+        static_metadata[field_name] = value
+    return tensor_kwargs, static_metadata
+
+
+def has_mamba_packed_seq_params_cuda_graph_kwargs(kwargs: Mapping[str, object]) -> bool:
+    return any(
+        _cuda_graph_packed_seq_params_key(
+            field_name, MAMBA_CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX
+        )
+        in kwargs
+        for field_name in MAMBA_PACKED_SEQ_PARAMS_CUDA_GRAPH_TENSOR_FIELDS
+    )
+
+
+def build_mamba_packed_seq_params_from_cuda_graph_kwargs(
+    kwargs: MutableMapping[str, object], static_metadata: Mapping[str, object] | None
+) -> PackedSeqParams | None:
+    params_kwargs = dict(static_metadata or {})
+    found_tensor_field = False
+    for field_name in MAMBA_PACKED_SEQ_PARAMS_CUDA_GRAPH_TENSOR_FIELDS:
+        key = _cuda_graph_packed_seq_params_key(
+            field_name, MAMBA_CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX
+        )
+        if key not in kwargs:
+            continue
+        found_tensor_field = True
+        value = kwargs.pop(key)
+        if value is not None and not isinstance(value, Tensor):
+            raise TypeError(
+                f"Flattened Mamba PackedSeqParams field {key} must be a Tensor or None, "
+                f"got {type(value).__name__}."
+            )
+        params_kwargs[field_name] = value
+    if not params_kwargs and not found_tensor_field:
+        return None
+    return PackedSeqParams(**params_kwargs)
