@@ -42,6 +42,70 @@ class _TransformerLayerCudaGraphStub:
     )
 
 
+class _MambaLayerCudaGraphStub:
+    def _set_te_cuda_graph_mamba_packed_seq_params_static_metadata(
+        self, static_metadata, tensor_kwarg_names
+    ):
+        self.static_metadata = dict(static_metadata)
+        self.tensor_kwarg_names = tuple(sorted(tensor_kwarg_names))
+
+
+def test_te_cuda_graph_mamba_sample_has_flattened_packed_inputs():
+    from megatron.core.transformer.cuda_graphs import (
+        _add_mamba_packed_seq_params_to_te_cuda_graph_sample_kwargs,
+    )
+
+    params = PackedSeqParams(
+        qkv_format="thd",
+        cu_seqlens_q=torch.IntTensor([0, 2, 5]),
+        cu_seqlens_kv=torch.IntTensor([0, 2, 5]),
+        max_seqlen_q=3,
+        max_seqlen_kv=3,
+        total_tokens=5,
+    )
+    layer = _MambaLayerCudaGraphStub()
+    sample_kwargs = {"attention_mask": None}
+
+    _add_mamba_packed_seq_params_to_te_cuda_graph_sample_kwargs(
+        layer, sample_kwargs, params
+    )
+
+    assert "_mamba_packed_seq_params_seq_idx" in sample_kwargs
+    assert layer.static_metadata["qkv_format"] == "thd"
+    assert "total_tokens" not in layer.static_metadata
+
+
+def test_mamba_replay_flattens_packed_seq_params_before_tensor_gate():
+    from megatron.core.ssm.mamba_layer import MambaLayer
+    from megatron.core.packed_seq_params import split_mamba_packed_seq_params_for_cuda_graph
+
+    layer = _MambaLayerCudaGraphStub()
+    layer._set_te_cuda_graph_mamba_packed_seq_params_static_metadata = (
+        MambaLayer._set_te_cuda_graph_mamba_packed_seq_params_static_metadata.__get__(layer)
+    )
+    layer._flatten_te_cuda_graph_mamba_packed_seq_params = (
+        MambaLayer._flatten_te_cuda_graph_mamba_packed_seq_params.__get__(layer)
+    )
+    params = PackedSeqParams(
+        qkv_format="thd",
+        cu_seqlens_q=torch.IntTensor([0, 2, 5]),
+        cu_seqlens_kv=torch.IntTensor([0, 2, 5]),
+        max_seqlen_q=3,
+        max_seqlen_kv=3,
+        total_tokens=5,
+    )
+    tensor_kwargs, static_metadata = split_mamba_packed_seq_params_for_cuda_graph(params)
+    layer._set_te_cuda_graph_mamba_packed_seq_params_static_metadata(
+        static_metadata, tensor_kwargs
+    )
+    kwargs = {"packed_seq_params": params}
+
+    layer._flatten_te_cuda_graph_mamba_packed_seq_params(kwargs)
+
+    assert "packed_seq_params" not in kwargs
+    assert kwargs["_mamba_packed_seq_params_seq_idx"] is params.seq_idx
+
+
 def _make_packed_seq_params():
     cu_seqlens = torch.IntTensor([0, 4, 9, 16])
     cu_seqlens_padded = torch.IntTensor([0, 8, 12, 16])
