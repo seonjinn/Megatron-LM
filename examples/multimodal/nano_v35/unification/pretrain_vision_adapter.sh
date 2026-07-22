@@ -36,10 +36,10 @@ NANO_V35_RESOURCES=${NANO_V35_RESOURCES:-"${NANO_V35_PROJECT_ROOT}/resources"}
 USER_NAME=${SLURM_JOB_USER:-${USER:-$(whoami)}}
 WORKSPACE=${WORKSPACE:-"/lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/${USER_NAME}"}
 OUTPUT_BASE=${OUTPUT_BASE:-"${WORKSPACE}/workspace/output"}
-CONTAINER_IMAGE=${CONTAINER_IMAGE:-"/lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/tpoon/containers/pytorch25.11-moe-avlm-editable-energon-super-triton35.sqsh"}
+CONTAINER_IMAGE="/lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/tpoon/containers/pytorch25.11-moe-avlm-editable-energon-super-triton35.sqsh"
 CONTAINER_MOUNTS=${CONTAINER_MOUNTS:-"/lustre"}
 
-NVDATASET_CACHE_DIR=${NVDATASET_CACHE_DIR:-"/home/svc-dss/cache/nemotron"}
+NVDATASET_CACHE_DIR="/home/svc-dss/cache/nemotron"
 if [[ -n "${NVDATASET_CACHE_DIR}" ]]; then
     export NVDATASET_CACHE_DIR
     case ",${CONTAINER_MOUNTS}," in
@@ -50,8 +50,8 @@ fi
 
 EXPERIMENT_ID=${EXPERIMENT_ID:-"nano_v35_base3p5_combined_omni_16k_vlm_only"}
 MODEL_NAME=${MODEL_NAME:-"${EXPERIMENT_ID}_vision_adapter_pretrain"}
-TOKENIZER_MODEL=${TOKENIZER_MODEL:-"${NANO_V35_RESOURCES}/tokenizer/nano_v35_sft_v10_closethink_unmask_orig6k_vlm"}
-BASE_VLM_CKPT_DIR=${BASE_VLM_CKPT_DIR:-"${WORKSPACE}/checkpoints/${EXPERIMENT_ID}/base_vlm_radio_v4_tp2_ep32"}
+TOKENIZER_MODEL="/lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/tpoon/repos_nanov35/resources/tokenizer/nano_v35_sft_v10_closethink_unmask_orig6k_vlm"
+BASE_VLM_CKPT_DIR="/lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/tpoon/checkpoints/nano_v35_base3p5_combined_omni_16k_vlm_only/base_vlm_radio_v4_tp2_ep32"
 CHECKPOINT_DIR=${CHECKPOINT_DIR:-${BOOTSTRAP_CKPT:-"${BASE_VLM_CKPT_DIR}"}}
 DATA_TRAIN=${DATA_TRAIN:-"${CODE_DIR}/examples/multimodal/v3_baseline/pretrain_vision_adaptor_recipe_1377_dss.yaml"}
 

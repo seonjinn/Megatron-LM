@@ -26,6 +26,11 @@ by default, use the shared training image at
 `/lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/tpoon/containers/pytorch25.11-moe-avlm-editable-energon-super-triton35.sqsh`,
 and inherit the W&B API key from the submitted shell environment.
 
+The training scripts directly reference the shared VLM tokenizer at
+`/lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/tpoon/repos_nanov35/resources/tokenizer/nano_v35_sft_v10_closethink_unmask_orig6k_vlm`.
+Vision-adapter pretraining directly starts from
+`/lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/tpoon/checkpoints/nano_v35_base3p5_combined_omni_16k_vlm_only/base_vlm_radio_v4_tp2_ep32`.
+
 Run the existing checkpoint through the two training stages from the
 Megatron-LM repository root:
 
@@ -45,10 +50,10 @@ pretrain_job=$(sbatch --parsable --dependency="afterok:${combine_job}" "${experi
 sbatch --dependency="afterok:${pretrain_job}" "${experiment_dir}/sft_vlm.sh"
 ```
 
-Paths and run names can be overridden with environment variables such as
-`BASE_HF_CKPT_DIR`, `BASE_MCORE_CKPT_DIR`, `BASE_VLM_CKPT_DIR`,
-`VISION_PRETRAIN_CKPT_DIR`, `TOKENIZER_MODEL`, `CONTAINER_IMAGE`,
-`DATA_TRAIN`, and `OUTPUT_BASE`.
+Bootstrap outputs and run/output names can be overridden with environment
+variables such as `MCORE_CKPT_DIR`, `OUTPUT_CKPT_DIR`,
+`VISION_PRETRAIN_CKPT_DIR`, `DATA_TRAIN`, and `OUTPUT_BASE`. Shared read-only
+inputs are intentionally pinned directly in the scripts.
 
 The collated local recipe and `data_yamls/` tree remain here as provenance; the
 production SFT job uses the DSS recipe above.
