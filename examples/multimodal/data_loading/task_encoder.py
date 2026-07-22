@@ -124,12 +124,35 @@ def _pop_int_packing_algorithm_parameter(
     return value
 
 
-def _clean_think(match: re.Match) -> str:
-    """Helper to strip whitespace inside <think> tags during preprocessing."""
+def _clean_think(match: re.Match, *, newline_before_close: bool) -> str:
+    """Strip whitespace inside <think> tags and format a non-empty trace."""
     clean_content = match.group(1).strip()
-    if clean_content:
-        clean_content = "\n" + clean_content + "\n"
-    return f"<think>{clean_content}</think>"
+    if not clean_content:
+        return "<think></think>"
+
+    close_prefix = "\n" if newline_before_close else ""
+    return f"<think>\n{clean_content}{close_prefix}</think>"
+
+
+def _normalize_thinking_trace(
+    content: str, *, prompt_format: str, thinking_trace_format: str
+) -> str:
+    """Normalize a tagged thinking trace for the selected serialization contract."""
+    ultra_format = thinking_trace_format == "ultra"
+    content = re.sub(
+        r"<think>(.*?)</think>",
+        partial(_clean_think, newline_before_close=not ultra_format),
+        content,
+        flags=re.DOTALL,
+    )
+
+    if ultra_format:
+        # Ultra serializes the answer directly after the closing thinking tag.
+        replacement = "</think>"
+    else:
+        # Preserve the existing prompt-specific newline behavior.
+        replacement = "</think>\n" if prompt_format == "nemotron6-moe" else "</think>\n\n"
+    return re.sub(r"</think>\s*", replacement, content)
 
 
 def _has_filtered_identity_keyword(sample: ConversationSample, keywords: list[str]) -> bool:
@@ -835,12 +858,11 @@ class MultiModalTaskEncoder(
                         f"Found sample with </think> tags before </think> tags in sample with "
                         f"key: {sample.__key__} and subflavors: {sample.__subflavors__}")
 
-                    # Clean up content inside <think> tags and strip surrounding whitespace
-                    content = re.sub(r"<think>(.*?)</think>", _clean_think, content, re.DOTALL)
-
-                    # Ensure </think> is always followed by N newlines and no other whitespace
-                    replacement = "</think>\n" if prompt_format == "nemotron6-moe" else "</think>\n\n"
-                    content = re.sub(r'</think>\s*', replacement, content)
+                    content = _normalize_thinking_trace(
+                        content,
+                        prompt_format=prompt_format,
+                        thinking_trace_format=self.args.thinking_trace_format,
+                    )
                 content_parts = [{"type": "text", "text": content}]
 
             structured_conversation.append({"role": message.sender, "content": content_parts})

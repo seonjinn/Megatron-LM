@@ -354,6 +354,15 @@ def add_multimodal_extra_args(parser):
         "--relax-thinking-trace-check", action="store_true", default=False, help="Relax the checks in the dataloader which ensure the thinking trace is well formatted."
     )
     group.add_argument(
+        "--thinking-trace-format",
+        choices=["normalized", "ultra"],
+        default="normalized",
+        help=(
+            "Formatting applied around assistant thinking traces. 'normalized' preserves the "
+            "existing newline behavior; 'ultra' emits <think>\\nreasoning</think>answer."
+        ),
+    )
+    group.add_argument(
         "--allow-cross-sample-attention", action="store_true", default=False, help="Allow cross sample attention when using sample packing."
     )
     group.add_argument(
