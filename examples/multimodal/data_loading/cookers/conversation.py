@@ -1,5 +1,6 @@
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 import dataclasses
+import re
 from collections import defaultdict
 
 from megatron.energon import CachePool, FileStore, SourceInfo, basic_sample_keys, cooker, stateless
@@ -19,6 +20,7 @@ from ..conversation_sample import (
 )
 
 warn_about_slow_media_loading = defaultdict(lambda: True)
+_re_clean_path = re.compile(r"(?:^\./|/\.(?=/))")
 
 NO_TOOL_SYSTEM_CONTENT = (
     "<|im_start|>system\n"
@@ -219,6 +221,7 @@ def cook_conversation(
     sample: dict,
     cache: CachePool,
     media_source: FileStore | None = None,
+    **media_sources: FileStore,
 ) -> ConversationSample:
     global warn_about_slow_media_loading
 
@@ -228,20 +231,42 @@ def cook_conversation(
     for msg in cs.conversation:
         for frag in msg.fragments:
             if isinstance(frag, (ImageMedia, VideoMedia, AudioMedia, VideoFrameMedia)):
-                if media_source is None:
+                current_media_source = media_source
+                media_path = frag.value
+                if current_media_source is None and media_sources and "aux_data_prefixes" in cs.__subflavors__:
+                    path = _re_clean_path.sub("", media_path)
+                    for prefix, aux_key in cs.__subflavors__["aux_data_prefixes"].items():
+                        if path.startswith(prefix):
+                            current_media_source = media_sources[aux_key]
+                            media_path = path[len(prefix) :]
+                            break
+                    else:
+                        raise ValueError(
+                            f"No prefix for {path!r} in {cs.__subflavors__['aux_data_prefixes']} "
+                            f"for {cs.__sources__}"
+                        )
+                if current_media_source is None:
                     raise ValueError("cook_conversation requires media_source for samples with media fragments")
                 if frag.metadata is None:
                     try:
-                        frag.metadata = dataclasses.asdict(media_source.get_media_metadata(frag.value))
+                        frag.metadata = dataclasses.asdict(current_media_source.get_media_metadata(media_path))
                     except Exception as e:
-                        if warn_about_slow_media_loading[media_source.get_path()]:
-                            print(f"WARNING: Dataset {media_source.get_path()} not prepared with media metadata, slow metadata for {frag.value}: {e!r}")
-                            warn_about_slow_media_loading[media_source.get_path()] = False
+                        if warn_about_slow_media_loading[current_media_source.get_path()]:
+                            print(
+                                f"WARNING: Dataset {current_media_source.get_path()} not prepared with media "
+                                f"metadata, slow metadata for {media_path}: {e!r}"
+                            )
+                            warn_about_slow_media_loading[current_media_source.get_path()] = False
                 cs.__sources__ = (
                     *cs.__sources__,
-                    SourceInfo(dataset_path=media_source.get_path(), index=frag.value, shard_name=None, file_names=(frag.value,)),
+                    SourceInfo(
+                        dataset_path=current_media_source.get_path(),
+                        index=media_path,
+                        shard_name=None,
+                        file_names=(media_path,),
+                    ),
                 )
-                frag.value = cache.get_lazy(media_source, frag.value)
+                frag.value = cache.get_lazy(current_media_source, media_path)
             elif isinstance(frag, str):
                 # No source
                 pass
