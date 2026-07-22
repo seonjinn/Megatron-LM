@@ -20,6 +20,7 @@ from megatron.energon import (
     FileStoreCachePool,
 )
 from data_loading.task_encoder import MultiModalTaskEncoder
+from megatron.training.arguments import parse_and_validate_args
 import tqdm
 
 
@@ -34,9 +35,11 @@ def main():
     # os.makedirs(finetune_dir, exist_ok=True)
     torch.distributed.init_process_group(backend='gloo')
 
-    initialize_megatron(
+    parse_and_validate_args(
         args_defaults={'tokenizer_type': 'GPT2BPETokenizer'},
         extra_args_provider=add_multimodal_extra_args,
+    )
+    initialize_megatron(
         allow_no_cuda=True,
         skip_mpu_initialization=True,
     )
@@ -93,7 +96,7 @@ def main():
         watchdog_timeout_seconds=120,
     )
 
-    max_iter = 200
+    max_iter = int(os.environ.get("ITER_DATA_MAX_ITERS", "200"))
 
     times = np.zeros(max_iter, dtype=np.float32)
 

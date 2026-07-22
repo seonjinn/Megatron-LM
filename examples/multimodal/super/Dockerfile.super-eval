@@ -11,8 +11,10 @@ ENV SHELL=/bin/bash
 # =========================
 RUN rm -rf /opt/megatron-lm && \
     apt-get update && \
-    apt-get install -y sudo gdb pstack bash-builtins git zsh autojump tmux curl gettext libfabric-dev && \
-    wget https://github.com/mikefarah/yq/releases/download/v4.27.5/yq_linux_amd64 -O /usr/bin/yq && \
+    apt-get install -y sudo gdb bash-builtins git zsh autojump tmux curl gettext libfabric-dev && \
+    YQ_ARCH="$(uname -m)" && \
+    case "${YQ_ARCH}" in x86_64) YQ_ARCH=amd64 ;; aarch64) YQ_ARCH=arm64 ;; *) exit 1 ;; esac && \
+    wget "https://github.com/mikefarah/yq/releases/download/v4.27.5/yq_linux_${YQ_ARCH}" -O /usr/bin/yq && \
     chmod +x /usr/bin/yq
 # =========================
 # Install Python packages
@@ -23,7 +25,7 @@ RUN rm -rf /opt/megatron-lm && \
 #   https://github.com/NVIDIA/Megatron-LM/blob/core_v0.12.0/requirements_mlm.txt.
 #   https://github.com/NVIDIA/Megatron-LM/blob/core_v0.12.0/requirements_ci.txt.
 RUN unset PIP_CONSTRAINT && pip install debugpy dm-tree torch_tb_profiler einops wandb \
-    sentencepiece tokenizers transformers torchvision ftfy modelcards datasets tqdm pydantic \
+    sentencepiece tokenizers "transformers<5.0.0" torchvision ftfy modelcards datasets tqdm pydantic \
     nvidia-pytriton py-spy yapf darker \
     tiktoken flask-restful \
     nltk wrapt pytest pytest_asyncio pytest-cov pytest_mock pytest-random-order \
@@ -116,12 +118,15 @@ RUN pip install mmf --no-deps
 RUN pip install open_clip_torch open-flamingo[eval] --no-deps
 # tensorstore: must be >= 0.1.82 for NumPy 2.x compat (base 0.1.45 was compiled against NumPy 1.x)
 RUN pip install zarr "tensorstore>=0.1.82"
-RUN pip install git+https://github.com/NVIDIA/Megatron-Energon.git#egg=megatron-energon[av_decode]
+RUN pip install 'git+https://github.com/NVIDIA/Megatron-Energon.git@bef8be243#egg=megatron-energon[av_decode]'
 RUN pip install -U nemo_toolkit['asr']
 RUN pip install librosa albumentations timm
 RUN apt-get install -y git-lfs
 # multi-storage-client: must be >= 0.34.0 for energon 7.3.3 prefetch_file support
 RUN pip uninstall --yes multi-storage-client && pip install "multi-storage-client>=0.34.0"
+# Megatron-Energon's S3 extras constrain botocore. Keep boto3 at the matching
+# release so importing Transformers/Accelerate does not fail through boto3.
+RUN pip install boto3==1.43.0 botocore==1.43.0
 
 # =========================
 # VLMEvalKit eval dependencies
@@ -188,13 +193,29 @@ RUN pip install --upgrade-strategy only-if-needed \
         jieba \
         Polygon3
 
-# `decord` is imported directly by every video dataset in VLMEvalKit
-# (vlmeval/dataset/video_base.py, videomme.py, mlvu.py, mvbench.py,
-# longvideobench.py, cgbench.py, dream.py) and is NOT declared in upstream
-# requirements.txt. Without it, Video-MME etc. fail at import time.
-# `av` (pyav) is already covered transitively by both qwen_vl_utils above
-# and megatron-energon[av_decode] earlier in this file.
-RUN pip install decord
+# `decord` is imported directly by every video dataset in VLMEvalKit, but PyPI
+# does not publish Linux aarch64 wheels. Build the CPU decoder from a pinned
+# upstream revision against Ubuntu's FFmpeg libraries. (`av`/PyAV is already
+# covered transitively by qwen_vl_utils and megatron-energon[av_decode].)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        cmake \
+        libavcodec-dev \
+        libavfilter-dev \
+        libavformat-dev \
+        libavutil-dev && \
+    git clone --recursive https://github.com/dmlc/decord.git /tmp/decord && \
+    git -C /tmp/decord checkout d2e56190286ae394032a8141885f76d5372bd44b && \
+    sed -i '/#include <libavcodec\/avcodec.h>/a #include <libavcodec/bsf.h>' \
+        /tmp/decord/src/video/ffmpeg/ffmpeg_common.h && \
+    sed -i 's/    AVCodec \*dec;/    const AVCodec *dec;/' \
+        /tmp/decord/src/video/video_reader.cc && \
+    cmake -S /tmp/decord -B /tmp/decord/build \
+        -DUSE_CUDA=0 -DCMAKE_BUILD_TYPE=Release && \
+    cmake --build /tmp/decord/build --parallel "$(nproc)" && \
+    pip install --no-cache-dir --no-build-isolation --no-deps /tmp/decord/python && \
+    rm -rf /tmp/decord && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # MMLongBench_DOC parses PDFs through `import fitz`, which is provided by
 # PyMuPDF and is not declared in VLMEvalKit's requirements.txt.

@@ -1,0 +1,23 @@
+# Smoke-only blend for validating DSS resolution and the Nano v3.5
+# materialized-text path before all multimodal DSS media datasets have landed.
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+      # Complete text-only DSS leaf referenced by the new vision-adapter recipe.
+      # Its effective size is 197,938 samples.
+      - path: dss://brainy-mantis_commercial.shuf.eagle_nmh5r_safetyfix0323@v0
+        repetitions: 1.0
+        subflavors:
+          name: brainy-mantis_commercial.shuf.eagle_nmh5r_safetyfix0323
+          cook: conversation
+          data_augment: false
+          length: 197938
+          orig_length: 199546
+          category: General
+
+      # Readable subset of the materialized Nano v3.5 text blend. Keeping this
+      # as a nested recipe exercises production-style blend flattening.
+      - path: openai_messages.readable_subset.yaml
+        repetitions: 1.0

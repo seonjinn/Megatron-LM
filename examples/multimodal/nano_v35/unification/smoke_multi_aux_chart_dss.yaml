@@ -1,0 +1,20 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+      - repetitions: 1
+        path: dss://chart_image_reasoning_task_clean_100k_qwen3p5_safetyfix0323_wds@v0
+        subflavors:
+          name: chart_image_reasoningv3_qwen_nocot_qwen3p5_cleaned_formatted_fixthink0319_cleaned0320_safetyfix0323
+          cook: conversation
+          data_augment: false
+          length: 69322
+          orig_length: 69346
+          category: General
+          aux_data_prefixes:
+            arxiv_chart_alignment/: arxiv_chart_alignment
+            nonarxiv_chart/: nonarxiv_chart
+        aux:
+          arxiv_chart_alignment: filesystem+dss://arxiv_chart_alignment@v0
+          nonarxiv_chart: filesystem+dss://nonarxiv_chart@v0

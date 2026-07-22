@@ -1,0 +1,16 @@
+# Temporary control recipe for isolating DSS access while the text recipe's
+# companion JSONL indices are not readable on this cluster.
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+      - path: dss://brainy-mantis_commercial.shuf.eagle_nmh5r_safetyfix0323@v0
+        repetitions: 1.0
+        subflavors:
+          name: brainy-mantis_commercial.shuf.eagle_nmh5r_safetyfix0323
+          cook: conversation
+          data_augment: false
+          length: 197938
+          orig_length: 199546
+          category: General

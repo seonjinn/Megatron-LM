@@ -1,5 +1,5 @@
 # Web-browsing derivative of:
-# /lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/tpoon/repos_nanov35/megatron-lm/examples/multimodal/nano_v35/oci-nrt/experiments/sft_combined_omni_16k_vlm_only/sft_combined_omni_16k_vlm_only.yaml
+# Derived from examples/multimodal/nano_v35/unification/sft_combined_omni_16k_vlm_only.yaml.
 __class__: MetadatasetV2
 __module__: megatron.energon
 splits:
