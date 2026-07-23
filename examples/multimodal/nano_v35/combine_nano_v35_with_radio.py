@@ -38,13 +38,11 @@ def _vision_rank_dir(vision_iter_dir: Path, lm_rank_name: str, tp_rank: int) -> 
 
 
 def _language_model_state(state: dict) -> dict:
-    result = {}
-    for key, value in state["model"].items():
-        if key.startswith("language_model."):
-            result[key] = value
-        else:
-            result[f"language_model.{key}"] = value
-    return result
+    model = state["model"]
+    prefixed = {key: value for key, value in model.items() if key.startswith("language_model.")}
+    if prefixed:
+        return prefixed
+    return {f"language_model.{key}": value for key, value in model.items()}
 
 
 def _vision_model_state(state: dict) -> dict:

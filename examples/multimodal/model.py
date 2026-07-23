@@ -71,6 +71,7 @@ def model_provider(
     assert encoder_pp_size <= 1, "LLaVA does not support pp>1 for encoder on it's own pipeline rank"
 
     use_te = args.use_te
+    vision_use_te = use_te and not args.vision_use_local_spec
 
     print_rank_0('building a multimodal model ...')
     if args.dynamic_resolution:
@@ -167,7 +168,7 @@ def model_provider(
         assert args.context_parallel_size < 2, "Huggingface models do not support --context-parallel-size > 1"
 
     if vision_model_type == "radio-g":
-        if use_te:
+        if vision_use_te:
             from radio.radio_g import get_radio_g_layer_spec_te
             vision_transformer_layer_spec = get_radio_g_layer_spec_te()  # TENorm detects LayerNorm/RMS automatically.
         else:
@@ -176,7 +177,7 @@ def model_provider(
                 normalization=vision_config.normalization
             )
     elif vision_model_type in ["clip", "siglip"] or "radio" in vision_model_type:
-        if use_te:
+        if vision_use_te:
             vision_transformer_layer_spec = get_layer_spec_te(
                 is_vit=True
             )  # TENorm detects LayerNorm/RMS automatically.
@@ -186,10 +187,10 @@ def model_provider(
             )
     elif vision_model_type == "internvit":
         from nvlm.internvit import get_internvit_layer_spec
-        vision_transformer_layer_spec = get_internvit_layer_spec(use_te=use_te)
+        vision_transformer_layer_spec = get_internvit_layer_spec(use_te=vision_use_te)
     elif vision_model_type == "internvit300M":
         from nvlm.internvit import get_internvit300M_layer_spec
-        vision_transformer_layer_spec = get_internvit300M_layer_spec(use_te=use_te)
+        vision_transformer_layer_spec = get_internvit300M_layer_spec(use_te=vision_use_te)
     elif vision_model_type.startswith("hf://"):
         vision_transformer_layer_spec = None
     else:

@@ -58,6 +58,23 @@ inputs are intentionally pinned directly in the scripts.
 The collated local recipe and `data_yamls/` tree remain here as provenance; the
 production SFT job uses the DSS recipe above.
 
+For a Nano v3.5 multimodal `torch_dist` checkpoint, set `CHECKPOINT_DIR` and
+`CKPT_CONVERT_SAVE` when submitting `pretrain_vision_adapter.sh`. The job will
+load and reshard the checkpoint at its configured TP/EP topology, save a legacy
+`torch` checkpoint under `${CKPT_CONVERT_SAVE}/torch`, and exit without
+training. The conversion retains the tokenizer supplied by this script rather
+than any cluster-specific tokenizer path saved in the source checkpoint. This
+is the format consumed by `combine_base_with_radio.sh`. `CLASS_TOKEN_LEN` can
+be set to match the source wrapper during conversion; normal pretraining keeps
+the experiment default of 10. `VISION_USE_LOCAL_SPEC=1` can similarly match a
+source wrapper whose vision encoder uses the local (unfused-LayerNorm) module
+layout while keeping TE enabled for the Nano language model and projection;
+normal pretraining keeps the TE vision spec. `USE_PIXEL_SHUFFLE` is independent
+of `USE_DYNAMIC_RES` so a source checkpoint that used pixel shuffle without
+dynamic resolution can be reproduced exactly. For the July 7 midtrain VLM
+checkpoint, use `CLASS_TOKEN_LEN=8 VISION_USE_LOCAL_SPEC=1
+USE_DYNAMIC_RES=0 USE_PIXEL_SHUFFLE=1`.
+
 `eval_sft_checkpoints.sh` submits the MCore, reasoning-disabled VLM evaluation
 suite for SFT iterations 3284, 5000, and 6435 by default. Set
 `BENCHMARKS_OVERRIDE` to a comma-separated subset when only selected datasets

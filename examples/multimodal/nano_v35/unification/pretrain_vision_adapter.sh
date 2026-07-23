@@ -112,13 +112,18 @@ NO_SAVE_OPTIM=${NO_SAVE_OPTIM:-0}
 NO_SAVE_RNG=${NO_SAVE_RNG:-0}
 USE_MTP=${USE_MTP:-1}
 USE_DYNAMIC_RES=${USE_DYNAMIC_RES:-1}
+USE_PIXEL_SHUFFLE=${USE_PIXEL_SHUFFLE:-${USE_DYNAMIC_RES}}
 USE_IMAGE_BREAK=${USE_IMAGE_BREAK:-0}
 USE_CONV_MERGE=${USE_CONV_MERGE:-0}
 USE_FP8=${USE_FP8:-0}
+USE_TE=${USE_TE:-1}
+VISION_USE_LOCAL_SPEC=${VISION_USE_LOCAL_SPEC:-0}
 USE_VISION_ENCODER_EVAL_MODE=${USE_VISION_ENCODER_EVAL_MODE:-1}
 USE_CPE_EVAL_MODE=${USE_CPE_EVAL_MODE:-0}
 USE_PACKING=${USE_PACKING:-1}
 USE_BUCKETING=${USE_BUCKETING:-0}
+CLASS_TOKEN_LEN=${CLASS_TOKEN_LEN:-10}
+CKPT_CONVERT_SAVE=${CKPT_CONVERT_SAVE:-}
 
 TOKENIZER_PROMPT_FORMAT=${TOKENIZER_PROMPT_FORMAT:-"nemotron6-moe"}
 MAIN_HYBRID_PATTERN=${MAIN_HYBRID_PATTERN:-"MEMEM*EMEMEM*EMEMEM*EMEMEM*EMEMEM*EMEMEMEM*EMEMEMEME"}
@@ -147,6 +152,13 @@ fi
 
 EXTRA_ARGS=""
 
+if [[ "${USE_TE}" -eq 1 ]]; then
+    EXTRA_ARGS+=" --use-te"
+fi
+if [[ "${VISION_USE_LOCAL_SPEC}" -eq 1 ]]; then
+    EXTRA_ARGS+=" --vision-use-local-spec"
+fi
+
 if [[ "${ENABLE_WANDB}" -eq 1 ]]; then
     EXTRA_ARGS+=" --wandb-project ${WANDB_PROJECT} --wandb-entity ${WANDB_ENTITY} --wandb-exp-name ${WANDB_NAME} --wandb-save-dir ${WANDB_DIR}"
 fi
@@ -154,6 +166,12 @@ fi
 if [[ "${USE_FP8}" -eq 1 ]]; then
     EXTRA_ARGS+=" --fp8-recipe blockwise --fp8-format e4m3 --first-last-layers-bf16 --num-layers-at-start-in-bf16 1 --num-layers-at-end-in-bf16 1"
     EXTRA_ARGS+=" --use-vision-backbone-fp8-arch"
+fi
+
+if [[ "${USE_CONV_MERGE}" -eq 1 ]]; then
+    EXTRA_ARGS+=" --conv-merging --allow-missing-conv-merge-checkpoint"
+elif [[ "${USE_PIXEL_SHUFFLE}" -eq 1 ]]; then
+    EXTRA_ARGS+=" --pixel-shuffle"
 fi
 
 if [[ "${USE_DYNAMIC_RES}" -eq 1 ]]; then
@@ -166,11 +184,6 @@ if [[ "${USE_DYNAMIC_RES}" -eq 1 ]]; then
             EXTRA_ARGS+=" --image-break-token \<image_break\>"
             SPECIAL_TOKENS+=" \<image_break\>"
         fi
-    fi
-    if [[ "${USE_CONV_MERGE}" -eq 1 ]]; then
-        EXTRA_ARGS+=" --conv-merging --allow-missing-conv-merge-checkpoint"
-    else
-        EXTRA_ARGS+=" --pixel-shuffle"
     fi
     EXTRA_ARGS+=" --dynamic-resolution --dynamic-resolution-min-patches 1024 --dynamic-resolution-max-patches 13312"
 fi
@@ -215,30 +228,45 @@ EXTRA_ARGS+=" --recompute-granularity selective --recompute-modules mlp moe"
 EXTRA_ARGS+=" --recompute-vision --recompute-method-vision block --recompute-granularity-vision full --recompute-vision-num-layers 16"
 EXTRA_ARGS+=" --only-keep-samples-with-img --use-new-dataloader-path --apply-data-augment ${CUSTOM_ARGS:-}"
 
-CHECKPOINT_ARGS=" \
-    --pretrained-checkpoint ${CHECKPOINT_DIR} \
-    --load ${FINETUNE_DIR} \
-    --ckpt-format torch \
-"
-
-if [[ "${SKIP_SAVE}" -eq 0 ]]; then
-    CHECKPOINT_ARGS+=" \
-        --save ${FINETUNE_DIR} \
-        --dataloader-save ${FINETUNE_DIR}/dataloader \
-        --save-interval ${SAVE_INTERVAL} \
+if [[ -n "${CKPT_CONVERT_SAVE}" ]]; then
+    mkdir -p "${CKPT_CONVERT_SAVE}"
+    CHECKPOINT_ARGS=" \
+        --load ${CHECKPOINT_DIR} \
+        --ckpt-format torch_dist \
+        --auto-detect-ckpt-format \
+        --ckpt-convert-format torch \
+        --ckpt-convert-save ${CKPT_CONVERT_SAVE} \
+        --no-use-tokenizer-model-from-checkpoint-args \
+        --no-load-optim \
+        --no-load-rng \
+        --no-save-optim \
+        --no-save-rng \
     "
-    if [[ "${NO_SAVE_OPTIM}" -eq 1 ]]; then
-        CHECKPOINT_ARGS+=" --no-save-optim"
-    fi
-    if [[ "${NO_SAVE_RNG}" -eq 1 ]]; then
-        CHECKPOINT_ARGS+=" --no-save-rng"
+else
+    CHECKPOINT_ARGS=" \
+        --pretrained-checkpoint ${CHECKPOINT_DIR} \
+        --load ${FINETUNE_DIR} \
+        --ckpt-format torch \
+    "
+
+    if [[ "${SKIP_SAVE}" -eq 0 ]]; then
+        CHECKPOINT_ARGS+=" \
+            --save ${FINETUNE_DIR} \
+            --dataloader-save ${FINETUNE_DIR}/dataloader \
+            --save-interval ${SAVE_INTERVAL} \
+        "
+        if [[ "${NO_SAVE_OPTIM}" -eq 1 ]]; then
+            CHECKPOINT_ARGS+=" --no-save-optim"
+        fi
+        if [[ "${NO_SAVE_RNG}" -eq 1 ]]; then
+            CHECKPOINT_ARGS+=" --no-save-rng"
+        fi
     fi
 fi
 
 OPTIONS=" \
     --use-checkpoint-args \
     --transformer-impl transformer_engine \
-    --use-te \
     --data-path ${DATA_TRAIN} \
     --train-full-dataset \
     --patch-dim 16 \
@@ -248,7 +276,7 @@ OPTIONS=" \
     --language-model-type nemotron6-moe \
     ${EXTRA_ARGS} \
     --vision-model-type radio \
-    --class-token-len 10 \
+    --class-token-len ${CLASS_TOKEN_LEN} \
     ${SPECIAL_TOKENS} \
     --disable-vision-class-token \
     --prompt-path ${CODE_DIR}/examples/multimodal/manual_prompts.json \

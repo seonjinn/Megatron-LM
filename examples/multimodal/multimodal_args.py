@@ -25,6 +25,12 @@ def add_multimodal_extra_args(parser):
     )
     group.add_argument("--use-te", action="store_true", default=False)
     group.add_argument(
+        "--vision-use-local-spec",
+        action="store_true",
+        default=False,
+        help="Use the local (unfused-LayerNorm) transformer spec for the vision encoder only.",
+    )
+    group.add_argument(
         "--dataloader-save", type=str, default=None, help="Energon dataloader state save path"
     )
     group.add_argument(

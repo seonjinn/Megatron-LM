@@ -20,10 +20,11 @@ def load_checkpoint(path: Path) -> dict[str, Any]:
 
 
 def language_state(state: dict[str, Any]) -> dict[str, Any]:
-    return {
-        key if key.startswith("language_model.") else f"language_model.{key}": value
-        for key, value in state["model"].items()
-    }
+    model = state["model"]
+    prefixed = {key: value for key, value in model.items() if key.startswith("language_model.")}
+    if prefixed:
+        return prefixed
+    return {f"language_model.{key}": value for key, value in model.items()}
 
 
 def vision_state(state: dict[str, Any]) -> dict[str, Any]:
@@ -93,9 +94,12 @@ def main() -> None:
     lm_iter = args.lm / "iter_0000001"
     radio_iter = args.radio / "iter_0000001"
     combined_iter = args.combined / "iter_0000001"
-    expected_ranks = {
-        f"mp_rank_{tp:02d}_{ep:03d}" for tp in range(2) for ep in range(32)
-    }
+    # Native Megatron legacy saves for TP2/EP32/ETP1 contain one model shard
+    # per expert rank. Tensor and expert ranks are correlated by the process
+    # layout (TP0/even EP, TP1/odd EP), rather than a 2x32 Cartesian product.
+    # Offline checkpoint converters may emit the redundant Cartesian layout,
+    # but training checkpoints use these 32 rank names.
+    expected_ranks = {f"mp_rank_{ep % 2:02d}_{ep:03d}" for ep in range(32)}
     actual_ranks = {
         path.name
         for path in combined_iter.iterdir()
@@ -108,11 +112,11 @@ def main() -> None:
         )
 
     # Validate an endpoint from each tensor-parallel rank byte-for-byte at the
-    # tensor level. Rank-layout checks above cover all 64 EP shards.
+    # tensor level. Rank-layout checks above cover all 32 expert shards.
     for rank in ("mp_rank_00_000", "mp_rank_01_031"):
         validate_rank(lm_iter, radio_iter, combined_iter, rank)
 
-    print(f"validated combined checkpoint: {args.combined} (TP=2, EP=32, ranks=64)")
+    print(f"validated combined checkpoint: {args.combined} (TP=2, EP=32, ranks=32)")
 
 
 if __name__ == "__main__":
