@@ -1629,6 +1629,11 @@ def pretrain(
     ft_integration.shutdown()
     one_logger_utils.finish()
 
+    if args.save is not None and torch.distributed.get_rank() == 0:
+        success_sentinel_path = os.path.join(args.save, "SUCCESS_SENTINEL.txt")
+        with open(success_sentinel_path, "w", encoding="utf-8") as success_sentinel:
+            success_sentinel.write("Training completed successfully")
+
 
 def update_train_iters(args):
 
