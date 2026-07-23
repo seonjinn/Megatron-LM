@@ -2889,7 +2889,14 @@ def training_log(
                 wandb_writer.log({'iteration-time': elapsed_time_per_iteration}, iteration)
         log_string = f" [{datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')}]"
         log_string += ' iteration {:8d}/{:8d} |'.format(iteration, args.train_iters)
-        log_string += ' consumed samples: {:12d} |'.format(args.consumed_train_samples)
+        if args.train_samples:
+            log_string += ' consumed samples: {:12d}/{:12d} ({:.2f}%) |'.format(
+                args.consumed_train_samples,
+                args.train_samples,
+                args.consumed_train_samples / args.train_samples * 100,
+            )
+        else:
+            log_string += ' consumed samples: {:12d} |'.format(args.consumed_train_samples)
         if has_rl_utils and args.rl_use_sequence_packing:
             log_string += rl_utils.get_sequence_packing_log_info(args)
         if args.skipped_train_samples > 0:
