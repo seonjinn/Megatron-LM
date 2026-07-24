@@ -18,6 +18,16 @@ workflow:
     - if: $CI_PROJECT_NAMESPACE != "ADLR" || ($CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_PROJECT_PATH != "ADLR/megatron-lm")
       when: never
 
+    # Keep MRs into the VLM rebase staging branch lightweight. This condition
+    # does not match the eventual staging-to-dev MR, which retains full CI.
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "tpoon/vlm2_rebase_super_vlm"'
+      variables:
+        BUILD: "no"
+        UNIT_TEST: "no"
+        INTEGRATION_TEST: "no"
+        FUNCTIONAL_TEST: "no"
+        PUBLISH: "no"
+
     - if: $CI_PIPELINE_SOURCE == "schedule" && ($CI_COMMIT_BRANCH == 'ci-approve-dev' || $CI_COMMIT_BRANCH == 'ci-approve-main')
 
     # ci-branches only for schedule
@@ -276,9 +286,49 @@ variables:
   TE_GIT_REF: ""
 
 include:
-  - .gitlab/stages/00.pre.yml
-  - .gitlab/stages/01.build.yml
-  - .gitlab/stages/02.test.yml
-  - .gitlab/stages/03.integration-tests.yml
-  - .gitlab/stages/04.functional-tests.yml
-  - .gitlab/stages/05.publish.yml
+  - local: .gitlab/stages/00.pre.yml
+  - local: .gitlab/stages/01.build.yml
+  - local: .gitlab/stages/02.test.yml
+    rules: &full_ci_include_rules
+      - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "tpoon/vlm2_rebase_super_vlm"'
+        when: never
+      - when: always
+  - local: .gitlab/stages/03.integration-tests.yml
+    rules: *full_ci_include_rules
+  - local: .gitlab/stages/04.functional-tests.yml
+    rules: *full_ci_include_rules
+  - local: .gitlab/stages/05.publish.yml
+    rules: *full_ci_include_rules
+
+# The secret-detection template is included by 00.pre.yml. The full test
+# configuration normally supplies this override, so retain it when test CI is
+# excluded for the staging target.
+secret_detection:
+  rules:
+    - when: never
+
+# The pre stage is still useful for lightweight administrative jobs, but a
+# staging merge train should not wait for the main-branch status gate.
+pre:check_status_of_main:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "tpoon/vlm2_rebase_super_vlm"'
+      when: never
+    - if: $CI_MERGE_REQUEST_EVENT_TYPE == 'merge_train' && $CI_MERGE_REQUEST_LABELS =~ /fast-track/
+      when: never
+    - if: $CI_MERGE_REQUEST_EVENT_TYPE == 'merge_train'
+      when: always
+    - when: never
+
+# Reuse the current build implementation while replacing the staging target's
+# six pre-builds and three manifest jobs with one amd64 utility-image build.
+staging:build_utility_image:
+  extends: [.build_image]
+  variables:
+    IMAGE: UTILITY_IMAGE
+    FILE: Dockerfile.linting
+    BASE_IMAGE: python:3.10
+    PLATFORM: amd64
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "tpoon/vlm2_rebase_super_vlm"'
+      when: on_success
+    - when: never
