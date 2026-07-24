@@ -18,6 +18,15 @@ def add_multimodal_extra_args(parser):
         "--allow-missing-vision-projection-checkpoint", action="store_true", default=False
     )
     group.add_argument(
+        "--allow-llm-only-checkpoint",
+        action="store_true",
+        default=False,
+        help=(
+            "Allow loading an LLM-only checkpoint into a LLaVA model by resolving language "
+            "model parameter names and leaving vision modules randomly initialized."
+        ),
+    )
+    group.add_argument(
         "--allow-missing-sound-projection-checkpoint", action="store_true", default=False
     )
     group.add_argument(

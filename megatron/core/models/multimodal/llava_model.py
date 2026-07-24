@@ -4,21 +4,23 @@ import logging
 from collections import namedtuple
 from copy import deepcopy
 from functools import partial
+from itertools import chain
 from typing import List, Optional, Tuple
 
 import torch
 
 from megatron.core import tensor_parallel
 from megatron.core.config_logger import has_config_logger_enabled, log_config_to_disk
+from megatron.core.dist_checkpointing.utils import apply_prefix_mapping
 from megatron.core.inference.contexts import BaseInferenceContext
 from megatron.core.models.gpt import GPTModel
 from megatron.core.models.mamba import MambaModel
 from megatron.core.models.multimodal.context_parallel import (
     gather_from_context_parallel_ranks,
-    split_to_context_parallel_ranks,
-    get_padding,
-    split_to_context_parallel_ranks_dynamic_res,
     gather_from_context_parallel_ranks_dynamic_res,
+    get_padding,
+    split_to_context_parallel_ranks,
+    split_to_context_parallel_ranks_dynamic_res,
 )
 from megatron.core.models.multimodal.efficient_video_sampling import EVSVariant
 from megatron.core.models.vision.clip_vit_model import CLIPViTModel, get_num_image_embeddings
@@ -26,12 +28,13 @@ from megatron.core.models.vision.conv_merging import ConvTokenMerge
 from megatron.core.models.vision.multimodal_projector import MultimodalProjector
 from megatron.core.models.vision.radio import RADIOViTModel
 from megatron.core.packed_seq_params import PackedSeqParams
-from megatron.core.parallel_state import get_context_parallel_group
-from megatron.core.parallel_state import get_tensor_model_parallel_rank
+from megatron.core.parallel_state import get_context_parallel_group, get_tensor_model_parallel_rank
 from megatron.core.transformer import MegatronModule
+from megatron.core.transformer.heterogeneous.heterogeneous_config import (
+    HeterogeneousTransformerConfig,
+)
 from megatron.core.transformer.spec_utils import ModuleSpec
 from megatron.core.transformer.transformer_config import TransformerConfig
-from megatron.core.transformer.heterogeneous.heterogeneous_config import HeterogeneousTransformerConfig
 from megatron.core.utils import deprecate_inference_params, log_single_rank
 
 try:
@@ -77,6 +80,9 @@ class LLaVAModel(MegatronModule):
         vision_projection_type (str): Type of the vision projection. Default: 2-layer MLP.
         allow_missing_vision_projection_checkpoint (bool): Allow vision projection weights to be
             missing when loading a checkpoint. Default False.
+        allow_llm_only_checkpoint (bool): Allow loading language-model weights from an LLM-only
+            checkpoint into the LLaVA language_model module while leaving vision modules randomly
+            initialized. Default False.
         parallel_output (bool): Keep outputs split across tensor parallel ranks.
             This is typically True for training and False for inference.
         share_embeddings_and_output_weights (bool): Input embedding and output layer share weights.
@@ -126,6 +132,7 @@ class LLaVAModel(MegatronModule):
         vision_projection_layer_spec: ModuleSpec,
         vision_projection_type: str = "mlp",
         allow_missing_vision_projection_checkpoint: bool = False,
+        allow_llm_only_checkpoint: bool = False,
         parallel_output: bool = True,
         share_embeddings_and_output_weights: bool = False,
         language_position_embedding_type: str = 'learned_absolute',
@@ -192,6 +199,7 @@ class LLaVAModel(MegatronModule):
         self.vision_model = None
         self.vision_projection = None
         self.language_model = None
+        self._allow_llm_only_checkpoint = allow_llm_only_checkpoint
 
         self.sound_model = sound_model
         self.sound_projection = sound_projection
@@ -349,6 +357,17 @@ class LLaVAModel(MegatronModule):
             self.vision_model.register_load_state_dict_post_hook(
                 _load_state_dict_hook_ignore_extra_state
             )
+            if allow_llm_only_checkpoint:
+                vision_model_param_names = [
+                    f"vision_model.{name}"
+                    for name, _ in chain(
+                        self.vision_model.named_parameters(),
+                        self.vision_model.named_buffers(),
+                    )
+                ]
+                self.vision_model.register_load_state_dict_post_hook(
+                    partial(_load_state_dict_hook_ignore_param_names, vision_model_param_names)
+                )
 
             vision_projection_input_size = vision_transformer_config.hidden_size
             vision_projection_input_size *= 4 if pixel_shuffle else 1
@@ -364,7 +383,7 @@ class LLaVAModel(MegatronModule):
             # This should be disabled by default but can be enabled if your checkpoint contains
             # pretrained vision and language models but not the projection from vision model
             # outputs to language model inputs.
-            if allow_missing_vision_projection_checkpoint:
+            if allow_missing_vision_projection_checkpoint or allow_llm_only_checkpoint:
                 vision_projection_param_names = [
                     f"vision_projection.{name}"
                     for name in self.vision_projection.state_dict().keys()
@@ -383,7 +402,7 @@ class LLaVAModel(MegatronModule):
                 conv_merge_config.hidden_size = vision_transformer_config.hidden_size
                 self.conv_merge = ConvTokenMerge(conv_merge_config)
 
-                if allow_missing_conv_merge_checkpoint:
+                if allow_missing_conv_merge_checkpoint or allow_llm_only_checkpoint:
                     conv_merge_param_names = [
                         f"conv_merge.{name}" for name in self.conv_merge.state_dict().keys()
                     ]
@@ -507,6 +526,26 @@ class LLaVAModel(MegatronModule):
         if self.add_decoder:
             return self.language_model.shared_embedding_or_output_weight()
         return None
+
+    def sharded_state_dict(self, prefix: str = '', sharded_offsets: tuple = (), metadata=None):
+        """Sharded state dict with optional LLM-only checkpoint key compatibility."""
+        sharded_state_dict = super().sharded_state_dict(prefix, sharded_offsets, metadata)
+
+        if self._allow_llm_only_checkpoint and (metadata or {}).get(
+            "load_from_llm_only_checkpoint", False
+        ):
+            for key in list(sharded_state_dict):
+                if key.startswith(
+                    (
+                        f"{prefix}vision_model.",
+                        f"{prefix}vision_projection.",
+                        f"{prefix}conv_merge.",
+                    )
+                ):
+                    del sharded_state_dict[key]
+            apply_prefix_mapping(sharded_state_dict, {f"{prefix}language_model.": prefix})
+
+        return sharded_state_dict
 
     def set_input_tensor(self, input_tensor) -> None:
         """Set model chunk input tensor."""

@@ -298,6 +298,7 @@ def model_provider(
         vision_projection_layer_spec=vision_projection_layer_spec,
         vision_projection_type="mlp",
         allow_missing_vision_projection_checkpoint=args.allow_missing_vision_projection_checkpoint,
+        allow_llm_only_checkpoint=getattr(args, "allow_llm_only_checkpoint", False),
         parallel_output=parallel_output,
         share_embeddings_and_output_weights=not args.untie_embeddings_and_output_weights,
         language_position_embedding_type=args.position_embedding_type,

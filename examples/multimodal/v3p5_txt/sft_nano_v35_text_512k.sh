@@ -126,6 +126,7 @@ SCRIPT_DIR=$(dirname "${SCRIPT_PATH}")
     echo "SHUFFLE_BUFFER_SIZE=${SHUFFLE_BUFFER_SIZE:-100}"
     echo "SAVE_CHECKPOINTS=${SAVE_CHECKPOINTS:-1}"
     echo "LOG_PACKED_SEQUENCE_STATS=${LOG_PACKED_SEQUENCE_STATS:-1}"
+    echo "ALLOW_LLM_ONLY_CHECKPOINT=${ALLOW_LLM_ONLY_CHECKPOINT:-0}"
     echo "TRAIN_ITERS=${TRAIN_ITERS:-}"
     echo "LR_WARMUP_ITERS=${LR_WARMUP_ITERS:-}"
     echo "LR_DECAY_ITERS=${LR_DECAY_ITERS:-}"
@@ -192,6 +193,7 @@ SAVE_CHECKPOINTS=${SAVE_CHECKPOINTS:-1}
 GLOBAL_TOKEN_LOSS_NORMALIZATION=${GLOBAL_TOKEN_LOSS_NORMALIZATION:-0}
 LOG_PACKED_SEQUENCE_STATS=${LOG_PACKED_SEQUENCE_STATS:-1}
 EXTRA_ARGS=${EXTRA_ARGS:-}
+ALLOW_LLM_ONLY_CHECKPOINT=${ALLOW_LLM_ONLY_CHECKPOINT:-0}
 TP=${TP:-8}
 CP=${CP:-8}
 EP=${EP:-8}
@@ -213,6 +215,11 @@ if [[ "${USE_MTP}" -eq 1 ]]; then
     --mtp-hybrid-override-pattern \"*E\" \
     --mtp-num-layers 2 \
     --mtp-loss-scaling-factor 0.1"
+fi
+
+LLM_ONLY_CHECKPOINT_OPTIONS=""
+if [[ "${ALLOW_LLM_ONLY_CHECKPOINT}" -eq 1 ]]; then
+    LLM_ONLY_CHECKPOINT_OPTIONS="--allow-llm-only-checkpoint"
 fi
 
 PRETRAINED_CHECKPOINT_OPTIONS=""
@@ -325,6 +332,7 @@ OPTIONS=" \
     --freeze-ViT \
     --freeze-vision-projection \
     --allow-missing-vision-projection-checkpoint \
+    ${LLM_ONLY_CHECKPOINT_OPTIONS} \
     --allow-large-videos \
     --pixel-shuffle \
     --use-tiling \

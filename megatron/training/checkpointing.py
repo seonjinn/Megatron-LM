@@ -1628,6 +1628,7 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load', 
     """
     args = get_args()
     load_dir = getattr(args, load_arg)
+    loading_pretrained_checkpoint = False
 
     # Finetuning directories
     pretrained_dir = getattr(args, 'pretrained_checkpoint', None)
@@ -1639,6 +1640,7 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load', 
         if not checkpoint_exists(load_dir):
             raise FileNotFoundError("No checkpoint found in load directory or pretrained directory")
         args.finetune = True
+        loading_pretrained_checkpoint = True
 
     model = unwrap_model(ddp_model)
 
@@ -1755,6 +1757,8 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load', 
         if sharded_sd_metadata is None:
             sharded_sd_metadata = {}
         sharded_sd_metadata["dp_cp_group"] = dp_cp_group
+        if loading_pretrained_checkpoint and getattr(args, "allow_llm_only_checkpoint", False):
+            sharded_sd_metadata["load_from_llm_only_checkpoint"] = True
 
         optim_sd_kwargs = dict(metadata=sharded_sd_metadata, is_loading=True)
         model_sd_kwargs = dict(metadata=sharded_sd_metadata)
