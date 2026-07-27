@@ -2317,6 +2317,17 @@ def dummy_train_step(data_iterator):
             )
 
 
+def _select_model_parallel_reduction_group(
+    pg_collection: ProcessGroupCollection | MultiModuleProcessGroupCollection,
+) -> torch.distributed.ProcessGroup:
+    """Reuse TP communication when it has the same membership as MP."""
+    mp_group = pg_collection.mp
+    tp_group = getattr(pg_collection, "tp", None)
+    if tp_group is not None and tp_group.size() == mp_group.size():
+        return tp_group
+    return mp_group
+
+
 def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_scheduler, config, forward_backward_func, iteration=None, pg_collection: Optional[ProcessGroupCollection | MultiModuleProcessGroupCollection] = None, p2p_communicator: Optional[P2PCommunicator] = None):
     """Single training step.
 
@@ -2477,7 +2488,7 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
         assert getattr(pg_collection, _required, None) is not None, (
             f"model pg_collection used by train_step must define {_required}"
         )
-    mp_group = pg_collection.mp
+    mp_group = _select_model_parallel_reduction_group(pg_collection)
     # gtp_remat-inclusive: the reported global per-token loss must cover gtp_remat peers' distinct
     # tokens (replicate dp_cp would report a 1/gtp_remat subsample -> per-step noisy). Display-only.
     dp_cp_group = getattr(pg_collection, 'dp_cp_gtp_remat', None) or pg_collection.dp_cp
@@ -2655,7 +2666,11 @@ def training_log(
     total_iterations = total_loss_dict[advanced_iters_key] + total_loss_dict[skipped_iters_key]
 
     # learning rate will be None on ranks without trainable params, so we must gather across mp ranks
-    _lr_mp_group = pg_collection.mp if pg_collection is not None else None
+    _lr_mp_group = (
+        _select_model_parallel_reduction_group(pg_collection)
+        if pg_collection is not None
+        else None
+    )
     learning_rate: float | None = reduce_max_stat_across_model_parallel_group(
         learning_rate, group=_lr_mp_group
     )
