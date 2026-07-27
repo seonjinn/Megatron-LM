@@ -53,6 +53,8 @@ splits:
       - path: dss://image_safety_energon_dataset@v1/image_safety_energon_dataset.jsonl
         subflavors:
           cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://mm_safety@v0
         repetitions: 2.4
 
       # SFT-0.5 addmix: benchfit_qa
