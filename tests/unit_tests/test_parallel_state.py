@@ -14,6 +14,33 @@ world_size = Utils.world_size
 test_parallel_order = ['tp-cp-ep-dp-pp', 'tp-cp-pp-ep-dp']
 
 
+def test_create_group_forwards_device_id(monkeypatch):
+    group = object()
+    new_group_calls = []
+    device_id = torch.device("cuda", 7)
+
+    monkeypatch.setattr(
+        torch.distributed,
+        "new_group",
+        lambda **kwargs: new_group_calls.append(kwargs) or group,
+    )
+    monkeypatch.setattr(torch.distributed, "get_rank", lambda: 0)
+    monkeypatch.setattr(ps, "_global_process_group_list", None)
+
+    assert ps.create_group(ranks=[0], device_id=device_id) is group
+    assert new_group_calls == [
+        {
+            "ranks": [0],
+            "timeout": None,
+            "backend": None,
+            "pg_options": None,
+            "use_local_synchronization": False,
+            "group_desc": None,
+            "device_id": device_id,
+        }
+    ]
+
+
 def test_warmup_tensor_and_data_parallel_group_with_cp_when_requested(monkeypatch):
     group = object()
     barrier_calls = []
