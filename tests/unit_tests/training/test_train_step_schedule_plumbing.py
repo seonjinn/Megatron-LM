@@ -67,3 +67,27 @@ def test_train_step_forwards_schedule_plumbing():
 def test_train_step_defaults_to_none():
     captured = _run()
     assert captured["p2p_communicator"] is None and captured["pg_collection"] is None
+
+
+def test_reuses_tensor_parallel_group_when_model_parallel_membership_matches():
+    tp_group = mock.MagicMock()
+    tp_group.size.return_value = 8
+    mp_group = mock.MagicMock()
+    mp_group.size.return_value = 8
+    pg_collection = SimpleNamespace(tp=tp_group, mp=mp_group)
+
+    assert (
+        training_mod._select_model_parallel_reduction_group(pg_collection) is tp_group
+    )
+
+
+def test_keeps_model_parallel_group_when_membership_differs():
+    tp_group = mock.MagicMock()
+    tp_group.size.return_value = 8
+    mp_group = mock.MagicMock()
+    mp_group.size.return_value = 16
+    pg_collection = SimpleNamespace(tp=tp_group, mp=mp_group)
+
+    assert (
+        training_mod._select_model_parallel_reduction_group(pg_collection) is mp_group
+    )
