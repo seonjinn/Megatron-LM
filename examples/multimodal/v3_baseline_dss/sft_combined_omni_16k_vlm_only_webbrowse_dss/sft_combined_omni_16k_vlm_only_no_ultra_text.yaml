@@ -1,0 +1,52 @@
+# Current V14 VLM-only 16K DSS mix without the ultra text include.
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+    - path: data_yamls/eagle_sft_v14_nano_charxiv.yaml
+      repetitions: 1.2
+    - path: data_yamls/short_video_qa_0318_newreps_mcq_shuffled.yaml
+      repetitions: 1.2
+    - path: data_yamls/video_qa_v1_v2_all_0519.yaml
+      repetitions: 1.2
+    - path: data_yamls/video_reasoning.short.0519.yaml
+      repetitions: 1.2
+    - path: data_yamls/short_dense_captions_no_think_0310_safetyfix.yaml
+      repetitions: 1.2
+    - path: dss://filtered_textsafety_energon_dataset@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 2.4
+    - path: dss://image_safety_energon_dataset@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 2.4
+      aux:
+        media_source: filesystem+dss://mm_safety@v0
+    - path: dss://benchfit_qa@v0
+      subflavors:
+        name: benchfit_qa
+        cook: conversation
+      aux:
+        media_source: filesystem+dss://image_shards@v0
+      repetitions: 0.72
+    - path: dss://dense_ocr_qa@v0
+      subflavors:
+        name: dense_ocr_qa
+        cook: conversation
+      aux:
+        media_source: filesystem+dss://image_shards@v0
+      repetitions: 0.72
+    - path: data_yamls/charxiv_blend.yaml
+      repetitions: 1.0
+    - path: data_yamls/charts_additional.yaml
+      repetitions: 1.0
+    - path: data_yamls/charts_additional2.yaml
+      repetitions: 1.0
+    - path: data_yamls/perplexity_holotron_distilled_molmoweb_v2.yaml
+      repetitions: 1.0
+    - path: data_yamls/holotron_a3_webarea_success_momoweb_energon.yaml
+      repetitions: 1.0
+    - path: data_yamls/hopchain_documents_plusnew_coco_multipagetiny.yaml
+      repetitions: 1.0
