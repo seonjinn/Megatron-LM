@@ -45,6 +45,7 @@ def test_warmup_tensor_and_data_parallel_group_with_cp_when_requested(monkeypatc
     tp_dp_cp_group = object()
     pp_group = object()
     optimizer_group = object()
+    model_group = object()
     barrier_calls = []
     synchronize_calls = []
 
@@ -56,6 +57,7 @@ def test_warmup_tensor_and_data_parallel_group_with_cp_when_requested(monkeypatc
     monkeypatch.setattr(
         ps, "_INTRA_DISTRIBUTED_OPTIMIZER_INSTANCE_GROUP", optimizer_group
     )
+    monkeypatch.setattr(ps, "_MODEL_PARALLEL_GROUP", model_group)
     monkeypatch.setattr(torch.cuda, "current_device", lambda: 7)
     monkeypatch.setattr(
         torch.distributed,
@@ -70,6 +72,7 @@ def test_warmup_tensor_and_data_parallel_group_with_cp_when_requested(monkeypatc
         {"group": tp_dp_cp_group, "device_ids": [7]},
         {"group": pp_group, "device_ids": [7]},
         {"group": optimizer_group, "device_ids": [7]},
+        {"group": model_group, "device_ids": [7]},
     ]
     assert synchronize_calls == [True]
 
