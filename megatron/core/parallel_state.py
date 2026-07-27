@@ -1598,8 +1598,6 @@ def initialize_model_parallel(
                     _INTRA_DISTRIBUTED_OPTIMIZER_INSTANCE_GROUP = intra_dist_opt_instance_group
                 intra_dist_opt_ranks = []
 
-    _warmup_tensor_and_data_parallel_group_with_cp_if_requested()
-
     # Initialize global memory buffer
     # This isn't really "parallel state" but there isn't another good place to
     # put this. If we end up with a more generic initialization of megatron-core

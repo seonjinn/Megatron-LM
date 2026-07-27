@@ -492,6 +492,7 @@ def set_jit_fusion_options(tp_size=None):
         torch._C._jit_override_can_fuse_on_gpu(True)
 
     _warmup_jit_function(tp_size=tp_size)
+    mpu._warmup_tensor_and_data_parallel_group_with_cp_if_requested()
 
 
 def _warmup_jit_function(tp_size=None):
