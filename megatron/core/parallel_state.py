@@ -165,21 +165,6 @@ _GLOBAL_MEMORY_BUFFER = None
 _global_process_group_list = None
 
 
-def _warmup_tensor_and_data_parallel_group_with_cp_if_requested():
-    """Initialize the TP-DP-CP NCCL communicator before model allocation."""
-    if os.getenv("MEGATRON_EAGER_INIT_TP_DP_CP_COMM") != "1":
-        return
-    if _TENSOR_AND_DATA_PARALLEL_GROUP_WITH_CP is None:
-        return
-
-    device_id = torch.cuda.current_device()
-    torch.distributed.barrier(
-        group=_TENSOR_AND_DATA_PARALLEL_GROUP_WITH_CP,
-        device_ids=[device_id],
-    )
-    torch.cuda.synchronize()
-
-
 def get_nccl_options(pg_name, nccl_comm_cfgs):
     """Set the NCCL process group options.
 
@@ -251,6 +236,7 @@ def create_group(
     pg_options=None,
     use_local_synchronization=False,
     group_desc=None,
+    device_id=None,
 ):
     """Creates a ProcessGroup."""
     kwargs = {
@@ -260,6 +246,7 @@ def create_group(
         "pg_options": pg_options,
         "use_local_synchronization": use_local_synchronization,
         "group_desc": group_desc,
+        "device_id": device_id,
     }
     if not is_torch_min_version("2.4.0"):
         kwargs.pop("group_desc")
@@ -1318,6 +1305,11 @@ def initialize_model_parallel(
             timeout=timeout,
             pg_options=get_nccl_options("tp_dp_cp", nccl_comm_cfgs),
             group_desc="TENSOR_AND_DATA_PARALLEL_GROUP_WITH_CP",
+            device_id=(
+                torch.device("cuda", torch.cuda.current_device())
+                if os.getenv("MEGATRON_EAGER_INIT_TP_DP_CP_COMM") == "1" and rank in ranks
+                else None
+            ),
         )
         if rank in ranks:
             _TENSOR_AND_DATA_PARALLEL_GROUP_WITH_CP = group
@@ -1590,8 +1582,6 @@ def initialize_model_parallel(
                 if rank in intra_dist_opt_ranks:
                     _INTRA_DISTRIBUTED_OPTIMIZER_INSTANCE_GROUP = intra_dist_opt_instance_group
                 intra_dist_opt_ranks = []
-
-    _warmup_tensor_and_data_parallel_group_with_cp_if_requested()
 
     # Initialize global memory buffer
     # This isn't really "parallel state" but there isn't another good place to

@@ -41,27 +41,6 @@ def test_create_group_forwards_device_id(monkeypatch):
     ]
 
 
-def test_warmup_tensor_and_data_parallel_group_with_cp_when_requested(monkeypatch):
-    group = object()
-    barrier_calls = []
-    synchronize_calls = []
-
-    monkeypatch.setenv("MEGATRON_EAGER_INIT_TP_DP_CP_COMM", "1")
-    monkeypatch.setattr(ps, "_TENSOR_AND_DATA_PARALLEL_GROUP_WITH_CP", group)
-    monkeypatch.setattr(torch.cuda, "current_device", lambda: 7)
-    monkeypatch.setattr(
-        torch.distributed,
-        "barrier",
-        lambda **kwargs: barrier_calls.append(kwargs),
-    )
-    monkeypatch.setattr(torch.cuda, "synchronize", lambda: synchronize_calls.append(True))
-
-    ps._warmup_tensor_and_data_parallel_group_with_cp_if_requested()
-
-    assert barrier_calls == [{"group": group, "device_ids": [7]}]
-    assert synchronize_calls == [True]
-
-
 @pytest.mark.parametrize('order', test_parallel_order)
 @pytest.mark.flaky
 @pytest.mark.flaky_in_dev
