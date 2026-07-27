@@ -166,17 +166,20 @@ _global_process_group_list = None
 
 
 def _warmup_tensor_and_data_parallel_group_with_cp_if_requested():
-    """Initialize the TP-DP-CP NCCL communicator before model allocation."""
+    """Initialize first-step NCCL communicators before model allocation."""
     if os.getenv("MEGATRON_EAGER_INIT_TP_DP_CP_COMM") != "1":
         return
-    if _TENSOR_AND_DATA_PARALLEL_GROUP_WITH_CP is None:
+    groups = (
+        _TENSOR_AND_DATA_PARALLEL_GROUP_WITH_CP,
+        _PIPELINE_MODEL_PARALLEL_GROUP,
+    )
+    if not any(group is not None for group in groups):
         return
 
     device_id = torch.cuda.current_device()
-    torch.distributed.barrier(
-        group=_TENSOR_AND_DATA_PARALLEL_GROUP_WITH_CP,
-        device_ids=[device_id],
-    )
+    for group in groups:
+        if group is not None:
+            torch.distributed.barrier(group=group, device_ids=[device_id])
     torch.cuda.synchronize()
 
 
