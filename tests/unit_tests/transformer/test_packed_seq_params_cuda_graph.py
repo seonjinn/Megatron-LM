@@ -612,6 +612,9 @@ def test_te_cuda_graph_partial_attn_only_flow():
 
     # Case 2: When CudaGraphModule.attn is NOT captured (e.g. only mlp is captured)
     layer_mlp = _TestLayer([CudaGraphModule.mlp])
+    layer_mlp._set_te_cuda_graph_packed_seq_params_static_metadata(
+        static_metadata, tensor_kwargs
+    )
 
     kwargs = {"packed_seq_params": packed_seq_params, "hidden_states": torch.ones(2, 1, 4)}
     layer_mlp._te_cuda_graph_replay(**kwargs)
