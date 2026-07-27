@@ -76,8 +76,8 @@ def test_te_cuda_graph_mamba_sample_has_flattened_packed_inputs():
 
 
 def test_mamba_replay_flattens_packed_seq_params_before_tensor_gate():
-    from megatron.core.ssm.mamba_layer import MambaLayer
     from megatron.core.packed_seq_params import split_mamba_packed_seq_params_for_cuda_graph
+    from megatron.core.ssm.mamba_layer import MambaLayer
 
     layer = _MambaLayerCudaGraphStub()
     layer._set_te_cuda_graph_mamba_packed_seq_params_static_metadata = (
