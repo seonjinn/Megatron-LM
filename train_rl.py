@@ -18,14 +18,18 @@ from megatron.core.utils import StragglerDetector
 from megatron.rl.rl_utils import (
     calculate_grpo_loss,
     get_logprobs,
+    get_rl_packed_seq_params_for_cuda_graph,
     get_rl_runtime_state,
     load_packed_data_by_index,
-    get_rl_packed_seq_params_for_cuda_graph,
 )
 from megatron.training import get_args, get_timers, pretrain, print_rank_0
-from megatron.training.utils import is_hybrid_model
+from megatron.training.argument_utils import (
+    gpt_config_from_args,
+    hybrid_config_from_args,
+    pretrain_cfg_container_from_args,
+)
 from megatron.training.arguments import core_transformer_config_from_args, parse_and_validate_args
-from megatron.training.argument_utils import gpt_config_from_args, hybrid_config_from_args, pretrain_cfg_container_from_args
+from megatron.training.utils import is_hybrid_model
 from model_provider import model_provider
 
 stimer = StragglerDetector()
