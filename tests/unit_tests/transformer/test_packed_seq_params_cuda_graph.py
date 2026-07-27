@@ -118,6 +118,8 @@ def _make_packed_seq_params():
         max_seqlen_q=8,
         max_seqlen_kv=8,
         local_cp_size=1,
+        tokens_per_sample=8,
+        pad_between_seqs=True,
     )
 
 
@@ -264,6 +266,8 @@ def test_split_packed_seq_params_for_cuda_graph_separates_tensors_from_metadata(
         "max_seqlen_kv": 8,
         "local_cp_size": 1,
         "cp_group": None,
+        "tokens_per_sample": 8,
+        "pad_between_seqs": True,
     }
     assert all(not isinstance(value, torch.Tensor) for value in static_metadata.values())
 
@@ -302,6 +306,8 @@ def test_build_packed_seq_params_from_cuda_graph_kwargs_pops_flattened_fields():
     assert rebuilt.max_seqlen_kv == 8
     assert rebuilt.local_cp_size == 1
     assert rebuilt.cp_group is None
+    assert rebuilt.tokens_per_sample == 8
+    assert rebuilt.pad_between_seqs is True
     assert rebuilt.total_tokens is None
     assert rebuilt.seq_idx is None
     assert torch.equal(rebuilt.cu_seqlens_q, packed_seq_params.cu_seqlens_q)
@@ -514,6 +520,48 @@ def test_te_cuda_graph_sample_kwargs_reject_overlapping_flattened_keys():
         )
 
 
+def test_te_cuda_graph_capture_threads_packed_metadata_to_mlp():
+    from megatron.core.transformer.enums import CudaGraphModule
+
+    class _ConfigStub:
+        cuda_graph_modules = []
+
+    class _TestLayer(_TransformerLayerCudaGraphStub):
+        _te_cuda_graph_capture = TransformerLayer._te_cuda_graph_capture
+
+        def __init__(self):
+            self.config = _ConfigStub()
+            self.offload_module_in_cuda_graph = False
+            self.is_moe_layer = True
+            self.mlp_packed_seq_params = None
+
+        def _forward_attention(self, hidden_states, **kwargs):
+            return hidden_states, None
+
+        def _forward_mlp(
+            self,
+            hidden_states,
+            inference_context=None,
+            padding_mask=None,
+            packed_seq_params=None,
+        ):
+            self.mlp_packed_seq_params = packed_seq_params
+            return hidden_states
+
+    layer = _TestLayer()
+    packed_seq_params = _make_packed_seq_params()
+    sample_kwargs = {}
+    _add_packed_seq_params_to_te_cuda_graph_sample_kwargs(
+        layer, sample_kwargs, packed_seq_params
+    )
+
+    layer._te_cuda_graph_capture(torch.ones(16, 1, 4), **sample_kwargs)
+
+    assert layer.mlp_packed_seq_params is not None
+    assert layer.mlp_packed_seq_params.tokens_per_sample == 8
+    assert layer.mlp_packed_seq_params.pad_between_seqs is True
+
+
 def test_te_cuda_graph_partial_attn_only_flow():
     from megatron.core.transformer.enums import CudaGraphModule
 
@@ -532,16 +580,18 @@ def test_te_cuda_graph_partial_attn_only_flow():
             self.replay_impl_args = None
             self.replay_impl_kwargs = None
             self.replay_impl_context = None
+            self.replay_impl_packed_seq_params = None
 
         def _forward_attention(self, *args, **kwargs):
             self.attn_called = True
             return torch.ones(2, 1, 4) * 2.0, "attn_context"
 
-        def _te_cuda_graph_replay_impl(self, args, kwargs, context):
+        def _te_cuda_graph_replay_impl(self, args, kwargs, context, packed_seq_params):
             self.replay_impl_called = True
             self.replay_impl_args = args
             self.replay_impl_kwargs = kwargs
             self.replay_impl_context = context
+            self.replay_impl_packed_seq_params = packed_seq_params
             return torch.ones(2, 1, 4) * 3.0
 
     # Case 1: When CudaGraphModule.attn is captured
@@ -556,6 +606,7 @@ def test_te_cuda_graph_partial_attn_only_flow():
     assert not layer_attn.attn_called
     assert layer_attn.replay_impl_called
     assert layer_attn.replay_impl_context is None
+    assert layer_attn.replay_impl_packed_seq_params is packed_seq_params
     assert "packed_seq_params" not in layer_attn.replay_impl_kwargs
     assert f"{CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX}cu_seqlens_q" in layer_attn.replay_impl_kwargs
 
@@ -568,9 +619,13 @@ def test_te_cuda_graph_partial_attn_only_flow():
     assert layer_mlp.attn_called
     assert layer_mlp.replay_impl_called
     assert layer_mlp.replay_impl_context == "attn_context"
+    assert layer_mlp.replay_impl_packed_seq_params is packed_seq_params
     assert len(layer_mlp.replay_impl_args) == 1
     assert torch.equal(layer_mlp.replay_impl_args[0], torch.ones(2, 1, 4) * 2.0)
-    assert layer_mlp.replay_impl_kwargs == {}
+    assert "packed_seq_params" not in layer_mlp.replay_impl_kwargs
+    assert f"{CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX}cu_seqlens_q" in (
+        layer_mlp.replay_impl_kwargs
+    )
 
 
 def test_seq_idx_determinism_across_replays():

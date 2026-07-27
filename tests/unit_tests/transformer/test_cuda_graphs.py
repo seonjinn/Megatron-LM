@@ -1010,9 +1010,7 @@ def _make_packed_mamba_model(cuda_graph_impl, pg_collection):
         attention_dropout=0.0,
         context_parallel_size=2,
         cuda_graph_impl=cuda_graph_impl,
-        cuda_graph_modules=[CudaGraphModule.mamba]
-        if cuda_graph_impl == "transformer_engine"
-        else [],
+        cuda_graph_modules=[],
     )
     return _PackedMambaCudaGraphModel(
         config=config,
@@ -1085,6 +1083,9 @@ def test_packed_mamba_te_cuda_graph_replay_matches_eager_on_all_cp_ranks():
         eager_output, eager_grads = _run_packed_mamba(
             eager_model, hidden_states.detach().clone().requires_grad_(True), first_params
         )
+        eager_replay_output, eager_replay_grads = _run_packed_mamba(
+            eager_model, hidden_states.detach().clone().requires_grad_(True), replay_params
+        )
 
         graph_helper = TECudaGraphHelper(
             model=[graph_model],
@@ -1112,8 +1113,12 @@ def test_packed_mamba_te_cuda_graph_replay_matches_eager_on_all_cp_ranks():
 
         torch.testing.assert_close(graph_output, eager_output, rtol=1e-3, atol=1e-3)
         torch.testing.assert_close(graph_grads, eager_grads, rtol=1e-3, atol=1e-3)
-        assert replay_output.shape == graph_output.shape
-        assert all(torch.isfinite(grad).all() for grad in replay_grads)
+        torch.testing.assert_close(
+            replay_output, eager_replay_output, rtol=1e-3, atol=1e-3
+        )
+        torch.testing.assert_close(
+            replay_grads, eager_replay_grads, rtol=1e-3, atol=1e-3
+        )
     finally:
         if graph_helper is not None and graph_helper.graphs_created():
             graph_helper.delete_cuda_graphs()
