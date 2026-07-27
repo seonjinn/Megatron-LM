@@ -15,13 +15,14 @@ from enum import Enum
 from functools import partial
 from itertools import chain, zip_longest
 from math import ceil
-from typing import Any, Dict, List
+from typing import Any, Dict, List, MutableMapping
 
 import torch
 from torch.utils._pytree import tree_map as tree_map_pyt
 
 from megatron.core.num_microbatches_calculator import get_num_microbatches
 from megatron.core.packed_seq_params import (
+    PackedSeqParams,
     split_mamba_packed_seq_params_for_cuda_graph,
     split_packed_seq_params_for_cuda_graph,
 )
@@ -1932,8 +1933,10 @@ def _layer_is_graphable(layer, config):
 
 
 def _add_packed_seq_params_to_te_cuda_graph_sample_kwargs(
-    layer, sample_kwargs, sample_packed_seq_params
-):
+    layer: Any,
+    sample_kwargs: MutableMapping[str, object],
+    sample_packed_seq_params: PackedSeqParams | None,
+) -> None:
     """Add flattened ``PackedSeqParams`` Tensor inputs to TE graph sample kwargs."""
     if sample_packed_seq_params is None:
         return
@@ -1957,8 +1960,10 @@ def _add_packed_seq_params_to_te_cuda_graph_sample_kwargs(
 
 
 def _add_mamba_packed_seq_params_to_te_cuda_graph_sample_kwargs(
-    layer, sample_kwargs, sample_packed_seq_params
-):
+    layer: Any,
+    sample_kwargs: MutableMapping[str, object],
+    sample_packed_seq_params: PackedSeqParams | None,
+) -> None:
     """Add flattened Mamba ``PackedSeqParams`` Tensor inputs to TE graph samples."""
     if sample_packed_seq_params is None:
         return
@@ -2267,7 +2272,10 @@ class TECudaGraphHelper:
             )
             contains_mamba = (
                 isinstance(layer, MambaLayer)
-                and CudaGraphModule.mamba in self.config.cuda_graph_modules
+                and (
+                    not self.config.cuda_graph_modules
+                    or CudaGraphModule.mamba in self.config.cuda_graph_modules
+                )
             )
 
             _sample_kwargs = {}
@@ -2279,6 +2287,7 @@ class TECudaGraphHelper:
                     rotary_pos_emb = get_rotary_pos_emb(chunk_of_the_layer, hidden_states)
                     if rotary_pos_emb is not None:
                         static_inputs["rotary_pos_emb"] = rotary_pos_emb
+                if isinstance(layer, TransformerLayer):
                     _add_packed_seq_params_to_te_cuda_graph_sample_kwargs(
                         layer, static_inputs, self.sample_packed_seq_params
                     )

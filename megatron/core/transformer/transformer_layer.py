@@ -6,7 +6,17 @@ import logging
 import warnings
 from abc import ABC
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, Optional, Protocol, Union
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Dict,
+    Iterable,
+    Mapping,
+    MutableMapping,
+    Optional,
+    Protocol,
+    Union,
+)
 
 import torch
 import torch.distributed
@@ -1142,19 +1152,25 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
         return submodules
 
     def _set_te_cuda_graph_packed_seq_params_static_metadata(
-        self, static_metadata, tensor_kwarg_names=None
-    ):
+        self,
+        static_metadata: Mapping[str, object],
+        tensor_kwarg_names: Iterable[str] | None = None,
+    ) -> None:
         """Store non-Tensor ``PackedSeqParams`` metadata used during TE graph capture."""
         self._te_cuda_graph_packed_seq_params_static_metadata = dict(static_metadata)
         self._te_cuda_graph_packed_seq_params_tensor_kwarg_names = (
             None if tensor_kwarg_names is None else tuple(sorted(tensor_kwarg_names))
         )
 
-    def _get_te_cuda_graph_packed_seq_params_static_metadata(self):
+    def _get_te_cuda_graph_packed_seq_params_static_metadata(
+        self,
+    ) -> dict[str, object] | None:
         """Return the static ``PackedSeqParams`` metadata used for this TE graph."""
         return getattr(self, '_te_cuda_graph_packed_seq_params_static_metadata', None)
 
-    def _validate_te_cuda_graph_packed_seq_params_static_metadata(self, static_metadata):
+    def _validate_te_cuda_graph_packed_seq_params_static_metadata(
+        self, static_metadata: Mapping[str, object]
+    ) -> None:
         """Validate that replay uses the same static packed-sequence contract as capture."""
         expected_static_metadata = self._get_te_cuda_graph_packed_seq_params_static_metadata()
         assert expected_static_metadata is not None, (
@@ -1178,11 +1194,15 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             f"{', '.join(mismatched_fields)}."
         )
 
-    def _get_te_cuda_graph_packed_seq_params_tensor_kwarg_names(self):
+    def _get_te_cuda_graph_packed_seq_params_tensor_kwarg_names(
+        self,
+    ) -> tuple[str, ...] | None:
         """Return flattened ``PackedSeqParams`` Tensor kwargs used for this TE graph."""
         return getattr(self, '_te_cuda_graph_packed_seq_params_tensor_kwarg_names', None)
 
-    def _validate_te_cuda_graph_packed_seq_params_tensor_kwargs(self, tensor_kwargs):
+    def _validate_te_cuda_graph_packed_seq_params_tensor_kwargs(
+        self, tensor_kwargs: Mapping[str, object]
+    ) -> None:
         """Validate replay uses the same flattened Tensor field set as capture."""
         expected_names = self._get_te_cuda_graph_packed_seq_params_tensor_kwarg_names()
         if expected_names is None:
@@ -1198,7 +1218,9 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             f"{missing_names} and extra fields {extra_names}."
         )
 
-    def _rebuild_te_cuda_graph_packed_seq_params(self, kwargs):
+    def _rebuild_te_cuda_graph_packed_seq_params(
+        self, kwargs: MutableMapping[str, object]
+    ) -> None:
         """Rebuild ``PackedSeqParams`` from flattened TE graph capture kwargs."""
         if not has_packed_seq_params_cuda_graph_kwargs(kwargs):
             return
@@ -1223,7 +1245,9 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             kwargs, static_metadata
         )
 
-    def _flatten_te_cuda_graph_packed_seq_params(self, kwargs):
+    def _flatten_te_cuda_graph_packed_seq_params(
+        self, kwargs: MutableMapping[str, object]
+    ) -> None:
         """Flatten replay-time ``PackedSeqParams`` into Tensor kwargs for TE graphs."""
         packed_seq_params = kwargs.pop('packed_seq_params', None)
         expected_static_metadata = self._get_te_cuda_graph_packed_seq_params_static_metadata()
@@ -1266,6 +1290,7 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                 hidden_states = self.off_interface.backward_record(hidden_states)
                 kwargs["hidden_states"] = hidden_states
         self._rebuild_te_cuda_graph_packed_seq_params(kwargs)
+        packed_seq_params = kwargs.get("packed_seq_params")
 
         context = None
         if (
@@ -1290,7 +1315,9 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                 )
             )
         ):
-            hidden_states = self._forward_mlp(hidden_states)
+            hidden_states = self._forward_mlp(
+                hidden_states, packed_seq_params=packed_seq_params
+            )
         if not isinstance(hidden_states, list) and not isinstance(hidden_states, tuple):
             cuda_graph_outputs = [hidden_states]
         else:
@@ -1310,18 +1337,22 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
         interface. TransformerEngine versions>=1.10 allow keyword arguments with CUDA graph.
         However, CUDA graph accepts only Tensor inputs.
         Hence, `inference_context` is excluded from input list. `packed_seq_params` is split
-        into Tensor graph inputs and static metadata when attention is in the graph scope.
+        into Tensor graph inputs and static metadata for any TransformerLayer graph scope.
         """
         context = None
+        packed_seq_params = kwargs.get("packed_seq_params")
         if (
             self.config.cuda_graph_modules
             and CudaGraphModule.attn not in self.config.cuda_graph_modules
         ):
             hidden_states, context = self._forward_attention(*args, **kwargs)
             args = (hidden_states,)
-            kwargs = {}
-        else:
-            self._flatten_te_cuda_graph_packed_seq_params(kwargs)
+            kwargs = (
+                {"packed_seq_params": packed_seq_params}
+                if packed_seq_params is not None
+                else {}
+            )
+        self._flatten_te_cuda_graph_packed_seq_params(kwargs)
 
         assert kwargs.get('inference_context') is None, (
             "CUDA graph accepts only Tensor inputs. "
@@ -1334,12 +1365,16 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             self.off_interface.enter_replay()
 
         try:
-            return self._te_cuda_graph_replay_impl(args, kwargs, context)
+            return self._te_cuda_graph_replay_impl(
+                args, kwargs, context, packed_seq_params
+            )
         finally:
             if self.config.delay_offload_until_cuda_graph:
                 self.off_interface.exit_replay()
 
-    def _te_cuda_graph_replay_impl(self, args, kwargs, context):
+    def _te_cuda_graph_replay_impl(
+        self, args, kwargs, context, packed_seq_params: PackedSeqParams | None
+    ):
         """Implementation of _te_cuda_graph_replay, separated for replay mode cleanup."""
         cuda_graph_output = list(super()._te_cuda_graph_replay(*args, **kwargs))
 
@@ -1448,7 +1483,9 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                 return residual, hidden_states, probs, shared_expert_output
 
             # CUDA Graph does not capture the MLP/MoE part at all.
-            output = self._forward_mlp(*cuda_graph_output)
+            output = self._forward_mlp(
+                *cuda_graph_output, packed_seq_params=packed_seq_params
+            )
         return output, context
 
     def _get_te_cuda_graph_replay_args(self, *args, **kwargs):

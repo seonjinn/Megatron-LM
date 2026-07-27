@@ -21,6 +21,8 @@ PACKED_SEQ_PARAMS_CUDA_GRAPH_STATIC_FIELDS = (
     "max_seqlen_kv",
     "local_cp_size",
     "cp_group",
+    "tokens_per_sample",
+    "pad_between_seqs",
 )
 
 
