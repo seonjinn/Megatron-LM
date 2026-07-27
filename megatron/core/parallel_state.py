@@ -172,6 +172,7 @@ def _warmup_tensor_and_data_parallel_group_with_cp_if_requested():
     groups = (
         _TENSOR_AND_DATA_PARALLEL_GROUP_WITH_CP,
         _PIPELINE_MODEL_PARALLEL_GROUP,
+        _INTRA_DISTRIBUTED_OPTIMIZER_INSTANCE_GROUP,
     )
     if not any(group is not None for group in groups):
         return
