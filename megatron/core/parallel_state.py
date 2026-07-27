@@ -165,6 +165,21 @@ _GLOBAL_MEMORY_BUFFER = None
 _global_process_group_list = None
 
 
+def _warmup_tensor_and_data_parallel_group_with_cp_if_requested():
+    """Initialize the TP-DP-CP NCCL communicator before model allocation."""
+    if os.getenv("MEGATRON_EAGER_INIT_TP_DP_CP_COMM") != "1":
+        return
+    if _TENSOR_AND_DATA_PARALLEL_GROUP_WITH_CP is None:
+        return
+
+    device_id = torch.cuda.current_device()
+    torch.distributed.barrier(
+        group=_TENSOR_AND_DATA_PARALLEL_GROUP_WITH_CP,
+        device_ids=[device_id],
+    )
+    torch.cuda.synchronize()
+
+
 def get_nccl_options(pg_name, nccl_comm_cfgs):
     """Set the NCCL process group options.
 
@@ -1575,6 +1590,8 @@ def initialize_model_parallel(
                 if rank in intra_dist_opt_ranks:
                     _INTRA_DISTRIBUTED_OPTIMIZER_INSTANCE_GROUP = intra_dist_opt_instance_group
                 intra_dist_opt_ranks = []
+
+    _warmup_tensor_and_data_parallel_group_with_cp_if_requested()
 
     # Initialize global memory buffer
     # This isn't really "parallel state" but there isn't another good place to
