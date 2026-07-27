@@ -42,12 +42,16 @@ def test_create_group_forwards_device_id(monkeypatch):
 
 
 def test_warmup_tensor_and_data_parallel_group_with_cp_when_requested(monkeypatch):
-    group = object()
+    tp_dp_cp_group = object()
+    pp_group = object()
     barrier_calls = []
     synchronize_calls = []
 
     monkeypatch.setenv("MEGATRON_EAGER_INIT_TP_DP_CP_COMM", "1")
-    monkeypatch.setattr(ps, "_TENSOR_AND_DATA_PARALLEL_GROUP_WITH_CP", group)
+    monkeypatch.setattr(
+        ps, "_TENSOR_AND_DATA_PARALLEL_GROUP_WITH_CP", tp_dp_cp_group
+    )
+    monkeypatch.setattr(ps, "_PIPELINE_MODEL_PARALLEL_GROUP", pp_group)
     monkeypatch.setattr(torch.cuda, "current_device", lambda: 7)
     monkeypatch.setattr(
         torch.distributed,
@@ -58,7 +62,10 @@ def test_warmup_tensor_and_data_parallel_group_with_cp_when_requested(monkeypatc
 
     ps._warmup_tensor_and_data_parallel_group_with_cp_if_requested()
 
-    assert barrier_calls == [{"group": group, "device_ids": [7]}]
+    assert barrier_calls == [
+        {"group": tp_dp_cp_group, "device_ids": [7]},
+        {"group": pp_group, "device_ids": [7]},
+    ]
     assert synchronize_calls == [True]
 
 
