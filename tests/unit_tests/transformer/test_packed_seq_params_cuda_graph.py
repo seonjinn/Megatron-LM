@@ -154,8 +154,8 @@ def _make_mamba_packed_seq_params(cu_q, cu_kv, total_tokens, seq_idx):
             [0, 3, 5],
             5,
             [0, 0, 1, 1, 1, 2],
-            [0, 1, 4, 6],
-            [0, 2, 4, 6],
+            [0, 1, 6],
+            [0, 4, 6],
             6,
             [0, 1, 1, 2, 2, 2],
         ),
@@ -217,9 +217,34 @@ def test_mamba_replay_updates_make_graphed_callables_packed_inputs_without_stati
     replay_kwargs = {"packed_seq_params": replay_params}
     layer._flatten_te_cuda_graph_mamba_packed_seq_params(replay_kwargs)
 
-    seq_idx_key = "_mamba_packed_seq_params_seq_idx"
-    assert make_graphed_callables_sample_kwargs[seq_idx_key] is capture_params.seq_idx
-    assert replay_kwargs == {seq_idx_key: replay_params.seq_idx}
+    expected_capture_inputs = {
+        "_mamba_packed_seq_params_cu_seqlens_q": capture_params.cu_seqlens_q,
+        "_mamba_packed_seq_params_cu_seqlens_kv": capture_params.cu_seqlens_kv,
+        "_mamba_packed_seq_params_cu_seqlens_q_padded": (
+            capture_params.cu_seqlens_q_padded
+        ),
+        "_mamba_packed_seq_params_cu_seqlens_kv_padded": (
+            capture_params.cu_seqlens_kv_padded
+        ),
+        "_mamba_packed_seq_params_seq_idx": capture_params.seq_idx,
+    }
+    expected_replay_inputs = {
+        "_mamba_packed_seq_params_cu_seqlens_q": replay_params.cu_seqlens_q,
+        "_mamba_packed_seq_params_cu_seqlens_kv": replay_params.cu_seqlens_kv,
+        "_mamba_packed_seq_params_cu_seqlens_q_padded": (
+            replay_params.cu_seqlens_q_padded
+        ),
+        "_mamba_packed_seq_params_cu_seqlens_kv_padded": (
+            replay_params.cu_seqlens_kv_padded
+        ),
+        "_mamba_packed_seq_params_seq_idx": replay_params.seq_idx,
+    }
+    assert make_graphed_callables_sample_kwargs.keys() == expected_capture_inputs.keys()
+    assert replay_kwargs.keys() == expected_replay_inputs.keys()
+    for key, value in expected_capture_inputs.items():
+        assert make_graphed_callables_sample_kwargs[key] is value
+    for key, value in expected_replay_inputs.items():
+        assert replay_kwargs[key] is value
     assert (
         layer._te_cuda_graph_mamba_packed_seq_params_static_metadata
         == captured_static_metadata
