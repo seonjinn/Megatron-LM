@@ -19,6 +19,7 @@ from megatron.core.models.gpt.gpt_model import GPTModel
 from megatron.core.models.hybrid.hybrid_block import HybridStack
 from megatron.core.models.hybrid.hybrid_layer_allocation import validate_segment_layers
 from megatron.core.models.hybrid.hybrid_layer_specs import hybrid_stack_spec
+from megatron.core.models.hybrid.hybrid_model import HybridModel
 from megatron.core.num_microbatches_calculator import (
     destroy_num_microbatches_calculator,
     init_num_microbatches_calculator,
@@ -971,6 +972,152 @@ class TestParallelHybridBlockCudagraphs:
             assert len(parallel_mamba_block.layers[0].cudagraph_manager.cudagraph_runners) == 1
 
             del parallel_mamba_block.layers[_].cudagraph_manager.cudagraph_runners[0].fwd_graph
+
+
+def _make_packed_mamba_params(lengths, cp_group):
+    total_tokens = 32
+    assert sum(lengths) == total_tokens
+    cu_seqlens = torch.tensor([0, lengths[0], total_tokens], device="cuda", dtype=torch.int32)
+    return PackedSeqParams(
+        qkv_format="thd",
+        cu_seqlens_q=cu_seqlens,
+        cu_seqlens_kv=cu_seqlens,
+        cu_seqlens_q_padded=cu_seqlens.clone(),
+        cu_seqlens_kv_padded=cu_seqlens.clone(),
+        max_seqlen_q=total_tokens,
+        max_seqlen_kv=total_tokens,
+        local_cp_size=2,
+        cp_group=cp_group,
+        total_tokens=total_tokens,
+    )
+
+
+class _PackedMambaCudaGraphModel(HybridModel):
+    def zero_grad_buffer(self):
+        self.zero_grad(set_to_none=True)
+
+
+def _make_packed_mamba_model(cuda_graph_impl, pg_collection):
+    config = TransformerConfig(
+        num_layers=1,
+        hidden_size=256,
+        num_attention_heads=4,
+        use_cpu_initialization=True,
+        bf16=True,
+        params_dtype=torch.bfloat16,
+        hidden_dropout=0.0,
+        attention_dropout=0.0,
+        context_parallel_size=2,
+        cuda_graph_impl=cuda_graph_impl,
+        cuda_graph_modules=[CudaGraphModule.mamba]
+        if cuda_graph_impl == "transformer_engine"
+        else [],
+    )
+    return _PackedMambaCudaGraphModel(
+        config=config,
+        hybrid_stack_spec=hybrid_stack_spec,
+        vocab_size=128,
+        max_sequence_length=32,
+        hybrid_layer_pattern="M",
+        pre_process=False,
+        post_process=False,
+        pg_collection=pg_collection,
+    ).cuda()
+
+
+def _run_packed_mamba(model, hidden_states, packed_seq_params):
+    model.zero_grad(set_to_none=True)
+    model.set_input_tensor(hidden_states)
+    output = model.decoder(
+        hidden_states=hidden_states,
+        attention_mask=None,
+        packed_seq_params=packed_seq_params,
+    )
+    output.float().square().mean().backward()
+    torch.cuda.synchronize()
+    grads = [
+        parameter.grad.detach().clone()
+        for parameter in model.parameters()
+        if parameter.grad is not None
+    ]
+    return output.detach().clone(), grads
+
+
+@pytest.mark.skipif(
+    not (HAVE_TE and is_te_min_version("1.10.0")),
+    reason="packed TE CUDA graph replay requires Transformer Engine >= 1.10.0",
+)
+def test_packed_mamba_te_cuda_graph_replay_matches_eager_on_all_cp_ranks():
+    total_tokens = 32
+    Utils.initialize_model_parallel(
+        tensor_model_parallel_size=1,
+        pipeline_model_parallel_size=1,
+        context_parallel_size=2,
+    )
+    graph_helper = None
+    try:
+        init_num_microbatches_calculator(
+            rank=torch.distributed.get_rank(),
+            global_batch_size=1,
+            micro_batch_size=1,
+            data_parallel_size=1,
+            decrease_batch_size_if_needed=False,
+        )
+        pg_collection = ProcessGroupCollection.use_mpu_process_groups(
+            required_pgs=["tp", "pp", "cp", "embd", "dp_cp"]
+        )
+        first_params = _make_packed_mamba_params([8, 24], pg_collection.cp)
+        replay_params = _make_packed_mamba_params([12, 20], pg_collection.cp)
+
+        model_parallel_cuda_manual_seed(123)
+        eager_model = _make_packed_mamba_model("none", pg_collection)
+        graph_model = _make_packed_mamba_model("transformer_engine", pg_collection)
+        graph_model.load_state_dict(eager_model.state_dict())
+
+        hidden_states = torch.randn(
+            total_tokens // 2,
+            1,
+            eager_model.config.hidden_size,
+            device="cuda",
+            dtype=torch.bfloat16,
+        )
+        eager_output, eager_grads = _run_packed_mamba(
+            eager_model, hidden_states.detach().clone().requires_grad_(True), first_params
+        )
+
+        graph_helper = TECudaGraphHelper(
+            model=[graph_model],
+            config=graph_model.config,
+            seq_length=total_tokens,
+            micro_batch_size=1,
+            pg_collection=pg_collection,
+            sample_packed_seq_params=first_params,
+        )
+        graph_helper.create_cudagraphs()
+        assert graph_helper.graphs_created()
+
+        graph_output, graph_grads = _run_packed_mamba(
+            graph_model, hidden_states.detach().clone().requires_grad_(True), first_params
+        )
+        replay_output, replay_grads = _run_packed_mamba(
+            graph_model, hidden_states.detach().clone().requires_grad_(True), replay_params
+        )
+
+        replayed_rank_count = torch.ones((), dtype=torch.int32, device="cuda")
+        torch.distributed.all_reduce(
+            replayed_rank_count, op=torch.distributed.ReduceOp.SUM, group=pg_collection.cp
+        )
+        assert replayed_rank_count.item() == torch.distributed.get_world_size(pg_collection.cp)
+
+        torch.testing.assert_close(graph_output, eager_output, rtol=1e-3, atol=1e-3)
+        torch.testing.assert_close(graph_grads, eager_grads, rtol=1e-3, atol=1e-3)
+        assert replay_output.shape == graph_output.shape
+        assert all(torch.isfinite(grad).all() for grad in replay_grads)
+    finally:
+        if graph_helper is not None and graph_helper.graphs_created():
+            graph_helper.delete_cuda_graphs()
+        destroy_num_microbatches_calculator()
+        Utils.destroy_model_parallel()
 
 
 # Global storage for comparing unique buffer counts across different num_microbatches,
