@@ -1,0 +1,16 @@
+# DSS conversion of the V14 49K video additions recipe.
+# Includes the three post-mapping caption/QA leaves activated after their DSS
+# uploads and HSG cache jobs completed on 2026-07-24. See README.md.
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+    - path: sft_49k_video_dss/medium_video_qa_0624_mcq_shuffled.yaml
+      repetitions: 0.05
+    - path: sft_49k_video_dss/long_video_qa_all_0227_rebalanced.yaml
+      repetitions: 0.1
+    - path: sft_49k_video_dss/video_reasoning.videomme.medium.0624.yaml
+      repetitions: 0.1
+    - path: sft_49k_video_dss/videomme_qa_0206.yaml
+      repetitions: 1

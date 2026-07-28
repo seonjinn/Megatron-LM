@@ -1,0 +1,98 @@
+__module__: megatron.energon
+__class__: MetadatasetV2
+splits:
+  train:
+    blend_epochized:
+      - repetitions: 2
+        path: dss://nano_v35_hopchain_fintabnet@v0
+        subflavors:
+          name: hopchain_fintabnet
+          cook: conversation
+          data_augment: false
+          length: 56479
+          orig_length: 26894
+          category: General
+        aux:
+          media_source:
+            filesystem+dss://nano_v35_hopchain_fintabnet-images_train@v0
+      - repetitions: 1
+        path: dss://nano_v35_hopchain_human_v0@v0
+        subflavors:
+          name: hopchain_human_v0
+          cook: conversation
+          data_augment: false
+          length: 7328
+          orig_length: 26894
+          category: General
+        aux:
+          media_source:
+            filesystem+dss://nano_v35_hopchain_human_annotation_v0_images_v0@v0
+      - repetitions: 2
+        path: dss://nano_v35_hopchain_nvpdftex12.1_val@v0
+        subflavors:
+          name: hopchain_nvpdftex12.1_val
+          cook: conversation
+          data_augment: false
+          length: 12170
+          orig_length: 26894
+          category: General
+        aux:
+          media_source:
+            filesystem+dss://nano_v35_hopchain_nvpdftex_val10k_images@v0
+      - repetitions: 4
+        path: dss://nano_v35_hopchain_long_1006_batch1@v0
+        subflavors:
+          name: hopchain_long_1006_batch1
+          cook: conversation
+          data_augment: false
+          length: 11521
+          orig_length: 30184
+          category: General
+        aux:
+          media_source: filesystem+dss://nano_v35_hopchain_serpapi@v0
+      - repetitions: 3
+        path: dss://nano_v35_hopchain_long_1006_batch2@v0
+        subflavors:
+          name: hopchain_long_1006_batch2
+          cook: conversation
+          data_augment: false
+          length: 10744
+          orig_length: 30184
+          category: General
+        aux:
+          media_source: filesystem+dss://nano_v35_hopchain_serpapi@v0
+      - repetitions: 1
+        path: dss://nano_v35_hopchain_coco2017@v0
+        subflavors:
+          name: hopchain_coco2017
+          cook: conversation
+          data_augment: false
+          length: 10771
+          orig_length: 30184
+          category: General
+        aux:
+          media_source: filesystem+dss://nano_v35_hopchain_coco2017_train@v0
+      - repetitions: 2
+        path:
+          dss://nano_v35_hopchain_multipage_tiny_a@v0/tiny_a_sft_converted_relpath.jsonl
+        subflavors:
+          name: hopchain_multipage_tiny_a
+          cook: general_conversations_jsonl
+          data_augment: false
+          length: 7653
+          category: General
+        aux:
+          media_source:
+            filesystem+dss://nano_v35_hopchain_multipage_images_mf_tiny_half_a@v0
+      - repetitions: 2
+        path:
+          dss://nano_v35_hopchain_multipage_tiny_b@v0/tiny_b_sft_converted_relpath.jsonl
+        subflavors:
+          name: hopchain_multipage_tiny_b
+          cook: general_conversations_jsonl
+          data_augment: false
+          length: 8521
+          category: General
+        aux:
+          media_source:
+            filesystem+dss://nano_v35_hopchain_multipage_images_mf_tiny_half_b@v0

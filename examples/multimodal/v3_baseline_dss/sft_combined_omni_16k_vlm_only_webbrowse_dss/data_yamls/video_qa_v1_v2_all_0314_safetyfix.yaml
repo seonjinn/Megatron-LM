@@ -1,0 +1,722 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+      - path: dss://HC-STVG_open_30s@v1/HC-STVG_open_30s.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://HC-STVG_30s@v0
+        repetitions: 1
+
+      - path:
+          dss://crosstask_open_30s_corrected_energon@v1/crosstask_open_30s_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://crosstask_30s@v0
+        repetitions: 1
+
+      - path:
+          dss://video-vqa-egoexolearn-video-oe_chunks_combined_batches_combined_energon@v1/video-vqa-egoexolearn-video-oe_chunks_combined_batches_combined_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://EgoExoLearn@v0
+        repetitions: 1
+
+      - path:
+          dss://llava_video_178k_activitynetqa_oe_1_2m@v1/llava_video_178k_1_2_m_activitynetqa_oe_qa_processed_chunks_combined_batches_combined_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source:
+            filesystem+dss://llava_video_178k_activitynetqa_1_2m_train@v0
+        repetitions: 1
+
+      - path:
+          dss://llava_video_178k_nextqa_mc_1_2m@v1/llava_video_178k_1_2_m_nextqa_mc_qa_processed_chunks_combined_batches_combined_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source:
+            filesystem+dss://nextvideo_llava_video_178k_nextqa_1_2m@v0
+        repetitions: 1
+
+      - path:
+          dss://llava_video_178k_nextqa_mc_0_30s@v1/llava_video_178k_0_30_s_nextqa_mc_qa_processed_chunks_combined_batches_combined_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source:
+            filesystem+dss://nextvideo_llava_video_178k_nextqa_0_30s@v0
+        repetitions: 1
+
+      - path:
+          dss://video_vqa_tvqa_long_mc_multiturn_shuffle_repeat2_corrected@v1/video-vqa-tvqa-long-mcq-multiturn-shuffle-repeat-2_chunks_combined_batches_combined_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://tvqa_fps3_mp4@v0
+        repetitions: 1
+
+      - path:
+          dss://llava_video_178k_activitynetqa_oe_30_60s@v1/llava_video_178k_30_60_s_activitynetqa_oe_qa_processed_chunks_combined_batches_combined_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source:
+            filesystem+dss://llava_video_178k_activitynetqa_30_60s_train@v0
+        repetitions: 1
+
+      - path:
+          dss://llava_video_178k_nextqa_mc_1_2m_corrected@v1/llava_video_178k_1_2_m_nextqa_mc_qa_processed_chunks_combined_batches_combined_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source:
+            filesystem+dss://nextvideo_llava_video_178k_nextqa_1_2m@v0
+        repetitions: 1
+
+      - path:
+          dss://llava_video_178k_nextqa_mc_30_60s_corrected@v1/llava_video_178k_30_60_s_nextqa_mc_qa_processed_chunks_combined_batches_combined_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source:
+            filesystem+dss://nextvideo_llava_video_178k_nextqa_30_60s@v0
+        repetitions: 1
+
+      - path:
+          dss://video-vtg-queryd_chunks_combined_batches_combined_corrected_energon@v1/video-vtg-queryd_chunks_combined_batches_combined_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://queryd@v0
+        repetitions: 1
+
+      - path:
+          dss://video-vtg-medvidqa-train_chunks_combined_batches_combined_corrected_energon@v1/video-vtg-medvidqa-train_chunks_combined_batches_combined_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://medvidqa@v0
+        repetitions: 1
+
+      - path:
+          dss://llava_video_178k_nextqa_mc_0_30s_corrected@v1/llava_video_178k_0_30_s_nextqa_mc_qa_processed_chunks_combined_batches_combined_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source:
+            filesystem+dss://nextvideo_llava_video_178k_nextqa_0_30s@v0
+        repetitions: 1
+
+      - path: dss://crosstask_open_30s@v1/crosstask_open_30s.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://crosstask_30s@v0
+        repetitions: 1
+
+      - path:
+          dss://video-vqa-videochat2-egoqa_chunks_combined_batches_combined_energon@v1/video-vqa-videochat2-egoqa_chunks_combined_batches_combined_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://videochat2_egoqa@v0
+        repetitions: 1
+
+      - path:
+          dss://llava_video_178k_nextqa_oe_1_2m@v1/llava_video_178k_1_2_m_nextqa_oe_qa_processed_chunks_combined_batches_combined_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source:
+            filesystem+dss://nextvideo_llava_video_178k_nextqa_1_2m@v0
+        repetitions: 1
+
+      - path: dss://tapos_mcq_30s@v1/tapos_mcq_30s.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://tapos_30s@v0
+        repetitions: 1
+
+      - path:
+          dss://llava_video_178k_nextqa_mc_30_60s@v1/llava_video_178k_30_60_s_nextqa_mc_qa_processed_chunks_combined_batches_combined_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source:
+            filesystem+dss://nextvideo_llava_video_178k_nextqa_30_60s@v0
+        repetitions: 1
+
+      - path:
+          dss://video_vqa_perceptiontest_mc_singleturn_corrected@v1/video-vqa-perceptiontest-mcq-singleturn_chunks_combined_batches_combined_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://perception_test_train_videos@v0
+        repetitions: 1
+
+      - path:
+          dss://video-cap-egoexolearn-ego-untrimmed_chunks_combined_batches_combined_energon@v1/video-cap-egoexolearn-ego-untrimmed_chunks_combined_batches_combined_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://EgoExoLearn@v0
+        repetitions: 1
+
+      - path:
+          dss://video-vtg-queryd_chunks_combined_batches_combined_energon@v1/video-vtg-queryd_chunks_combined_batches_combined_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://queryd@v0
+        repetitions: 1
+
+      - path:
+          dss://video-vqa-videochat2-egoqa_chunks_combined_batches_combined_corrected_energon@v1/video-vqa-videochat2-egoqa_chunks_combined_batches_combined_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://videochat2_egoqa@v0
+        repetitions: 1
+
+      - path:
+          dss://video-cls-k710-full-train_chunks_combined_batches_combined_energon@v1/video-cls-k710-full-train_chunks_combined_batches_combined_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://k710@v0
+        repetitions: 1
+
+      - path:
+          dss://video-tal-hacs-train_chunks_combined_batches_combined_corrected_energon@v1/video-tal-hacs-train_chunks_combined_batches_combined_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://hacs@v0
+        repetitions: 1
+
+      - path:
+          dss://video-dvpc-youcook2-train_chunks_combined_batches_combined_corrected_energon@v1/video-dvpc-youcook2-train_chunks_combined_batches_combined_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://youcook2@v0
+        repetitions: 1
+
+      - path:
+          dss://video-tal-hirest-class-train_chunks_combined_batches_combined_corrected_energon@v1/video-tal-hirest-class-train_chunks_combined_batches_combined_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://hirest@v0
+        repetitions: 1
+
+      - path:
+          dss://HC-STVG_mcq_30s_corrected_energon@v1/HC-STVG_mcq_30s_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://HC-STVG_30s@v0
+        repetitions: 1
+
+      - path:
+          dss://llava_video_178k_perceptiontest_mc_30_60s@v1/llava_video_178k_30_60_s_perceptiontest_mc_qa_processed_chunks_combined_batches_combined_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source:
+            filesystem+dss://llava_video_178k_perception_test_30_60_s_videos@v0
+        repetitions: 1
+
+      - path:
+          dss://HC-STVG_open_30s_corrected_energon@v1/HC-STVG_open_30s_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://HC-STVG_30s@v0
+        repetitions: 1
+
+      - path:
+          dss://tapos_mcq_30s_corrected_energon@v1/tapos_mcq_30s_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://tapos_30s@v0
+        repetitions: 1
+
+      - path:
+          dss://video-tal-fineaction-train_chunks_combined_batches_combined_energon@v1/video-tal-fineaction-train_chunks_combined_batches_combined_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://fineaction@v0
+        repetitions: 1
+
+      - path:
+          dss://llava_video_178k_nextqa_oe_0_30s_corrected@v1/llava_video_178k_0_30_s_nextqa_oe_qa_processed_chunks_combined_batches_combined_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source:
+            filesystem+dss://nextvideo_llava_video_178k_nextqa_0_30s@v0
+        repetitions: 1
+
+      - path:
+          dss://llava_video_178k_nextqa_oe_1_2m_corrected@v1/llava_video_178k_1_2_m_nextqa_oe_qa_processed_chunks_combined_batches_combined_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source:
+            filesystem+dss://nextvideo_llava_video_178k_nextqa_1_2m@v0
+        repetitions: 1
+
+      - path:
+          dss://video-tal-hacs-train_chunks_combined_batches_combined_energon@v1/video-tal-hacs-train_chunks_combined_batches_combined_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://hacs@v0
+        repetitions: 1
+
+      - path:
+          dss://video-vqa-nextqa_chunks_combined_batches_combined_corrected_energon@v1/video-vqa-nextqa_chunks_combined_batches_combined_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://nextvideo_nextqa_video_vqa_flat_mp4@v0
+        repetitions: 1
+
+      - path:
+          dss://video_tal_perceptiontest_train_corrected@v1/video-tal-perceptiontest-train_chunks_combined_batches_combined_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://perception_test_train_videos@v0
+        repetitions: 1
+
+      - path:
+          dss://llava_video_178k_perceptiontest_mc_0_30s_corrected@v1/llava_video_178k_0_30_s_perceptiontest_mc_qa_processed_chunks_combined_batches_combined_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source:
+            filesystem+dss://llava_video_178k_perception_test_0_30_s_videos@v0
+        repetitions: 1
+
+      - path:
+          dss://llava_video_178k_activitynetqa_oe_0_30s_corrected@v1/llava_video_178k_0_30_s_activitynetqa_oe_qa_processed_chunks_combined_batches_combined_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source:
+            filesystem+dss://llava_video_178k_activitynetqa_0_30s_train@v0
+        repetitions: 1
+
+      - path:
+          dss://llava_video_178k_perceptiontest_mc_30_60s_corrected@v1/llava_video_178k_30_60_s_perceptiontest_mc_qa_processed_chunks_combined_batches_combined_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source:
+            filesystem+dss://llava_video_178k_perception_test_30_60_s_videos@v0
+        repetitions: 1
+
+      - path:
+          dss://video-dvpc-youcook2-train_chunks_combined_batches_combined_energon@v1/video-dvpc-youcook2-train_chunks_combined_batches_combined_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://youcook2@v0
+        repetitions: 1
+
+      - path:
+          dss://video-vtg-ego4d-nlq-train_chunks_combined_batches_combined_corrected_energon@v1/video-vtg-ego4d-nlq-train_chunks_combined_batches_combined_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://ego4d_nlq_short448_30fps@v0
+        repetitions: 1
+
+      - path:
+          dss://video-groundvqa-anet-rtl_chunks_combined_batches_combined_corrected_energon@v1/video-groundvqa-anet-rtl_chunks_combined_batches_combined_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://anet@v0
+        repetitions: 1
+
+      - path:
+          dss://llava_video_178k_nextqa_mc_2_3m_corrected@v1/llava_video_178k_2_3_m_nextqa_mc_qa_processed_chunks_combined_batches_combined_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source:
+            filesystem+dss://nextvideo_llava_video_178k_nextqa_2_3m@v0
+        repetitions: 1
+
+      - path:
+          dss://llava_video_178k_perceptiontest_mc_0_30s@v1/llava_video_178k_0_30_s_perceptiontest_mc_qa_processed_chunks_combined_batches_combined_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source:
+            filesystem+dss://llava_video_178k_perception_test_0_30_s_videos@v0
+        repetitions: 1
+
+      - path:
+          dss://video-tal-anet-train_chunks_combined_batches_combined_energon@v1/video-tal-anet-train_chunks_combined_batches_combined_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://anet@v0
+        repetitions: 1
+
+      - path: dss://egoprocel_open_30s@v1/egoprocel_open_30s.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://egoprocel_30s@v0
+        repetitions: 1
+
+      - path:
+          dss://tapos_open_30s_corrected_energon@v1/tapos_open_30s_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://tapos_30s@v0
+        repetitions: 1
+
+      - path:
+          dss://video-tal-anet-train_chunks_combined_batches_combined_corrected_energon@v1/video-tal-anet-train_chunks_combined_batches_combined_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://anet@v0
+        repetitions: 1
+
+      - path:
+          dss://llava_video_178k_activitynetqa_oe_2_3m_corrected@v1/llava_video_178k_2_3_m_activitynetqa_oe_qa_processed_chunks_combined_batches_combined_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source:
+            filesystem+dss://llava_video_178k_activitynetqa_2_3m_train@v0
+        repetitions: 1
+
+      - path:
+          dss://video-dvpc-hirest-step-train_chunks_combined_batches_combined_energon@v1/video-dvpc-hirest-step-train_chunks_combined_batches_combined_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://hirest@v0
+        repetitions: 1
+
+
+      - path:
+          dss://video-vqa-perceptiontest-mcq-singleturn_chunks_combined_batches_combined_energon@v1/video-vqa-perceptiontest-mcq-singleturn_chunks_combined_batches_combined_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://perception_test_train_videos@v0
+        repetitions: 1
+
+
+
+      - path:
+          dss://llava_video_178k_activitynetqa_oe_0_30s@v1/llava_video_178k_0_30_s_activitynetqa_oe_qa_processed_chunks_combined_batches_combined_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source:
+            filesystem+dss://llava_video_178k_activitynetqa_0_30s_train@v0
+        repetitions: 1
+
+      - path:
+          dss://llava_video_178k_activitynetqa_oe_30_60s_corrected@v1/llava_video_178k_30_60_s_activitynetqa_oe_qa_processed_chunks_combined_batches_combined_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source:
+            filesystem+dss://llava_video_178k_activitynetqa_30_60s_train@v0
+        repetitions: 1
+
+      - path:
+          dss://video-vqa-clevrerqa_chunks_combined_batches_combined_energon@v1/video-vqa-clevrerqa_chunks_combined_batches_combined_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://clevrerqa_video_media@v0
+        repetitions: 1
+
+      - path:
+          dss://video-groundvqa-anet-rtl_chunks_combined_batches_combined_energon@v1/video-groundvqa-anet-rtl_chunks_combined_batches_combined_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://anet@v0
+        repetitions: 1
+
+      - path:
+          dss://llava_video_178k_nextqa_oe_0_30s@v1/llava_video_178k_0_30_s_nextqa_oe_qa_processed_chunks_combined_batches_combined_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source:
+            filesystem+dss://nextvideo_llava_video_178k_nextqa_0_30s@v0
+        repetitions: 1
+
+      - path:
+          dss://llava_video_178k_nextqa_oe_30_60s@v1/llava_video_178k_30_60_s_nextqa_oe_qa_processed_chunks_combined_batches_combined_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source:
+            filesystem+dss://nextvideo_llava_video_178k_nextqa_30_60s@v0
+        repetitions: 1
+
+      - path: dss://egoprocel_mcq_30s@v1/egoprocel_mcq_30s.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://egoprocel_30s@v0
+        repetitions: 1
+
+      - path:
+          dss://video_vqa_egoexolearn_video_mc_corrected@v1/video-vqa-egoexolearn-video-mcq_chunks_combined_batches_combined_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://EgoExoLearn@v0
+        repetitions: 1
+
+      - path:
+          dss://video-tal-ego4d-mq-train_chunks_combined_batches_combined_corrected_energon@v1/video-tal-ego4d-mq-train_chunks_combined_batches_combined_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://ego4d_mq_short448_30fps@v0
+        repetitions: 1
+
+      - path:
+          dss://egoprocel_open_30s_corrected_energon@v1/egoprocel_open_30s_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://egoprocel_30s@v0
+        repetitions: 1
+
+      - path:
+          dss://video-vqa-clevrerqa_chunks_combined_batches_combined_corrected_energon@v1/video-vqa-clevrerqa_chunks_combined_batches_combined_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://clevrerqa_video_media@v0
+        repetitions: 1
+
+      - path:
+          dss://video-vtg-youcook2-train_chunks_combined_batches_combined_corrected_energon@v1/video-vtg-youcook2-train_chunks_combined_batches_combined_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://youcook2@v0
+        repetitions: 1
+
+      - path:
+          dss://video_vqa_egoexolearn_video_oe_corrected@v1/video-vqa-egoexolearn-video-oe_chunks_combined_batches_combined_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://EgoExoLearn@v0
+        repetitions: 1
+
+      - path:
+          dss://video-vtg-didemo-train_chunks_combined_batches_combined_corrected_energon@v1/video-vtg-didemo-train_chunks_combined_batches_combined_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://didemo@v0
+        repetitions: 1
+
+      - path:
+          dss://video-dvpc-hirest-step-train_chunks_combined_batches_combined_corrected_energon@v1/video-dvpc-hirest-step-train_chunks_combined_batches_combined_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://hirest@v0
+        repetitions: 1
+
+      - path:
+          dss://video-cls-videochat2-k710_chunks_combined_batches_combined_energon@v1/video-cls-videochat2-k710_chunks_combined_batches_combined_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://videochat2_k710@v0
+        repetitions: 1
+
+      - path:
+          dss://video_cap_egoexolearn_ego_untrimmed_corrected@v1/video-cap-egoexolearn-ego-untrimmed_chunks_combined_batches_combined_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://EgoExoLearn@v0
+        repetitions: 1
+
+      - path:
+          dss://video-tas-breakfast-train_chunks_combined_batches_combined_corrected_energon@v1/video-tas-breakfast-train_chunks_combined_batches_combined_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://breakfast_h264@v0
+        repetitions: 1
+
+      - path:
+          dss://crosstask_mcq_30s_corrected_energon@v1/crosstask_mcq_30s_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://crosstask_30s@v0
+        repetitions: 1
+
+      - path:
+          dss://video-tal-fineaction-train_chunks_combined_batches_combined_corrected_energon@v1/video-tal-fineaction-train_chunks_combined_batches_combined_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://fineaction@v0
+        repetitions: 1
+
+      - path:
+          dss://llava_video_178k_nextqa_oe_2_3m_corrected@v1/llava_video_178k_2_3_m_nextqa_oe_qa_processed_chunks_combined_batches_combined_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source:
+            filesystem+dss://nextvideo_llava_video_178k_nextqa_2_3m@v0
+        repetitions: 1
+
+      - path:
+          dss://egoprocel_mcq_30s_corrected_energon@v1/egoprocel_mcq_30s_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://egoprocel_30s@v0
+        repetitions: 1
+
+      - path:
+          dss://llava_video_178k_activitynetqa_oe_2_3m@v1/llava_video_178k_2_3_m_activitynetqa_oe_qa_processed_chunks_combined_batches_combined_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source:
+            filesystem+dss://llava_video_178k_activitynetqa_2_3m_train@v0
+        repetitions: 1
+
+      - path:
+          dss://llava_video_178k_activitynetqa_oe_1_2m_corrected@v1/llava_video_178k_1_2_m_activitynetqa_oe_qa_processed_chunks_combined_batches_combined_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source:
+            filesystem+dss://llava_video_178k_activitynetqa_1_2m_train@v0
+        repetitions: 1
+
+      - path:
+          dss://video-dvfc-anet-caption-train_chunks_combined_batches_combined_energon@v1/video-dvfc-anet-caption-train_chunks_combined_batches_combined_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://anet@v0
+        repetitions: 1
+
+      - path:
+          dss://video_vqa_tvqa_long_mc_multiturn_shuffle_repeat2@v1/video-vqa-tvqa-long-mcq-multiturn-shuffle-repeat-2_chunks_combined_batches_combined_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://tvqa_fps3_mp4@v0
+        repetitions: 1
+
+      - path:
+          dss://video-vqa-egoexolearn-video-mcq_chunks_combined_batches_combined_energon@v1/video-vqa-egoexolearn-video-mcq_chunks_combined_batches_combined_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://EgoExoLearn@v0
+        repetitions: 1
+
+      - path: dss://HC-STVG_mcq_30s@v1/HC-STVG_mcq_30s.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://HC-STVG_30s@v0
+        repetitions: 1
+
+      - path:
+          dss://video-dvfc-anet-caption-train_chunks_combined_batches_combined_corrected_energon@v1/video-dvfc-anet-caption-train_chunks_combined_batches_combined_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://anet@v0
+        repetitions: 1
+
+      - path:
+          dss://video-cls-videochat2-sthv2_chunks_combined_batches_combined_energon@v1/video-cls-videochat2-sthv2_chunks_combined_batches_combined_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://sthv2_mp4@v0
+        repetitions: 1
+
+      - path:
+          dss://llava_video_178k_nextqa_oe_30_60s_corrected@v1/llava_video_178k_30_60_s_nextqa_oe_qa_processed_chunks_combined_batches_combined_corrected_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source:
+            filesystem+dss://nextvideo_llava_video_178k_nextqa_30_60s@v0
+        repetitions: 1
+
+      - path: dss://crosstask_mcq_30s@v1/crosstask_mcq_30s.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://crosstask_30s@v0
+        repetitions: 1
+
+      - path: dss://tapos_open_30s@v1/tapos_open_30s.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://tapos_30s@v0
+        repetitions: 1
+
+      - path:
+          dss://video-vtg-didemo-train_chunks_combined_batches_combined_energon@v1/video-vtg-didemo-train_chunks_combined_batches_combined_energon.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://didemo@v0
+        repetitions: 1
+
+      - path:
+          dss://llava_video_academic_caps_qwen3@v1/llava_video_academic_caps_qwen3.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://academic_source@v0
+        repetitions: 1
+
+      - path:
+          dss://llava_video_youtube_caps_qwen3_clean_safetyfix0323@v1/llava_video_youtube_caps_qwen3_clean_safetyfix0323.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source:
+            filesystem+dss://llava_liwei_youtube_hdvila_2024_videos@v0
+        repetitions: 1

@@ -1,0 +1,203 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+    # Boyi data
+      - path: dss://boyi_data@v1/boyi_data.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://videos_crop@v0
+        repetitions: 1
+    # Metropolis data
+      - path:
+          dss://df_human_v1_global_lita_processed@v1/df_human_v1_global_lita_processed.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://df_human@v0
+        repetitions: 1
+      - path:
+          dss://train_chunked_processed_clean_v2_safetyfix0323@v1/train_chunked_processed_clean_v2_safetyfix0323.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://video_chunked_60s@v0
+        repetitions: 1
+      - path:
+          dss://df_human_v2_global_lita_processed@v1/df_human_v2_global_lita_processed.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://df_human@v0
+        repetitions: 1
+
+    # - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/energon_jsonl_aux/short/lita_dvc_ram_drop1_wo_keyframe_processed.jsonl
+    #   subflavors:
+    #     cook: general_conversations_jsonl
+    #   aux:
+    #     media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/metropolis_data/lita_data/1_4m_videos_yt/
+    #   repetitions: 1
+      - path:
+          dss://merged_drop3_lita_processed@v1/merged_drop3_lita_processed.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://df_human@v0
+        repetitions: 1
+
+    # Molmo2 data
+      - path:
+          dss://molmo2_video_askmodelanything@v1/molmo2_video_askmodelanything.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://molmo2_videos@v0
+        repetitions: 2
+      - path: dss://molmo2_video_capqa@v1/molmo2_video_capqa.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://molmo2_videos@v0
+        repetitions: 1
+      - path: dss://molmo2_video_longcapqa@v1/molmo2_video_longcapqa.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://molmo2_videos@v0
+        repetitions: 2
+      - path: dss://molmo2_video_pointqa@v1/molmo2_video_pointqa.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://molmo2_videos@v0
+        repetitions: 1
+    # VGGSound data
+      - path: dss://short_video_ocr_vggsound@v1/short_video_ocr_vggsound.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://vggsound_video_media@v0
+        repetitions: 2
+      - path: dss://short_video_qa_vggsound@v1/short_video_qa_vggsound.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://vggsound_video_media@v0
+        repetitions: 1
+    # Miradata Video data
+      - path:
+          dss://video_qa_miradata_counting@v1/video_qa_miradata_counting.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://miradata_all_clips@v0
+        repetitions: 2
+      - path: dss://video_qa_miradata_needle@v1/video_qa_miradata_needle.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://miradata_all_clips@v0
+        repetitions: 1
+      - path: dss://video_qa_miradata_ocr@v1/video_qa_miradata_ocr.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://miradata_all_clips@v0
+        repetitions: 2
+      - path:
+          dss://video_qa_miradata_spatial_perception@v1/video_qa_miradata_spatial_perception.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://miradata_all_clips@v0
+        repetitions: 1
+      - path:
+          dss://video_qa_miradata_spatial_reasoning@v1/video_qa_miradata_spatial_reasoning.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://miradata_all_clips@v0
+        repetitions: 2
+      - path:
+          dss://video_qa_miradata_subscene@v1/video_qa_miradata_subscene.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://miradata_all_clips@v0
+        repetitions: 1
+      - path:
+          dss://video_qa_miradata_temporal@v1/video_qa_miradata_temporal.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://miradata_all_clips@v0
+        repetitions: 2
+    # Youtube140k Omni Video data
+      - path: dss://video_qa_omni_data@v1/video_qa_omni_data.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://omni_video_qa_source_videos@v0
+        repetitions: 1
+      - path:
+          dss://video_qa_omni_data_counting@v1/video_qa_omni_data_counting.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://omni_video_qa_source_videos@v0
+        repetitions: 1
+      - path: dss://video_qa_omni_data_ocr@v1/video_qa_omni_data_ocr.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://omni_video_qa_source_videos@v0
+        repetitions: 1
+      - path:
+          dss://video_qa_omni_data_spatial_perception@v1/video_qa_omni_data_spatial_perception.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://omni_video_qa_source_videos@v0
+        repetitions: 1
+      - path:
+          dss://video_qa_omni_data_spatial_reasoning@v1/video_qa_omni_data_spatial_reasoning.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://omni_video_qa_source_videos@v0
+        repetitions: 1
+    # Videomme text questions
+      - path:
+          dss://videomme_text_questions_safetyfix0323@v1/videomme_text_questions_safetyfix0323.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        repetitions: 1
+      # PLM Human video data
+      - path: dss://fgqa_plm_human_relative@v1/fgqa_plm_human_relative.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://fgqa_videos@v0
+        repetitions: 2
+    # - path: /lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/PLM_video_data/plm_rdcap_train.jsonl
+    #   subflavors:
+    #     cook: general_conversations_jsonl
+    #   aux:
+    #     media_source: filesystem:///lustre/fsw/portfolios/llmservice/projects/llmservice_fm_vision/datasets/avlm/video_audio_raw/PLM_video_data/SA-V
+    #   repetitions: 1
+
+      - path: dss://plm_rtloc_train@v1/plm_rtloc_train.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://SA-V@v0
+        repetitions: 1
+
+      - path: dss://plm_rcap_train@v1/plm_rcap_train.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://SA-V@v0
+        repetitions: 1

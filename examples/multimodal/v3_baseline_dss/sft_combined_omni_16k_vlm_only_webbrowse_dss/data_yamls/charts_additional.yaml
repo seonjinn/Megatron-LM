@@ -1,0 +1,13 @@
+# Additional charts datasets
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+      # charxiv-dd-v010-prod-extra200k-missinganchors-s320-async-h256, heuristic filters, max reasoning 20k
+      - path: charxiv-dd-v010-prod-extra200k-missinganchors-s320-async-h256__megatron_heuristic_20k_20260615__charxiv_finetune.yaml
+        repetitions: 2.0
+
+      # charxiv-dd-v010-chartqa-source-matches-38k-async-h64, heuristic filters, max reasoning 20k
+      - path: charxiv-dd-v010-chartqa-source-matches-38k-async-h64__megatron_heuristic_20k_20260615__charxiv_finetune.yaml
+        repetitions: 3.0

@@ -1,0 +1,80 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+      - path:
+          dss://nano_v35_chart_image_reasoningv3_qwen_nocot_qwen3p5_cleaned_formatted_fixthink0319_cleaned0320@v0
+        subflavors:
+          cook: conversation
+          length: 55329
+          orig_length: 69322
+          aux_data_prefixes:
+            arxiv_chart_alignment/: arxiv_chart_alignment
+            nonarxiv_chart/: nonarxiv_chart
+        aux:
+          arxiv_chart_alignment: filesystem+dss://arxiv_chart_alignment@v0
+          nonarxiv_chart: filesystem+dss://nonarxiv_chart@v0
+        repetitions: 6.0
+      - path:
+          dss://nano_v35_chart_image_descriptive_task_nonapplicable_ratio22@v0
+        subflavors:
+          cook: conversation
+          length: 35479
+          orig_length: 74263
+        aux:
+          media_source: filesystem+dss://arxiv_chart_alignment@v0
+        repetitions: 3.0
+      - path:
+          dss://nano_v35_chart_image_reasoningv4_arxiv_1002_qwen3p5_cleaned_formatted_fixthink0319_cleaned0320@v0
+        subflavors:
+          cook: conversation
+          length: 14866
+          orig_length: 19661
+        aux:
+          media_source: filesystem+dss://arxiv_chart_alignment@v0
+        repetitions: 6.0
+      - path:
+          dss://nano_v35_chart_image_reasoningv4_nonarxiv_1002_qwen3p5_cleaned_formatted_fixthink0319_cleaned0320@v0
+        subflavors:
+          cook: conversation
+          length: 18631
+          orig_length: 20770
+        aux:
+          media_source: filesystem+dss://nonarxiv_chart@v0
+        repetitions: 6.0
+      - path:
+          dss://nano_v35_chart_image_reasoningv4_arxiv_1002_remaining_nonqwen3p5_fixthink0319@v0
+        subflavors:
+          cook: conversation
+          length: 820
+          orig_length: 2424
+        aux:
+          media_source: filesystem+dss://arxiv_chart_alignment@v0
+        repetitions: 2.0
+      - path:
+          dss://nano_v35_chart_image_reasoningv4_nonarxiv_1002_remaining_nonqwen3p5@v0
+        subflavors:
+          cook: conversation
+          length: 120
+          orig_length: 444
+        aux:
+          media_source: filesystem+dss://nonarxiv_chart@v0
+        repetitions: 2.0
+      - path:
+          dss://nano_v35_charxiv_1302_qwen3p5_formatted_fixthink0319_cleaned0320@v0
+        subflavors:
+          cook: conversation
+          length: 2196
+          orig_length: 4305
+        aux:
+          media_source: filesystem+dss://charxiv_code2img@v0
+        repetitions: 6.0
+      - path: dss://nano_v35_charxiv_1302_noqwen3p5@v0
+        subflavors:
+          cook: conversation
+          length: 493
+          orig_length: 4442
+        aux:
+          media_source: filesystem+dss://charxiv_code2img@v0
+        repetitions: 2.0

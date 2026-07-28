@@ -1,0 +1,17 @@
+# DSS conversion of /lustre/fs1/portfolios/nemotron/projects/nemotron_omni_vision/users/matthieul/repos/data_recipe/includes/users/trintamaki/workspace/megatron-lm5/arxiv-random1-multi-page-big-vl-50k-03242026/arxiv-random1-multi-page-big-vl-50k-03242026.yaml
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+    - repetitions: 1
+      path: dss://nano_omni_262k_multi-page-vl2-max-samples-50k-frontier-filtered-03242026@v0
+      subflavors:
+        name: mmlongbench
+        cook: conversation
+        data_augment: false
+        length: 50000
+        orig_length: 9999999
+        category: General
+      aux:
+        media_source: filesystem+dss://nano_omni_262k_mmlongbench-arxiv-seed_random_1@v0

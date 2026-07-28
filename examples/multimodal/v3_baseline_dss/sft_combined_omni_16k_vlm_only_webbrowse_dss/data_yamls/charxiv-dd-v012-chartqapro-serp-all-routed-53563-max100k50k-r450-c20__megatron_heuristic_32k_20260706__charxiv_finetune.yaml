@@ -1,0 +1,12 @@
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+      - path:
+          dss://nano_v35_charxiv-dd-v012-chartqapro-serp-all-routed-53563-max100k50k-r450-c20@v0/charxiv_sft.jsonl
+        subflavors:
+          cook: general_conversations_jsonl
+        aux:
+          media_source: filesystem+dss://nano_v35_serp-charts@v0
+        repetitions: 1.0

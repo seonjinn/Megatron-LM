@@ -1,0 +1,12 @@
+# V14 VLM-only 16K web-browsing DSS recipe without ultra text data.
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+    - path: sft_combined_omni_16k_vlm_only_webbrowse_dss/sft_combined_omni_16k_vlm_only_no_ultra_text.yaml
+      repetitions: 1
+    - path: sft_combined_omni_16k_vlm_only_webbrowse_dss/data_yamls/perplexity_holotron_distilled_molmoweb_v2.yaml
+      repetitions: 0.5
+    - path: sft_combined_omni_16k_vlm_only_webbrowse_dss/data_yamls/holotron_a3_webarea_success_momoweb_energon.yaml
+      repetitions: 0.5

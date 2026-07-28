@@ -1,0 +1,166 @@
+# DSS conversion of /lustre/fs1/portfolios/nemotron/projects/nemotron_omni_vision/users/matthieul/repos/data_recipe/stages/v14_vlm_16k/data_yamls/short_video_qa_0318_newreps_mcq_shuffled.yaml
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+    - path: dss://boyi_data@v1/boyi_data.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://videos_crop@v0
+      repetitions: 1
+    - path: dss://df_human_v1_global_lita_processed@v1/df_human_v1_global_lita_processed.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://df_human@v0
+      repetitions: 1
+    - path: dss://train_chunked_processed_clean_v2_safetyfix0323@v1/train_chunked_processed_clean_v2_safetyfix0323.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://video_chunked_60s@v0
+      repetitions: 1
+    - path: dss://df_human_v2_global_lita_processed@v1/df_human_v2_global_lita_processed.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://df_human@v0
+      repetitions: 1
+    - path: dss://merged_drop3_lita_processed@v1/merged_drop3_lita_processed.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://df_human@v0
+      repetitions: 1
+    - path: dss://molmo2_video_askmodelanything@v1/molmo2_video_askmodelanything.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://molmo2_videos@v0
+      repetitions: 2
+    - path: dss://molmo2_video_capqa@v1/molmo2_video_capqa.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://molmo2_videos@v0
+      repetitions: 1
+    - path: dss://molmo2_video_longcapqa@v1/molmo2_video_longcapqa.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://molmo2_videos@v0
+      repetitions: 2
+    - path: dss://molmo2_video_pointqa@v1/molmo2_video_pointqa.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://molmo2_videos@v0
+      repetitions: 1
+    - path: dss://nano_v14_16k_short_video_ocr_vggsound@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://vggsound_video_media@v0
+      repetitions: 2
+    - path: dss://nano_v14_16k_short_video_qa_vggsound@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://vggsound_video_media@v0
+      repetitions: 1
+    - path: dss://nano_v14_16k_video_qa_miradata_counting@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://miradata_all_clips@v0
+      repetitions: 2
+    - path: dss://nano_v14_16k_video_qa_miradata_needle@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://miradata_all_clips@v0
+      repetitions: 1
+    - path: dss://nano_v14_16k_video_qa_miradata_ocr@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://miradata_all_clips@v0
+      repetitions: 2
+    - path: dss://nano_v14_16k_video_qa_miradata_spatial_perception@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://miradata_all_clips@v0
+      repetitions: 1
+    - path: dss://nano_v14_16k_video_qa_miradata_spatial_reasoning@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://miradata_all_clips@v0
+      repetitions: 2
+    - path: dss://nano_v14_16k_video_qa_miradata_subscene@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://miradata_all_clips@v0
+      repetitions: 1
+    - path: dss://nano_v14_16k_video_qa_miradata_temporal@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://miradata_all_clips@v0
+      repetitions: 2
+    - path: dss://nano_v14_16k_video_qa_omni_data@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://omni_video_qa_source_videos@v0
+      repetitions: 1
+    - path: dss://nano_v14_16k_video_qa_omni_data_counting@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://omni_video_qa_source_videos@v0
+      repetitions: 1
+    - path: dss://nano_v14_16k_video_qa_omni_data_ocr@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://omni_video_qa_source_videos@v0
+      repetitions: 1
+    - path: dss://nano_v14_16k_video_qa_omni_data_spatial_perception@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://omni_video_qa_source_videos@v0
+      repetitions: 1
+    - path: dss://nano_v14_16k_video_qa_omni_data_spatial_reasoning@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://omni_video_qa_source_videos@v0
+      repetitions: 1
+    - path: dss://nano_v14_16k_videomme_text_questions_safetyfix0323@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+    - path: dss://fgqa_plm_human_relative@v1/fgqa_plm_human_relative.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://fgqa_videos@v0
+      repetitions: 2
+    - path: dss://plm_rtloc_train@v1/plm_rtloc_train.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://SA-V@v0
+      repetitions: 1
+    - path: dss://plm_rcap_train@v1/plm_rcap_train.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://SA-V@v0
+      repetitions: 1

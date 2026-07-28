@@ -1,0 +1,108 @@
+# DSS conversion of the exact NRT video_reasoning.videomme.medium.0624.yaml.
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+    - path: dss://nano_v14_49k_video_qa_miradata_ocr@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+      aux:
+        media_source: filesystem+dss://miradata_all_clips@v0
+    - path: dss://nano_v14_49k_video_qa_miradata_temporal@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+      aux:
+        media_source: filesystem+dss://miradata_all_clips@v0
+    - path: dss://nano_v14_49k_video_qa_omni_data@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+      aux:
+        media_source: filesystem+dss://omni_video_qa_source_videos@v0
+    - path: dss://nano_v14_49k_video_qa_omni_data_ocr@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+      aux:
+        media_source: filesystem+dss://omni_video_qa_source_videos@v0
+    - path: dss://nano_v14_49k_yt1b_qa_plm_sampled@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+      aux:
+        media_source: filesystem+dss://yttemporal180m-youtube-dataset@v0
+    - path: dss://nano_v14_49k_video_qa_yt8m_temporal@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+      aux:
+        media_source: filesystem+dss://nano_v14_49k_YouTube8M@v0
+    - path: dss://nano_v14_49k_video_qa_yt8m_action_reasoning@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+      aux:
+        media_source: filesystem+dss://nano_v14_49k_YouTube8M@v0
+    - path: dss://nano_v14_49k_video_qa_yt8m_object_reasoning@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+      aux:
+        media_source: filesystem+dss://nano_v14_49k_YouTube8M@v0
+    - path: dss://nano_v14_49k_video_qa_yt8m_ocr_problems@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+      aux:
+        media_source: filesystem+dss://nano_v14_49k_YouTube8M@v0
+    - path: dss://nano_v14_49k_video_qa_yt8m_counting_problem@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 2
+      aux:
+        media_source: filesystem+dss://nano_v14_49k_YouTube8M@v0
+    - path: dss://nano_v14_49k_video_qa_yt8m_temporal_perception@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 2
+      aux:
+        media_source: filesystem+dss://nano_v14_49k_YouTube8M@v0
+    - path: dss://nano_v14_49k_video_yt8m_action_recognition@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+      aux:
+        media_source: filesystem+dss://nano_v14_49k_YouTube8M@v0
+    - path: dss://nano_v14_49k_video_yt8m_attribute_perception@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 2
+      aux:
+        media_source: filesystem+dss://nano_v14_49k_YouTube8M@v0
+    - path: dss://nano_v14_49k_video_qa_yt8m_object_recognition@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 2
+      aux:
+        media_source: filesystem+dss://nano_v14_49k_YouTube8M@v0
+    - path: dss://nano_v14_49k_video_yt8m_temporal_reasoning_long@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+      aux:
+        media_source: filesystem+dss://nano_v14_49k_YouTube8M@v0
+    - path: dss://nano_v14_49k_video_yt8m_temporal_reasoning_short@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+      aux:
+        media_source: filesystem+dss://nano_v14_49k_YouTube8M@v0
+    - path: dss://nano_v14_49k_yt1b_qa_plm_sampled_dense_captions@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      repetitions: 1
+      aux:
+        media_source: filesystem+dss://yttemporal180m-youtube-dataset@v0

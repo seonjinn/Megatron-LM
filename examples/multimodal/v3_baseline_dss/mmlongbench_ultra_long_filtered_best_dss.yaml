@@ -1,0 +1,44 @@
+# DSS conversion of the filtered MMLongBench ultra-long mix.
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+    - path: mmlongbench_ultra_long_filtered_best_dss/cc-batch0-03172026.yaml
+      repetitions: 1
+    - path: mmlongbench_ultra_long_filtered_best_dss/sec-03172026.yaml
+      repetitions: 1
+    - path: mmlongbench_ultra_long_filtered_best_dss/nabin-image-03172026.yaml
+      repetitions: 1
+    - path: mmlongbench_ultra_long_filtered_best_dss/cc-batch1-multi-page-03172026.yaml
+      repetitions: 1
+    - path: mmlongbench_ultra_long_filtered_best_dss/nabin-image-v2-03242026.yaml
+      repetitions: 1
+    - path: mmlongbench_ultra_long_filtered_best_dss/sec-multi-page-03242026.yaml
+      repetitions: 1
+    - path: mmlongbench_ultra_long_filtered_best_dss/arxiv-random0-multi-page-big-vl-03242026.yaml
+      repetitions: 1
+    - path: mmlongbench_ultra_long_filtered_best_dss/cc-batch2-whole-document-03242026.yaml
+      repetitions: 1
+    - path: mmlongbench_ultra_long_filtered_best_dss/arxiv-random1-multi-page-big-vl-50k-03242026.yaml
+      repetitions: 1
+    - path: mmlongbench_ultra_long_filtered_best_dss/cc-batch2-nabin-image-v2-03242026.yaml
+      repetitions: 1
+    - path: mmlongbench_ultra_long_filtered_best_dss/arxiv-random1-nabin-image-v2-03242026.yaml
+      repetitions: 1
+    - path: mmlongbench_ultra_long_filtered_best_dss/cc-batch2-multi-page-qwen3p5-03182026.yaml
+      repetitions: 1
+    - path: mmlongbench_ultra_long_filtered_best_dss/manuals-en-single-page-qwen3p5-v2-03182026.yaml
+      repetitions: 1
+    - path: mmlongbench_ultra_long_filtered_best_dss/cc-batch3-whole-document-qwen3p5-v2-03182026.yaml
+      repetitions: 1
+    - path: mmlongbench_ultra_long_filtered_best_dss/cc-batch4-whole-document-qwen3p5-v2-03182026.yaml
+      repetitions: 1
+    - path: mmlongbench_ultra_long_filtered_best_dss/sec-single-page-qwen3p5-v2-03182026.yaml
+      repetitions: 1
+    - path: mmlongbench_ultra_long_filtered_best_dss/sec-whole-document-qwen3p5-03182026.yaml
+      repetitions: 1
+    - path: mmlongbench_ultra_long_filtered_best_dss/pew-single-page-qwen3p5-v3-03252026.yaml
+      repetitions: 1.5
+    - path: mmlongbench_ultra_long_filtered_best_dss/pew-whole-document-qwen3p5-v3-03252026.yaml
+      repetitions: 1.5

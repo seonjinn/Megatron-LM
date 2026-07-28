@@ -1,0 +1,3 @@
+source_prefix,canonical_prefix,scope,confidence,notes
+/lustre/fsw/portfolios/llmservice,/lustre/fs1/portfolios/llmservice,v14_16k_49k_omni_262k,verified_for_this_migration,The NRT legacy YAMLs use fsw while the mapping registry and HSG paths use fs1 for the same llmservice portfolio hierarchy
+/lustre/fsw/portfolios/nvr,/lustre/fs1/portfolios/nvr,v14_16k_49k_omni_262k,verified_for_this_migration,The web and Holotron legacy YAMLs use fsw while the mapping registry uses fs1 for the same nvr portfolio hierarchy

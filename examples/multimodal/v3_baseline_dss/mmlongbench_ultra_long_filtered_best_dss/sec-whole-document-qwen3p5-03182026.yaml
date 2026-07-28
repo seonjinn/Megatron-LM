@@ -1,0 +1,17 @@
+# DSS conversion of /lustre/fs1/portfolios/nemotron/projects/nemotron_omni_vision/users/matthieul/repos/data_recipe/includes/users/trintamaki/workspace/megatron-lm5/sec-whole-document-qwen3p5-03182026/sec-whole-document-qwen3p5-03182026.yaml
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+    - repetitions: 1
+      path: dss://nano_omni_262k_whole-document-qwen3p5-v2-sec-03182026@v0
+      subflavors:
+        name: mmlongbench
+        cook: conversation
+        data_augment: false
+        length: 3579
+        orig_length: 9999999
+        category: General
+      aux:
+        media_source: filesystem+dss://nano_omni_262k_mmlongbench-sec-seed@v0

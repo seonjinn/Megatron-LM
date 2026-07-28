@@ -1,0 +1,86 @@
+# DSS conversion of the exact NRT videomme_qa_0206.yaml where DSS data exists.
+# Includes the three newer NRT leaves whose DSS uploads and HSG caches
+# completed on 2026-07-24.
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+    - path: dss://nano_v14_49k_yt8m_time_captions_with_think@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://nano_v14_49k_YouTube8M@v0
+      repetitions: 0.1
+    - path: dss://nano_v14_49k_yt8m_action_reasoning_captions@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://nano_v14_49k_YouTube8M@v0
+      repetitions: 0.3
+    - path: dss://nano_v14_49k_mmtrail_object_reasoning_captions@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://nano_v14_49k_mmtrail@v0
+      repetitions: 1.0
+    - path: dss://nano_v14_49k_video_omni140k_time_captions@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://nano_v14_49k_omni_video_data_reencoded@v0
+      repetitions: 1.0
+    - path: dss://nano_v14_49k_hopchain_qa_yt1b@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://nano_v14_49k_yt1b_data_200_500_sec@v0
+      repetitions: 4.0
+    - path: dss://nano_v14_49k_avspeech_dense_temporal_captions@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://nano_v14_49k_AVSpeech@v0
+      repetitions: 1.0
+    - path: dss://nano_v14_49k_ego4d_dense_temporal_captions@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://nano_v14_49k_ego4d_data@v0
+      repetitions: 2.0
+    - path: dss://nano_v14_49k_molmo2_cap_dense_temporal_captions@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://molmo2_videos@v0
+      repetitions: 1.0
+    - path: dss://nano_v14_49k_hdvila_dense_object_captions@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://nano_v14_49k_hdvila@v0
+      repetitions: 1.0
+    - path: dss://nano_v14_49k_vidchapters_dense_temporal_captions@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://nano_v14_49k_vidchapters@v0
+      repetitions: 1.0
+    - path: dss://nano_v14_49k_caprl_video_178k_dense_temporal_captions@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://nano_v14_49k_LLaVA-Video-178K@v0
+      repetitions: 1.0
+    - path: dss://nano_v14_49k_internvid_dense_temporal_captions@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://nano_v14_49k_internvid@v0
+      repetitions: 1.0
+    - path: dss://nano_v14_49k_hdvila_hopchain_qa_520k@v0
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://nano_v14_49k_hdvila@v0
+      repetitions: 1.0
