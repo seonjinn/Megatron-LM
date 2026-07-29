@@ -272,6 +272,21 @@ def test_reset_is_idempotent_and_resets_each_owned_graph_identity_once() -> None
     assert manager.registered_bank_count == 0
 
 
+def test_mutable_bank_reset_fields_cannot_bypass_canonical_reset() -> None:
+    layers = [_FakeLayer("0")]
+    manager = _make_manager(layers)
+    bank, _, graphs = _capture(manager, layers, "bank")
+    bank._is_reset = True
+    bank._reset_graph_ids = {id(graph) for graph in graphs[0]}
+
+    bank.reset()
+    bank.reset()
+
+    assert [graph.reset_calls for graph in graphs[0]] == [1, 1]
+    assert manager.registered_bank_count == 0
+    assert bank.graphs_by_layer == ()
+
+
 def test_reset_and_external_cache_drop_release_graph_references() -> None:
     layers = [_FakeLayer("0")]
     manager = _make_manager(layers)
@@ -385,6 +400,34 @@ def test_replay_guard_hot_path_does_not_run_full_bank_validation() -> None:
     )
 
     layers[0]._te_cuda_graph_bank_replay_guard(layers[0], layers[0].cuda_graphs)
+    assert (
+        manager.get_graph(
+            bank,
+            layers[0],
+            microbatch_index=0,
+            num_microbatches=2,
+        )
+        is layers[0].cuda_graphs[0]
+    )
+
+
+def test_get_graph_rejects_runtime_change_despite_stale_supplied_count() -> None:
+    runtime = {"count": 2}
+    layers = [_FakeLayer("0")]
+    manager = _make_manager(
+        layers, runtime_num_microbatches=lambda: runtime["count"]
+    )
+    bank, _, _ = _capture(manager, layers, "bank")
+    bank.activate()
+    runtime["count"] = 3
+
+    with pytest.raises(ValueError, match="runtime provider"):
+        manager.get_graph(
+            bank,
+            layers[0],
+            microbatch_index=0,
+            num_microbatches=2,
+        )
 
 
 def test_replay_guard_rejects_graph_list_swapped_between_layers() -> None:

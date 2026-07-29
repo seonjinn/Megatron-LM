@@ -9,6 +9,7 @@ be switched and reset without operating on a different bank by accident.
 
 from dataclasses import dataclass, field
 from typing import Callable, Iterable, Sequence
+from weakref import WeakSet
 
 _PACKED_REPLAY_ATTRIBUTES = (
     "_te_cuda_graph_packed_seq_params_static_metadata",
@@ -78,6 +79,7 @@ class _BankRegistration:
     graph_tuples: tuple[tuple[object, ...], ...]
     contracts: tuple[_LayerReplayContract, ...]
     replay_guard: object
+    reset_graph_ids: set[int]
 
 
 class _BankReplayGuard:
@@ -100,15 +102,11 @@ class TECudaGraphBank:
     _manager: "TECudaGraphBankManager" = field(repr=False)
     _owned_graph_lists: tuple[list[object], ...] = field(repr=False)
     _layer_contracts: tuple[_LayerReplayContract, ...] = field(repr=False)
-    _reset_graph_ids: set[int] = field(default_factory=set, init=False, repr=False)
-    _is_reset: bool = field(default=False, init=False, repr=False)
 
     def activate(self) -> None:
         self._manager.activate(self)
 
     def reset(self) -> None:
-        if self._is_reset:
-            return
         self._manager.reset(self)
 
 
@@ -151,6 +149,7 @@ class TECudaGraphBankManager:
             raise TypeError("runtime_num_microbatches must be a callable provider")
         self._runtime_num_microbatches = runtime_num_microbatches
         self._registrations: dict[int, _BankRegistration] = {}
+        self._terminal_banks: WeakSet[TECudaGraphBank] = WeakSet()
         self.active_bank: TECudaGraphBank | None = None
 
     @property
@@ -302,7 +301,7 @@ class TECudaGraphBankManager:
 
     def reset(self, bank: TECudaGraphBank) -> None:
         """Reset only graph identities owned by ``bank``."""
-        if bank._is_reset:
+        if bank in self._terminal_banks:
             return
         self._assert_model_drained()
         self._validate_bank(bank)
@@ -311,22 +310,24 @@ class TECudaGraphBankManager:
         if self.active_bank is bank:
             self.active_bank = None
         identities = {
-            id(graph) for graph_list in bank._owned_graph_lists for graph in graph_list
+            id(graph)
+            for graph_tuple in registration.graph_tuples
+            for graph in graph_tuple
         }
-        pending_identities = identities - bank._reset_graph_ids
+        pending_identities = identities - registration.reset_graph_ids
         try:
             if pending_identities:
                 self._synchronize()
                 self._reset_graph_identities(
-                    bank._owned_graph_lists,
-                    already_reset=bank._reset_graph_ids,
+                    registration.graph_tuples,
+                    already_reset=registration.reset_graph_ids,
                 )
         finally:
             self._registrations.pop(id(bank), None)
+            self._terminal_banks.add(bank)
             bank.graphs_by_layer = ()
             bank._owned_graph_lists = ()
             bank._layer_contracts = ()
-            bank._is_reset = True
             del registration
 
     def refresh_manual_hooks(self, bank: TECudaGraphBank) -> None:
@@ -352,6 +353,7 @@ class TECudaGraphBankManager:
             graph_tuples=registration.graph_tuples,
             contracts=contracts,
             replay_guard=registration.replay_guard,
+            reset_graph_ids=registration.reset_graph_ids,
         )
 
     def get_graph(
@@ -363,25 +365,13 @@ class TECudaGraphBankManager:
         num_microbatches: int,
     ) -> object:
         """Validate replay geometry before selecting the legacy modulo graph."""
-        self._validate_bank(bank)
-        if bank is not self.active_bank or not self._bank_is_installed(bank):
-            raise ValueError("TE CUDA graph bank is not active")
-        if num_microbatches != bank.fingerprint.num_microbatches:
-            raise ValueError(
-                "num_microbatches does not match the active TE CUDA graph bank"
-            )
-        try:
-            layer_index = next(
-                index
-                for index, expected_layer in enumerate(self.layers)
-                if expected_layer is layer
-            )
-        except StopIteration as exc:
-            raise ValueError(
-                "layer is not owned by this TECudaGraphBankManager"
-            ) from exc
-        graphs = bank._owned_graph_lists[layer_index]
-        return graphs[microbatch_index % num_microbatches]
+        graphs, runtime_num_microbatches = self._resolve_replay(
+            bank,
+            layer,
+            installed_graph_list=getattr(layer, "cuda_graphs", None),
+            supplied_num_microbatches=num_microbatches,
+        )
+        return graphs[microbatch_index % runtime_num_microbatches]
 
     def _get_runtime_num_microbatches(self, supplied: int | None = None) -> int:
         if supplied is not None:
@@ -398,7 +388,21 @@ class TECudaGraphBankManager:
         layer: object,
         installed_graph_list: list[object],
     ) -> None:
-        if bank._is_reset:
+        self._resolve_replay(
+            bank,
+            layer,
+            installed_graph_list=installed_graph_list,
+        )
+
+    def _resolve_replay(
+        self,
+        bank: TECudaGraphBank,
+        layer: object,
+        *,
+        installed_graph_list: object,
+        supplied_num_microbatches: int | None = None,
+    ) -> tuple[list[object], int]:
+        if bank in self._terminal_banks:
             raise ValueError("TE CUDA graph bank has already been reset")
         if bank is not self.active_bank:
             raise ValueError("TE CUDA graph bank is not active")
@@ -416,18 +420,22 @@ class TECudaGraphBankManager:
             or self.layers[layer_index] is not layer
         ):
             raise ValueError("Layer is not registered with the active bank")
-        if installed_graph_list is not registration.owned_graph_lists[layer_index]:
+        canonical_graph_list = registration.owned_graph_lists[layer_index]
+        if installed_graph_list is not canonical_graph_list:
             raise ValueError("Layer CUDA graph list does not match its bank registration")
-        runtime_num_microbatches = self._get_runtime_num_microbatches()
+        runtime_num_microbatches = self._get_runtime_num_microbatches(
+            supplied_num_microbatches
+        )
         if (
             runtime_num_microbatches != registration.fingerprint.num_microbatches
-            or len(installed_graph_list) != runtime_num_microbatches
+            or len(canonical_graph_list) != runtime_num_microbatches
             or registration.fingerprint.graph_counts[layer_index]
             != runtime_num_microbatches
         ):
             raise ValueError(
                 "runtime num_microbatches or graph count does not match the active TE CUDA graph bank"
             )
+        return canonical_graph_list, runtime_num_microbatches
 
     def _assert_model_drained(self) -> None:
         drained = self._assert_model_drained_callback()
@@ -490,12 +498,11 @@ class TECudaGraphBankManager:
         bank: TECudaGraphBank,
         *,
         establish_expected_fingerprint: bool = False,
-        allow_reset: bool = False,
         require_registered: bool = True,
     ) -> None:
         if bank._manager is not self:
             raise ValueError("Bank belongs to a different TECudaGraphBankManager")
-        if bank._is_reset and not allow_reset:
+        if bank in self._terminal_banks:
             raise ValueError("TE CUDA graph bank has already been reset")
         registration = self._registrations.get(id(bank))
         if require_registered:
@@ -555,6 +562,7 @@ class TECudaGraphBankManager:
             graph_tuples=tuple(tuple(graph_list) for graph_list in bank._owned_graph_lists),
             contracts=bank._layer_contracts,
             replay_guard=guard,
+            reset_graph_ids=set(),
         )
 
     def _live_graph_ids(self) -> set[int]:
