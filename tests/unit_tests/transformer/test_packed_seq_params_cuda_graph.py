@@ -246,7 +246,7 @@ def test_mamba_layer_replay_rejects_changed_dynamic_field_set_before_te(
     replayed = _make_mamba_packed_seq_params()
     replayed.seq_idx = None
 
-    with pytest.raises(AssertionError, match="Tensor fields"):
+    with pytest.raises(TypeError, match="seq_idx must be a Tensor"):
         replay(layer, packed_seq_params=replayed)
 
     assert not te_called["value"]
