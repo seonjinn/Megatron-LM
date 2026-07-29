@@ -2088,16 +2088,51 @@ def _layer_is_graphable(layer, config):
     return False
 
 
-def _validate_requested_cuda_graph_module_discovery(config, flattened_callables) -> None:
-    """Reject an explicit Mamba graph scope that did not discover a Mamba layer."""
+def _pipeline_group_any(
+    local_value: bool,
+    pipeline_group: torch.distributed.ProcessGroup | None,
+) -> bool:
+    """Return the logical OR of a value across the pipeline group."""
+    if (
+        pipeline_group is None
+        or not torch.distributed.is_available()
+        or not torch.distributed.is_initialized()
+    ):
+        return local_value
+
+    backend = torch.distributed.get_backend(pipeline_group)
+    is_nccl_backend = (
+        backend == torch.distributed.Backend.NCCL or str(backend).lower() == "nccl"
+    )
+    device = (
+        torch.device("cuda", torch.cuda.current_device())
+        if is_nccl_backend
+        else torch.device("cpu")
+    )
+    reduced_value = torch.tensor(local_value, dtype=torch.int32, device=device)
+    torch.distributed.all_reduce(
+        reduced_value,
+        op=torch.distributed.ReduceOp.MAX,
+        group=pipeline_group,
+    )
+    return bool(reduced_value.item())
+
+
+def _validate_requested_cuda_graph_module_discovery(
+    config: TransformerConfig,
+    flattened_callables: List[GraphableMegatronModule],
+    pipeline_group: torch.distributed.ProcessGroup | None = None,
+) -> None:
+    """Reject an explicit Mamba graph scope when no pipeline stage has a Mamba layer."""
     if CudaGraphModule.mamba not in config.cuda_graph_modules:
         return
 
     from megatron.core.ssm.mamba_layer import MambaLayer
 
-    assert any(isinstance(layer, MambaLayer) for layer in flattened_callables), (
+    local_has_mamba = any(isinstance(layer, MambaLayer) for layer in flattened_callables)
+    assert _pipeline_group_any(local_has_mamba, pipeline_group), (
         "CudaGraphModule.mamba was requested, but no MambaLayer was discovered for TE CUDA "
-        "graph capture."
+        "graph capture on any pipeline stage."
     )
 
 
@@ -2291,7 +2326,7 @@ class TECudaGraphHelper:
             f'{len(self.flattened_callables)} graphable layers.',
         )
         _validate_requested_cuda_graph_module_discovery(
-            self.config, self.flattened_callables
+            self.config, self.flattened_callables, pipeline_group=self.pp_group
         )
 
     def capture_finished(self):

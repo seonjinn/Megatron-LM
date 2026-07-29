@@ -67,7 +67,9 @@ from tests.unit_tests.test_utilities import Utils
 fp8_available, _ = check_fp8_support()
 
 
-def test_te_cuda_graph_explicit_mamba_scope_requires_discovered_mamba_layer():
+def test_te_cuda_graph_explicit_mamba_scope_allows_local_empty_when_global_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     validate_discovery = getattr(
         cuda_graphs_module,
         "_validate_requested_cuda_graph_module_discovery",
@@ -75,9 +77,81 @@ def test_te_cuda_graph_explicit_mamba_scope_requires_discovered_mamba_layer():
     )
     assert callable(validate_discovery)
     config = SimpleNamespace(cuda_graph_modules=[CudaGraphModule.mamba])
+    pipeline_group = object()
+    reduced_local_values: list[tuple[bool, object]] = []
+
+    def _global_any(local_value: bool, group: object) -> bool:
+        reduced_local_values.append((local_value, group))
+        return True
+
+    monkeypatch.setattr(cuda_graphs_module, "_pipeline_group_any", _global_any, raising=False)
+
+    validate_discovery(config, [], pipeline_group=pipeline_group)
+
+    assert reduced_local_values == [(False, pipeline_group)]
+
+
+def test_te_cuda_graph_explicit_mamba_scope_rejects_global_absence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    validate_discovery = getattr(
+        cuda_graphs_module,
+        "_validate_requested_cuda_graph_module_discovery",
+        None,
+    )
+    assert callable(validate_discovery)
+    config = SimpleNamespace(cuda_graph_modules=[CudaGraphModule.mamba])
+    pipeline_group = object()
+
+    monkeypatch.setattr(
+        cuda_graphs_module,
+        "_pipeline_group_any",
+        lambda local_value, group: False,
+        raising=False,
+    )
 
     with pytest.raises(AssertionError, match="MambaLayer"):
-        validate_discovery(config, [])
+        validate_discovery(config, [], pipeline_group=pipeline_group)
+
+
+def test_pipeline_group_any_uses_explicit_cuda_device_for_nccl(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pipeline_group_any = getattr(cuda_graphs_module, "_pipeline_group_any", None)
+    assert callable(pipeline_group_any)
+    pipeline_group = object()
+    tensor_arguments: dict[str, object] = {}
+    all_reduce_arguments: dict[str, object] = {}
+
+    class _ReducedValue:
+        def item(self) -> int:
+            return 1
+
+    def _make_tensor(value: bool, *, dtype: object, device: object) -> _ReducedValue:
+        tensor_arguments.update(value=value, dtype=dtype, device=device)
+        return _ReducedValue()
+
+    def _all_reduce(value: object, *, op: object, group: object) -> None:
+        all_reduce_arguments.update(value=value, op=op, group=group)
+
+    monkeypatch.setattr(torch.distributed, "is_available", lambda: True)
+    monkeypatch.setattr(torch.distributed, "is_initialized", lambda: True)
+    monkeypatch.setattr(torch.distributed, "get_backend", lambda group: "nccl")
+    monkeypatch.setattr(torch.cuda, "current_device", lambda: 3)
+    monkeypatch.setattr(torch, "tensor", _make_tensor)
+    monkeypatch.setattr(torch.distributed, "all_reduce", _all_reduce)
+
+    assert pipeline_group_any(False, pipeline_group)
+    assert tensor_arguments == {
+        "value": False,
+        "dtype": torch.int32,
+        "device": torch.device("cuda", 3),
+    }
+    assert isinstance(all_reduce_arguments.pop("value"), _ReducedValue)
+    assert all_reduce_arguments == {
+        "op": torch.distributed.ReduceOp.MAX,
+        "group": pipeline_group,
+    }
 
 
 def _base_cuda_graph_config(**kwargs) -> TransformerConfig:

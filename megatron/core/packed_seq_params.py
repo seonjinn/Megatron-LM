@@ -194,6 +194,12 @@ def split_mamba_packed_seq_params_for_cuda_graph(
         static_metadata["tensor_field_names"] = ()
         return {}, static_metadata
 
+    if not isinstance(packed_seq_params.seq_idx, Tensor):
+        raise TypeError(
+            "PackedSeqParams.seq_idx must be a Tensor for Mamba CUDA graphs, "
+            f"got {type(packed_seq_params.seq_idx).__name__}."
+        )
+
     consumed_fields = MAMBA_PACKED_SEQ_PARAMS_CUDA_GRAPH_TENSOR_FIELDS
     if include_cp_fields:
         consumed_fields += MAMBA_PACKED_SEQ_PARAMS_CUDA_GRAPH_CP_TENSOR_FIELDS
@@ -235,6 +241,9 @@ def build_mamba_packed_seq_params_from_cuda_graph_kwargs(
     if not packed_seq_params_present:
         return None
 
+    seq_idx_key = _cuda_graph_packed_seq_params_key(
+        "seq_idx", MAMBA_CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX
+    )
     consumed_fields = MAMBA_PACKED_SEQ_PARAMS_CUDA_GRAPH_TENSOR_FIELDS
     if include_cp_fields:
         consumed_fields += MAMBA_PACKED_SEQ_PARAMS_CUDA_GRAPH_CP_TENSOR_FIELDS
@@ -250,7 +259,9 @@ def build_mamba_packed_seq_params_from_cuda_graph_kwargs(
 
     remaining_kwargs = dict(kwargs)
     packed_seq_params_kwargs: dict[str, Tensor | None] = {}
-    for key in tensor_field_names:
+    required_tensor_field_names = set(tensor_field_names)
+    required_tensor_field_names.add(seq_idx_key)
+    for key in sorted(required_tensor_field_names):
         assert key in remaining_kwargs, (
             f"Flattened Mamba PackedSeqParams field {key} is required by the captured graph."
         )
@@ -261,5 +272,8 @@ def build_mamba_packed_seq_params_from_cuda_graph_kwargs(
                 f"got {type(value).__name__}."
             )
         packed_seq_params_kwargs[expected_keys[key]] = value
+    assert isinstance(packed_seq_params_kwargs["seq_idx"], Tensor), (
+        f"Flattened Mamba PackedSeqParams field {seq_idx_key} must be a Tensor."
+    )
 
     return PackedSeqParams(**packed_seq_params_kwargs)

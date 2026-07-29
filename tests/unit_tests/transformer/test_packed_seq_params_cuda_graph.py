@@ -117,6 +117,27 @@ def test_mamba_graph_schema_without_cp_uses_only_seq_idx() -> None:
     assert set(tensor_kwargs) == {"_mamba_packed_seq_params_seq_idx"}
 
 
+def test_mamba_graph_schema_requires_seq_idx_tensor() -> None:
+    split, _ = _get_mamba_graph_helpers()
+    packed = _make_mamba_packed_seq_params()
+    packed.seq_idx = None
+
+    with pytest.raises(TypeError, match="seq_idx must be a Tensor"):
+        split(packed, include_cp_fields=False)
+
+
+def test_mamba_rebuild_requires_prefixed_seq_idx_key() -> None:
+    _, build = _get_mamba_graph_helpers()
+    static_metadata = {
+        "packed_seq_params_present": True,
+        "include_cp_fields": False,
+        "tensor_field_names": (),
+    }
+
+    with pytest.raises(AssertionError, match="_mamba_packed_seq_params_seq_idx"):
+        build({}, static_metadata)
+
+
 def test_mamba_rebuild_preserves_supplied_seq_idx_identity() -> None:
     split, build = _get_mamba_graph_helpers()
     packed = _make_mamba_packed_seq_params()
