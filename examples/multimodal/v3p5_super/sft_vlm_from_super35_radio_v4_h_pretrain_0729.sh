@@ -13,19 +13,19 @@
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --dependency=singleton
-#SBATCH --job-name=super35_radio_v4_h_vision_adapter_pretrain
+#SBATCH --job-name=super35_radio_v4_h_vlm_sft_0729
 
 set -euo pipefail
 
-# Vision-adapter pretraining for the Super 3.5 TP8/EP8 language model combined
-# with RADIO v4-h TP8. The initial checkpoint is documented at:
+# Full multimodal SFT for the Super 3.5 TP8/EP8 model after RADIO v4-h
+# vision-adapter pretraining.
 #
-#   /lustre/fs1/portfolios/nemotron/projects/nemotron_omni_vision/users/matthieul/
-#     workspace/output/super35_radio_v4_h_tp8_ep8/iter_0000001/LINEAGE.md
+# Language-model architecture and parallelism follow the Super 3.5 text run.
+# Data, multimodal processing, packing, and optimization settings follow:
 #
-# Model architecture and model parallelism follow the Super 3.5 text-only run.
-# Vision, data, packing, and optimization settings follow the Nano v3.5
-# honest-dolphin vision-adapter pretraining stage.
+#   examples/multimodal/nano_v35/unification/sft_vlm_from_honest_dolphin.sh
+#
+# This stage intentionally does not freeze the language or vision model.
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 SCRIPT_CODE_DIR=$(cd -- "${SCRIPT_DIR}/../../.." && pwd)
@@ -57,13 +57,14 @@ case ",${CONTAINER_MOUNTS}," in
     *) CONTAINER_MOUNTS+=",${NVDATASET_CACHE_DIR}:${NVDATASET_CACHE_DIR}" ;;
 esac
 
-MODEL_NAME=${MODEL_NAME:-"super35_radio_v4_h_tp8_ep8_vision_adapter_pretrain_1377_dss"}
-CHECKPOINT_DIR=${CHECKPOINT_DIR:-"/lustre/fs1/portfolios/nemotron/projects/nemotron_omni_vision/users/matthieul/workspace/output/super35_radio_v4_h_tp8_ep8"}
-DATA_TRAIN=${DATA_TRAIN:-"${CODE_DIR}/examples/multimodal/v3_baseline/pretrain_vision_adaptor_recipe_1377_dss.yaml"}
+VISION_PRETRAIN_MODEL_NAME=${VISION_PRETRAIN_MODEL_NAME:-"super35_radio_v4_h_tp8_ep8_vision_adapter_pretrain_1377_dss_0729"}
+MODEL_NAME=${MODEL_NAME:-"super35_radio_v4_h_tp8_ep8_vlm_sft_0729"}
+VISION_PRETRAIN_CKPT_DIR=${VISION_PRETRAIN_CKPT_DIR:-"${OUTPUT_BASE}/${VISION_PRETRAIN_MODEL_NAME}/checkpoints"}
+CHECKPOINT_DIR=${CHECKPOINT_DIR:-"${VISION_PRETRAIN_CKPT_DIR}"}
+DATA_TRAIN=${DATA_TRAIN:-"${CODE_DIR}/examples/multimodal/v3_baseline/sft_combined_omni_16k_vlm_only_webbrowse_dss_no_ultra.yaml"}
 
 # This tokenizer has the same 131072 token-to-ID mapping as the Super tokenizer,
 # except that reserved IDs 18-26 are renamed to the nine multimodal markup tokens.
-# The checkpoint embedding shape and all ordinary text token IDs are unchanged.
 TOKENIZER_MODEL=${TOKENIZER_MODEL:-"/lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/tpoon/repos_nanov35/resources/tokenizer/nano_v35_sft_v10_closethink_unmask_orig6k_vlm"}
 TOKENIZER_PROMPT_FORMAT=${TOKENIZER_PROMPT_FORMAT:-"nemotron6-moe"}
 
@@ -73,11 +74,11 @@ LOGS_DIR="${OUTPUT}/logs"
 TENSORBOARD_DIR="${OUTPUT}/tensorboard"
 WANDB_DIR="${OUTPUT}/wandb"
 
+DRY_RUN=${DRY_RUN:-0}
+
 for required_path in \
     "${TRAIN_ENTRYPOINT}" \
     "${TOKENIZER_MODEL}" \
-    "${CHECKPOINT_DIR}" \
-    "${CHECKPOINT_DIR}/latest_checkpointed_iteration.txt" \
     "${DATA_TRAIN}" \
     "${CONTAINER_IMAGE}"; do
     if [[ ! -r "${required_path}" ]]; then
@@ -85,6 +86,16 @@ for required_path in \
         exit 1
     fi
 done
+
+if [[ ! -r "${CHECKPOINT_DIR}/latest_checkpointed_iteration.txt" ]]; then
+    if [[ "${DRY_RUN}" -eq 1 ]]; then
+        echo "WARNING: Pretraining checkpoint is not ready yet: ${CHECKPOINT_DIR}" >&2
+    else
+        echo "ERROR: Pretraining checkpoint tracker is not readable: ${CHECKPOINT_DIR}/latest_checkpointed_iteration.txt" >&2
+        echo "Wait for ${VISION_PRETRAIN_MODEL_NAME} to save a checkpoint, or set CHECKPOINT_DIR explicitly." >&2
+        exit 1
+    fi
+fi
 
 mkdir -p "${FINETUNE_DIR}" "${LOGS_DIR}" "${TENSORBOARD_DIR}" "${WANDB_DIR}"
 
@@ -99,8 +110,7 @@ export TORCHINDUCTOR_WORKER_START=${TORCHINDUCTOR_WORKER_START:-fork}
 export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-16}
 
-# Transport-only settings used by the Super 3.5 text run and the successful
-# TP8/EP8 checkpoint conversion. These do not change model numerics.
+# Transport settings used by the Super 3.5 text run and TP8/EP8 conversion.
 export NCCL_NVLS_ENABLE=${NCCL_NVLS_ENABLE:-0}
 export NCCL_PROTO=${NCCL_PROTO:-simple}
 export NCCL_SHM_DISABLE=${NCCL_SHM_DISABLE:-1}
@@ -120,19 +130,17 @@ WANDB_PROJECT=${WANDB_PROJECT:-"megatron-vlm-v3"}
 WANDB_ENTITY=${WANDB_ENTITY:-"adlr"}
 WANDB_NAME=${WANDB_NAME:-"${MODEL_NAME}"}
 
-# The converted checkpoint was produced with TP8/EP8. Keep this topology for
-# the initial legacy-torch load.
+# The pretraining checkpoint uses the native Super 3.5 TP8/EP8 layout.
 TP=${TP:-8}
 EP=${EP:-8}
 NUM_GPU=${NUM_GPU:-4}
 
-# Vision-adapter pretraining settings inherited from the Nano v3.5 stage.
+# Multimodal SFT settings inherited from the Nano v3.5 stage.
 MBZ=${MBZ:-1}
 NW=${NW:-8}
 AD=${AD:-0.0}
 HD=${HD:-0.0}
 LI=${LI:-5}
-DRY_RUN=${DRY_RUN:-0}
 EARLY_EXIT_ITERS=${EARLY_EXIT_ITERS:-0}
 SKIP_SAVE=${SKIP_SAVE:-0}
 NO_SAVE_OPTIM=${NO_SAVE_OPTIM:-0}
@@ -142,10 +150,14 @@ USE_DYNAMIC_RES=${USE_DYNAMIC_RES:-1}
 USE_IMAGE_BREAK=${USE_IMAGE_BREAK:-0}
 USE_CONV_MERGE=${USE_CONV_MERGE:-0}
 USE_FP8=${USE_FP8:-0}
-USE_VISION_ENCODER_EVAL_MODE=${USE_VISION_ENCODER_EVAL_MODE:-1}
-USE_CPE_EVAL_MODE=${USE_CPE_EVAL_MODE:-0}
+USE_CPE_EVAL_MODE=${USE_CPE_EVAL_MODE:-1}
 USE_PACKING=${USE_PACKING:-1}
 USE_BUCKETING=${USE_BUCKETING:-0}
+USE_CHECKPOINT_ARGS=${USE_CHECKPOINT_ARGS:-1}
+USE_SEQUENCE_PARALLEL=${USE_SEQUENCE_PARALLEL:-1}
+USE_MOE_GROUPED_GEMM=${USE_MOE_GROUPED_GEMM:-1}
+LANGUAGE_RECOMPUTE_MODULES=${LANGUAGE_RECOMPUTE_MODULES:-"core_attn mlp layernorm moe_act moe"}
+VISION_RECOMPUTE_NUM_LAYERS=${VISION_RECOMPUTE_NUM_LAYERS:-32}
 
 MAIN_HYBRID_PATTERN=${MAIN_HYBRID_PATTERN:-"MEMEMEM*EMEMEMEM*EMEMEMEM*EMEMEMEMEM*EMEMEMEMEM*EMEMEMEMEM*EMEMEMEMEM*EMEMEMEM*EMEMEMEME"}
 MTP_HYBRID_PATTERN=${MTP_HYBRID_PATTERN:-"*E"}
@@ -159,14 +171,14 @@ MTP_LOSS_SCALING_FACTOR=${MTP_LOSS_SCALING_FACTOR:-1.5e-4}
 SEQ_LEN=${SEQ_LEN:-256}
 DECODER_SEQ_LEN=${DECODER_SEQ_LEN:-16384}
 PACKING_SEQ_LEN=${PACKING_SEQ_LEN:-${DECODER_SEQ_LEN}}
-PBS=${PBS:-4000}
-BZ=${BZ:-128}
-LR=${LR:-1e-3}
-MIN_LR=${MIN_LR:-1e-5}
+PBS=${PBS:-3247}
+BZ=${BZ:-256}
+LR=${LR:-5e-5}
+MIN_LR=${MIN_LR:-0.0}
 LR_WARMUP_FRACTION=${LR_WARMUP_FRACTION:-0.1}
-WEIGHT_DECAY=${WEIGHT_DECAY:-0.01}
+WEIGHT_DECAY=${WEIGHT_DECAY:-0.05}
 SAVE_INTERVAL=${SAVE_INTERVAL:-1000}
-MOE_AUX_LOSS_COEFF=${MOE_AUX_LOSS_COEFF:-1e-9}
+MOE_AUX_LOSS_COEFF=${MOE_AUX_LOSS_COEFF:-1e-8}
 USE_LOSS_SCALING=${USE_LOSS_SCALING:-1}
 
 if [[ "${BATCH}" -eq 0 ]]; then
@@ -187,7 +199,7 @@ if [[ "${USE_FP8}" -eq 1 ]]; then
 fi
 
 if [[ "${USE_DYNAMIC_RES}" -eq 1 ]]; then
-    SEQ_LEN=12288
+    SEQ_LEN=${DYNAMIC_SEQ_LEN:-12288}
     if [[ "${USE_IMAGE_BREAK}" -eq 1 ]]; then
         if [[ "${BATCH}" -eq 0 ]]; then
             EXTRA_ARGS+=" --image-break-token <image_break>"
@@ -203,10 +215,6 @@ if [[ "${USE_DYNAMIC_RES}" -eq 1 ]]; then
         EXTRA_ARGS+=" --pixel-shuffle"
     fi
     EXTRA_ARGS+=" --dynamic-resolution --dynamic-resolution-min-patches 1024 --dynamic-resolution-max-patches 13312"
-fi
-
-if [[ "${USE_VISION_ENCODER_EVAL_MODE}" -eq 1 ]]; then
-    EXTRA_ARGS+=" --radio-force-eval-mode"
 fi
 
 if [[ "${USE_CPE_EVAL_MODE}" -eq 1 ]]; then
@@ -235,14 +243,47 @@ if [[ "${USE_PACKING}" -eq 1 ]]; then
     fi
 fi
 
-EXTRA_ARGS+=" --allow-missing-vision-projection-checkpoint"
+VIDEO_MAX_NUM_FRAMES=${VIDEO_MAX_NUM_FRAMES:-64}
+VIDEO_TARGET_NUM_PATCHES=${VIDEO_TARGET_NUM_PATCHES:-1024}
+VIDEO_AUG_SCALE_FRAMES_UP=${VIDEO_AUG_SCALE_FRAMES_UP:-4}
+VIDEO_AUG_SCALE_RESOLUTION_UP=${VIDEO_AUG_SCALE_RESOLUTION_UP:-None}
+VIDEO_AUG_SCALE_RESOLUTION_ONLY=${VIDEO_AUG_SCALE_RESOLUTION_ONLY:-1}
+EXTRA_ARGS+=" --video-maintain-aspect-ratio --separate-video-embedder"
+EXTRA_ARGS+=" --video-target-num-patches ${VIDEO_TARGET_NUM_PATCHES}"
+EXTRA_ARGS+=" --video-max-num-frames ${VIDEO_MAX_NUM_FRAMES}"
+EXTRA_ARGS+=" --video-temporal-patch-size 2 --video-prompt-version 2"
+if [[ "${VIDEO_AUG_SCALE_FRAMES_UP}" != "None" ]]; then
+    EXTRA_ARGS+=" --video-aug-scale-frames-up ${VIDEO_AUG_SCALE_FRAMES_UP}"
+fi
+if [[ "${VIDEO_AUG_SCALE_RESOLUTION_UP}" != "None" ]]; then
+    EXTRA_ARGS+=" --video-aug-scale-resolution-up ${VIDEO_AUG_SCALE_RESOLUTION_UP}"
+fi
+if [[ "${VIDEO_AUG_SCALE_RESOLUTION_ONLY}" -eq 1 ]]; then
+    EXTRA_ARGS+=" --video-aug-scale-resolution-only"
+fi
+
 if [[ "${USE_LOSS_SCALING}" -eq 1 ]]; then
     EXTRA_ARGS+=" --use-loss-scaling"
 fi
 
-EXTRA_ARGS+=" --recompute-granularity selective --recompute-modules mlp moe"
-EXTRA_ARGS+=" --recompute-vision --recompute-method-vision block --recompute-granularity-vision full --recompute-vision-num-layers 16"
-EXTRA_ARGS+=" --only-keep-samples-with-img --use-new-dataloader-path --apply-data-augment ${CUSTOM_ARGS:-}"
+EXTRA_ARGS+=" --recompute-granularity selective --recompute-modules ${LANGUAGE_RECOMPUTE_MODULES}"
+EXTRA_ARGS+=" --recompute-vision --recompute-method-vision block --recompute-granularity-vision full --recompute-vision-num-layers ${VISION_RECOMPUTE_NUM_LAYERS}"
+EXTRA_ARGS+=" --log-model-grad-norms --log-model-act-norms --allow-checkpoint-without-temporal-compression ${CUSTOM_ARGS:-}"
+
+CHECKPOINT_CONFIG_ARGS=""
+if [[ "${USE_CHECKPOINT_ARGS}" -eq 1 ]]; then
+    CHECKPOINT_CONFIG_ARGS="--use-checkpoint-args"
+fi
+
+PARALLEL_ARGS=""
+if [[ "${USE_SEQUENCE_PARALLEL}" -eq 1 ]]; then
+    PARALLEL_ARGS="--sequence-parallel"
+fi
+
+MOE_GROUPED_GEMM_ARGS=""
+if [[ "${USE_MOE_GROUPED_GEMM}" -eq 1 ]]; then
+    MOE_GROUPED_GEMM_ARGS="--moe-grouped-gemm"
+fi
 
 CHECKPOINT_ARGS=" \
     --pretrained-checkpoint ${CHECKPOINT_DIR} \
@@ -265,7 +306,7 @@ if [[ "${SKIP_SAVE}" -eq 0 ]]; then
 fi
 
 OPTIONS=" \
-    --use-checkpoint-args \
+    ${CHECKPOINT_CONFIG_ARGS} \
     --no-use-tokenizer-model-from-checkpoint-args \
     --transformer-impl transformer_engine \
     --use-te \
@@ -290,7 +331,7 @@ OPTIONS=" \
     --moe-permute-fusion \
     --use-fused-weighted-squared-relu \
     --moe-router-score-function sigmoid \
-    --moe-grouped-gemm \
+    ${MOE_GROUPED_GEMM_ARGS} \
     --num-experts 512 \
     --moe-router-topk 22 \
     --moe-aux-loss-coeff ${MOE_AUX_LOSS_COEFF} \
@@ -324,7 +365,7 @@ OPTIONS=" \
     --normalization RMSNorm \
     --attention-dropout ${AD} \
     --hidden-dropout ${HD} \
-    --exit-duration-in-mins 230 \
+    --exit-duration-in-mins 220 \
     --tensor-model-parallel-size ${TP} \
     --expert-model-parallel-size ${EP} \
     --expert-tensor-parallel-size 1 \
@@ -346,6 +387,8 @@ OPTIONS=" \
     --tokenizer-type MultimodalTokenizer \
     --tokenizer-model ${TOKENIZER_MODEL} \
     --tokenizer-prompt-format ${TOKENIZER_PROMPT_FORMAT} \
+    --thinking-trace-format ultra \
+    --tokenizer-keep-history-thinking \
     ${CHECKPOINT_ARGS} \
     --log-progress \
     --timing-log-option minmax \
@@ -360,36 +403,33 @@ OPTIONS=" \
     --use-distributed-optimizer \
     --num-workers ${NW} \
     --tensorboard-dir ${TENSORBOARD_DIR} \
-    --sequence-parallel \
+    ${PARALLEL_ARGS} \
     --allow-large-videos \
-    --freeze-ViT \
-    --freeze-LM \
-    --thinking-trace-format ultra \
 "
 
 export WANDB_PROJECT WANDB_ENTITY WANDB_NAME WANDB_DIR
 export NVTE_APPLY_QK_LAYER_SCALING=0
 export NVTE_ALLOW_NONDETERMINISTIC_ALGO=1
 
+run_cmd="python -u ${TRAIN_ENTRYPOINT} ${OPTIONS}"
+
+echo "CODE_DIR=${CODE_DIR}"
+echo "CHECKPOINT_DIR=${CHECKPOINT_DIR}"
+echo "DATA_TRAIN=${DATA_TRAIN}"
+echo "TOKENIZER_MODEL=${TOKENIZER_MODEL}"
+echo "FINETUNE_DIR=${FINETUNE_DIR}"
+echo "TP=${TP} EP=${EP}"
+
+if [[ "${DRY_RUN}" -eq 1 ]]; then
+    echo "${run_cmd}"
+    exit 0
+fi
+
 if [[ "${BATCH}" -eq 0 ]]; then
     cd "${CODE_DIR}"
     torchrun --nproc_per_node "${NUM_GPU}" "${TRAIN_ENTRYPOINT}" ${OPTIONS}
 else
-    run_cmd="python -u ${TRAIN_ENTRYPOINT} ${OPTIONS}"
-
-    echo "CODE_DIR=${CODE_DIR}"
-    echo "CHECKPOINT_DIR=${CHECKPOINT_DIR}"
-    echo "DATA_TRAIN=${DATA_TRAIN}"
-    echo "TOKENIZER_MODEL=${TOKENIZER_MODEL}"
-    echo "FINETUNE_DIR=${FINETUNE_DIR}"
-    echo "TP=${TP} EP=${EP}"
     git -C "${CODE_DIR}" log --oneline -1
-
-    if [[ "${DRY_RUN}" -eq 1 ]]; then
-        echo "${run_cmd}"
-        exit 0
-    fi
-
     DATETIME=$(date +'date_%y-%m-%d_time_%H-%M-%S')
     srun -l --verbose \
         --mpi=none \
