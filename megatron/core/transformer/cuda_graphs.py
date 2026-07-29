@@ -35,6 +35,10 @@ from megatron.core.tensor_parallel.random import (
 )
 from megatron.core.transformer.enums import CudaGraphModule
 from megatron.core.transformer.module import GraphableMegatronModule, MegatronModule
+from megatron.core.transformer.te_cuda_graph_bank import (
+    TECudaGraphBank,
+    TECudaGraphBankManager,
+)
 from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.utils import (
     get_attr_wrapped_model,
@@ -2188,6 +2192,46 @@ def _add_mamba_packed_seq_params_to_te_cuda_graph_sample_kwargs(
     sample_kwargs.update(tensor_kwargs)
 
 
+def _map_te_graphs_to_layers(
+    graphs,
+    *,
+    callables_per_chunk,
+    owned_graph_lists,
+    num_microbatches,
+    overlap_moe_expert_parallel_comm,
+):
+    """Map TE's flat graph result into manager-owned per-layer lists."""
+    flattened_layers = [layer for layers in callables_per_chunk for layer in layers]
+    assert len(flattened_layers) == len(owned_graph_lists), (
+        "Every graphable layer must have exactly one manager-owned graph list."
+    )
+    expected_graph_count = len(flattened_layers) * num_microbatches
+    assert len(graphs) == expected_graph_count, (
+        f"Expected {expected_graph_count} TE CUDA graphs, got {len(graphs)}."
+    )
+
+    num_layers_accumulated = 0
+    owned_list_index = 0
+    for layers in callables_per_chunk:
+        for layer_number, _ in enumerate(layers):
+            graph_list = owned_graph_lists[owned_list_index]
+            assert not graph_list, "TE CUDA graph owned lists must be empty before mapping."
+            for batch_number in range(num_microbatches):
+                if overlap_moe_expert_parallel_comm:
+                    graph_idx = (
+                        num_layers_accumulated + layer_number
+                    ) * num_microbatches + batch_number
+                else:
+                    graph_idx = (
+                        num_layers_accumulated * num_microbatches
+                        + batch_number * len(layers)
+                        + layer_number
+                    )
+                graph_list.append(graphs[graph_idx])
+            owned_list_index += 1
+        num_layers_accumulated += len(layers)
+
+
 class TECudaGraphHelper:
     """
     Helper class to capture CUDA Graphs using TE make_graphed_callables().
@@ -2250,6 +2294,9 @@ class TECudaGraphHelper:
         #   layers found)
         self._capture_finished = False
         self._graphs_created = False
+        self._capture_gc_frozen = False
+        self._compatibility_bank = None
+        self._compatibility_bank_manager = None
 
     def _discover_layers(self):
         """Discover captureable layers from the model and populate internal data structures."""
@@ -2795,6 +2842,7 @@ class TECudaGraphHelper:
         torch.cuda.empty_cache()
         if FREEZE_GC:
             gc.freeze()
+            self._capture_gc_frozen = True
 
         _set_capture_start()
         log_single_rank(logger, logging.INFO, f'Start CUDA Graphs capture...')
@@ -2834,59 +2882,128 @@ class TECudaGraphHelper:
             off_interface.reset()
         torch.cuda.synchronize()
         self._reset_after_capture()
-        if FREEZE_GC:
+        if self._capture_gc_frozen:
             gc.unfreeze()
+            self._capture_gc_frozen = False
         gc.collect()
         torch.cuda.empty_cache()
 
         self._capture_finished = True
 
-    def create_cudagraphs(self):
-        """
-        Capture CUDA Graphs per TransformerLayer per microbatch.
-        """
-        start_time = self._start_capturing()
+    def _abort_capturing(self):
+        """Restore process-global state after an unsuccessful TE capture."""
+        _set_warmup_end()
+        _set_capture_end()
+        if HAVE_TE_GRAPHS:
+            try:
+                te_set_capture_end()
+            except Exception:
+                logger.debug("TE capture state was already clear during abort.", exc_info=True)
 
-        if not self.flattened_callables:
-            # Check if there are any graphable layers. If not, log a warning and skip capture,
-            # but still call _finish_capturing to ensure all ranks complete the capture phase.
-            logger.warning(
-                'TECudaGraphHelper: No graphable layers found. Skipping CUDA graph capture.'
-            )
-        else:
-            # Prepare CUDA Graph capturing input data and call `make_graphed_callables`.
-            sample_args, kwargs = self._get_cuda_graph_input_data()
-            if self.config.sequence_parallel:
-                rng_context = get_cuda_rng_tracker().fork()
-            else:
-                rng_context = nullcontext()
-            with rng_context:
-                graphs = make_graphed_callables(
-                    tuple(self.flattened_callables), sample_args, **kwargs
+        from megatron.core.pipeline_parallel.fine_grained_activation_offload import (
+            FineGrainedActivationOffloadingInterface as off_interface,
+        )
+
+        if self.config.fine_grained_activation_offloading:
+            off_interface.reset()
+        if self._capture_gc_frozen:
+            gc.unfreeze()
+            self._capture_gc_frozen = False
+
+        if is_te_min_version("2.10.0"):
+            reset_graph_ids = set()
+            for layer in self.flattened_callables:
+                for graph in getattr(layer, "cuda_graphs", ()):
+                    graph_id = id(graph)
+                    if graph_id in reset_graph_ids:
+                        continue
+                    if hasattr(graph, "reset"):
+                        graph.reset()
+                    reset_graph_ids.add(graph_id)
+                layer.cuda_graphs.clear()
+
+        torch.cuda.synchronize()
+        gc.collect()
+        torch.cuda.empty_cache()
+        self._capture_finished = False
+        self._graphs_created = False
+
+    def _capture_cuda_graph_lists(self, *, num_microbatches):
+        """Capture CUDA graphs into the empty lists already installed on layers."""
+        try:
+            start_time = self._start_capturing()
+            for layer in self.flattened_callables:
+                assert not layer.cuda_graphs, (
+                    "TE CUDA graph capture requires empty manager-owned layer lists."
                 )
 
-            # Push the captured graphs to the corresponding TransformerBlock.
-            num_layers_accumulated = 0
-            for layers in self.callables_per_chunk:
-                for layer_number, layer in enumerate(layers):
-                    layer.cuda_graphs = []
-                    for batch_number in range(self.num_microbatches):
-                        if self.config.overlap_moe_expert_parallel_comm:
-                            graph_idx = (
-                                num_layers_accumulated + layer_number
-                            ) * self.num_microbatches + batch_number
-                        else:
-                            graph_idx = (
-                                num_layers_accumulated * self.num_microbatches
-                                + batch_number * len(layers)
-                                + layer_number
-                            )
-                        layer.cuda_graphs.append(graphs[graph_idx])
-                num_layers_accumulated += len(layers)
+            if not self.flattened_callables:
+                logger.warning(
+                    'TECudaGraphHelper: No graphable layers found. Skipping CUDA graph capture.'
+                )
+            else:
+                sample_args, kwargs = self._get_cuda_graph_input_data()
+                if self.num_microbatches != num_microbatches:
+                    raise ValueError(
+                        "num_microbatches requested by the graph bank does not match "
+                        f"the helper capture schedule ({num_microbatches} != "
+                        f"{self.num_microbatches})."
+                    )
+                if self.config.sequence_parallel:
+                    rng_context = get_cuda_rng_tracker().fork()
+                else:
+                    rng_context = nullcontext()
+                with rng_context:
+                    graphs = make_graphed_callables(
+                        tuple(self.flattened_callables), sample_args, **kwargs
+                    )
 
-            self._graphs_created = True
+                _map_te_graphs_to_layers(
+                    graphs,
+                    callables_per_chunk=self.callables_per_chunk,
+                    owned_graph_lists=[
+                        layer.cuda_graphs for layer in self.flattened_callables
+                    ],
+                    num_microbatches=self.num_microbatches,
+                    overlap_moe_expert_parallel_comm=(
+                        self.config.overlap_moe_expert_parallel_comm
+                    ),
+                )
+                self._graphs_created = True
 
-        self._finish_capturing(start_time)
+            self._finish_capturing(start_time)
+            return tuple(
+                (layer, tuple(layer.cuda_graphs))
+                for layer in self.flattened_callables
+            )
+        except BaseException:
+            self._abort_capturing()
+            raise
+
+    def create_cuda_graph_bank(
+        self,
+        manager: TECudaGraphBankManager,
+        *,
+        num_microbatches: int,
+    ) -> TECudaGraphBank:
+        """Capture one manager-owned TE CUDA graph bank."""
+        return manager.capture(self, num_microbatches=num_microbatches)
+
+    def create_cudagraphs(self):
+        """Capture and activate one backward-compatible TE CUDA graph bank."""
+        manager = TECudaGraphBankManager.from_helper(self)
+        requested_num_microbatches = (
+            1
+            if self.pp_group.size() == 1
+            and not self.config.overlap_moe_expert_parallel_comm
+            else get_num_microbatches()
+        )
+        bank = self.create_cuda_graph_bank(
+            manager, num_microbatches=requested_num_microbatches
+        )
+        bank.activate()
+        self._compatibility_bank_manager = manager
+        self._compatibility_bank = bank
 
     def cuda_graph_set_manual_hooks(self):
         """
@@ -2899,23 +3016,14 @@ class TECudaGraphHelper:
                 layer.setup_manual_hooks(model_chunk._make_forward_pre_hook)
 
     def delete_cuda_graphs(self):
-        """
-        Delete all CUDA graphs.
-        """
-        assert self._graphs_created, "No CUDA Graphs were created to delete."
-
-        graph_resettable = is_te_min_version("2.10.0")
-        graphs_reset, graphs_not_reset = 0, 0
-        for layers in self.callables_per_chunk:
-            for layer in layers:
-                for graph in layer.cuda_graphs:
-                    if graph_resettable:
-                        graph.reset()
-                        graphs_reset += 1
-                    else:
-                        graphs_not_reset += 1
-                layer.cuda_graphs = []
-                layer.cuda_graph_manual_hooks = []
+        """Delete the exact bank created by the compatibility capture method."""
+        assert self._compatibility_bank is not None, (
+            "No compatibility CUDA Graph bank was created to delete."
+        )
+        graph_count = sum(
+            len(graphs) for _, graphs in self._compatibility_bank.graphs_by_layer
+        )
+        self._compatibility_bank.reset()
 
         log_on_each_pipeline_stage(
             logger=logger,
@@ -2923,9 +3031,10 @@ class TECudaGraphHelper:
             dp_cp_group=self.dp_cp_group,
             level=logging.INFO,
             msg=f'Rank {torch.distributed.get_rank()}: '
-            f'{graphs_reset} graphs deleted with explicit reset, '
-            f'{graphs_not_reset} graphs deleted without explicit reset.',
+            f'{graph_count} owned TE CUDA graphs deleted.',
         )
+        self._compatibility_bank = None
+        self._compatibility_bank_manager = None
         self._graphs_created = False
 
 
@@ -3287,7 +3396,9 @@ class VisionTECudaGraphHelper(TECudaGraphHelper):
         # Wrap the captured graphs before finishing
         for layer in self.flattened_callables:
             if hasattr(layer, 'cuda_graphs'):
-                layer.cuda_graphs = [_wrap_graph_for_vision(g) for g in layer.cuda_graphs]
+                layer.cuda_graphs[:] = [
+                    _wrap_graph_for_vision(graph) for graph in layer.cuda_graphs
+                ]
 
         super()._finish_capturing(start_time)
 
