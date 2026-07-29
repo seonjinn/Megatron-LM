@@ -2295,6 +2295,7 @@ class TECudaGraphHelper:
         self._capture_finished = False
         self._graphs_created = False
         self._capture_gc_frozen = False
+        self._capture_attempted = False
         self._compatibility_bank = None
         self._compatibility_bank_manager = None
 
@@ -2894,23 +2895,26 @@ class TECudaGraphHelper:
         """Restore process-global state after an unsuccessful TE capture."""
         _set_warmup_end()
         _set_capture_end()
+        cleanup_errors = []
         if HAVE_TE_GRAPHS:
             try:
                 te_set_capture_end()
-            except Exception:
-                logger.debug("TE capture state was already clear during abort.", exc_info=True)
+            except Exception as error:
+                cleanup_errors.append(error)
 
-        from megatron.core.pipeline_parallel.fine_grained_activation_offload import (
-            FineGrainedActivationOffloadingInterface as off_interface,
-        )
+        synchronized = False
+        try:
+            torch.cuda.synchronize()
+            synchronized = True
+        except Exception as error:
+            cleanup_errors.append(error)
 
-        if self.config.fine_grained_activation_offloading:
-            off_interface.reset()
-        if self._capture_gc_frozen:
-            gc.unfreeze()
-            self._capture_gc_frozen = False
-
-        if is_te_min_version("2.10.0"):
+        try:
+            graph_resettable = synchronized and is_te_min_version("2.10.0")
+        except Exception as error:
+            cleanup_errors.append(error)
+            graph_resettable = False
+        if graph_resettable:
             reset_graph_ids = set()
             for layer in self.flattened_callables:
                 for graph in getattr(layer, "cuda_graphs", ()):
@@ -2918,15 +2922,46 @@ class TECudaGraphHelper:
                     if graph_id in reset_graph_ids:
                         continue
                     if hasattr(graph, "reset"):
-                        graph.reset()
+                        try:
+                            graph.reset()
+                        except Exception as error:
+                            cleanup_errors.append(error)
                     reset_graph_ids.add(graph_id)
+        for layer in self.flattened_callables:
+            try:
                 layer.cuda_graphs.clear()
+            except Exception as error:
+                cleanup_errors.append(error)
 
-        torch.cuda.synchronize()
-        gc.collect()
-        torch.cuda.empty_cache()
-        self._capture_finished = False
-        self._graphs_created = False
+        try:
+            from megatron.core.pipeline_parallel.fine_grained_activation_offload import (
+                FineGrainedActivationOffloadingInterface as off_interface,
+            )
+
+            if self.config.fine_grained_activation_offloading:
+                off_interface.reset()
+        except Exception as error:
+            cleanup_errors.append(error)
+        try:
+            if self._capture_gc_frozen:
+                gc.unfreeze()
+        except Exception as error:
+            cleanup_errors.append(error)
+        finally:
+            self._capture_gc_frozen = False
+        try:
+            gc.collect()
+            torch.cuda.empty_cache()
+        except Exception as error:
+            cleanup_errors.append(error)
+        finally:
+            self._capture_finished = False
+            self._graphs_created = False
+        if cleanup_errors:
+            logger.warning(
+                "Suppressed %d cleanup error(s) while aborting TE CUDA graph capture.",
+                len(cleanup_errors),
+            )
 
     def _capture_cuda_graph_lists(self, *, num_microbatches):
         """Capture CUDA graphs into the empty lists already installed on layers."""
@@ -3014,6 +3049,13 @@ class TECudaGraphHelper:
             model_chunk = self.model[chunk_number]
             for layer in layers:
                 layer.setup_manual_hooks(model_chunk._make_forward_pre_hook)
+        if (
+            self._compatibility_bank_manager is not None
+            and self._compatibility_bank is not None
+        ):
+            self._compatibility_bank_manager.refresh_manual_hooks(
+                self._compatibility_bank
+            )
 
     def delete_cuda_graphs(self):
         """Delete the exact bank created by the compatibility capture method."""
