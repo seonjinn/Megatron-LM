@@ -1,8 +1,13 @@
 # Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
 
+from collections.abc import Callable
+from types import SimpleNamespace
+
 import pytest
 import torch
 
+import megatron.core.packed_seq_params as packed_seq_module
+import megatron.core.transformer.cuda_graphs as cuda_graphs_module
 from megatron.core.packed_seq_params import (
     CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX,
     PACKED_SEQ_PARAMS_CUDA_GRAPH_STATIC_FIELDS,
@@ -12,9 +17,13 @@ from megatron.core.packed_seq_params import (
     has_packed_seq_params_cuda_graph_kwargs,
     split_packed_seq_params_for_cuda_graph,
 )
+from megatron.core.ssm.mamba_layer import MambaLayer
 from megatron.core.transformer.cuda_graphs import (
+    TECudaGraphHelper,
     _add_packed_seq_params_to_te_cuda_graph_sample_kwargs,
 )
+from megatron.core.transformer.enums import CudaGraphModule
+from megatron.core.transformer.module import GraphableMegatronModule
 from megatron.core.transformer.transformer_layer import TransformerLayer
 
 
@@ -55,6 +64,260 @@ def _make_packed_seq_params():
         max_seqlen_kv=8,
         local_cp_size=1,
     )
+
+
+def _make_mamba_packed_seq_params() -> PackedSeqParams:
+    packed_seq_params = PackedSeqParams(
+        qkv_format="thd",
+        cu_seqlens_q=torch.IntTensor([0, 2, 5]),
+        cu_seqlens_kv=torch.IntTensor([0, 3, 5]),
+        cu_seqlens_q_padded=torch.IntTensor([0, 4, 8]),
+        cu_seqlens_kv_padded=torch.IntTensor([0, 6, 8]),
+        max_seqlen_q=4,
+        max_seqlen_kv=6,
+        local_cp_size=2,
+        total_tokens=8,
+    )
+    packed_seq_params.seq_idx = torch.IntTensor([[0, 0, 1, 1, 1, 2, 2, 2]])
+    return packed_seq_params
+
+
+def _get_mamba_graph_helpers() -> tuple[Callable[..., object], Callable[..., object]]:
+    split = getattr(
+        packed_seq_module,
+        "split_mamba_packed_seq_params_for_cuda_graph",
+        None,
+    )
+    build = getattr(
+        packed_seq_module,
+        "build_mamba_packed_seq_params_from_cuda_graph_kwargs",
+        None,
+    )
+    assert callable(split)
+    assert callable(build)
+    return split, build
+
+
+def test_mamba_graph_schema_uses_only_consumed_tensor_fields() -> None:
+    split, _ = _get_mamba_graph_helpers()
+    packed = _make_mamba_packed_seq_params()
+    tensor_kwargs, static = split(packed, include_cp_fields=True)
+    assert set(tensor_kwargs) == {
+        "_mamba_packed_seq_params_seq_idx",
+        "_mamba_packed_seq_params_cu_seqlens_q",
+        "_mamba_packed_seq_params_cu_seqlens_q_padded",
+    }
+    assert "_mamba_packed_seq_params_cu_seqlens_kv" not in tensor_kwargs
+    assert "total_tokens" not in static
+
+
+def test_mamba_graph_schema_without_cp_uses_only_seq_idx() -> None:
+    split, _ = _get_mamba_graph_helpers()
+    tensor_kwargs, _ = split(_make_mamba_packed_seq_params(), include_cp_fields=False)
+    assert set(tensor_kwargs) == {"_mamba_packed_seq_params_seq_idx"}
+
+
+def test_mamba_rebuild_preserves_supplied_seq_idx_identity() -> None:
+    split, build = _get_mamba_graph_helpers()
+    packed = _make_mamba_packed_seq_params()
+    tensor_kwargs, static = split(packed, include_cp_fields=True)
+    rebuilt = build(dict(tensor_kwargs), static)
+    assert rebuilt.seq_idx is packed.seq_idx
+    assert rebuilt.total_tokens is None
+
+
+def _get_mamba_layer_graph_methods() -> tuple[Callable[..., object], Callable[..., object]]:
+    flatten = getattr(
+        MambaLayer,
+        "_flatten_te_cuda_graph_mamba_packed_seq_params",
+        None,
+    )
+    replay = getattr(MambaLayer, "_te_cuda_graph_replay", None)
+    assert callable(flatten)
+    assert callable(replay)
+    return flatten, replay
+
+
+def _get_add_mamba_sample_helper() -> Callable[..., object]:
+    helper = getattr(
+        cuda_graphs_module,
+        "_add_mamba_packed_seq_params_to_te_cuda_graph_sample_kwargs",
+        None,
+    )
+    assert callable(helper)
+    return helper
+
+
+def _make_mamba_layer_for_graph_test(
+    monkeypatch: pytest.MonkeyPatch,
+    packed_seq_params: PackedSeqParams,
+    *,
+    context_parallel_size: int = 1,
+) -> tuple[MambaLayer, dict[str, bool]]:
+    layer = MambaLayer.__new__(MambaLayer)
+    torch.nn.Module.__init__(layer)
+    layer.config = SimpleNamespace(context_parallel_size=context_parallel_size)
+    _get_add_mamba_sample_helper()(layer, {}, packed_seq_params)
+    te_called = {"value": False}
+
+    def _fake_te_replay(
+        self: GraphableMegatronModule, *args: object, **kwargs: object
+    ) -> object:
+        te_called["value"] = True
+        return object()
+
+    monkeypatch.setattr(GraphableMegatronModule, "_te_cuda_graph_replay", _fake_te_replay)
+    return layer, te_called
+
+
+def test_mamba_layer_replay_rejects_changed_seq_idx_shape_before_te(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, replay = _get_mamba_layer_graph_methods()
+    captured = _make_mamba_packed_seq_params()
+    layer, te_called = _make_mamba_layer_for_graph_test(monkeypatch, captured)
+    replayed = _make_mamba_packed_seq_params()
+    replayed.seq_idx = torch.zeros((1, captured.seq_idx.shape[1] + 1), dtype=torch.int32)
+
+    with pytest.raises(AssertionError, match="shape"):
+        replay(layer, packed_seq_params=replayed)
+
+    assert not te_called["value"]
+
+
+def test_mamba_layer_replay_rejects_changed_seq_idx_dtype_before_te(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, replay = _get_mamba_layer_graph_methods()
+    captured = _make_mamba_packed_seq_params()
+    layer, te_called = _make_mamba_layer_for_graph_test(monkeypatch, captured)
+    replayed = _make_mamba_packed_seq_params()
+    replayed.seq_idx = replayed.seq_idx.to(torch.int64)
+
+    with pytest.raises(AssertionError, match="dtype"):
+        replay(layer, packed_seq_params=replayed)
+
+    assert not te_called["value"]
+
+
+def test_mamba_layer_replay_rejects_changed_static_metadata_before_te(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, replay = _get_mamba_layer_graph_methods()
+    captured = _make_mamba_packed_seq_params()
+    layer, te_called = _make_mamba_layer_for_graph_test(monkeypatch, captured)
+    layer._te_cuda_graph_mamba_packed_seq_params_static_metadata[
+        "include_cp_fields"
+    ] = True
+
+    with pytest.raises(AssertionError, match="static metadata"):
+        replay(layer, packed_seq_params=_make_mamba_packed_seq_params())
+
+    assert not te_called["value"]
+
+
+def test_mamba_layer_replay_rejects_changed_dynamic_field_set_before_te(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, replay = _get_mamba_layer_graph_methods()
+    captured = _make_mamba_packed_seq_params()
+    layer, te_called = _make_mamba_layer_for_graph_test(monkeypatch, captured)
+    replayed = _make_mamba_packed_seq_params()
+    replayed.seq_idx = None
+
+    with pytest.raises(AssertionError, match="Tensor fields"):
+        replay(layer, packed_seq_params=replayed)
+
+    assert not te_called["value"]
+
+
+def test_mamba_layer_sample_stores_exact_tensor_signatures() -> None:
+    layer = MambaLayer.__new__(MambaLayer)
+    torch.nn.Module.__init__(layer)
+    layer.config = SimpleNamespace(context_parallel_size=1)
+    packed_seq_params = _make_mamba_packed_seq_params()
+
+    _get_add_mamba_sample_helper()(layer, {}, packed_seq_params)
+
+    signatures = layer._te_cuda_graph_mamba_packed_seq_params_tensor_signatures
+    assert signatures == {
+        "_mamba_packed_seq_params_seq_idx": (
+            packed_seq_params.seq_idx.shape,
+            packed_seq_params.seq_idx.dtype,
+            packed_seq_params.seq_idx.device,
+            packed_seq_params.seq_idx.layout,
+            packed_seq_params.seq_idx.stride(),
+        )
+    }
+
+
+def _get_mamba_graph_callable_sample_kwargs(
+    monkeypatch: pytest.MonkeyPatch,
+    packed_seq_params: PackedSeqParams,
+    *,
+    cuda_graph_modules: list[CudaGraphModule],
+    context_parallel_size: int,
+) -> dict[str, object]:
+    monkeypatch.setattr(cuda_graphs_module, "is_te_min_version", lambda version: True)
+    layer = MambaLayer.__new__(MambaLayer)
+    torch.nn.Module.__init__(layer)
+    layer.config = SimpleNamespace(
+        context_parallel_size=context_parallel_size,
+        cuda_graph_modules=cuda_graph_modules,
+    )
+    layer.get_layer_static_inputs = lambda seq_length, micro_batch_size: {
+        "hidden_states": torch.ones(seq_length, micro_batch_size, 4)
+    }
+    chunk = SimpleNamespace(decoder=SimpleNamespace(layers=[layer]))
+    helper = TECudaGraphHelper.__new__(TECudaGraphHelper)
+    helper.config = layer.config
+    helper.seq_length = 8
+    helper.micro_batch_size = 1
+    helper.sample_packed_seq_params = packed_seq_params
+    helper.num_model_chunks = 1
+    helper.num_microbatches = 1
+    helper.num_layers_per_chunk = [1]
+    helper.callables_per_chunk = [[layer]]
+    helper.flattened_callables = [layer]
+    helper.chunks_with_decoder = [chunk]
+
+    _, sample_kwargs = helper._get_sample_arguments([1, -1])
+    return sample_kwargs[0]
+
+
+def test_helper_adds_mamba_sample_for_explicit_scope_without_attention_kv_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    packed_seq_params = _make_mamba_packed_seq_params()
+    sample_kwargs = _get_mamba_graph_callable_sample_kwargs(
+        monkeypatch,
+        packed_seq_params,
+        cuda_graph_modules=[CudaGraphModule.mamba],
+        context_parallel_size=1,
+    )
+
+    assert set(sample_kwargs) == {"_mamba_packed_seq_params_seq_idx"}
+    assert sample_kwargs["_mamba_packed_seq_params_seq_idx"] is packed_seq_params.seq_idx
+    assert not any("kv" in key for key in sample_kwargs)
+
+
+def test_helper_adds_mamba_sample_for_whole_layer_scope_with_cp_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    packed_seq_params = _make_mamba_packed_seq_params()
+    sample_kwargs = _get_mamba_graph_callable_sample_kwargs(
+        monkeypatch,
+        packed_seq_params,
+        cuda_graph_modules=[],
+        context_parallel_size=2,
+    )
+
+    assert set(sample_kwargs) == {
+        "_mamba_packed_seq_params_seq_idx",
+        "_mamba_packed_seq_params_cu_seqlens_q",
+        "_mamba_packed_seq_params_cu_seqlens_q_padded",
+    }
+    assert not any("kv" in key for key in sample_kwargs)
 
 
 def test_split_packed_seq_params_for_cuda_graph_separates_tensors_from_metadata():

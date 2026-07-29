@@ -3,11 +3,13 @@
 import gc
 import os
 import sys
+from types import SimpleNamespace
 
 import pytest
 import torch
 from transformer_engine.pytorch.fp8 import check_fp8_support
 
+import megatron.core.transformer.cuda_graphs as cuda_graphs_module
 from megatron.core.enums import ModelType
 from megatron.core.models.gpt.gpt_layer_specs import (
     get_gpt_decoder_block_spec,
@@ -63,6 +65,19 @@ from megatron.training.training import setup_model_and_optimizer
 from tests.unit_tests.test_utilities import Utils
 
 fp8_available, _ = check_fp8_support()
+
+
+def test_te_cuda_graph_explicit_mamba_scope_requires_discovered_mamba_layer():
+    validate_discovery = getattr(
+        cuda_graphs_module,
+        "_validate_requested_cuda_graph_module_discovery",
+        None,
+    )
+    assert callable(validate_discovery)
+    config = SimpleNamespace(cuda_graph_modules=[CudaGraphModule.mamba])
+
+    with pytest.raises(AssertionError, match="MambaLayer"):
+        validate_discovery(config, [])
 
 
 def _base_cuda_graph_config(**kwargs) -> TransformerConfig:

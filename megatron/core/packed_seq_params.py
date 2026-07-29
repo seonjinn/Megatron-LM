@@ -23,6 +23,15 @@ PACKED_SEQ_PARAMS_CUDA_GRAPH_STATIC_FIELDS = (
     "cp_group",
 )
 
+MAMBA_CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX = "_mamba_packed_seq_params_"
+
+MAMBA_PACKED_SEQ_PARAMS_CUDA_GRAPH_TENSOR_FIELDS = ("seq_idx",)
+
+MAMBA_PACKED_SEQ_PARAMS_CUDA_GRAPH_CP_TENSOR_FIELDS = (
+    "cu_seqlens_q",
+    "cu_seqlens_q_padded",
+)
+
 
 @dataclass
 class PackedSeqParams:
@@ -169,5 +178,88 @@ def build_packed_seq_params_from_cuda_graph_kwargs(
 
     if not packed_seq_params_kwargs and not found_tensor_field:
         return None
+
+    return PackedSeqParams(**packed_seq_params_kwargs)
+
+
+def split_mamba_packed_seq_params_for_cuda_graph(
+    packed_seq_params: PackedSeqParams | None, include_cp_fields: bool
+) -> tuple[dict[str, Tensor | None], dict[str, object]]:
+    """Split Mamba-consumed packed sequence inputs for a TE CUDA graph."""
+    static_metadata: dict[str, object] = {
+        "packed_seq_params_present": packed_seq_params is not None,
+        "include_cp_fields": include_cp_fields,
+    }
+    if packed_seq_params is None:
+        static_metadata["tensor_field_names"] = ()
+        return {}, static_metadata
+
+    consumed_fields = MAMBA_PACKED_SEQ_PARAMS_CUDA_GRAPH_TENSOR_FIELDS
+    if include_cp_fields:
+        consumed_fields += MAMBA_PACKED_SEQ_PARAMS_CUDA_GRAPH_CP_TENSOR_FIELDS
+
+    tensor_kwargs: dict[str, Tensor | None] = {}
+    for field_name in consumed_fields:
+        value = getattr(packed_seq_params, field_name)
+        if value is not None and not isinstance(value, Tensor):
+            raise TypeError(
+                f"PackedSeqParams.{field_name} must be a Tensor or None for Mamba CUDA graphs, "
+                f"got {type(value).__name__}."
+            )
+        if value is not None:
+            tensor_kwargs[
+                _cuda_graph_packed_seq_params_key(
+                    field_name, MAMBA_CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX
+                )
+            ] = value
+
+    static_metadata["tensor_field_names"] = tuple(sorted(tensor_kwargs))
+    return tensor_kwargs, static_metadata
+
+
+def build_mamba_packed_seq_params_from_cuda_graph_kwargs(
+    kwargs: Mapping[str, object], static_metadata: Mapping[str, object]
+) -> PackedSeqParams | None:
+    """Rebuild Mamba ``PackedSeqParams`` without regenerating ``seq_idx``."""
+    metadata = dict(static_metadata)
+    packed_seq_params_present = metadata.pop("packed_seq_params_present")
+    include_cp_fields = metadata.pop("include_cp_fields")
+    tensor_field_names = metadata.pop("tensor_field_names")
+    assert not metadata, (
+        "Unexpected Mamba PackedSeqParams CUDA graph static metadata: "
+        f"{', '.join(sorted(metadata))}."
+    )
+    assert isinstance(packed_seq_params_present, bool)
+    assert isinstance(include_cp_fields, bool)
+    assert isinstance(tensor_field_names, tuple)
+    if not packed_seq_params_present:
+        return None
+
+    consumed_fields = MAMBA_PACKED_SEQ_PARAMS_CUDA_GRAPH_TENSOR_FIELDS
+    if include_cp_fields:
+        consumed_fields += MAMBA_PACKED_SEQ_PARAMS_CUDA_GRAPH_CP_TENSOR_FIELDS
+    expected_keys = {
+        _cuda_graph_packed_seq_params_key(
+            field_name, MAMBA_CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX
+        ): field_name
+        for field_name in consumed_fields
+    }
+    assert set(tensor_field_names) <= set(expected_keys), (
+        "Mamba PackedSeqParams CUDA graph metadata contains unconsumed Tensor fields."
+    )
+
+    remaining_kwargs = dict(kwargs)
+    packed_seq_params_kwargs: dict[str, Tensor | None] = {}
+    for key in tensor_field_names:
+        assert key in remaining_kwargs, (
+            f"Flattened Mamba PackedSeqParams field {key} is required by the captured graph."
+        )
+        value = remaining_kwargs.pop(key)
+        if value is not None and not isinstance(value, Tensor):
+            raise TypeError(
+                f"Flattened Mamba PackedSeqParams field {key} must be a Tensor or None, "
+                f"got {type(value).__name__}."
+            )
+        packed_seq_params_kwargs[expected_keys[key]] = value
 
     return PackedSeqParams(**packed_seq_params_kwargs)

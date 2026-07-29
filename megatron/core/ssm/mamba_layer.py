@@ -6,7 +6,7 @@
 # LICENSE file in the root directory of this source tree.
 
 from dataclasses import dataclass, field
-from typing import Dict, Optional, Tuple, Union
+from typing import Dict, Mapping, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
@@ -15,7 +15,12 @@ from megatron.core.dist_checkpointing.mapping import ShardedStateDict
 from megatron.core.dist_checkpointing.utils import apply_prefix_mapping
 from megatron.core.inference.contexts import BaseInferenceContext
 from megatron.core.inference.utils import InferenceMode
-from megatron.core.packed_seq_params import PackedSeqParams
+from megatron.core.packed_seq_params import (
+    MAMBA_CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX,
+    PackedSeqParams,
+    build_mamba_packed_seq_params_from_cuda_graph_kwargs,
+    split_mamba_packed_seq_params_for_cuda_graph,
+)
 from megatron.core.process_groups_config import ProcessGroupCollection
 from megatron.core.transformer.enums import CudaGraphModule, InferenceCudaGraphScope
 from megatron.core.transformer.identity_op import IdentityOp
@@ -185,7 +190,145 @@ class MambaLayer(GraphableMegatronModule):
             apply_prefix_mapping(sharded_state_dict, prefixed_map)
         return sharded_state_dict
 
-    def _te_cuda_graph_replay(self, *args, **kwargs):
+    @staticmethod
+    def _te_cuda_graph_tensor_signature(tensor: Tensor) -> tuple[object, ...]:
+        """Return the Tensor contract that must remain fixed across graph replays."""
+        return (
+            tensor.shape,
+            tensor.dtype,
+            tensor.device,
+            tensor.layout,
+            tensor.stride(),
+        )
+
+    def _set_te_cuda_graph_mamba_packed_seq_params_static_metadata(
+        self,
+        static_metadata: Mapping[str, object],
+        tensor_kwargs: Mapping[str, Tensor | None],
+    ) -> None:
+        """Store the packed Mamba contract used for TE graph capture."""
+        self._te_cuda_graph_mamba_packed_seq_params_static_metadata = dict(static_metadata)
+        self._te_cuda_graph_mamba_packed_seq_params_tensor_signatures = {
+            name: self._te_cuda_graph_tensor_signature(value)
+            for name, value in tensor_kwargs.items()
+            if isinstance(value, Tensor)
+        }
+
+    def _validate_te_cuda_graph_mamba_packed_seq_params(
+        self,
+        static_metadata: Mapping[str, object],
+        tensor_kwargs: Mapping[str, Tensor | None],
+    ) -> None:
+        """Validate packed Mamba replay inputs before invoking Transformer Engine."""
+        expected_static_metadata = getattr(
+            self, "_te_cuda_graph_mamba_packed_seq_params_static_metadata", None
+        )
+        assert expected_static_metadata is not None, (
+            "TE CUDA graph replay received Mamba packed sequence inputs without a captured "
+            "static metadata contract."
+        )
+
+        expected_signatures = getattr(
+            self, "_te_cuda_graph_mamba_packed_seq_params_tensor_signatures", None
+        )
+        assert expected_signatures is not None
+        actual_signatures = {
+            name: self._te_cuda_graph_tensor_signature(value)
+            for name, value in tensor_kwargs.items()
+            if isinstance(value, Tensor)
+        }
+        missing_names = sorted(set(expected_signatures) - set(actual_signatures))
+        extra_names = sorted(set(actual_signatures) - set(expected_signatures))
+        assert not missing_names and not extra_names, (
+            "TE CUDA graph replay received Mamba PackedSeqParams with Tensor fields that differ "
+            f"from capture: missing {missing_names}, extra {extra_names}."
+        )
+
+        for name, expected_signature in expected_signatures.items():
+            actual_signature = actual_signatures[name]
+            signature_fields = ("shape", "dtype", "device", "layout", "stride")
+            mismatches = [
+                field_name
+                for field_name, expected_value, actual_value in zip(
+                    signature_fields, expected_signature, actual_signature
+                )
+                if expected_value != actual_value
+            ]
+            assert not mismatches, (
+                f"TE CUDA graph replay Tensor {name} changed "
+                f"{', '.join(mismatches)} from capture."
+            )
+
+        assert expected_static_metadata == dict(static_metadata), (
+            "TE CUDA graph replay received Mamba PackedSeqParams with static metadata that "
+            "differs from capture."
+        )
+
+    def _rebuild_te_cuda_graph_mamba_packed_seq_params(
+        self, kwargs: dict[str, object]
+    ) -> None:
+        """Rebuild Mamba ``PackedSeqParams`` from flattened TE graph capture kwargs."""
+        tensor_kwargs = {
+            key: value
+            for key, value in kwargs.items()
+            if key.startswith(MAMBA_CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX)
+        }
+        if not tensor_kwargs:
+            return
+
+        assert kwargs.get("packed_seq_params") is None, (
+            "Mamba PackedSeqParams must be passed either as flattened TE CUDA graph kwargs or as "
+            "packed_seq_params, but not both."
+        )
+        static_metadata = getattr(
+            self, "_te_cuda_graph_mamba_packed_seq_params_static_metadata", None
+        )
+        assert static_metadata is not None, (
+            "Flattened Mamba PackedSeqParams Tensor fields require static metadata captured on "
+            "the MambaLayer."
+        )
+        self._validate_te_cuda_graph_mamba_packed_seq_params(
+            static_metadata, tensor_kwargs
+        )
+        packed_seq_params = build_mamba_packed_seq_params_from_cuda_graph_kwargs(
+            tensor_kwargs, static_metadata
+        )
+        for key in tensor_kwargs:
+            kwargs.pop(key)
+        kwargs["packed_seq_params"] = packed_seq_params
+
+    def _flatten_te_cuda_graph_mamba_packed_seq_params(
+        self, kwargs: dict[str, object]
+    ) -> None:
+        """Flatten replay-time Mamba ``PackedSeqParams`` into TE graph Tensor kwargs."""
+        packed_seq_params = kwargs.get("packed_seq_params")
+        expected_static_metadata = getattr(
+            self, "_te_cuda_graph_mamba_packed_seq_params_static_metadata", None
+        )
+        if packed_seq_params is None and expected_static_metadata is None:
+            return
+
+        include_cp_fields = self.config.context_parallel_size > 1
+        tensor_kwargs, static_metadata = split_mamba_packed_seq_params_for_cuda_graph(
+            packed_seq_params, include_cp_fields
+        )
+        self._validate_te_cuda_graph_mamba_packed_seq_params(
+            static_metadata, tensor_kwargs
+        )
+
+        duplicate_keys = set(kwargs) & set(tensor_kwargs)
+        assert not duplicate_keys, (
+            "Mamba PackedSeqParams CUDA graph Tensor kwargs overlap with existing replay kwargs: "
+            f"{', '.join(sorted(duplicate_keys))}."
+        )
+        kwargs.pop("packed_seq_params", None)
+        kwargs.update(tensor_kwargs)
+
+    def _te_cuda_graph_capture(self, *args: object, **kwargs: object) -> Tensor:
+        self._rebuild_te_cuda_graph_mamba_packed_seq_params(kwargs)
+        return self.forward(*args, **kwargs)
+
+    def _te_cuda_graph_replay(self, *args: object, **kwargs: object) -> object:
         """
         CUDA graph replay for this layer and microbatch `self.current_microbatch` using TE
         interface. TransformerEngine versions>=1.10 allow keyword arguments with CUDA graph.
@@ -196,6 +339,7 @@ class MambaLayer(GraphableMegatronModule):
             "CUDA graph accepts only Tensor inputs. inference_context is excluded from input list. "
             "For inference cuda graph, please use cuda_graph_impl=local instead."
         )
+        self._flatten_te_cuda_graph_mamba_packed_seq_params(kwargs)
         return super()._te_cuda_graph_replay(*args, **kwargs)
 
     def _should_call_local_cudagraph(self, *args, **kwargs):
