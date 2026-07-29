@@ -73,6 +73,7 @@ class _BankRegistration:
     bank: "TECudaGraphBank"
     fingerprint: TECudaGraphBankFingerprint
     layer_ids: tuple[int, ...]
+    layer_index_by_id: dict[int, int]
     owned_graph_lists: tuple[list[object], ...]
     graph_tuples: tuple[tuple[object, ...], ...]
     contracts: tuple[_LayerReplayContract, ...]
@@ -124,7 +125,7 @@ class TECudaGraphBankManager:
         assert_model_drained: Callable[[], object] | None = None,
         graph_reset_supported: bool | None = None,
         synchronize: Callable[[], None] | None = None,
-        runtime_num_microbatches: Callable[[], int] | None = None,
+        runtime_num_microbatches: Callable[[], int],
     ) -> None:
         self.layers = tuple(layers)
         self._layer_ids = tuple(id(layer) for layer in self.layers)
@@ -146,6 +147,8 @@ class TECudaGraphBankManager:
 
             synchronize = torch.cuda.synchronize
         self._synchronize = synchronize
+        if not callable(runtime_num_microbatches):
+            raise TypeError("runtime_num_microbatches must be a callable provider")
         self._runtime_num_microbatches = runtime_num_microbatches
         self._registrations: dict[int, _BankRegistration] = {}
         self.active_bank: TECudaGraphBank | None = None
@@ -344,6 +347,7 @@ class TECudaGraphBankManager:
             bank=bank,
             fingerprint=registration.fingerprint,
             layer_ids=registration.layer_ids,
+            layer_index_by_id=registration.layer_index_by_id,
             owned_graph_lists=registration.owned_graph_lists,
             graph_tuples=registration.graph_tuples,
             contracts=contracts,
@@ -381,18 +385,11 @@ class TECudaGraphBankManager:
 
     def _get_runtime_num_microbatches(self, supplied: int | None = None) -> int:
         if supplied is not None:
-            if (
-                self._runtime_num_microbatches is not None
-                and self._runtime_num_microbatches() != supplied
-            ):
+            if self._runtime_num_microbatches() != supplied:
                 raise ValueError(
                     "supplied num_microbatches differs from the runtime provider"
                 )
             return supplied
-        if self._runtime_num_microbatches is None:
-            raise ValueError(
-                "runtime num_microbatches must be supplied when no provider is configured"
-            )
         return self._runtime_num_microbatches()
 
     def _assert_replay_ready(
@@ -401,24 +398,35 @@ class TECudaGraphBankManager:
         layer: object,
         installed_graph_list: list[object],
     ) -> None:
-        self._validate_bank(bank)
+        if bank._is_reset:
+            raise ValueError("TE CUDA graph bank has already been reset")
         if bank is not self.active_bank:
             raise ValueError("TE CUDA graph bank is not active")
-        registration = self._registrations[id(bank)]
-        try:
-            layer_index = next(
-                index
-                for index, expected_layer in enumerate(self.layers)
-                if layer is expected_layer
-            )
-        except StopIteration as exc:
-            raise ValueError("Layer is not registered with the active bank") from exc
+        registration = self._registrations.get(id(bank))
+        if (
+            registration is None
+            or registration.bank is not bank
+            or bank.fingerprint is not registration.fingerprint
+        ):
+            raise ValueError("TE CUDA graph bank registration is missing or forged")
+        layer_index = registration.layer_index_by_id.get(id(layer))
+        if (
+            layer_index is None
+            or layer_index >= len(self.layers)
+            or self.layers[layer_index] is not layer
+        ):
+            raise ValueError("Layer is not registered with the active bank")
         if installed_graph_list is not registration.owned_graph_lists[layer_index]:
             raise ValueError("Layer CUDA graph list does not match its bank registration")
         runtime_num_microbatches = self._get_runtime_num_microbatches()
-        if runtime_num_microbatches != bank.fingerprint.num_microbatches:
+        if (
+            runtime_num_microbatches != registration.fingerprint.num_microbatches
+            or len(installed_graph_list) != runtime_num_microbatches
+            or registration.fingerprint.graph_counts[layer_index]
+            != runtime_num_microbatches
+        ):
             raise ValueError(
-                "runtime num_microbatches does not match the active TE CUDA graph bank"
+                "runtime num_microbatches or graph count does not match the active TE CUDA graph bank"
             )
 
     def _assert_model_drained(self) -> None:
@@ -539,6 +547,10 @@ class TECudaGraphBankManager:
             bank=bank,
             fingerprint=bank.fingerprint,
             layer_ids=tuple(id(layer) for layer, _ in bank.graphs_by_layer),
+            layer_index_by_id={
+                id(layer): index
+                for index, (layer, _) in enumerate(bank.graphs_by_layer)
+            },
             owned_graph_lists=bank._owned_graph_lists,
             graph_tuples=tuple(tuple(graph_list) for graph_list in bank._owned_graph_lists),
             contracts=bank._layer_contracts,

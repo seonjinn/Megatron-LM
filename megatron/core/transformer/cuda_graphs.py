@@ -35,10 +35,7 @@ from megatron.core.tensor_parallel.random import (
 )
 from megatron.core.transformer.enums import CudaGraphModule
 from megatron.core.transformer.module import GraphableMegatronModule, MegatronModule
-from megatron.core.transformer.te_cuda_graph_bank import (
-    TECudaGraphBank,
-    TECudaGraphBankManager,
-)
+from megatron.core.transformer.te_cuda_graph_bank import TECudaGraphBank, TECudaGraphBankManager
 from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.utils import (
     get_attr_wrapped_model,

@@ -133,6 +133,13 @@ def _capture(
     return manager.capture(helper, num_microbatches=num_microbatches), helper, graphs
 
 
+def test_direct_manager_requires_runtime_microbatch_provider() -> None:
+    bank_module = _load_bank_module()
+
+    with pytest.raises(TypeError, match="runtime_num_microbatches"):
+        bank_module.TECudaGraphBankManager([_FakeLayer("0")])
+
+
 def test_capture_uses_empty_owned_lists_and_activation_installs_the_same_lists() -> (
     None
 ):
@@ -368,6 +375,18 @@ def test_installed_replay_guard_rejects_runtime_topology_change() -> None:
         layers[0]._te_cuda_graph_bank_replay_guard(layers[0], layers[0].cuda_graphs)
 
 
+def test_replay_guard_hot_path_does_not_run_full_bank_validation() -> None:
+    layers = [_FakeLayer("0")]
+    manager = _make_manager(layers)
+    bank, _, _ = _capture(manager, layers, "bank")
+    bank.activate()
+    manager._validate_bank = lambda *args, **kwargs: (_ for _ in ()).throw(
+        AssertionError("full validation reached replay hot path")
+    )
+
+    layers[0]._te_cuda_graph_bank_replay_guard(layers[0], layers[0].cuda_graphs)
+
+
 def test_replay_guard_rejects_graph_list_swapped_between_layers() -> None:
     layers = [_FakeLayer("0"), _FakeLayer("1")]
     manager = _make_manager(layers)
@@ -481,10 +500,7 @@ def test_activation_clears_packed_contract_absent_from_target_bank() -> None:
 def test_vision_wrapping_preserves_owned_graph_list_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from megatron.core.transformer.cuda_graphs import (
-        TECudaGraphHelper,
-        VisionTECudaGraphHelper,
-    )
+    from megatron.core.transformer.cuda_graphs import TECudaGraphHelper, VisionTECudaGraphHelper
 
     layer = _FakeLayer("vision")
     layer.cuda_graphs = [_FakeGraph("vision-0"), _FakeGraph("vision-1")]
@@ -567,6 +583,7 @@ def test_real_helper_abort_clears_capture_state_and_resets_partial_graph(
         [layer],
         graph_reset_supported=True,
         synchronize=lambda: None,
+        runtime_num_microbatches=lambda: 2,
     )
 
     with pytest.raises(RuntimeError, match="input creation failed"):
