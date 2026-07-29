@@ -1981,8 +1981,10 @@ splits:
           length: 100000
           orig_length: 100000
           category: General
+          aux_data_prefixes:
+            train1/png/: figureqa
         aux:
-          media_source:
+          figureqa:
             filesystem+dss://internvl@v0/image_data/figureqa/train1/png
       - repetitions: 2
         path:
@@ -2306,8 +2308,10 @@ splits:
           length: 22244
           orig_length: 22244
           category: OCR
+          aux_data_prefixes:
+            hw_math/: haoweilai_hw_math
         aux:
-          media_source: filesystem+dss://haoweilai_hw_math@v0
+          haoweilai_hw_math: filesystem+dss://haoweilai_hw_math@v0
       - repetitions: 6
         path:
           dss://mulberry_sft_cot_nmh5r_legal_v2_fixthink0319_safetyfix0323@v0

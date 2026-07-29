@@ -4,103 +4,103 @@ __module__: megatron.energon
 splits:
   train:
     blend_epochized:
-    - path: dss://nano_v14_49k_video_qa_miradata_ocr@v0
+    - path: dss://nano_v14_49k_video_qa_miradata_ocr@v0/video_qa_miradata_ocr.jsonl
       subflavors:
         cook: general_conversations_jsonl
       repetitions: 1
       aux:
         media_source: filesystem+dss://miradata_all_clips@v0
-    - path: dss://nano_v14_49k_video_qa_miradata_temporal@v0
+    - path: dss://nano_v14_49k_video_qa_miradata_temporal@v0/video_qa_miradata_temporal.jsonl
       subflavors:
         cook: general_conversations_jsonl
       repetitions: 1
       aux:
         media_source: filesystem+dss://miradata_all_clips@v0
-    - path: dss://nano_v14_49k_video_qa_omni_data@v0
+    - path: dss://nano_v14_49k_video_qa_omni_data@v0/video_qa_omni_data.jsonl
       subflavors:
         cook: general_conversations_jsonl
       repetitions: 1
       aux:
         media_source: filesystem+dss://omni_video_qa_source_videos@v0
-    - path: dss://nano_v14_49k_video_qa_omni_data_ocr@v0
+    - path: dss://nano_v14_49k_video_qa_omni_data_ocr@v0/video_qa_omni_data_ocr.jsonl
       subflavors:
         cook: general_conversations_jsonl
       repetitions: 1
       aux:
         media_source: filesystem+dss://omni_video_qa_source_videos@v0
-    - path: dss://nano_v14_49k_yt1b_qa_plm_sampled@v0
+    - path: dss://nano_v14_49k_yt1b_qa_plm_sampled@v0/yt1b_qa_plm_sampled.jsonl
       subflavors:
         cook: general_conversations_jsonl
       repetitions: 1
       aux:
         media_source: filesystem+dss://yttemporal180m-youtube-dataset@v0
-    - path: dss://nano_v14_49k_video_qa_yt8m_temporal@v0
+    - path: dss://nano_v14_49k_video_qa_yt8m_temporal@v0/video_qa_yt8m_temporal.jsonl
       subflavors:
         cook: general_conversations_jsonl
       repetitions: 1
       aux:
         media_source: filesystem+dss://nano_v14_49k_YouTube8M@v0
-    - path: dss://nano_v14_49k_video_qa_yt8m_action_reasoning@v0
+    - path: dss://nano_v14_49k_video_qa_yt8m_action_reasoning@v0/video_qa_yt8m_action_reasoning.jsonl
       subflavors:
         cook: general_conversations_jsonl
       repetitions: 1
       aux:
         media_source: filesystem+dss://nano_v14_49k_YouTube8M@v0
-    - path: dss://nano_v14_49k_video_qa_yt8m_object_reasoning@v0
+    - path: dss://nano_v14_49k_video_qa_yt8m_object_reasoning@v0/video_qa_yt8m_object_reasoning.jsonl
       subflavors:
         cook: general_conversations_jsonl
       repetitions: 1
       aux:
         media_source: filesystem+dss://nano_v14_49k_YouTube8M@v0
-    - path: dss://nano_v14_49k_video_qa_yt8m_ocr_problems@v0
+    - path: dss://nano_v14_49k_video_qa_yt8m_ocr_problems@v0/video_qa_yt8m_ocr_problems.jsonl
       subflavors:
         cook: general_conversations_jsonl
       repetitions: 1
       aux:
         media_source: filesystem+dss://nano_v14_49k_YouTube8M@v0
-    - path: dss://nano_v14_49k_video_qa_yt8m_counting_problem@v0
+    - path: dss://nano_v14_49k_video_qa_yt8m_counting_problem@v0/video_qa_yt8m_counting_problem.jsonl
       subflavors:
         cook: general_conversations_jsonl
       repetitions: 2
       aux:
         media_source: filesystem+dss://nano_v14_49k_YouTube8M@v0
-    - path: dss://nano_v14_49k_video_qa_yt8m_temporal_perception@v0
+    - path: dss://nano_v14_49k_video_qa_yt8m_temporal_perception@v0/video_qa_yt8m_temporal_perception.jsonl
       subflavors:
         cook: general_conversations_jsonl
       repetitions: 2
       aux:
         media_source: filesystem+dss://nano_v14_49k_YouTube8M@v0
-    - path: dss://nano_v14_49k_video_yt8m_action_recognition@v0
+    - path: dss://nano_v14_49k_video_yt8m_action_recognition@v0/video_yt8m_action_recognition.jsonl
       subflavors:
         cook: general_conversations_jsonl
       repetitions: 1
       aux:
         media_source: filesystem+dss://nano_v14_49k_YouTube8M@v0
-    - path: dss://nano_v14_49k_video_yt8m_attribute_perception@v0
+    - path: dss://nano_v14_49k_video_yt8m_attribute_perception@v0/video_yt8m_attribute_perception.jsonl
       subflavors:
         cook: general_conversations_jsonl
       repetitions: 2
       aux:
         media_source: filesystem+dss://nano_v14_49k_YouTube8M@v0
-    - path: dss://nano_v14_49k_video_qa_yt8m_object_recognition@v0
+    - path: dss://nano_v14_49k_video_qa_yt8m_object_recognition@v0/video_qa_yt8m_object_recognition.jsonl
       subflavors:
         cook: general_conversations_jsonl
       repetitions: 2
       aux:
         media_source: filesystem+dss://nano_v14_49k_YouTube8M@v0
-    - path: dss://nano_v14_49k_video_yt8m_temporal_reasoning_long@v0
+    - path: dss://nano_v14_49k_video_yt8m_temporal_reasoning_long@v0/video_yt8m_temporal_reasoning_long.jsonl
       subflavors:
         cook: general_conversations_jsonl
       repetitions: 1
       aux:
         media_source: filesystem+dss://nano_v14_49k_YouTube8M@v0
-    - path: dss://nano_v14_49k_video_yt8m_temporal_reasoning_short@v0
+    - path: dss://nano_v14_49k_video_yt8m_temporal_reasoning_short@v0/video_yt8m_temporal_reasoning_short.jsonl
       subflavors:
         cook: general_conversations_jsonl
       repetitions: 1
       aux:
         media_source: filesystem+dss://nano_v14_49k_YouTube8M@v0
-    - path: dss://nano_v14_49k_yt1b_qa_plm_sampled_dense_captions@v0
+    - path: dss://nano_v14_49k_yt1b_qa_plm_sampled_dense_captions@v0/yt1b_qa_plm_sampled_dense_captions.jsonl
       subflavors:
         cook: general_conversations_jsonl
       repetitions: 1

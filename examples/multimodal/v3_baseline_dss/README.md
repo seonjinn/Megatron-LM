@@ -29,8 +29,8 @@ Each entry point is self-contained apart from its DSS dataset references.
   caching, rewriting YAML, and validating.
 - [`DSS_DATASET_MANIFEST.md`](DSS_DATASET_MANIFEST.md): exhaustive
   human-readable mapping and cache snapshot generated from the active graphs
-  on 2026-07-23. Its cache columns are historical; consult the operations log
-  for later changes.
+  on 2026-07-23. Its cache columns and mapping tables are historical; consult
+  its 2026-07-28 correction addendum and the operations log for later changes.
 - [`commit_missing_dss_on_nrt.sh`](commit_missing_dss_on_nrt.sh): historical
   helper used for the five post-mapping NRT uploads. Those uploads completed;
   do not rerun it blindly.
@@ -63,11 +63,20 @@ python dss_mapping_tool.py lookup /exact/legacy/path \
 python dss_mapping_tool.py audit /path/to/derivative.yaml \
   --recipe-key v14_vlm_16k \
   --output /tmp/derivative_dss_audit.csv
+
+python ../tools/validate/audit_dss_recipe.py \
+  --cache-dir /home/svc-dss/cache/nemotron \
+  /path/to/converted_recipe.yaml
 ```
 
 An audit exits with status 2 when human review is required. This is expected
 for new data and for historical paths that were relocated before upload.
 Run the tool in a Megatron-LM environment with PyYAML installed.
+
+The mapping audit and DSS recipe audit answer different questions:
+`dss_mapping_tool.py` inventories legacy-to-DSS decisions, while
+`audit_dss_recipe.py` recursively validates the converted graph, exact DSS
+subpaths, and standalone-JSONL structure.
 
 ## Entry points
 
@@ -103,7 +112,7 @@ All three primary leaves and the two new media roots were uploaded on
 leaves are now active in `sft_49k_video_dss/videomme_qa_0206.yaml`. Exact
 references and job IDs are in `DSS_OPERATIONS_LOG.csv`.
 
-## Final migration status as observed on 2026-07-24
+## Final migration status through 2026-07-28
 
 - Of the 237 active references that were initially missing from the local
   cache, all 237 are now cached.
@@ -115,17 +124,32 @@ references and job IDs are in `DSS_OPERATIONS_LOG.csv`.
 - A post-migration media audit confirmed that the image-safety JSONL needs an
   explicit `filesystem+dss://mm_safety@v0` auxiliary source. The standard and
   no-ultra 16K leaves now include it, and all 22,560 referenced image basenames
-  were found in the cache. The existing BenchFit and YT1B auxiliary mappings
-  were also checked against 652,731 image and 968,697 video references
-  respectively; no additional upload or cache job was required.
+  were found in the cache. BenchFit and Dense OCR use the indexed
+  `dss://image_shards@v0` media store; using `filesystem+dss://` bypasses its
+  shard index. The YT1B direct-filesystem media mapping remains
+  `filesystem+dss://yttemporal180m-youtube-dataset@v0`.
+- Standalone JSONL snapshots are referenced as
+  `dss://NAME@VERSION/FILE.jsonl`, never by an absolute cache path and never by
+  a bare DSS version directory unless that directory is an Energon-prepared
+  dataset root.
+- Seven prefixed-media cases use named DSS auxiliaries plus
+  `subflavors.aux_data_prefixes` so record paths are routed to, and normalized
+  relative to, the appropriate DSS media root.
 - The 16K recipes contain 138 inherited references that resolve from the
   prebuilt local cache but are not visible through exact live DSS lookup. They
   are locally usable but not portable to a fresh cluster.
 
 ## Final graph validation
 
-All active YAML graphs parse and resolve locally. Current expanded-graph leaf
-counts are 848 for 16K, 769 for 16K without ultra text, 74 for 49K, and 19 for
-MMLongBench.
+All active YAML graphs parse and resolve locally. Containerized loader
+validation initialized every materialized leaf and decoded eight samples per
+leaf:
+
+- 852 leaves and 6,779 samples for the 16K web recipe;
+- 773 leaves and 6,147 samples for the no-ultra variant;
+- 74 leaves and 592 samples for 49K video;
+- 19 leaves and 152 samples for MMLongBench.
+
 Every active DSS cache root and referenced subpath is present under
-`/home/svc-dss/cache/nemotron`.
+`/home/svc-dss/cache/nemotron`. These smoke tests cover every leaf but do not
+claim that every record in every dataset is valid.

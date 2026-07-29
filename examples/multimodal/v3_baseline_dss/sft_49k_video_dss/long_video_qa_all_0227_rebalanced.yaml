@@ -4,145 +4,145 @@ __module__: megatron.energon
 splits:
   train:
     blend_epochized:
-    - path: dss://nano_v14_49k_df_human_v1_global_lita_processed@v0
+    - path: dss://nano_v14_49k_df_human_v1_global_lita_processed@v0/df_human_v1_global_lita_processed.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://df_human@v0
       repetitions: 0.5
-    - path: dss://nano_v14_49k_df_human_v2_global_lita_processed@v0
+    - path: dss://nano_v14_49k_df_human_v2_global_lita_processed@v0/df_human_v2_global_lita_processed.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://df_human@v0
       repetitions: 0.5
-    - path: dss://nano_v14_49k_merged_drop3_lita_processed@v0
+    - path: dss://nano_v14_49k_merged_drop3_lita_processed@v0/merged_drop3_lita_processed.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://df_human@v0
       repetitions: 0.5
-    - path: dss://nano_v14_49k_molmo2_video_askmodelanything@v0
+    - path: dss://nano_v14_49k_molmo2_video_askmodelanything@v0/molmo2_video_askmodelanything.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://molmo2_videos@v0
       repetitions: 1
-    - path: dss://nano_v14_49k_molmo2_video_capqa@v0
+    - path: dss://nano_v14_49k_molmo2_video_capqa@v0/molmo2_video_capqa.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://molmo2_videos@v0
       repetitions: 1
-    - path: dss://nano_v14_49k_molmo2_video_longcapqa@v0
+    - path: dss://nano_v14_49k_molmo2_video_longcapqa@v0/molmo2_video_longcapqa.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://molmo2_videos@v0
       repetitions: 1
-    - path: dss://nano_v14_49k_molmo2_video_pointqa@v0
+    - path: dss://nano_v14_49k_molmo2_video_pointqa@v0/molmo2_video_pointqa.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://molmo2_videos@v0
       repetitions: 1
-    - path: dss://nano_v14_49k_video_qa_miradata_counting@v0
+    - path: dss://nano_v14_49k_video_qa_miradata_counting@v0/video_qa_miradata_counting.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://miradata_all_clips@v0
       repetitions: 0.5
-    - path: dss://nano_v14_49k_video_qa_miradata_needle@v0
+    - path: dss://nano_v14_49k_video_qa_miradata_needle@v0/video_qa_miradata_needle.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://miradata_all_clips@v0
       repetitions: 0.5
-    - path: dss://nano_v14_49k_video_qa_miradata_ocr_995e80f9ca@v0
+    - path: dss://nano_v14_49k_video_qa_miradata_ocr_995e80f9ca@v0/video_qa_miradata_ocr.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://miradata_all_clips@v0
       repetitions: 0.5
-    - path: dss://nano_v14_49k_video_qa_miradata_spatial_perception@v0
+    - path: dss://nano_v14_49k_video_qa_miradata_spatial_perception@v0/video_qa_miradata_spatial_perception.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://miradata_all_clips@v0
       repetitions: 0.5
-    - path: dss://nano_v14_49k_video_qa_miradata_spatial_reasoning@v0
-      subflavors:
-        cook: general_conversations_jsonl
-      aux:
-        media_source: filesystem+dss://miradata_all_clips@v0
-      repetitions: 1
-    - path: dss://nano_v14_49k_video_qa_miradata_subscene@v0
-      subflavors:
-        cook: general_conversations_jsonl
-      aux:
-        media_source: filesystem+dss://miradata_all_clips@v0
-      repetitions: 0.5
-    - path: dss://nano_v14_49k_video_qa_miradata_temporal_160b558dfa@v0
+    - path: dss://nano_v14_49k_video_qa_miradata_spatial_reasoning@v0/video_qa_miradata_spatial_reasoning.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://miradata_all_clips@v0
       repetitions: 1
-    - path: dss://nano_v14_49k_video_qa_omni_data_63bb570a49@v0
+    - path: dss://nano_v14_49k_video_qa_miradata_subscene@v0/video_qa_miradata_subscene.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://miradata_all_clips@v0
+      repetitions: 0.5
+    - path: dss://nano_v14_49k_video_qa_miradata_temporal_160b558dfa@v0/video_qa_miradata_temporal.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://miradata_all_clips@v0
+      repetitions: 1
+    - path: dss://nano_v14_49k_video_qa_omni_data_63bb570a49@v0/video_qa_omni_data.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://omni_video_qa_source_videos@v0
       repetitions: 0.5
-    - path: dss://nano_v14_49k_video_qa_omni_data_counting@v0
+    - path: dss://nano_v14_49k_video_qa_omni_data_counting@v0/video_qa_omni_data_counting.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://omni_video_qa_source_videos@v0
       repetitions: 0.5
-    - path: dss://nano_v14_49k_video_qa_omni_data_ocr_bfbd505b2c@v0
+    - path: dss://nano_v14_49k_video_qa_omni_data_ocr_bfbd505b2c@v0/video_qa_omni_data_ocr.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://omni_video_qa_source_videos@v0
       repetitions: 0.5
-    - path: dss://nano_v14_49k_video_qa_omni_data_spatial_perception@v0
+    - path: dss://nano_v14_49k_video_qa_omni_data_spatial_perception@v0/video_qa_omni_data_spatial_perception.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://omni_video_qa_source_videos@v0
       repetitions: 0.5
-    - path: dss://nano_v14_49k_video_qa_omni_data_spatial_reasoning@v0
+    - path: dss://nano_v14_49k_video_qa_omni_data_spatial_reasoning@v0/video_qa_omni_data_spatial_reasoning.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://omni_video_qa_source_videos@v0
       repetitions: 1
-    - path: dss://nano_v14_49k_fgqa_plm_human_relative@v0
+    - path: dss://nano_v14_49k_fgqa_plm_human_relative@v0/fgqa_plm_human_relative.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://fgqa_videos@v0
       repetitions: 1
-    - path: dss://nano_v14_49k_video_qa_yt8m_counting@v0
+    - path: dss://nano_v14_49k_video_qa_yt8m_counting@v0/video_qa_yt8m_counting.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://nano_v14_49k_YouTube8M@v0
       repetitions: 1
-    - path: dss://nano_v14_49k_video_qa_yt8m_ocr@v0
+    - path: dss://nano_v14_49k_video_qa_yt8m_ocr@v0/video_qa_yt8m_ocr.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://nano_v14_49k_YouTube8M@v0
       repetitions: 1
-    - path: dss://nano_v14_49k_video_qa_yt8m_spatial_reasoning@v0
+    - path: dss://nano_v14_49k_video_qa_yt8m_spatial_reasoning@v0/video_qa_yt8m_spatial_reasoning.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://nano_v14_49k_YouTube8M@v0
       repetitions: 1
-    - path: dss://nano_v14_49k_video_qa_yt8m_temporal_6678a81e13@v0
+    - path: dss://nano_v14_49k_video_qa_yt8m_temporal_6678a81e13@v0/video_qa_yt8m_temporal.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:

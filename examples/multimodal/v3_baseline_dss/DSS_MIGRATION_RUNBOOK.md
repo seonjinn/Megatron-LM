@@ -20,6 +20,9 @@ shell history or a pre-existing cache.
   no basename or fuzzy dataset matching is performed.
 - `dss_mapping_tool.py` validates and normalizes the registry, looks up exact
   paths, and recursively audits a legacy YAML graph without modifying it.
+- `../tools/validate/audit_dss_recipe.py` validates a converted recipe graph
+  against the local DSS cache, including exact subpaths and the invalid case
+  where an unindexed standalone-JSONL directory is used as a dataset root.
 - `DSS_OPERATIONS_LOG.csv` is append-only operational history. Record uploads,
   cache jobs, permission failures, replacement datasets, and their observed
   status. A later status observation should be a new row with a new timestamp.
@@ -260,11 +263,34 @@ nvdataset job list DATASET_NAME \
 Only after exact mapping decisions are recorded:
 
 - replace a primary path with `dss://NAME@VERSION[/SUBPATH]`;
-- replace a media root with
-  `filesystem+dss://NAME@VERSION[/SUBPATH]`;
+- reference a standalone JSONL by its exact file subpath, for example
+  `dss://NAME@VERSION/data.jsonl`; a bare version directory is valid only when
+  it is itself an Energon-prepared dataset root;
+- use `dss://NAME@VERSION[/SUBPATH]` for indexed Energon/WebDataset media
+  stores. For example, BenchFit and Dense OCR require
+  `dss://image_shards@v0` so media fragments are retrieved through its shard
+  index;
+- use `filesystem+dss://NAME@VERSION[/SUBPATH]` for direct filesystem media
+  stores whose fragment paths resolve below the cached directory;
+- when record paths contain a prefix that is already represented by the DSS
+  root, use a named auxiliary plus `subflavors.aux_data_prefixes` to route the
+  prefix and remove it before lookup:
+
+  ```yaml
+  subflavors:
+    cook: conversation
+    aux_data_prefixes:
+      train1/png/: figureqa
+  aux:
+    figureqa: filesystem+dss://internvl@v0/image_data/figureqa/train1/png
+  ```
+
 - preserve all weights, ordering, cooks, and other metadata;
 - keep newly uploaded leaves inactive until both primary and auxiliary caches
   exist on the training cluster.
+
+Do not replace DSS references with absolute paths below
+`/home/svc-dss/cache`, `/lustre`, or another cluster-specific storage root.
 
 When replacing a dataset because of ownership or a broken snapshot, update
 every exact occurrence of the old reference and record the old and new mapping
@@ -281,7 +307,17 @@ At minimum:
 5. Verify every expected local cache path.
 6. Confirm there are no active `filesystem://` paths in the converted graph.
 7. Confirm intentionally inactive leaves are commented and documented.
-8. Launch a data-loader smoke test before a full model job.
+8. Run the recursive DSS recipe audit:
+
+   ```bash
+   python ../tools/validate/audit_dss_recipe.py \
+     --cache-dir /home/svc-dss/cache/nemotron \
+     /path/to/converted_recipe.yaml
+   ```
+
+9. Launch a containerized data-loader smoke test before a full model job.
+   Materialize every leaf and decode multiple records per leaf so indexed
+   media access, cooks, task encoding, and lazy media loading are exercised.
 
 If the training process reports a different cache root than
 `/home/svc-dss/cache/nemotron`, fix the environment before changing the recipe.
@@ -300,8 +336,11 @@ If the training process reports a different cache root than
 - The 138 cache-only legacy references are acceptable for this cluster but
   remain a portability risk. A future fresh-cluster migration must restore
   their DSS visibility or upload/remap them.
-- All four entry-point graphs parse and resolve, and every active DSS cache
-  root and referenced subpath exists under `/home/svc-dss/cache/nemotron`.
+- On 2026-07-28, all four entry-point graphs passed recursive static auditing
+  and containerized loader validation: 852 materialized leaves for 16K, 773
+  for no-ultra, 74 for 49K, and 19 for MMLongBench.
+- All active recipe paths remain DSS references. No recipe fix points directly
+  into `/home/svc-dss/cache` or an absolute `/lustre` path.
 
 ## Recordkeeping checklist
 
@@ -313,6 +352,9 @@ For every new or changed mapping:
       baseline.
 - [ ] Append upload and cache observations to `DSS_OPERATIONS_LOG.csv`.
 - [ ] Update the relevant recipe only after exact DSS and cache validation.
+- [ ] Record any runtime media-prefix routing with named auxiliaries and
+      `aux_data_prefixes`; do not put these record-relative prefixes in
+      `path_prefix_aliases.csv`.
 - [ ] Update the current-status section of `README.md`.
 - [ ] Regenerate or clearly date any exhaustive inventory.
 - [ ] Record job IDs, clusters, snapshot names, ownership exceptions, and

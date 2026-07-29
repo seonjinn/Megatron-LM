@@ -58,91 +58,91 @@ splits:
       aux:
         media_source: filesystem+dss://molmo2_videos@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_short_video_ocr_vggsound@v0
+    - path: dss://nano_v14_16k_short_video_ocr_vggsound@v0/short_video_ocr_vggsound.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://vggsound_video_media@v0
       repetitions: 2
-    - path: dss://nano_v14_16k_short_video_qa_vggsound@v0
+    - path: dss://nano_v14_16k_short_video_qa_vggsound@v0/short_video_qa_vggsound.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://vggsound_video_media@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video_qa_miradata_counting@v0
+    - path: dss://nano_v14_16k_video_qa_miradata_counting@v0/video_qa_miradata_counting.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://miradata_all_clips@v0
       repetitions: 2
-    - path: dss://nano_v14_16k_video_qa_miradata_needle@v0
+    - path: dss://nano_v14_16k_video_qa_miradata_needle@v0/video_qa_miradata_needle.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://miradata_all_clips@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video_qa_miradata_ocr@v0
-      subflavors:
-        cook: general_conversations_jsonl
-      aux:
-        media_source: filesystem+dss://miradata_all_clips@v0
-      repetitions: 2
-    - path: dss://nano_v14_16k_video_qa_miradata_spatial_perception@v0
-      subflavors:
-        cook: general_conversations_jsonl
-      aux:
-        media_source: filesystem+dss://miradata_all_clips@v0
-      repetitions: 1
-    - path: dss://nano_v14_16k_video_qa_miradata_spatial_reasoning@v0
+    - path: dss://nano_v14_16k_video_qa_miradata_ocr@v0/video_qa_miradata_ocr.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://miradata_all_clips@v0
       repetitions: 2
-    - path: dss://nano_v14_16k_video_qa_miradata_subscene@v0
+    - path: dss://nano_v14_16k_video_qa_miradata_spatial_perception@v0/video_qa_miradata_spatial_perception.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://miradata_all_clips@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video_qa_miradata_temporal@v0
+    - path: dss://nano_v14_16k_video_qa_miradata_spatial_reasoning@v0/video_qa_miradata_spatial_reasoning.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://miradata_all_clips@v0
       repetitions: 2
-    - path: dss://nano_v14_16k_video_qa_omni_data@v0
+    - path: dss://nano_v14_16k_video_qa_miradata_subscene@v0/video_qa_miradata_subscene.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://miradata_all_clips@v0
+      repetitions: 1
+    - path: dss://nano_v14_16k_video_qa_miradata_temporal@v0/video_qa_miradata_temporal.jsonl
+      subflavors:
+        cook: general_conversations_jsonl
+      aux:
+        media_source: filesystem+dss://miradata_all_clips@v0
+      repetitions: 2
+    - path: dss://nano_v14_16k_video_qa_omni_data@v0/video_qa_omni_data.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://omni_video_qa_source_videos@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video_qa_omni_data_counting@v0
+    - path: dss://nano_v14_16k_video_qa_omni_data_counting@v0/video_qa_omni_data_counting.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://omni_video_qa_source_videos@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video_qa_omni_data_ocr@v0
+    - path: dss://nano_v14_16k_video_qa_omni_data_ocr@v0/video_qa_omni_data_ocr.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://omni_video_qa_source_videos@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video_qa_omni_data_spatial_perception@v0
+    - path: dss://nano_v14_16k_video_qa_omni_data_spatial_perception@v0/video_qa_omni_data_spatial_perception.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://omni_video_qa_source_videos@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video_qa_omni_data_spatial_reasoning@v0
+    - path: dss://nano_v14_16k_video_qa_omni_data_spatial_reasoning@v0/video_qa_omni_data_spatial_reasoning.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://omni_video_qa_source_videos@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_videomme_text_questions_safetyfix0323@v0
+    - path: dss://nano_v14_16k_videomme_text_questions_safetyfix0323@v0/videomme_text_questions_safetyfix0323.jsonl
       subflavors:
         cook: general_conversations_jsonl
       repetitions: 1

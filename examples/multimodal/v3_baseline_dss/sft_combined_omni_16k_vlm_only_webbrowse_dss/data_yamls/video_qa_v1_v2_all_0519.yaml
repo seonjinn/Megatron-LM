@@ -100,523 +100,523 @@ splits:
       aux:
         media_source: filesystem+dss://tapos_30s@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-vtg-didemo-train@v0
+    - path: dss://nano_v14_16k_video-vtg-didemo-train@v0/video-vtg-didemo-train.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://didemo@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_llava_video_178k_1_2_m_nextqa_oe_qa_processed@v0
+    - path: dss://nano_v14_16k_llava_video_178k_1_2_m_nextqa_oe_qa_processed@v0/llava_video_178k_1_2_m_nextqa_oe_qa_processed.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://nextvideo_llava_video_178k_nextqa_1_2m@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-cls-k710-full-train@v0
+    - path: dss://nano_v14_16k_video-cls-k710-full-train@v0/video-cls-k710-full-train.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://k710@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-dvfc-anet-caption-train@v0
+    - path: dss://nano_v14_16k_video-dvfc-anet-caption-train@v0/video-dvfc-anet-caption-train.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://anet@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-vqa-star@v0
+    - path: dss://nano_v14_16k_video-vqa-star@v0/video-vqa-star.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://nano_v14_16k_Charades_v1@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-vqa-videochat2-egoqa@v0
+    - path: dss://nano_v14_16k_video-vqa-videochat2-egoqa@v0/video-vqa-videochat2-egoqa.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://videochat2_egoqa@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_llava_video_178k_30_60_s_nextqa_oe_qa_processed@v0
+    - path: dss://nano_v14_16k_llava_video_178k_30_60_s_nextqa_oe_qa_processed@v0/llava_video_178k_30_60_s_nextqa_oe_qa_processed.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://nextvideo_llava_video_178k_nextqa_30_60s@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-cap-egoexolearn-ego-untrimmed@v0
+    - path: dss://nano_v14_16k_video-cap-egoexolearn-ego-untrimmed@v0/video-cap-egoexolearn-ego-untrimmed.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://EgoExoLearn@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_llava_video_178k_2_3_m_activitynetqa_oe_qa_processed@v0
+    - path: dss://nano_v14_16k_llava_video_178k_2_3_m_activitynetqa_oe_qa_processed@v0/llava_video_178k_2_3_m_activitynetqa_oe_qa_processed.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://llava_video_178k_activitynetqa_2_3m_train@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-vqa-egoexolearn-video-oe@v0
+    - path: dss://nano_v14_16k_video-vqa-egoexolearn-video-oe@v0/video-vqa-egoexolearn-video-oe.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://EgoExoLearn@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_llava_video_178k_30_60_s_perceptiontest_mc_qa_processed@v0
+    - path: dss://nano_v14_16k_llava_video_178k_30_60_s_perceptiontest_mc_qa_processed@v0/llava_video_178k_30_60_s_perceptiontest_mc_qa_processed.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://llava_video_178k_perception_test_30_60_s_videos@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-tal-fineaction-train@v0
+    - path: dss://nano_v14_16k_video-tal-fineaction-train@v0/video-tal-fineaction-train.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://fineaction@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-tal-anet-train@v0
+    - path: dss://nano_v14_16k_video-tal-anet-train@v0/video-tal-anet-train.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://anet@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_llava_video_178k_0_30_s_perceptiontest_mc_qa_processed@v0
+    - path: dss://nano_v14_16k_llava_video_178k_0_30_s_perceptiontest_mc_qa_processed@v0/llava_video_178k_0_30_s_perceptiontest_mc_qa_processed.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://llava_video_178k_perception_test_0_30_s_videos@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-vtg-queryd@v0
+    - path: dss://nano_v14_16k_video-vtg-queryd@v0/video-vtg-queryd.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://queryd@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_llava_video_178k_0_30_s_nextqa_mc_qa_processed@v0
+    - path: dss://nano_v14_16k_llava_video_178k_0_30_s_nextqa_mc_qa_processed@v0/llava_video_178k_0_30_s_nextqa_mc_qa_processed.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://nextvideo_llava_video_178k_nextqa_0_30s@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-vqa-clevrerqa@v0
+    - path: dss://nano_v14_16k_video-vqa-clevrerqa@v0/video-vqa-clevrerqa.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://clevrerqa_video_media@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-groundvqa-anet-rtl@v0
+    - path: dss://nano_v14_16k_video-groundvqa-anet-rtl@v0/video-groundvqa-anet-rtl.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://anet@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_llava_video_178k_30_60_s_nextqa_mc_qa_processed@v0
+    - path: dss://nano_v14_16k_llava_video_178k_30_60_s_nextqa_mc_qa_processed@v0/llava_video_178k_30_60_s_nextqa_mc_qa_processed.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://nextvideo_llava_video_178k_nextqa_30_60s@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_llava_video_178k_1_2_m_activitynetqa_oe_qa_processed@v0
+    - path: dss://nano_v14_16k_llava_video_178k_1_2_m_activitynetqa_oe_qa_processed@v0/llava_video_178k_1_2_m_activitynetqa_oe_qa_processed.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://llava_video_178k_activitynetqa_1_2m_train@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-vqa-perceptiontest-mcq-singleturn@v0
+    - path: dss://nano_v14_16k_video-vqa-perceptiontest-mcq-singleturn@v0/video-vqa-perceptiontest-mcq-singleturn.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://perception_test_train_videos@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-vqa-sportsqa-oe-multiturn@v0
+    - path: dss://nano_v14_16k_video-vqa-sportsqa-oe-multiturn@v0/video-vqa-sportsqa-oe-multiturn.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://nano_v14_16k_sportsqa_mp4@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-vqa-nextqa@v0
+    - path: dss://nano_v14_16k_video-vqa-nextqa@v0/video-vqa-nextqa.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://nextvideo_nextqa_video_vqa_flat_mp4@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_llava_video_178k_30_60_s_activitynetqa_oe_qa_processed@v0
+    - path: dss://nano_v14_16k_llava_video_178k_30_60_s_activitynetqa_oe_qa_processed@v0/llava_video_178k_30_60_s_activitynetqa_oe_qa_processed.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://llava_video_178k_activitynetqa_30_60s_train@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-vqa-sportsqa-mcq-multiturn@v0
+    - path: dss://nano_v14_16k_video-vqa-sportsqa-mcq-multiturn@v0/video-vqa-sportsqa-mcq-multiturn.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://nano_v14_16k_sportsqa_mp4@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-tal-hacs-train@v0
+    - path: dss://nano_v14_16k_video-tal-hacs-train@v0/video-tal-hacs-train.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://hacs@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-vqa-tvqa-long-mcq-multiturn-shuffle-repeat-2@v0
+    - path: dss://nano_v14_16k_video-vqa-tvqa-long-mcq-multiturn-shuffle-repeat-2@v0/video-vqa-tvqa-long-mcq-multiturn-shuffle-repeat-2.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://tvqa_fps3_mp4@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-dvpc-youcook2-train@v0
+    - path: dss://nano_v14_16k_video-dvpc-youcook2-train@v0/video-dvpc-youcook2-train.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://youcook2@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-cls-videochat2-k710@v0
+    - path: dss://nano_v14_16k_video-cls-videochat2-k710@v0/video-cls-videochat2-k710.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://videochat2_k710@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_llava_video_178k_0_30_s_activitynetqa_oe_qa_processed@v0
+    - path: dss://nano_v14_16k_llava_video_178k_0_30_s_activitynetqa_oe_qa_processed@v0/llava_video_178k_0_30_s_activitynetqa_oe_qa_processed.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://llava_video_178k_activitynetqa_0_30s_train@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-dvpc-hirest-step-train@v0
+    - path: dss://nano_v14_16k_video-dvpc-hirest-step-train@v0/video-dvpc-hirest-step-train.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://hirest@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-dvpc-coin-action-train@v0
+    - path: dss://nano_v14_16k_video-dvpc-coin-action-train@v0/video-dvpc-coin-action-train.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://nano_v14_16k_coin@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-vqa-egoexolearn-video-mcq@v0
+    - path: dss://nano_v14_16k_video-vqa-egoexolearn-video-mcq@v0/video-vqa-egoexolearn-video-mcq.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://EgoExoLearn@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_llava_video_178k_0_30_s_nextqa_oe_qa_processed@v0
+    - path: dss://nano_v14_16k_llava_video_178k_0_30_s_nextqa_oe_qa_processed@v0/llava_video_178k_0_30_s_nextqa_oe_qa_processed.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://nextvideo_llava_video_178k_nextqa_0_30s@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-cls-videochat2-sthv2@v0
+    - path: dss://nano_v14_16k_video-cls-videochat2-sthv2@v0/video-cls-videochat2-sthv2.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://sthv2_mp4@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-vqa-llava-hound@v0
+    - path: dss://nano_v14_16k_video-vqa-llava-hound@v0/video-vqa-llava-hound.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://nano_v14_16k_llava_hound@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-cap-ego4d-video-recap-gpt4o-extend@v0
+    - path: dss://nano_v14_16k_video-cap-ego4d-video-recap-gpt4o-extend@v0/video-cap-ego4d-video-recap-gpt4o-extend.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://nano_v14_16k_ego4d_summary_trimmed@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_llava_video_178k_1_2_m_nextqa_mc_qa_processed@v0
+    - path: dss://nano_v14_16k_llava_video_178k_1_2_m_nextqa_mc_qa_processed@v0/llava_video_178k_1_2_m_nextqa_mc_qa_processed.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://nextvideo_llava_video_178k_nextqa_1_2m@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-tas-breakfast-train@v0
+    - path: dss://nano_v14_16k_video-tas-breakfast-train@v0/video-tas-breakfast-train.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://breakfast_h264@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-tal-hirest-class-train@v0
+    - path: dss://nano_v14_16k_video-tal-hirest-class-train@v0/video-tal-hirest-class-train.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://hirest@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_llava_video_178k_30_60_s_perceptiontest_mc_qa@v0
+    - path: dss://nano_v14_16k_llava_video_178k_30_60_s_perceptiontest_mc_qa@v0/llava_video_178k_30_60_s_perceptiontest_mc_qa.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://llava_video_178k_perception_test_30_60_s_videos@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_llava_video_178k_30_60_s_activitynetqa_oe_qa@v0
+    - path: dss://nano_v14_16k_llava_video_178k_30_60_s_activitynetqa_oe_qa@v0/llava_video_178k_30_60_s_activitynetqa_oe_qa.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://llava_video_178k_activitynetqa_30_60s_train@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-vqa-videochat2-egoqa_b8acc53b14@v0
+    - path: dss://nano_v14_16k_video-vqa-videochat2-egoqa_b8acc53b14@v0/video-vqa-videochat2-egoqa.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://videochat2_egoqa@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-cls-videochat2-k710_d686ceb558@v0
+    - path: dss://nano_v14_16k_video-cls-videochat2-k710_d686ceb558@v0/video-cls-videochat2-k710.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://videochat2_k710@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_llava_video_178k_30_60_s_nextqa_mc_qa@v0
+    - path: dss://nano_v14_16k_llava_video_178k_30_60_s_nextqa_mc_qa@v0/llava_video_178k_30_60_s_nextqa_mc_qa.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://nextvideo_llava_video_178k_nextqa_30_60s@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_llava_video_178k_1_2_m_activitynetqa_oe_qa@v0
+    - path: dss://nano_v14_16k_llava_video_178k_1_2_m_activitynetqa_oe_qa@v0/llava_video_178k_1_2_m_activitynetqa_oe_qa.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://llava_video_178k_activitynetqa_1_2m_train@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-dvpc-hirest-step-train_e6f94661b2@v0
+    - path: dss://nano_v14_16k_video-dvpc-hirest-step-train_e6f94661b2@v0/video-dvpc-hirest-step-train.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://hirest@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_llava_video_178k_0_30_s_nextqa_mc_qa@v0
+    - path: dss://nano_v14_16k_llava_video_178k_0_30_s_nextqa_mc_qa@v0/llava_video_178k_0_30_s_nextqa_mc_qa.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://nextvideo_llava_video_178k_nextqa_0_30s@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-vqa-egoexolearn-video-mcq_01088e988c@v0
+    - path: dss://nano_v14_16k_video-vqa-egoexolearn-video-mcq_01088e988c@v0/video-vqa-egoexolearn-video-mcq.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://EgoExoLearn@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-vqa-egoexolearn-video-oe_a9f01c5c9f@v0
+    - path: dss://nano_v14_16k_video-vqa-egoexolearn-video-oe_a9f01c5c9f@v0/video-vqa-egoexolearn-video-oe.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://EgoExoLearn@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-vqa-nextqa_dff37a77ba@v0
+    - path: dss://nano_v14_16k_video-vqa-nextqa_dff37a77ba@v0/video-vqa-nextqa.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://nextvideo_nextqa_video_vqa_flat_mp4@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-vtg-queryd_ac5768044d@v0
+    - path: dss://nano_v14_16k_video-vtg-queryd_ac5768044d@v0/video-vtg-queryd.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://queryd@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-tal-ego4d-mq-train@v0
+    - path: dss://nano_v14_16k_video-tal-ego4d-mq-train@v0/video-tal-ego4d-mq-train.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://ego4d_mq_short448_30fps@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-cap-ego4d-video-recap-gpt4o-extend_59f448db3f@v0
+    - path: dss://nano_v14_16k_video-cap-ego4d-video-recap-gpt4o-extend_59f448db3f@v0/video-cap-ego4d-video-recap-gpt4o-extend.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://nano_v14_16k_ego4d_summary_trimmed@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_llava_video_178k_2_3_m_nextqa_oe_qa@v0
+    - path: dss://nano_v14_16k_llava_video_178k_2_3_m_nextqa_oe_qa@v0/llava_video_178k_2_3_m_nextqa_oe_qa.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://nextvideo_llava_video_178k_nextqa_2_3m@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-vqa-clevrerqa_4180952037@v0
+    - path: dss://nano_v14_16k_video-vqa-clevrerqa_4180952037@v0/video-vqa-clevrerqa.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://clevrerqa_video_media@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-cls-videochat2-sthv2_b163382643@v0
+    - path: dss://nano_v14_16k_video-cls-videochat2-sthv2_b163382643@v0/video-cls-videochat2-sthv2.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://sthv2_mp4@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-tal-hacs-train_7150246438@v0
+    - path: dss://nano_v14_16k_video-tal-hacs-train_7150246438@v0/video-tal-hacs-train.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://hacs@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-dvpc-coin-action-train_5c44a03a13@v0
+    - path: dss://nano_v14_16k_video-dvpc-coin-action-train_5c44a03a13@v0/video-dvpc-coin-action-train.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://nano_v14_16k_coin@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-vspc-vitt@v0
+    - path: dss://nano_v14_16k_video-vspc-vitt@v0/video-vspc-vitt.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://nano_v14_16k_vitt_h264@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-vtg-youcook2-train@v0
+    - path: dss://nano_v14_16k_video-vtg-youcook2-train@v0/video-vtg-youcook2-train.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://youcook2@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-tal-perceptiontest-train@v0
+    - path: dss://nano_v14_16k_video-tal-perceptiontest-train@v0/video-tal-perceptiontest-train.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://perception_test_train_videos@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-tal-anet-train_c879976690@v0
+    - path: dss://nano_v14_16k_video-tal-anet-train_c879976690@v0/video-tal-anet-train.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://anet@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-vqa-sportsqa-mcq-multiturn_c20f3f3dc3@v0
+    - path: dss://nano_v14_16k_video-vqa-sportsqa-mcq-multiturn_c20f3f3dc3@v0/video-vqa-sportsqa-mcq-multiturn.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://nano_v14_16k_sportsqa_mp4@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-cls-k710-full-train_300a14dad2@v0
+    - path: dss://nano_v14_16k_video-cls-k710-full-train_300a14dad2@v0/video-cls-k710-full-train.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://k710@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_llava_video_178k_30_60_s_nextqa_oe_qa@v0
+    - path: dss://nano_v14_16k_llava_video_178k_30_60_s_nextqa_oe_qa@v0/llava_video_178k_30_60_s_nextqa_oe_qa.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://nextvideo_llava_video_178k_nextqa_30_60s@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_llava_video_178k_2_3_m_nextqa_mc_qa@v0
+    - path: dss://nano_v14_16k_llava_video_178k_2_3_m_nextqa_mc_qa@v0/llava_video_178k_2_3_m_nextqa_mc_qa.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://nextvideo_llava_video_178k_nextqa_2_3m@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_llava_video_178k_0_30_s_nextqa_oe_qa@v0
+    - path: dss://nano_v14_16k_llava_video_178k_0_30_s_nextqa_oe_qa@v0/llava_video_178k_0_30_s_nextqa_oe_qa.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://nextvideo_llava_video_178k_nextqa_0_30s@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-tas-breakfast-train_f3700554b9@v0
+    - path: dss://nano_v14_16k_video-tas-breakfast-train_f3700554b9@v0/video-tas-breakfast-train.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://breakfast_h264@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_llava_video_178k_0_30_s_perceptiontest_mc_qa@v0
+    - path: dss://nano_v14_16k_llava_video_178k_0_30_s_perceptiontest_mc_qa@v0/llava_video_178k_0_30_s_perceptiontest_mc_qa.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://llava_video_178k_perception_test_0_30_s_videos@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_llava_video_178k_0_30_s_activitynetqa_oe_qa@v0
+    - path: dss://nano_v14_16k_llava_video_178k_0_30_s_activitynetqa_oe_qa@v0/llava_video_178k_0_30_s_activitynetqa_oe_qa.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://llava_video_178k_activitynetqa_0_30s_train@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-vqa-tvqa-long-mcq-multiturn-shuffle-repeat-2_2b9ab61857@v0
+    - path: dss://nano_v14_16k_video-vqa-tvqa-long-mcq-multiturn-shuffle-repeat-2_2b9ab61857@v0/video-vqa-tvqa-long-mcq-multiturn-shuffle-repeat-2.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://tvqa_fps3_mp4@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-vtg-medvidqa-train@v0
+    - path: dss://nano_v14_16k_video-vtg-medvidqa-train@v0/video-vtg-medvidqa-train.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://medvidqa@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_llava_video_178k_1_2_m_nextqa_oe_qa@v0
+    - path: dss://nano_v14_16k_llava_video_178k_1_2_m_nextqa_oe_qa@v0/llava_video_178k_1_2_m_nextqa_oe_qa.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://nextvideo_llava_video_178k_nextqa_1_2m@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-vtg-ego4d-nlq-train@v0
+    - path: dss://nano_v14_16k_video-vtg-ego4d-nlq-train@v0/video-vtg-ego4d-nlq-train.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://ego4d_nlq_short448_30fps@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-vtg-didemo-train_05a84b90f7@v0
+    - path: dss://nano_v14_16k_video-vtg-didemo-train_05a84b90f7@v0/video-vtg-didemo-train.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://didemo@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-cap-egoexolearn-ego-untrimmed_a286bfa99a@v0
+    - path: dss://nano_v14_16k_video-cap-egoexolearn-ego-untrimmed_a286bfa99a@v0/video-cap-egoexolearn-ego-untrimmed.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://EgoExoLearn@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_llava_video_178k_1_2_m_nextqa_mc_qa@v0
+    - path: dss://nano_v14_16k_llava_video_178k_1_2_m_nextqa_mc_qa@v0/llava_video_178k_1_2_m_nextqa_mc_qa.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://nextvideo_llava_video_178k_nextqa_1_2m@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-vqa-llava-hound_be8621d89b@v0
+    - path: dss://nano_v14_16k_video-vqa-llava-hound_be8621d89b@v0/video-vqa-llava-hound.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://nano_v14_16k_llava_hound@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-vqa-perceptiontest-mcq-singleturn_49797db988@v0
+    - path: dss://nano_v14_16k_video-vqa-perceptiontest-mcq-singleturn_49797db988@v0/video-vqa-perceptiontest-mcq-singleturn.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://perception_test_train_videos@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-tal-fineaction-train_8741a1d95c@v0
+    - path: dss://nano_v14_16k_video-tal-fineaction-train_8741a1d95c@v0/video-tal-fineaction-train.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://fineaction@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-dvfc-anet-caption-train_33a30a5c67@v0
+    - path: dss://nano_v14_16k_video-dvfc-anet-caption-train_33a30a5c67@v0/video-dvfc-anet-caption-train.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://anet@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-groundvqa-anet-rtl_aab7c70d83@v0
+    - path: dss://nano_v14_16k_video-groundvqa-anet-rtl_aab7c70d83@v0/video-groundvqa-anet-rtl.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://anet@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_llava_video_178k_2_3_m_activitynetqa_oe_qa@v0
+    - path: dss://nano_v14_16k_llava_video_178k_2_3_m_activitynetqa_oe_qa@v0/llava_video_178k_2_3_m_activitynetqa_oe_qa.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://llava_video_178k_activitynetqa_2_3m_train@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-vqa-sportsqa-oe-multiturn_2c20077834@v0
+    - path: dss://nano_v14_16k_video-vqa-sportsqa-oe-multiturn_2c20077834@v0/video-vqa-sportsqa-oe-multiturn.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://nano_v14_16k_sportsqa_mp4@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-vqa-star_e6a92668a8@v0
+    - path: dss://nano_v14_16k_video-vqa-star_e6a92668a8@v0/video-vqa-star.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://nano_v14_16k_Charades_v1@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_video-dvpc-youcook2-train_98acb96a68@v0
+    - path: dss://nano_v14_16k_video-dvpc-youcook2-train_98acb96a68@v0/video-dvpc-youcook2-train.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:

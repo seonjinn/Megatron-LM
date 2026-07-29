@@ -4,145 +4,145 @@ __module__: megatron.energon
 splits:
   train:
     blend_epochized:
-    - path: dss://nano_v14_16k_molmo2_video_capqa_correct_safetyfix0323@v0
+    - path: dss://nano_v14_16k_molmo2_video_capqa_correct_safetyfix0323@v0/molmo2_video_capqa_correct_safetyfix0323.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://molmo2_videos@v0
       repetitions: 2
-    - path: dss://nano_v14_16k_molmo2_video_pointqa_correct@v0
+    - path: dss://nano_v14_16k_molmo2_video_pointqa_correct@v0/molmo2_video_pointqa_correct.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://molmo2_videos@v0
       repetitions: 2
-    - path: dss://nano_v14_16k_plm_rcap_train_correct@v0
+    - path: dss://nano_v14_16k_plm_rcap_train_correct@v0/plm_rcap_train_correct.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://SA-V@v0
       repetitions: 2
-    - path: dss://nano_v14_16k_plm_rtloc_train_correct@v0
+    - path: dss://nano_v14_16k_plm_rtloc_train_correct@v0/plm_rtloc_train_correct.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://SA-V@v0
       repetitions: 2
-    - path: dss://nano_v14_16k_short_video_qa_vggsound_correct@v0
+    - path: dss://nano_v14_16k_short_video_qa_vggsound_correct@v0/short_video_qa_vggsound_correct.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://vggsound_video_media@v0
       repetitions: 2
-    - path: dss://nano_v14_16k_train_chunked_processed_clean_v2_correct@v0
+    - path: dss://nano_v14_16k_train_chunked_processed_clean_v2_correct@v0/train_chunked_processed_clean_v2_correct.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://video_chunked_60s@v0
       repetitions: 2
-    - path: dss://nano_v14_16k_video_qa_miradata_counting_correct@v0
+    - path: dss://nano_v14_16k_video_qa_miradata_counting_correct@v0/video_qa_miradata_counting_correct.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://miradata_all_clips@v0
       repetitions: 2
-    - path: dss://nano_v14_16k_video_qa_miradata_needle_correct@v0
+    - path: dss://nano_v14_16k_video_qa_miradata_needle_correct@v0/video_qa_miradata_needle_correct.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://miradata_all_clips@v0
       repetitions: 2
-    - path: dss://nano_v14_16k_video_qa_miradata_spatial_reasoning_correct@v0
+    - path: dss://nano_v14_16k_video_qa_miradata_spatial_reasoning_correct@v0/video_qa_miradata_spatial_reasoning_correct.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://miradata_all_clips@v0
       repetitions: 2
-    - path: dss://nano_v14_16k_video_qa_miradata_subscene_correct@v0
+    - path: dss://nano_v14_16k_video_qa_miradata_subscene_correct@v0/video_qa_miradata_subscene_correct.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://miradata_all_clips@v0
       repetitions: 2
-    - path: dss://nano_v14_16k_video_qa_miradata_temporal_correct@v0
+    - path: dss://nano_v14_16k_video_qa_miradata_temporal_correct@v0/video_qa_miradata_temporal_correct.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://miradata_all_clips@v0
       repetitions: 2
-    - path: dss://nano_v14_16k_molmo2_video_capqa_incorrect@v0
+    - path: dss://nano_v14_16k_molmo2_video_capqa_incorrect@v0/molmo2_video_capqa_incorrect.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://molmo2_videos@v0
       repetitions: 2
-    - path: dss://nano_v14_16k_molmo2_video_pointqa_incorrect@v0
+    - path: dss://nano_v14_16k_molmo2_video_pointqa_incorrect@v0/molmo2_video_pointqa_incorrect.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://molmo2_videos@v0
       repetitions: 2
-    - path: dss://nano_v14_16k_plm_rcap_train_incorrect@v0
+    - path: dss://nano_v14_16k_plm_rcap_train_incorrect@v0/plm_rcap_train_incorrect.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://SA-V@v0
       repetitions: 1
-    - path: dss://nano_v14_16k_plm_rtloc_train_incorrect@v0
+    - path: dss://nano_v14_16k_plm_rtloc_train_incorrect@v0/plm_rtloc_train_incorrect.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://SA-V@v0
       repetitions: 2
-    - path: dss://nano_v14_16k_short_video_qa_vggsound_incorrect@v0
+    - path: dss://nano_v14_16k_short_video_qa_vggsound_incorrect@v0/short_video_qa_vggsound_incorrect.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://vggsound_video_media@v0
       repetitions: 2
-    - path: dss://nano_v14_16k_train_chunked_processed_clean_v2_incorrect_safetyfix0323@v0
+    - path: dss://nano_v14_16k_train_chunked_processed_clean_v2_incorrect_safetyfix0323@v0/train_chunked_processed_clean_v2_incorrect_safetyfix0323.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://video_chunked_60s@v0
       repetitions: 2
-    - path: dss://nano_v14_16k_video_qa_miradata_counting_incorrect@v0
+    - path: dss://nano_v14_16k_video_qa_miradata_counting_incorrect@v0/video_qa_miradata_counting_incorrect.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://miradata_all_clips@v0
       repetitions: 2
-    - path: dss://nano_v14_16k_video_qa_miradata_needle_incorrect@v0
+    - path: dss://nano_v14_16k_video_qa_miradata_needle_incorrect@v0/video_qa_miradata_needle_incorrect.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://miradata_all_clips@v0
       repetitions: 2
-    - path: dss://nano_v14_16k_video_qa_miradata_spatial_reasoning_incorrect@v0
+    - path: dss://nano_v14_16k_video_qa_miradata_spatial_reasoning_incorrect@v0/video_qa_miradata_spatial_reasoning_incorrect.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://miradata_all_clips@v0
       repetitions: 2
-    - path: dss://nano_v14_16k_video_qa_miradata_subscene_incorrect@v0
+    - path: dss://nano_v14_16k_video_qa_miradata_subscene_incorrect@v0/video_qa_miradata_subscene_incorrect.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://miradata_all_clips@v0
       repetitions: 2
-    - path: dss://nano_v14_16k_video_qa_miradata_temporal_incorrect@v0
+    - path: dss://nano_v14_16k_video_qa_miradata_temporal_incorrect@v0/video_qa_miradata_temporal_incorrect.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://miradata_all_clips@v0
       repetitions: 2
-    - path: dss://nano_v14_16k_yt1b_qa_plm_sampled_thinking_traces_safetyfix0323@v0
+    - path: dss://nano_v14_16k_yt1b_qa_plm_sampled_thinking_traces_safetyfix0323@v0/yt1b_qa_plm_sampled_thinking_traces_safetyfix0323.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:
         media_source: filesystem+dss://yttemporal180m-youtube-dataset@v0
       repetitions: 1.0
-    - path: dss://nano_v14_16k_yt1b_qa_plm_sampled_dense_captions_no_think_safetyfix0323@v0
+    - path: dss://nano_v14_16k_yt1b_qa_plm_sampled_dense_captions_no_think_safetyfix0323@v0/yt1b_qa_plm_sampled_dense_captions_no_think_safetyfix0323.jsonl
       subflavors:
         cook: general_conversations_jsonl
       aux:

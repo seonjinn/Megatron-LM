@@ -13,6 +13,26 @@ include graphs, `v14_16k_49k_omni_262k_actions.csv`, and the local cache at
 > datasets were cached locally. The DSS-team restart cached the original
 > MMLongBench media dataset, so the user-owned fallback is not used.
 
+> **2026-07-28 correction addendum:** The tables below remain a historical
+> 2026-07-23 snapshot. The active recipes now use exact JSONL subpaths for 201
+> unique primary DSS references, use the prepared `v1` JSONLs for text safety,
+> image safety, BenchFit, and Dense OCR, and use indexed
+> `dss://image_shards@v0` media access for BenchFit and Dense OCR. Seven
+> prefixed-media cases use named auxiliaries and `aux_data_prefixes`. No active
+> recipe was changed to point directly at an absolute cache or Lustre path.
+> The source mapping registry and its generated normalized form were updated
+> to match these active references.
+
+The runtime media-prefix corrections are:
+
+| Record prefix | Named auxiliary | DSS media reference | Active occurrences |
+|---|---|---|---:|
+| `arxiv_chart_alignment/` | `arxiv_chart_alignment` | `filesystem+dss://arxiv_chart_alignment@v0` | 2 |
+| `nonarxiv_chart/` | `nonarxiv_chart` | `filesystem+dss://nonarxiv_chart@v0` | 2 |
+| `code2Img/` | `charxiv_code2img` | `filesystem+dss://charxiv_code2img@v0` | 1 |
+| `train1/png/` | `figureqa` | `filesystem+dss://internvl@v0/image_data/figureqa/train1/png` | 1 |
+| `hw_math/` | `haoweilai_hw_math` | `filesystem+dss://haoweilai_hw_math@v0` | 1 |
+
 ## How to read this document
 
 - **Primary** is the training JSONL/dataset referenced by `path`.
@@ -1799,7 +1819,9 @@ successfully as job `0fcd205d-a21f-4b7e-91f7-528d190eaefd`. The user-owned
 - Active references without a CSV source row: 10
 - Unique active datasets requiring cache on 2026-07-23: 237
 - Post-mapping NRT uploads identified: 3 primary datasets and 2 auxiliary media roots
-- Final expanded-graph leaf counts: 848 for 16K, 769 for 16K without ultra
-  text, 74 for 49K, and 19 for MMLongBench
+- Historical expanded-graph leaf counts on 2026-07-24: 848 for 16K, 769 for
+  16K without ultra text, 74 for 49K, and 19 for MMLongBench
+- Current materialized leaf counts validated on 2026-07-28: 852 for 16K, 773
+  for 16K without ultra text, 74 for 49K, and 19 for MMLongBench
 - Final active DSS cache roots or referenced subpaths missing locally: 0
 - Authoritative post-snapshot operations: `DSS_OPERATIONS_LOG.csv`

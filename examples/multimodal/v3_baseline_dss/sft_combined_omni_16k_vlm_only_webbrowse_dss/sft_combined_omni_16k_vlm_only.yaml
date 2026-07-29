@@ -16,29 +16,29 @@ splits:
       repetitions: 1.2
     - path: data_yamls/ultra_txt_materialized_0407_median_le_16384.yaml
       repetitions: 0.3
-    - path: dss://filtered_textsafety_energon_dataset@v0
+    - path: dss://filtered_textsafety_energon_dataset@v1/filtered_textsafety_energon_dataset.jsonl
       subflavors:
         cook: general_conversations_jsonl
       repetitions: 2.4
-    - path: dss://image_safety_energon_dataset@v0
+    - path: dss://image_safety_energon_dataset@v1/image_safety_energon_dataset.jsonl
       subflavors:
         cook: general_conversations_jsonl
       repetitions: 2.4
       aux:
         media_source: filesystem+dss://mm_safety@v0
-    - path: dss://benchfit_qa@v0
+    - path: dss://benchfit_qa@v1/03-10a_stage5_output.jsonl
       subflavors:
         name: benchfit_qa
         cook: conversation
       aux:
-        media_source: filesystem+dss://image_shards@v0
+        media_source: dss://image_shards@v0
       repetitions: 0.72
-    - path: dss://dense_ocr_qa@v0
+    - path: dss://dense_ocr_qa@v1/03-10a_stage5_qa_output.jsonl
       subflavors:
         name: dense_ocr_qa
         cook: conversation
       aux:
-        media_source: filesystem+dss://image_shards@v0
+        media_source: dss://image_shards@v0
       repetitions: 0.72
     - path: data_yamls/charxiv_blend.yaml
       repetitions: 1.0
