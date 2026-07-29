@@ -752,7 +752,7 @@ def get_rl_packed_seq_params_for_cuda_graph(
     seq_length: int,
     device: torch.device,
     sequence_packing: bool = False,
-    max_sequences_per_bin: int = None,
+    max_sequences_per_bin: int | None = None,
 ) -> PackedSeqParams:
     """Build RL ``PackedSeqParams`` used to keep CUDA graph signatures stable."""
     if sequence_packing:

@@ -365,4 +365,3 @@ def test_seq_idx_determinism_across_replays():
     assert torch.equal(params1.seq_idx, params2.seq_idx)
     assert params1.seq_idx.shape == params2.seq_idx.shape
     assert params1.seq_idx.dtype == torch.int32
-
