@@ -384,10 +384,17 @@ def test_installed_replay_guard_rejects_runtime_topology_change() -> None:
     bank, _, _ = _capture(manager, layers, "bank")
     bank.activate()
 
-    layers[0]._te_cuda_graph_bank_replay_guard(layers[0], layers[0].cuda_graphs)
+    assert (
+        layers[0]._te_cuda_graph_bank_replay_guard(
+            layers[0], layers[0].cuda_graphs, 0
+        )
+        == 0
+    )
     runtime["count"] = 3
     with pytest.raises(ValueError, match="runtime num_microbatches"):
-        layers[0]._te_cuda_graph_bank_replay_guard(layers[0], layers[0].cuda_graphs)
+        layers[0]._te_cuda_graph_bank_replay_guard(
+            layers[0], layers[0].cuda_graphs, 0
+        )
 
 
 def test_replay_guard_hot_path_does_not_run_full_bank_validation() -> None:
@@ -399,7 +406,9 @@ def test_replay_guard_hot_path_does_not_run_full_bank_validation() -> None:
         AssertionError("full validation reached replay hot path")
     )
 
-    layers[0]._te_cuda_graph_bank_replay_guard(layers[0], layers[0].cuda_graphs)
+    layers[0]._te_cuda_graph_bank_replay_guard(
+        layers[0], layers[0].cuda_graphs, 0
+    )
     assert (
         manager.get_graph(
             bank,
@@ -439,7 +448,20 @@ def test_replay_guard_rejects_graph_list_swapped_between_layers() -> None:
 
     with pytest.raises(ValueError, match="does not match"):
         layers[0]._te_cuda_graph_bank_replay_guard(
-            layers[0], layers[0].cuda_graphs
+            layers[0], layers[0].cuda_graphs, 0
+        )
+
+
+def test_replay_guard_rejects_same_length_in_place_callable_mutation() -> None:
+    layers = [_FakeLayer("0")]
+    manager = _make_manager(layers)
+    bank, _, _ = _capture(manager, layers, "bank")
+    bank.activate()
+    layers[0].cuda_graphs[0] = _FakeGraph("mutated")
+
+    with pytest.raises(ValueError, match="canonical registration"):
+        layers[0]._te_cuda_graph_bank_replay_guard(
+            layers[0], layers[0].cuda_graphs, 0
         )
 
 
@@ -457,7 +479,7 @@ def test_graphable_module_calls_guard_before_forward_and_backward_selection() ->
         def backward_dw(self) -> None:
             selections.append("backward_dw")
 
-    def _reject(layer, graphs) -> None:
+    def _reject(layer, graphs, microbatch_index) -> int:
         raise ValueError("runtime num_microbatches mismatch")
 
     layer = SimpleNamespace(
@@ -470,6 +492,38 @@ def test_graphable_module_calls_guard_before_forward_and_backward_selection() ->
     with pytest.raises(ValueError, match="runtime num_microbatches"):
         GraphableMegatronModule._te_cuda_graph_backward_dw_graph(layer, 0)
     assert selections == []
+
+
+def test_graphable_module_uses_validated_index_for_forward_and_backward() -> None:
+    import torch
+
+    from megatron.core.transformer.module import GraphableMegatronModule
+
+    selections: list[str] = []
+
+    class _CallableGraph(_FakeGraph):
+        def __call__(self, *args, **kwargs) -> str:
+            selections.append(f"forward-{self.name}")
+            return self.name
+
+        def backward_dw(self) -> None:
+            selections.append(f"backward-{self.name}")
+
+    layer = _FakeLayer("0")
+    graphs = [_CallableGraph("g0"), _CallableGraph("g1")]
+    manager = _make_manager([layer])
+    bank = manager.capture(_FakeHelper([layer], [graphs]), num_microbatches=2)
+    bank.activate()
+    layer.current_microbatch = 1
+    layer._get_te_cuda_graph_replay_args = lambda *args, **kwargs: (args, kwargs)
+
+    assert (
+        GraphableMegatronModule._te_cuda_graph_replay(layer, torch.empty(1))
+        == "g1"
+    )
+    GraphableMegatronModule._te_cuda_graph_backward_dw_graph(layer, 1)
+
+    assert selections == ["forward-g1", "backward-g1"]
 
 
 @pytest.mark.parametrize("operation", ["activate", "reset"])

@@ -231,8 +231,9 @@ class GraphableMegatronModule(MegatronModule):
         """
         replay_guard = getattr(self, "_te_cuda_graph_bank_replay_guard", None)
         if replay_guard is not None:
-            replay_guard(self, self.cuda_graphs)
-        cg_index = microbatch_idx % len(self.cuda_graphs)
+            cg_index = replay_guard(self, self.cuda_graphs, microbatch_idx)
+        else:
+            cg_index = microbatch_idx % len(self.cuda_graphs)
         if not hasattr(self.cuda_graphs[cg_index], 'backward_dw'):
             return
         self.cuda_graphs[cg_index].backward_dw()
@@ -314,8 +315,11 @@ class GraphableMegatronModule(MegatronModule):
 
         replay_guard = getattr(self, "_te_cuda_graph_bank_replay_guard", None)
         if replay_guard is not None:
-            replay_guard(self, self.cuda_graphs)
-        cg_index = getattr(self, 'current_microbatch', 0) % len(self.cuda_graphs)
+            cg_index = replay_guard(
+                self, self.cuda_graphs, getattr(self, 'current_microbatch', 0)
+            )
+        else:
+            cg_index = getattr(self, 'current_microbatch', 0) % len(self.cuda_graphs)
         cudagraph_args, cudagraph_kwargs = self._get_te_cuda_graph_replay_args(*args, **kwargs)
 
         for hook, hook_args in self.cuda_graph_manual_hooks:

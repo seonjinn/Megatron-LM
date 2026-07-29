@@ -89,8 +89,15 @@ class _BankReplayGuard:
         self._manager = manager
         self._bank = bank
 
-    def __call__(self, layer: object, installed_graph_list: list[object]) -> None:
-        self._manager._assert_replay_ready(self._bank, layer, installed_graph_list)
+    def __call__(
+        self,
+        layer: object,
+        installed_graph_list: list[object],
+        microbatch_index: int,
+    ) -> int:
+        return self._manager._assert_replay_ready(
+            self._bank, layer, installed_graph_list, microbatch_index
+        )
 
 
 @dataclass(eq=False)
@@ -365,13 +372,15 @@ class TECudaGraphBankManager:
         num_microbatches: int,
     ) -> object:
         """Validate replay geometry before selecting the legacy modulo graph."""
-        graphs, runtime_num_microbatches = self._resolve_replay(
+        graphs, _, selected_index = self._resolve_replay(
             bank,
             layer,
             installed_graph_list=getattr(layer, "cuda_graphs", None),
             supplied_num_microbatches=num_microbatches,
+            microbatch_index=microbatch_index,
         )
-        return graphs[microbatch_index % runtime_num_microbatches]
+        assert selected_index is not None
+        return graphs[selected_index]
 
     def _get_runtime_num_microbatches(self, supplied: int | None = None) -> int:
         if supplied is not None:
@@ -387,12 +396,16 @@ class TECudaGraphBankManager:
         bank: TECudaGraphBank,
         layer: object,
         installed_graph_list: list[object],
-    ) -> None:
-        self._resolve_replay(
+        microbatch_index: int,
+    ) -> int:
+        _, _, selected_index = self._resolve_replay(
             bank,
             layer,
             installed_graph_list=installed_graph_list,
+            microbatch_index=microbatch_index,
         )
+        assert selected_index is not None
+        return selected_index
 
     def _resolve_replay(
         self,
@@ -401,7 +414,8 @@ class TECudaGraphBankManager:
         *,
         installed_graph_list: object,
         supplied_num_microbatches: int | None = None,
-    ) -> tuple[list[object], int]:
+        microbatch_index: int | None = None,
+    ) -> tuple[list[object], int, int | None]:
         if bank in self._terminal_banks:
             raise ValueError("TE CUDA graph bank has already been reset")
         if bank is not self.active_bank:
@@ -435,7 +449,17 @@ class TECudaGraphBankManager:
             raise ValueError(
                 "runtime num_microbatches or graph count does not match the active TE CUDA graph bank"
             )
-        return canonical_graph_list, runtime_num_microbatches
+        selected_index = None
+        if microbatch_index is not None:
+            selected_index = microbatch_index % runtime_num_microbatches
+            if (
+                canonical_graph_list[selected_index]
+                is not registration.graph_tuples[layer_index][selected_index]
+            ):
+                raise ValueError(
+                    "Selected CUDA graph callable does not match its canonical registration"
+                )
+        return canonical_graph_list, runtime_num_microbatches, selected_index
 
     def _assert_model_drained(self) -> None:
         drained = self._assert_model_drained_callback()
