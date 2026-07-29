@@ -6,14 +6,34 @@ import importlib
 import importlib.util
 import sys
 import weakref
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pytest
 
 
 def _load_bank_module() -> ModuleType:
-    spec = importlib.util.find_spec("megatron.core.transformer.te_cuda_graph_bank")
+    try:
+        spec = importlib.util.find_spec("megatron.core.transformer.te_cuda_graph_bank")
+    except ModuleNotFoundError:
+        module_name = "_standalone_te_cuda_graph_bank"
+        if module_name in sys.modules:
+            return sys.modules[module_name]
+        module_path = (
+            Path(__file__).resolve().parents[3]
+            / "megatron"
+            / "core"
+            / "transformer"
+            / "te_cuda_graph_bank.py"
+        )
+        spec = importlib.util.spec_from_file_location(module_name, module_path)
     assert spec is not None
+    if spec.name == "_standalone_te_cuda_graph_bank":
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+        return module
     return importlib.import_module(spec.name)
 
 
@@ -31,6 +51,67 @@ class _FakeLayer:
         self.name = name
         self.cuda_graphs = []
         self.cuda_graph_manual_hooks = []
+
+
+class _FakeTensorStore:
+    def __init__(self) -> None:
+        self.hidden_states = None
+        self.probs = None
+        self.routing_map = None
+        self.shared_expert_output = None
+
+    def clear(self) -> None:
+        self.hidden_states = None
+        self.probs = None
+        self.routing_map = None
+        self.shared_expert_output = None
+
+
+class _FakeMoELayer(_FakeLayer):
+    def __init__(
+        self,
+        name: str,
+        *,
+        valid_cudagraph_attrs: tuple[str, ...] = (
+            "z_dispatch_ref",
+            "nested.a_dispatch_ref",
+        ),
+    ) -> None:
+        super().__init__(name)
+
+        self.is_moe_layer = True
+        self.dispatcher = SimpleNamespace(
+            valid_cudagraph_attrs=list(valid_cudagraph_attrs),
+            z_dispatch_ref=None,
+            nested=SimpleNamespace(a_dispatch_ref=None),
+            handle=None,
+        )
+        self.mlp = SimpleNamespace(
+            token_dispatcher=self.dispatcher,
+            cudagraph_tensor_store=_FakeTensorStore(),
+        )
+
+    def te_cuda_graph_bank_schema(self) -> tuple[str, ...]:
+        return tuple(self.dispatcher.valid_cudagraph_attrs or ())
+
+    def assert_te_cuda_graph_bank_drained(self) -> None:
+        for field_name in (
+            "hidden_states",
+            "probs",
+            "routing_map",
+            "shared_expert_output",
+        ):
+            if getattr(self.mlp.cudagraph_tensor_store, field_name) is not None:
+                raise RuntimeError(f"MoE CUDA graph tensor store field {field_name} is live")
+
+    def clear_te_cuda_graph_bank_references(self) -> None:
+        for attr_name in self.te_cuda_graph_bank_schema():
+            parent = self.dispatcher
+            path = attr_name.split(".")
+            for component in path[:-1]:
+                parent = getattr(parent, component)
+            setattr(parent, path[-1], None)
+        self.mlp.cudagraph_tensor_store.clear()
 
 
 class _FakeHelper:
@@ -95,6 +176,7 @@ def _make_manager(
     *,
     modules: tuple[str, ...] = ("attn",),
     drained=lambda: True,
+    synchronize=lambda: None,
     runtime_num_microbatches=lambda: 2,
 ):
     bank_module = _load_bank_module()
@@ -103,7 +185,7 @@ def _make_manager(
         cuda_graph_modules=modules,
         assert_model_drained=drained,
         graph_reset_supported=True,
-        synchronize=lambda: None,
+        synchronize=synchronize,
         runtime_num_microbatches=runtime_num_microbatches,
     )
 
@@ -556,6 +638,154 @@ def test_live_delayed_work_rejects_capture_before_lists_are_uninstalled() -> Non
 
     assert not helper.saw_empty_graph_lists
     assert layers[0].cuda_graphs is installed_list
+
+
+def test_moe_store_rejects_bank_switch_after_model_drain_and_cuda_sync() -> None:
+    events: list[str] = []
+    layer = _FakeMoELayer("moe")
+    manager = _make_manager(
+        [layer],
+        modules=("moe_router", "moe_preprocess"),
+        drained=lambda: events.append("model-drain") or True,
+        synchronize=lambda: events.append("cuda-sync"),
+    )
+    active_bank, _, _ = _capture(
+        manager,
+        [layer],
+        "active",
+        modules=("moe_router", "moe_preprocess"),
+    )
+    inactive_bank, _, _ = _capture(
+        manager,
+        [layer],
+        "inactive",
+        modules=("moe_router", "moe_preprocess"),
+    )
+    active_bank.activate()
+    installed_graphs = layer.cuda_graphs
+    layer.mlp.cudagraph_tensor_store.probs = object()
+    events.clear()
+
+    with pytest.raises(RuntimeError, match="probs"):
+        inactive_bank.activate()
+
+    assert events == ["model-drain", "cuda-sync"]
+    assert manager.active_bank is active_bank
+    assert layer.cuda_graphs is installed_graphs
+
+
+def test_active_moe_bank_reset_clears_only_resolved_dispatcher_leaves() -> None:
+    layer = _FakeMoELayer("moe")
+    manager = _make_manager(
+        [layer],
+        modules=("moe_router", "moe_preprocess"),
+    )
+    bank, _, _ = _capture(
+        manager,
+        [layer],
+        "bank",
+        modules=("moe_router", "moe_preprocess"),
+    )
+    bank.activate()
+    schema = layer.dispatcher.valid_cudagraph_attrs
+    layer.dispatcher.z_dispatch_ref = object()
+    layer.dispatcher.nested.a_dispatch_ref = object()
+
+    bank.reset()
+
+    assert layer.dispatcher.valid_cudagraph_attrs is schema
+    assert tuple(schema) == ("z_dispatch_ref", "nested.a_dispatch_ref")
+    assert layer.dispatcher.z_dispatch_ref is None
+    assert layer.dispatcher.nested.a_dispatch_ref is None
+    assert layer.mlp.cudagraph_tensor_store.hidden_states is None
+    assert layer.mlp.cudagraph_tensor_store.probs is None
+    assert layer.mlp.cudagraph_tensor_store.routing_map is None
+    assert layer.mlp.cudagraph_tensor_store.shared_expert_output is None
+
+
+def test_inactive_moe_bank_reset_preserves_active_dispatcher_and_manual_ddp_hooks() -> None:
+    layer = _FakeMoELayer("moe")
+    manager = _make_manager(
+        [layer],
+        modules=("moe_router", "moe_preprocess"),
+    )
+    active_bank, _, _ = _capture(
+        manager,
+        [layer],
+        "active",
+        modules=("moe_router", "moe_preprocess"),
+    )
+    inactive_bank, _, _ = _capture(
+        manager,
+        [layer],
+        "inactive",
+        modules=("moe_router", "moe_preprocess"),
+    )
+    active_bank.activate()
+    active_reference = object()
+    layer.dispatcher.z_dispatch_ref = active_reference
+    manual_hooks = layer.cuda_graph_manual_hooks
+
+    inactive_bank.reset()
+
+    assert manager.active_bank is active_bank
+    assert layer.dispatcher.z_dispatch_ref is active_reference
+    assert layer.cuda_graph_manual_hooks is manual_hooks
+
+
+def test_inactive_moe_bank_reset_ignores_externally_installed_inactive_list() -> None:
+    layers = [_FakeMoELayer("moe-0"), _FakeMoELayer("moe-1")]
+    manager = _make_manager(
+        layers,
+        modules=("moe_router", "moe_preprocess"),
+    )
+    active_bank, _, _ = _capture(
+        manager,
+        layers,
+        "active",
+        modules=("moe_router", "moe_preprocess"),
+    )
+    inactive_bank, _, _ = _capture(
+        manager,
+        layers,
+        "inactive",
+        modules=("moe_router", "moe_preprocess"),
+    )
+    active_bank.activate()
+    active_reference = object()
+    layers[0].dispatcher.z_dispatch_ref = active_reference
+    manual_hooks = layers[0].cuda_graph_manual_hooks
+    layers[0].cuda_graphs = inactive_bank._owned_graph_lists[0]
+
+    inactive_bank.reset()
+
+    assert manager.active_bank is active_bank
+    assert layers[0].dispatcher.z_dispatch_ref is active_reference
+    assert layers[0].cuda_graph_manual_hooks is manual_hooks
+
+
+def test_moe_bank_activation_rejects_changed_dispatcher_attribute_names() -> None:
+    layer = _FakeMoELayer("moe")
+    manager = _make_manager(
+        [layer],
+        modules=("moe_router", "moe_preprocess"),
+    )
+    bank, _, _ = _capture(
+        manager,
+        [layer],
+        "bank",
+        modules=("moe_router", "moe_preprocess"),
+    )
+    assert bank.fingerprint.moe_attribute_schema == (
+        (id(layer), ("z_dispatch_ref", "nested.a_dispatch_ref")),
+    )
+    layer.dispatcher.valid_cudagraph_attrs = [
+        "nested.a_dispatch_ref",
+        "z_dispatch_ref",
+    ]
+
+    with pytest.raises(ValueError, match="moe_attribute_schema"):
+        bank.activate()
 
 
 @pytest.mark.parametrize(

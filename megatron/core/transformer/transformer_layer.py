@@ -1141,6 +1141,91 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                 submodules += [self.mlp.shared_experts]
         return submodules
 
+    def te_cuda_graph_bank_schema(self) -> tuple[str, ...]:
+        """Return the MoE dispatcher attribute names captured by TE CUDA graphs."""
+        if not self.is_moe_layer:
+            return ()
+        return tuple(self.mlp.token_dispatcher.valid_cudagraph_attrs or ())
+
+    def _resolve_token_dispatcher_attr(self, attr_name: str) -> tuple[Any, str]:
+        parent_attr_name, _, leaf_attr_name = attr_name.rpartition('.')
+        obj = self.mlp.token_dispatcher
+        for parent_name in parent_attr_name.split('.') if parent_attr_name else ():
+            obj = getattr(obj, parent_name)
+        return obj, leaf_attr_name or attr_name
+
+    def assert_te_cuda_graph_bank_drained(self) -> None:
+        """Assert that no per-forward MoE state remains before a bank transition."""
+        if not self.is_moe_layer:
+            return
+
+        tensor_store = self.mlp.cudagraph_tensor_store
+        for field_name in (
+            "hidden_states",
+            "probs",
+            "routing_map",
+            "shared_expert_output",
+        ):
+            if getattr(tensor_store, field_name) is not None:
+                raise RuntimeError(
+                    f"MoE CUDA graph tensor store field {field_name} is still live"
+                )
+
+        if self.config.moe_shared_expert_overlap:
+            from megatron.core.transformer.moe.shared_experts import SharedExpertState
+
+            shared_experts = self.mlp.shared_experts
+            if shared_experts._overlap_state is not SharedExpertState.IDLE:
+                raise RuntimeError(
+                    "MoE shared expert overlap state is not IDLE at the graph bank boundary"
+                )
+            for field_name in (
+                "cached_fc1_input",
+                "cached_fc2_input",
+                "cached_fc2_output",
+                "cached_output",
+                "gate_score",
+            ):
+                if getattr(shared_experts, field_name) is not None:
+                    raise RuntimeError(
+                        f"MoE shared expert field {field_name} is still live"
+                    )
+
+        token_dispatcher = self.mlp.token_dispatcher
+        dispatcher_state_owners = (
+            ("token dispatcher", token_dispatcher),
+            (
+                "Flex token dispatcher communication manager",
+                getattr(token_dispatcher, "_comm_manager", None),
+            ),
+        )
+        for owner_name, owner in dispatcher_state_owners:
+            if owner is None:
+                continue
+            for field_name in ("handle", "_buffer"):
+                if hasattr(owner, field_name) and getattr(owner, field_name) is not None:
+                    raise RuntimeError(
+                        f"MoE {owner_name} field {field_name} is still live"
+                    )
+
+        experts = getattr(self.mlp, "experts", None)
+        activation_checkpoint = getattr(experts, "activation_checkpoint", None)
+        if activation_checkpoint is not None:
+            for field_name in ("ctx", "outputs"):
+                if getattr(activation_checkpoint, field_name) is not None:
+                    raise RuntimeError(
+                        f"MoE activation checkpoint field {field_name} is still live"
+                    )
+
+    def clear_te_cuda_graph_bank_references(self) -> None:
+        """Clear active-bank MoE Tensor leaves while preserving their structural schema."""
+        if not self.is_moe_layer:
+            return
+        for attr_name in self.te_cuda_graph_bank_schema():
+            obj, name = self._resolve_token_dispatcher_attr(attr_name)
+            setattr(obj, name, None)
+        self.mlp.cudagraph_tensor_store.clear()
+
     def _set_te_cuda_graph_packed_seq_params_static_metadata(
         self, static_metadata, tensor_kwarg_names=None
     ):
@@ -1720,13 +1805,6 @@ class MoETransformerLayer(TransformerLayer):
             or CudaGraphModule.moe_preprocess in self.config.cuda_graph_modules
         ):
             self.transition_cudagraph_scope('partial')
-
-    def _resolve_token_dispatcher_attr(self, attr_name: str) -> tuple[Any, str]:
-        parent_attr_name, _, leaf_attr_name = attr_name.rpartition('.')
-        obj = self.mlp.token_dispatcher
-        for parent_name in parent_attr_name.split('.') if parent_attr_name else ():
-            obj = getattr(obj, parent_name)
-        return obj, leaf_attr_name or attr_name
 
     def _restore_token_dispatcher_attrs(self, attr_outputs):
         assert len(attr_outputs) == len(self._local_cudagraph_attr_names)

@@ -287,6 +287,8 @@ class TECudaGraphBankManager:
         previous_installations = self._snapshot_installations()
         previous_active_bank = self.active_bank
         try:
+            if previous_active_bank is not None and previous_active_bank is not bank:
+                self._clear_installed_bank(previous_active_bank)
             self._install_bank(bank)
             self.active_bank = bank
         except BaseException:
@@ -467,6 +469,13 @@ class TECudaGraphBankManager:
             raise RuntimeError(
                 "Model is not drained: delayed-wgrad or communication work is still live"
             )
+        self._synchronize()
+        for layer in self.layers:
+            assert_layer_drained = getattr(
+                layer, "assert_te_cuda_graph_bank_drained", None
+            )
+            if callable(assert_layer_drained):
+                assert_layer_drained()
 
     def _validate_helper(self, helper: object) -> None:
         if getattr(helper, "_capture_attempted", False) or getattr(
@@ -557,6 +566,10 @@ class TECudaGraphBankManager:
             expected_moe_attribute_schema = fingerprint.moe_attribute_schema
         if fingerprint.moe_attribute_schema != expected_moe_attribute_schema:
             raise ValueError("moe_attribute_schema differs from TECudaGraphBankManager")
+        if fingerprint.moe_attribute_schema != self._moe_attribute_schema():
+            raise ValueError(
+                "moe_attribute_schema differs from the current layer dispatcher schema"
+            )
         if establish_expected_fingerprint:
             self._expected_packed_input_signature = expected_packed_input_signature
             self._expected_moe_attribute_schema = expected_moe_attribute_schema
@@ -725,7 +738,7 @@ class TECudaGraphBankManager:
         schema = []
         for layer in self.layers:
             get_schema = getattr(layer, "te_cuda_graph_bank_schema", None)
-            attributes = tuple(sorted(get_schema())) if callable(get_schema) else ()
+            attributes = tuple(get_schema()) if callable(get_schema) else ()
             schema.append((id(layer), attributes))
         return tuple(schema)
 
@@ -748,10 +761,19 @@ class TECudaGraphBankManager:
         )
 
     def _clear_installed_bank(self, bank: TECudaGraphBank) -> None:
+        if bank is not self.active_bank:
+            return
+        if not self._bank_is_installed(bank):
+            raise ValueError("Active TE CUDA graph bank is not fully installed")
         registration = self._registrations.get(id(bank))
         replay_guard = None if registration is None else registration.replay_guard
         for layer, graph_list in zip(self.layers, bank._owned_graph_lists):
             if getattr(layer, "cuda_graphs", None) is graph_list:
+                clear_references = getattr(
+                    layer, "clear_te_cuda_graph_bank_references", None
+                )
+                if callable(clear_references):
+                    clear_references()
                 self._clear_replay_contract(layer)
                 layer.cuda_graph_manual_hooks = []
                 layer.cuda_graphs = []

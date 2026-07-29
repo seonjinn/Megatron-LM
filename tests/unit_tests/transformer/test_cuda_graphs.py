@@ -158,6 +158,150 @@ def _base_cuda_graph_config(**kwargs) -> TransformerConfig:
     return TransformerConfig(num_layers=2, hidden_size=64, num_attention_heads=4, **kwargs)
 
 
+def _make_moe_bank_hook_layer(
+    *,
+    shared_expert_overlap: bool = False,
+    moe_act_recompute: bool = False,
+) -> TransformerLayer:
+    from megatron.core.transformer.moe.moe_utils import MoECudaGraphTensorStore
+    from megatron.core.transformer.moe.shared_experts import SharedExpertState
+
+    layer = TransformerLayer.__new__(TransformerLayer)
+    layer.is_moe_layer = True
+    layer.config = SimpleNamespace(moe_shared_expert_overlap=shared_expert_overlap)
+    token_dispatcher = SimpleNamespace(
+        valid_cudagraph_attrs=["z_dispatch_ref", "nested.a_dispatch_ref"],
+        z_dispatch_ref=None,
+        nested=SimpleNamespace(a_dispatch_ref=None),
+        _comm_manager=SimpleNamespace(handle=None, _buffer=None),
+    )
+    shared_experts = (
+        SimpleNamespace(
+            _overlap_state=SharedExpertState.IDLE,
+            cached_fc1_input=None,
+            cached_fc2_input=None,
+            cached_fc2_output=None,
+            cached_output=None,
+            gate_score=None,
+        )
+        if shared_expert_overlap
+        else None
+    )
+    checkpoint = (
+        SimpleNamespace(ctx=None, outputs=None) if moe_act_recompute else None
+    )
+    layer.mlp = SimpleNamespace(
+        token_dispatcher=token_dispatcher,
+        cudagraph_tensor_store=MoECudaGraphTensorStore(),
+        shared_experts=shared_experts,
+        experts=SimpleNamespace(activation_checkpoint=checkpoint),
+    )
+    return layer
+
+
+@pytest.mark.parametrize("shared_expert_overlap", [False, True])
+@pytest.mark.parametrize("moe_act_recompute", [False, True])
+def test_transformer_layer_moe_bank_hooks_accept_drained_variants(
+    shared_expert_overlap: bool,
+    moe_act_recompute: bool,
+) -> None:
+    layer = _make_moe_bank_hook_layer(
+        shared_expert_overlap=shared_expert_overlap,
+        moe_act_recompute=moe_act_recompute,
+    )
+
+    assert layer.te_cuda_graph_bank_schema() == (
+        "z_dispatch_ref",
+        "nested.a_dispatch_ref",
+    )
+    layer.assert_te_cuda_graph_bank_drained()
+
+
+@pytest.mark.parametrize(
+    ("state_path", "expected_message"),
+    [
+        ("store_hidden_states", "hidden_states"),
+        ("store_probs", "probs"),
+        ("store_routing_map", "routing_map"),
+        ("store_shared_expert_output", "shared_expert_output"),
+        ("shared_expert", "shared expert"),
+        ("shared_cached_fc1_input", "cached_fc1_input"),
+        ("shared_cached_fc2_input", "cached_fc2_input"),
+        ("shared_cached_fc2_output", "cached_fc2_output"),
+        ("shared_cached_output", "cached_output"),
+        ("shared_gate_score", "gate_score"),
+        ("dispatcher_handle", "handle"),
+        ("dispatcher_buffer", "_buffer"),
+        ("moe_act_ctx", "ctx"),
+        ("moe_act_outputs", "outputs"),
+    ],
+)
+def test_transformer_layer_moe_bank_hooks_reject_live_state(
+    state_path: str,
+    expected_message: str,
+) -> None:
+    from megatron.core.transformer.moe.shared_experts import SharedExpertState
+
+    layer = _make_moe_bank_hook_layer(
+        shared_expert_overlap=True,
+        moe_act_recompute=True,
+    )
+    if state_path.startswith("store_"):
+        setattr(layer.mlp.cudagraph_tensor_store, state_path.removeprefix("store_"), object())
+    elif state_path == "shared_expert":
+        layer.mlp.shared_experts._overlap_state = SharedExpertState.FC1_FORWARD_DONE
+    elif state_path.startswith("shared_"):
+        setattr(layer.mlp.shared_experts, state_path.removeprefix("shared_"), object())
+    elif state_path == "dispatcher_handle":
+        layer.mlp.token_dispatcher._comm_manager.handle = object()
+    elif state_path == "dispatcher_buffer":
+        layer.mlp.token_dispatcher._comm_manager._buffer = object()
+    elif state_path == "moe_act_ctx":
+        layer.mlp.experts.activation_checkpoint.ctx = object()
+    else:
+        layer.mlp.experts.activation_checkpoint.outputs = (object(),)
+
+    with pytest.raises(RuntimeError, match=expected_message):
+        layer.assert_te_cuda_graph_bank_drained()
+
+
+def test_transformer_layer_moe_bank_clear_preserves_structural_schema() -> None:
+    layer = _make_moe_bank_hook_layer()
+    schema = layer.mlp.token_dispatcher.valid_cudagraph_attrs
+    layer.mlp.token_dispatcher.z_dispatch_ref = object()
+    layer.mlp.token_dispatcher.nested.a_dispatch_ref = object()
+
+    layer.clear_te_cuda_graph_bank_references()
+
+    assert layer.mlp.token_dispatcher.valid_cudagraph_attrs is schema
+    assert layer.mlp.token_dispatcher.z_dispatch_ref is None
+    assert layer.mlp.token_dispatcher.nested.a_dispatch_ref is None
+
+
+def test_moe_router_fp64_output_is_preserved_at_te_graph_boundary() -> None:
+    from megatron.core.transformer.module import GraphableMegatronModule
+
+    router_probs = torch.ones(4, 2, dtype=torch.float64)
+
+    class _RouterGraph:
+        def __call__(self, hidden_states):
+            return hidden_states, router_probs
+
+    layer = SimpleNamespace(
+        cuda_graphs=[_RouterGraph()],
+        cuda_graph_manual_hooks=[],
+        current_microbatch=0,
+        _get_te_cuda_graph_replay_args=lambda *args, **kwargs: (args, kwargs),
+    )
+
+    _, replayed_probs = GraphableMegatronModule._te_cuda_graph_replay(
+        layer, torch.ones(4, 8)
+    )
+
+    assert replayed_probs is router_probs
+    assert replayed_probs.dtype == torch.float64
+
+
 def _validated_cuda_graph_cli_args(monkeypatch, cli_args=None, **overrides):
     destroy_global_vars()
     destroy_num_microbatches_calculator()
@@ -207,6 +351,32 @@ class TestCudaGraphConfigAndArguments:
         assert CudaGraphModule.attn in cfg.cuda_graph_modules
         assert CudaGraphModule.moe_router in cfg.cuda_graph_modules
         assert CudaGraphModule.moe_preprocess in cfg.cuda_graph_modules
+
+    @pytest.mark.parametrize("recompute_module", [None, "moe_act", "shared_experts"])
+    def test_te_moe_recompute_is_a_supported_moe_scope_variant(
+        self, recompute_module: str | None
+    ) -> None:
+        recompute_modules = [] if recompute_module is None else [recompute_module]
+        cfg = _base_cuda_graph_config(
+            cuda_graph_impl="transformer_engine",
+            cuda_graph_modules=[
+                CudaGraphModule.moe_router,
+                CudaGraphModule.moe_preprocess,
+            ],
+            num_moe_experts=4,
+            moe_grouped_gemm=True,
+            moe_shared_expert_intermediate_size=128,
+            moe_shared_expert_overlap=False,
+            recompute_granularity="selective",
+            recompute_modules=recompute_modules,
+        )
+
+        assert cfg.moe_grouped_gemm
+        assert cfg.recompute_modules == recompute_modules
+        assert cfg.cuda_graph_modules == [
+            CudaGraphModule.moe_router,
+            CudaGraphModule.moe_preprocess,
+        ]
 
     def test_local_impl_rejects_unsupported_activation_offload_scope(self):
         with pytest.raises(
