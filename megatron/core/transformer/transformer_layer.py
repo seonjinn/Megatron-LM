@@ -1577,7 +1577,7 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
     def _reconcile_packed_partial_cudagraph_tensor(
         self,
         tensor: Tensor,
-        replay_hidden_states: Tensor,
+        logical_hidden_states: Tensor,
         *,
         tensor_name: str,
     ) -> Tensor:
@@ -1593,17 +1593,17 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
 
         if (
             tensor.ndim == 0
-            or replay_hidden_states.ndim == 0
-            or tensor.ndim != replay_hidden_states.ndim
-            or tensor.shape[1:] != replay_hidden_states.shape[1:]
+            or logical_hidden_states.ndim == 0
+            or tensor.ndim != logical_hidden_states.ndim
+            or tensor.shape[1:] != logical_hidden_states.shape[1:]
         ):
             raise RuntimeError(
                 "Packed partial CUDA graph replay requires matching trailing dimensions, "
-                f"got captured {tensor_name} {tuple(tensor.shape)} and replay hidden states "
-                f"{tuple(replay_hidden_states.shape)}."
+                f"got captured {tensor_name} {tuple(tensor.shape)} and logical hidden states "
+                f"{tuple(logical_hidden_states.shape)}."
             )
 
-        logical_tokens = replay_hidden_states.size(0)
+        logical_tokens = logical_hidden_states.size(0)
         captured_capacity = tensor.size(0)
         if captured_capacity < logical_tokens:
             raise RuntimeError(
@@ -1629,16 +1629,22 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
         residual: Tensor,
         replay_hidden_states: Tensor,
     ) -> tuple[tuple[Tensor, Tensor | None], Tensor]:
-        """Align both bias-dropout-add operands to the packed replay token extent."""
+        """Align bias-dropout-add operands to the eager MoE output's logical extent.
+
+        The partial graph covers only the router and preprocess stages, so the resumed MoE MLP
+        output is computed eagerly and already has the authoritative logical token extent.
+        ``replay_hidden_states`` and the graph residual are capacity-sized buffers and may be
+        longer when a packed batch does not fill the configured token capacity.
+        """
+        mlp_output, mlp_bias = mlp_output_with_bias
+        self._reconcile_packed_partial_cudagraph_tensor(
+            replay_hidden_states,
+            mlp_output,
+            tensor_name="replay hidden states",
+        )
         residual = self._reconcile_packed_partial_cudagraph_residual(
             residual,
-            replay_hidden_states,
-        )
-        mlp_output, mlp_bias = mlp_output_with_bias
-        mlp_output = self._reconcile_packed_partial_cudagraph_tensor(
             mlp_output,
-            replay_hidden_states,
-            tensor_name="MLP output",
         )
         return (mlp_output, mlp_bias), residual
 

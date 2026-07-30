@@ -729,7 +729,7 @@ def test_validate_packed_partial_moe_cuda_graph_fails_closed_with_ep_overlap():
     ((64, False), (None, False), (64, True)),
     ids=("shared-expert", "no-shared-expert", "shared-expert-overlap"),
 )
-def test_packed_partial_moe_post_mlp_inputs_use_logical_replay_extent(
+def test_packed_partial_moe_post_mlp_inputs_use_eager_mlp_extent(
     shared_expert_intermediate_size, shared_expert_overlap
 ):
     layer = _TransformerLayerCudaGraphStub()
@@ -744,13 +744,13 @@ def test_packed_partial_moe_post_mlp_inputs_use_logical_replay_extent(
         cudagraph_tensor_store=SimpleNamespace(is_packed_seq_replay=True)
     )
     captured_residual = torch.empty(16, 1, 8)
-    captured_mlp_output = torch.empty(16, 1, 8)
+    eager_mlp_output = torch.empty(12, 1, 8)
     mlp_bias = torch.empty(8)
-    replay_hidden_states = captured_residual.narrow(0, 0, 12)
+    replay_hidden_states = torch.empty(16, 1, 8)
 
     mlp_output_with_bias, residual = (
         layer._reconcile_packed_partial_cudagraph_post_mlp_inputs(
-            (captured_mlp_output, mlp_bias),
+            (eager_mlp_output, mlp_bias),
             captured_residual,
             replay_hidden_states,
         )
@@ -759,8 +759,27 @@ def test_packed_partial_moe_post_mlp_inputs_use_logical_replay_extent(
     assert residual.shape == (12, 1, 8)
     assert residual.data_ptr() == captured_residual.data_ptr()
     assert mlp_output_with_bias[0].shape == (12, 1, 8)
-    assert mlp_output_with_bias[0].data_ptr() == captured_mlp_output.data_ptr()
+    assert mlp_output_with_bias[0] is eager_mlp_output
     assert mlp_output_with_bias[1] is mlp_bias
+
+
+def test_packed_partial_moe_rejects_mlp_output_larger_than_replay_input():
+    layer = _TransformerLayerCudaGraphStub()
+    layer.config = SimpleNamespace(
+        cuda_graph_impl="transformer_engine",
+        cuda_graph_modules=[CudaGraphModule.moe_router, CudaGraphModule.moe_preprocess],
+        overlap_moe_expert_parallel_comm=False,
+    )
+    layer.mlp = SimpleNamespace(
+        cudagraph_tensor_store=SimpleNamespace(is_packed_seq_replay=True)
+    )
+
+    with pytest.raises(RuntimeError, match="replay hidden states replay exceeds captured capacity"):
+        layer._reconcile_packed_partial_cudagraph_post_mlp_inputs(
+            (torch.empty(16, 1, 8), None),
+            torch.empty(16, 1, 8),
+            torch.empty(12, 1, 8),
+        )
 
 
 def test_te_cuda_graph_replay_exits_offload_when_packed_state_setup_fails():
