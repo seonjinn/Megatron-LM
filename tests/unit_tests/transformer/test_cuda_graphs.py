@@ -2239,9 +2239,8 @@ def _task5_append_moe_telemetry(
 ) -> None:
     dispatcher = layer.mlp.token_dispatcher
     routing_map = dispatcher.routing_map
-    tokens_per_expert = dispatcher.tokens_per_expert
     assert routing_map is not None
-    assert tokens_per_expert is not None
+    tokens_per_expert = routing_map.sum(dim=0, dtype=torch.int64)
     telemetry.append(
         (
             layer.layer_number,
