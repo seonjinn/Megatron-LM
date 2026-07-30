@@ -2057,7 +2057,9 @@ def _build_packed_partial_moe_model(cuda_graph_impl: str) -> GPTModel:
         tensor_model_parallel_size=1,
         pipeline_model_parallel_size=1,
         context_parallel_size=1,
-        num_moe_experts=2,
+        expert_model_parallel_size=4,
+        expert_tensor_parallel_size=1,
+        num_moe_experts=4,
         moe_router_topk=1,
         moe_router_pre_softmax=True,
         moe_grouped_gemm=True,
@@ -2082,7 +2084,7 @@ def _build_packed_partial_moe_model(cuda_graph_impl: str) -> GPTModel:
     model = GPTModel(
         config=config,
         transformer_layer_spec=get_gpt_layer_with_transformer_engine_spec(
-            num_experts=2, moe_grouped_gemm=True
+            num_experts=4, moe_grouped_gemm=True
         ),
         vocab_size=128,
         max_sequence_length=16,
@@ -2101,9 +2103,8 @@ def _build_packed_partial_moe_model(cuda_graph_impl: str) -> GPTModel:
 
 
 def _packed_partial_moe_inputs(logical_tokens: int) -> dict[str, object]:
-    """Keep a 16-token graph input while varying the packed logical token extent."""
+    """Build a packed model input whose physical extent is the logical token count."""
     assert logical_tokens in (12, 16)
-    capacity = 16
     device = torch.device("cuda")
     cu_seqlens = torch.tensor(
         [0, logical_tokens // 2, logical_tokens], dtype=torch.int32, device=device
@@ -2119,10 +2120,12 @@ def _packed_partial_moe_inputs(logical_tokens: int) -> dict[str, object]:
         total_tokens=logical_tokens,
     )
     return {
-        "input_ids": torch.arange(capacity, dtype=torch.int64, device=device)
+        "input_ids": torch.arange(logical_tokens, dtype=torch.int64, device=device)
         .remainder(128)
         .unsqueeze(0),
-        "position_ids": torch.arange(capacity, dtype=torch.int64, device=device).unsqueeze(0),
+        "position_ids": torch.arange(
+            logical_tokens, dtype=torch.int64, device=device
+        ).unsqueeze(0),
         "attention_mask": None,
         "packed_seq_params": packed_seq_params,
     }
@@ -2135,20 +2138,22 @@ def _packed_partial_moe_inputs(logical_tokens: int) -> dict[str, object]:
 )
 def test_packed_partial_moe_te_cuda_graph_shared_expert_parity() -> None:
     """A smaller packed replay must match eager after capturing shared experts at capacity."""
-    if Utils.world_size != 1:
-        pytest.skip("Packed partial MoE CUDA graph parity requires world size 1")
+    if Utils.world_size != 4:
+        pytest.skip("Packed partial MoE CUDA graph parity requires world size 4")
 
     manager = None
     bank = None
     eager_model = None
     graph_model = None
+    reconciliation_extents = []
     try:
         initialize_rng_tracker(use_te_rng_tracker=True, force_reset=True)
         Utils.initialize_model_parallel(
             tensor_model_parallel_size=1,
             pipeline_model_parallel_size=1,
             context_parallel_size=1,
-            expert_model_parallel_size=1,
+            expert_model_parallel_size=4,
+            expert_tensor_parallel_size=1,
         )
         model_parallel_cuda_manual_seed(123)
         torch.manual_seed(123)
@@ -2156,6 +2161,24 @@ def test_packed_partial_moe_te_cuda_graph_shared_expert_parity() -> None:
         torch.manual_seed(456)
         graph_model = _build_packed_partial_moe_model("transformer_engine")
         graph_model.load_state_dict(eager_model.state_dict())
+        graph_moe_layer = graph_model.decoder.layers[0].mlp
+        original_reconcile = (
+            graph_moe_layer._reconcile_packed_partial_cudagraph_shared_expert_output
+        )
+
+        def record_reconciliation_extents(
+            bound_moe_layer,
+            routed_expert_output,
+            captured_shared_expert_output,
+        ):
+            reconciliation_extents.append(
+                (routed_expert_output.size(0), captured_shared_expert_output.size(0))
+            )
+            return original_reconcile(routed_expert_output, captured_shared_expert_output)
+
+        graph_moe_layer._reconcile_packed_partial_cudagraph_shared_expert_output = MethodType(
+            record_reconciliation_extents, graph_moe_layer
+        )
 
         helper = TECudaGraphHelper(
             model=[graph_model],
@@ -2180,6 +2203,7 @@ def test_packed_partial_moe_te_cuda_graph_shared_expert_parity() -> None:
         graph_loss.backward()
 
         assert torch.equal(graph_output, eager_output)
+        assert reconciliation_extents == [(12, 16)]
         eager_grads = _task5_named_main_grads(eager_model)
         graph_grads = _task5_named_main_grads(graph_model)
         for component in ("shared_experts", "router", "experts"):

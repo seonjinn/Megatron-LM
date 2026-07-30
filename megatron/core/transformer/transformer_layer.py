@@ -1420,15 +1420,30 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
         if self.config.delay_offload_until_cuda_graph:
             self.off_interface.enter_replay()
 
+        packed_replay_store = None
+        previous_packed_seq_replay = False
+        if (
+            is_packed_seq_replay
+            and getattr(self, 'is_moe_layer', False)
+            and self.config.cuda_graph_modules
+            and CudaGraphModule.moe_router in self.config.cuda_graph_modules
+            and CudaGraphModule.moe_preprocess in self.config.cuda_graph_modules
+            and self.config.moe_shared_expert_intermediate_size is not None
+            and not self.config.moe_shared_expert_overlap
+        ):
+            packed_replay_store = self.mlp.cudagraph_tensor_store
+            previous_packed_seq_replay = packed_replay_store.is_packed_seq_replay
+            packed_replay_store.set(is_packed_seq_replay=True)
+
         try:
-            return self._te_cuda_graph_replay_impl(
-                args, kwargs, context, is_packed_seq_replay=is_packed_seq_replay
-            )
+            return self._te_cuda_graph_replay_impl(args, kwargs, context)
         finally:
+            if packed_replay_store is not None:
+                packed_replay_store.is_packed_seq_replay = previous_packed_seq_replay
             if self.config.delay_offload_until_cuda_graph:
                 self.off_interface.exit_replay()
 
-    def _te_cuda_graph_replay_impl(self, args, kwargs, context, *, is_packed_seq_replay=False):
+    def _te_cuda_graph_replay_impl(self, args, kwargs, context):
         """Implementation of _te_cuda_graph_replay, separated for replay mode cleanup."""
         cuda_graph_output = list(super()._te_cuda_graph_replay(*args, **kwargs))
 
@@ -1496,7 +1511,6 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                 probs=probs,
                 routing_map=routing_map,
                 shared_expert_output=shared_expert_output,
-                is_packed_seq_replay=is_packed_seq_replay,
             )
             # If EP overlap is enabled, remaining of mlp will be called as fine_grained_callables
             # and should be skipped here.

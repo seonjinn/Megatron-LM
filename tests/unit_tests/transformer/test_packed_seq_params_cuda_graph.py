@@ -24,6 +24,7 @@ from megatron.core.transformer.cuda_graphs import (
 )
 from megatron.core.transformer.enums import CudaGraphModule
 from megatron.core.transformer.module import GraphableMegatronModule
+from megatron.core.transformer.moe.moe_utils import MoECudaGraphTensorStore
 from megatron.core.transformer.transformer_layer import TransformerLayer
 
 
@@ -566,17 +567,22 @@ def test_te_cuda_graph_partial_attn_only_flow():
         def __init__(self, cuda_graph_modules):
             self.cuda_graph_modules = cuda_graph_modules
             self.delay_offload_until_cuda_graph = False
+            self.moe_shared_expert_intermediate_size = 64
+            self.moe_shared_expert_overlap = False
 
     class _TestLayer(_TransformerLayerCudaGraphStub):
         _te_cuda_graph_replay = TransformerLayer._te_cuda_graph_replay
 
-        def __init__(self, cuda_graph_modules):
+        def __init__(self, cuda_graph_modules, *, is_moe_layer=False):
             self.config = _ConfigStub(cuda_graph_modules)
+            self.is_moe_layer = is_moe_layer
+            self.mlp = SimpleNamespace(cudagraph_tensor_store=MoECudaGraphTensorStore())
             self.attn_called = False
             self.replay_impl_called = False
             self.replay_impl_args = None
             self.replay_impl_kwargs = None
             self.replay_impl_context = None
+            self.replay_impl_packed_seq = None
 
         def _forward_attention(self, *args, **kwargs):
             self.attn_called = True
@@ -587,6 +593,9 @@ def test_te_cuda_graph_partial_attn_only_flow():
             self.replay_impl_args = args
             self.replay_impl_kwargs = kwargs
             self.replay_impl_context = context
+            self.replay_impl_packed_seq = (
+                self.mlp.cudagraph_tensor_store.is_packed_seq_replay
+            )
             return torch.ones(2, 1, 4) * 3.0
 
     # Case 1: When CudaGraphModule.attn is captured
@@ -603,6 +612,7 @@ def test_te_cuda_graph_partial_attn_only_flow():
     assert layer_attn.replay_impl_context is None
     assert "packed_seq_params" not in layer_attn.replay_impl_kwargs
     assert f"{CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX}cu_seqlens_q" in layer_attn.replay_impl_kwargs
+    assert layer_attn.replay_impl_packed_seq is False
 
     # Case 2: When CudaGraphModule.attn is NOT captured (e.g. only mlp is captured)
     layer_mlp = _TestLayer([CudaGraphModule.mlp])
@@ -616,6 +626,22 @@ def test_te_cuda_graph_partial_attn_only_flow():
     assert len(layer_mlp.replay_impl_args) == 1
     assert torch.equal(layer_mlp.replay_impl_args[0], torch.ones(2, 1, 4) * 2.0)
     assert layer_mlp.replay_impl_kwargs == {}
+    assert layer_mlp.replay_impl_packed_seq is False
+
+    # Case 3: Packed partial MoE replay exposes scoped state without changing the impl contract.
+    layer_moe = _TestLayer(
+        [CudaGraphModule.moe_router, CudaGraphModule.moe_preprocess],
+        is_moe_layer=True,
+    )
+    layer_moe._te_cuda_graph_replay(**kwargs)
+
+    assert layer_moe.replay_impl_packed_seq is True
+    assert layer_moe.mlp.cudagraph_tensor_store.is_packed_seq_replay is False
+
+    layer_moe._te_cuda_graph_replay(hidden_states=torch.ones(2, 1, 4))
+
+    assert layer_moe.replay_impl_packed_seq is False
+    assert layer_moe.mlp.cudagraph_tensor_store.is_packed_seq_replay is False
 
 
 def test_seq_idx_determinism_across_replays():
