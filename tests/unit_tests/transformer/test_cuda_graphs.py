@@ -2179,6 +2179,7 @@ def _task5_build_pipeline_moe_model(cuda_graph_impl: str) -> GPTModel:
         expert_tensor_parallel_size=1,
         num_moe_experts=2,
         moe_router_topk=1,
+        moe_router_pre_softmax=True,
         moe_grouped_gemm=True,
         moe_token_dispatcher_type="alltoall",
         moe_expert_capacity_factor=1.0,
