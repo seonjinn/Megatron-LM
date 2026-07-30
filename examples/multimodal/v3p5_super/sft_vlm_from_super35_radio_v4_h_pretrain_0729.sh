@@ -326,7 +326,6 @@ OPTIONS=" \
     --eod-mask-loss \
     --image-tag-type internvl \
     --moe-token-dispatcher-type alltoall \
-    --moe-shared-expert-overlap \
     --enable-experimental \
     --moe-permute-fusion \
     --use-fused-weighted-squared-relu \
