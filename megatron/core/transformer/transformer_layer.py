@@ -1332,10 +1332,10 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
 
     def _te_cuda_graph_captures_attention(self) -> bool:
         """Return whether this layer contributes a real self-attention graph scope."""
-        return not isinstance(self.self_attention, IdentityOp) and (
+        return (
             not self.config.cuda_graph_modules
             or CudaGraphModule.attn in self.config.cuda_graph_modules
-        )
+        ) and not isinstance(self.self_attention, IdentityOp)
 
     def _te_cuda_graph_capture(self, *args, **kwargs):
         """
