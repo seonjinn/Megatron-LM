@@ -1,7 +1,7 @@
 # Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
 
 from collections.abc import Callable
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 
 import pytest
 import torch
@@ -24,6 +24,7 @@ from megatron.core.transformer.cuda_graphs import (
     validate_packed_partial_moe_cuda_graph,
 )
 from megatron.core.transformer.enums import CudaGraphModule
+from megatron.core.transformer.identity_op import IdentityOp
 from megatron.core.transformer.module import GraphableMegatronModule
 from megatron.core.transformer.moe.moe_utils import MoECudaGraphTensorStore
 from megatron.core.transformer.transformer_layer import TransformerLayer
@@ -575,9 +576,16 @@ def test_te_cuda_graph_partial_replay_flow():
     class _TestLayer(_TransformerLayerCudaGraphStub):
         _te_cuda_graph_replay = TransformerLayer._te_cuda_graph_replay
 
-        def __init__(self, cuda_graph_modules, *, is_moe_layer=False):
+        def __init__(
+            self,
+            cuda_graph_modules,
+            *,
+            is_moe_layer=False,
+            has_self_attention=True,
+        ):
             self.config = _ConfigStub(cuda_graph_modules)
             self.is_moe_layer = is_moe_layer
+            self.self_attention = object() if has_self_attention else IdentityOp()
             self.mlp = SimpleNamespace(cudagraph_tensor_store=MoECudaGraphTensorStore())
             self.attn_called = False
             self.replay_impl_called = False
@@ -632,7 +640,25 @@ def test_te_cuda_graph_partial_replay_flow():
     assert layer_mlp.replay_impl_kwargs == {}
     assert layer_mlp.replay_impl_packed_seq is False
 
-    # Case 3: Every supported packed partial MoE replay exposes scoped state without
+    # Case 3: A hybrid MoE layer without self-attention runs its identity attention path
+    # eagerly even when the model-level graph scope also includes attention.
+    layer_hybrid_moe = _TestLayer(
+        [
+            CudaGraphModule.attn,
+            CudaGraphModule.moe_router,
+            CudaGraphModule.moe_preprocess,
+        ],
+        is_moe_layer=True,
+        has_self_attention=False,
+    )
+    layer_hybrid_moe._te_cuda_graph_replay(**kwargs)
+
+    assert layer_hybrid_moe.attn_called
+    assert layer_hybrid_moe.replay_impl_called
+    assert layer_hybrid_moe.replay_impl_kwargs == {}
+    assert layer_hybrid_moe.replay_impl_packed_seq is True
+
+    # Case 4: Every supported packed partial MoE replay exposes scoped state without
     # changing the impl contract, independently of shared-expert configuration.
     for shared_expert_intermediate_size, shared_expert_overlap in (
         (64, False),
@@ -655,7 +681,7 @@ def test_te_cuda_graph_partial_replay_flow():
         assert layer_moe.replay_impl_packed_seq is False
         assert layer_moe.mlp.cudagraph_tensor_store.is_packed_seq_replay is False
 
-    # Case 4: Packed partial MoE fails closed with EP overlap and retains no global flag.
+    # Case 5: Packed partial MoE fails closed with EP overlap and retains no global flag.
     layer_overlap = _TestLayer(
         [CudaGraphModule.moe_router, CudaGraphModule.moe_preprocess],
         is_moe_layer=True,
@@ -691,7 +717,7 @@ def test_validate_packed_partial_moe_cuda_graph_fails_closed_with_ep_overlap():
     ((64, False), (None, False), (64, True)),
     ids=("shared-expert", "no-shared-expert", "shared-expert-overlap"),
 )
-def test_packed_partial_moe_residual_uses_logical_replay_extent(
+def test_packed_partial_moe_post_mlp_inputs_use_logical_replay_extent(
     shared_expert_intermediate_size, shared_expert_overlap
 ):
     layer = SimpleNamespace(
@@ -707,14 +733,24 @@ def test_packed_partial_moe_residual_uses_logical_replay_extent(
         ),
     )
     captured_residual = torch.empty(16, 1, 8)
+    captured_mlp_output = torch.empty(16, 1, 8)
+    mlp_bias = torch.empty(8)
     replay_hidden_states = captured_residual.narrow(0, 0, 12)
 
-    residual = TransformerLayer._reconcile_packed_partial_cudagraph_residual(
-        layer, captured_residual, replay_hidden_states
+    mlp_output_with_bias, residual = (
+        TransformerLayer._reconcile_packed_partial_cudagraph_post_mlp_inputs(
+            layer,
+            (captured_mlp_output, mlp_bias),
+            captured_residual,
+            replay_hidden_states,
+        )
     )
 
     assert residual.shape == (12, 1, 8)
     assert residual.data_ptr() == captured_residual.data_ptr()
+    assert mlp_output_with_bias[0].shape == (12, 1, 8)
+    assert mlp_output_with_bias[0].data_ptr() == captured_mlp_output.data_ptr()
+    assert mlp_output_with_bias[1] is mlp_bias
 
 
 def test_te_cuda_graph_replay_exits_offload_when_packed_state_setup_fails():
