@@ -34,6 +34,15 @@ class _TransformerLayerCudaGraphStub:
     _te_cuda_graph_captures_attention = (
         TransformerLayer._te_cuda_graph_captures_attention
     )
+    _reconcile_packed_partial_cudagraph_tensor = (
+        TransformerLayer._reconcile_packed_partial_cudagraph_tensor
+    )
+    _reconcile_packed_partial_cudagraph_residual = (
+        TransformerLayer._reconcile_packed_partial_cudagraph_residual
+    )
+    _reconcile_packed_partial_cudagraph_post_mlp_inputs = (
+        TransformerLayer._reconcile_packed_partial_cudagraph_post_mlp_inputs
+    )
     _set_te_cuda_graph_packed_seq_params_static_metadata = (
         TransformerLayer._set_te_cuda_graph_packed_seq_params_static_metadata
     )
@@ -723,17 +732,16 @@ def test_validate_packed_partial_moe_cuda_graph_fails_closed_with_ep_overlap():
 def test_packed_partial_moe_post_mlp_inputs_use_logical_replay_extent(
     shared_expert_intermediate_size, shared_expert_overlap
 ):
-    layer = SimpleNamespace(
-        config=SimpleNamespace(
-            cuda_graph_impl="transformer_engine",
-            cuda_graph_modules=[CudaGraphModule.moe_router, CudaGraphModule.moe_preprocess],
-            moe_shared_expert_intermediate_size=shared_expert_intermediate_size,
-            moe_shared_expert_overlap=shared_expert_overlap,
-            overlap_moe_expert_parallel_comm=False,
-        ),
-        mlp=SimpleNamespace(
-            cudagraph_tensor_store=SimpleNamespace(is_packed_seq_replay=True)
-        ),
+    layer = _TransformerLayerCudaGraphStub()
+    layer.config = SimpleNamespace(
+        cuda_graph_impl="transformer_engine",
+        cuda_graph_modules=[CudaGraphModule.moe_router, CudaGraphModule.moe_preprocess],
+        moe_shared_expert_intermediate_size=shared_expert_intermediate_size,
+        moe_shared_expert_overlap=shared_expert_overlap,
+        overlap_moe_expert_parallel_comm=False,
+    )
+    layer.mlp = SimpleNamespace(
+        cudagraph_tensor_store=SimpleNamespace(is_packed_seq_replay=True)
     )
     captured_residual = torch.empty(16, 1, 8)
     captured_mlp_output = torch.empty(16, 1, 8)
@@ -741,8 +749,7 @@ def test_packed_partial_moe_post_mlp_inputs_use_logical_replay_extent(
     replay_hidden_states = captured_residual.narrow(0, 0, 12)
 
     mlp_output_with_bias, residual = (
-        TransformerLayer._reconcile_packed_partial_cudagraph_post_mlp_inputs(
-            layer,
+        layer._reconcile_packed_partial_cudagraph_post_mlp_inputs(
             (captured_mlp_output, mlp_bias),
             captured_residual,
             replay_hidden_states,
