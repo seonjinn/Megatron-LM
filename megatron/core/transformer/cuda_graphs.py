@@ -2229,6 +2229,22 @@ def _map_te_graphs_to_layers(
         num_layers_accumulated += len(layers)
 
 
+def validate_packed_partial_moe_cuda_graph(config, *, has_packed_seq_params: bool) -> None:
+    """Reject packed partial MoE graphs that defer combine through EP overlap."""
+    cuda_graph_modules = config.cuda_graph_modules or ()
+    if (
+        has_packed_seq_params
+        and getattr(config, 'overlap_moe_expert_parallel_comm', False)
+        and CudaGraphModule.moe_router in cuda_graph_modules
+        and CudaGraphModule.moe_preprocess in cuda_graph_modules
+    ):
+        raise ValueError(
+            "Packed Transformer Engine CUDA graphs with moe_router+moe_preprocess do not "
+            "support EP communication overlap; disable overlap_moe_expert_parallel_comm "
+            "or remove moe_preprocess from cuda_graph_modules."
+        )
+
+
 class TECudaGraphHelper:
     """
     Helper class to capture CUDA Graphs using TE make_graphed_callables().
@@ -2265,6 +2281,9 @@ class TECudaGraphHelper:
             "because packed-sequence Tensor fields are passed as keyword arguments."
         )
         self.config = config
+        validate_packed_partial_moe_cuda_graph(
+            config, has_packed_seq_params=sample_packed_seq_params is not None
+        )
         self.seq_length = seq_length
         self.micro_batch_size = micro_batch_size
         self.optimizers = optimizers

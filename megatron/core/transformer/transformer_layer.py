@@ -24,7 +24,10 @@ from megatron.core.packed_seq_params import (
     split_packed_seq_params_for_cuda_graph,
 )
 from megatron.core.process_groups_config import ProcessGroupCollection
-from megatron.core.transformer.cuda_graphs import is_graph_capturing
+from megatron.core.transformer.cuda_graphs import (
+    is_graph_capturing,
+    validate_packed_partial_moe_cuda_graph,
+)
 from megatron.core.transformer.enums import CudaGraphModule, InferenceCudaGraphScope, LayerType
 from megatron.core.transformer.identity_op import IdentityFuncOp, IdentityOp
 from megatron.core.transformer.mlp import MLP
@@ -1352,6 +1355,11 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                 kwargs["hidden_states"] = hidden_states
         self._rebuild_te_cuda_graph_packed_seq_params(kwargs)
 
+        has_packed_seq_params = kwargs.get('packed_seq_params') is not None
+        validate_packed_partial_moe_cuda_graph(
+            self.config, has_packed_seq_params=has_packed_seq_params
+        )
+
         context = None
         if (
             not self.config.cuda_graph_modules
@@ -1397,6 +1405,11 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
         Hence, `inference_context` is excluded from input list. `packed_seq_params` is split
         into Tensor graph inputs and static metadata when attention is in the graph scope.
         """
+        has_packed_seq_params = kwargs.get('packed_seq_params') is not None
+        validate_packed_partial_moe_cuda_graph(
+            self.config, has_packed_seq_params=has_packed_seq_params
+        )
+
         context = None
         if (
             self.config.cuda_graph_modules
@@ -1419,7 +1432,6 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
 
         packed_replay_store = None
         previous_packed_seq_replay = False
-        preserve_packed_replay_state = False
         offload_replay_entered = False
         try:
             if self.config.delay_offload_until_cuda_graph:
@@ -1433,20 +1445,15 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                 and CudaGraphModule.moe_preprocess in self.config.cuda_graph_modules
                 and self.config.moe_shared_expert_intermediate_size is not None
                 and not self.config.moe_shared_expert_overlap
+                and not self.config.overlap_moe_expert_parallel_comm
             ):
                 packed_replay_store = self.mlp.cudagraph_tensor_store
                 previous_packed_seq_replay = packed_replay_store.is_packed_seq_replay
                 packed_replay_store.set(is_packed_seq_replay=is_packed_seq_replay)
 
-            output = self._te_cuda_graph_replay_impl(args, kwargs, context)
-            preserve_packed_replay_state = (
-                packed_replay_store is not None
-                and self.config.overlap_moe_expert_parallel_comm
-                and not packed_replay_store.is_empty()
-            )
-            return output
+            return self._te_cuda_graph_replay_impl(args, kwargs, context)
         finally:
-            if packed_replay_store is not None and not preserve_packed_replay_state:
+            if packed_replay_store is not None:
                 packed_replay_store.is_packed_seq_replay = previous_packed_seq_replay
             if offload_replay_entered:
                 self.off_interface.exit_replay()
@@ -1482,6 +1489,10 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             shared_expert_output, routing_map = None, None
             # residual is the last element in the CUDA graph output.
             residual = cuda_graph_output.pop()
+            replay_hidden_states = args[0] if args else kwargs['hidden_states']
+            residual = self._reconcile_packed_partial_cudagraph_residual(
+                residual, replay_hidden_states
+            )
             if (
                 self.config.moe_shared_expert_intermediate_size is not None
                 and not self.config.moe_shared_expert_overlap
@@ -1562,6 +1573,42 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             # CUDA Graph does not capture the MLP/MoE part at all.
             output = self._forward_mlp(*cuda_graph_output)
         return output, context
+
+    def _reconcile_packed_partial_cudagraph_residual(
+        self, residual: Tensor, replay_hidden_states: Tensor
+    ) -> Tensor:
+        """Match a captured residual capacity buffer to the packed replay token extent."""
+        if not (
+            self.mlp.cudagraph_tensor_store.is_packed_seq_replay
+            and self.config.cuda_graph_impl == "transformer_engine"
+            and CudaGraphModule.moe_router in self.config.cuda_graph_modules
+            and CudaGraphModule.moe_preprocess in self.config.cuda_graph_modules
+            and not self.config.moe_shared_expert_overlap
+            and not self.config.overlap_moe_expert_parallel_comm
+        ):
+            return residual
+
+        if (
+            residual.ndim == 0
+            or replay_hidden_states.ndim == 0
+            or residual.ndim != replay_hidden_states.ndim
+            or residual.shape[1:] != replay_hidden_states.shape[1:]
+        ):
+            raise RuntimeError(
+                "Packed partial CUDA graph residual replay requires matching trailing "
+                f"dimensions, got captured residual {tuple(residual.shape)} and replay hidden "
+                f"states {tuple(replay_hidden_states.shape)}."
+            )
+
+        logical_tokens = replay_hidden_states.size(0)
+        captured_capacity = residual.size(0)
+        if captured_capacity < logical_tokens:
+            raise RuntimeError(
+                "Packed partial CUDA graph residual replay exceeds captured capacity: "
+                f"logical token extent {logical_tokens} is greater than captured capacity "
+                f"{captured_capacity}."
+            )
+        return residual.narrow(0, 0, logical_tokens)
 
     def _get_te_cuda_graph_replay_args(self, *args, **kwargs):
         """Helper function to get tensor arguments for TE CUDA graph."""

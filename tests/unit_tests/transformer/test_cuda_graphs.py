@@ -2146,6 +2146,7 @@ def test_packed_partial_moe_te_cuda_graph_shared_expert_parity() -> None:
     graph_model = None
     reconciliation_extents = []
     logical_output_views = []
+    residual_extents = []
     try:
         initialize_rng_tracker(use_te_rng_tracker=True, force_reset=True)
         Utils.initialize_model_parallel(
@@ -2191,6 +2192,28 @@ def test_packed_partial_moe_te_cuda_graph_shared_expert_parity() -> None:
         assert logical_graph_surface.data_ptr() == graph_capacity_surface.data_ptr()
         assert logical_graph_surface.shape == (12, 1, graph_model.config.hidden_size)
         assert graph_capacity_surface.shape == (16, 1, graph_model.config.hidden_size)
+        original_reconcile_residual = (
+            graph_layer._reconcile_packed_partial_cudagraph_residual
+        )
+
+        def record_residual_extents(
+            bound_layer, captured_residual, replay_hidden_states
+        ):
+            residual = original_reconcile_residual(
+                captured_residual, replay_hidden_states
+            )
+            residual_extents.append(
+                (
+                    residual.size(0),
+                    captured_residual.size(0),
+                    residual.data_ptr() == captured_residual.data_ptr(),
+                )
+            )
+            return residual
+
+        graph_layer._reconcile_packed_partial_cudagraph_residual = MethodType(
+            record_residual_extents, graph_layer
+        )
 
         graph_moe_layer = graph_model.decoder.layers[0].mlp
         graph_dispatcher = graph_moe_layer.token_dispatcher
@@ -2254,6 +2277,7 @@ def test_packed_partial_moe_te_cuda_graph_shared_expert_parity() -> None:
         assert torch.equal(graph_output, eager_output)
         assert reconciliation_extents == [(12, 16)]
         assert logical_output_views == [(12, 16, True)]
+        assert residual_extents == [(12, 16, True)]
         eager_grads = _task5_named_main_grads(eager_model)
         graph_grads = _task5_named_main_grads(graph_model)
         for component in ("shared_experts", "router", "experts"):

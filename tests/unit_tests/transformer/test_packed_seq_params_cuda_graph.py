@@ -21,10 +21,10 @@ from megatron.core.ssm.mamba_layer import MambaLayer
 from megatron.core.transformer.cuda_graphs import (
     TECudaGraphHelper,
     _add_packed_seq_params_to_te_cuda_graph_sample_kwargs,
+    validate_packed_partial_moe_cuda_graph,
 )
 from megatron.core.transformer.enums import CudaGraphModule
 from megatron.core.transformer.module import GraphableMegatronModule
-from megatron.core.transformer.moe.moe_layer import MoELayer
 from megatron.core.transformer.moe.moe_utils import MoECudaGraphTensorStore
 from megatron.core.transformer.transformer_layer import TransformerLayer
 
@@ -647,35 +647,58 @@ def test_te_cuda_graph_partial_replay_flow():
     assert layer_moe.replay_impl_packed_seq is False
     assert layer_moe.mlp.cudagraph_tensor_store.is_packed_seq_replay is False
 
-    # Case 4: EP-overlap defers postprocess, so packed state must remain live until combine.
+    # Case 4: Packed partial MoE fails closed with EP overlap and retains no global flag.
     layer_overlap = _TestLayer(
         [CudaGraphModule.moe_router, CudaGraphModule.moe_preprocess],
         is_moe_layer=True,
     )
     layer_overlap.config.overlap_moe_expert_parallel_comm = True
-    layer_overlap._te_cuda_graph_replay(**kwargs)
+    for _ in range(2):
+        with pytest.raises(ValueError, match="EP communication overlap"):
+            layer_overlap._te_cuda_graph_replay(**kwargs)
+        assert layer_overlap.mlp.cudagraph_tensor_store.is_packed_seq_replay is False
 
-    assert layer_overlap.replay_impl_packed_seq is True
-    assert layer_overlap.mlp.cudagraph_tensor_store.is_packed_seq_replay is True
+    for _ in range(2):
+        layer_overlap._te_cuda_graph_replay(hidden_states=torch.ones(2, 1, 4))
+        assert layer_overlap.replay_impl_packed_seq is False
+        assert layer_overlap.mlp.cudagraph_tensor_store.is_packed_seq_replay is False
 
-    # A nested non-packed replay must see false without destroying the outer packed state.
-    layer_overlap.config.overlap_moe_expert_parallel_comm = False
-    layer_overlap._te_cuda_graph_replay(hidden_states=torch.ones(2, 1, 4))
 
-    assert layer_overlap.replay_impl_packed_seq is False
-    assert layer_overlap.mlp.cudagraph_tensor_store.is_packed_seq_replay is True
-
-    layer_overlap.config.overlap_moe_expert_parallel_comm = True
-    delayed_moe = SimpleNamespace(
-        config=layer_overlap.config,
-        cudagraph_tensor_store=layer_overlap.mlp.cudagraph_tensor_store,
+def test_validate_packed_partial_moe_cuda_graph_fails_closed_with_ep_overlap():
+    config = SimpleNamespace(
+        cuda_graph_modules=[CudaGraphModule.moe_router, CudaGraphModule.moe_preprocess],
+        overlap_moe_expert_parallel_comm=True,
     )
-    reconciled = MoELayer._reconcile_packed_partial_cudagraph_shared_expert_output(
-        delayed_moe, torch.empty(12, 8), torch.empty(16, 8)
+
+    with pytest.raises(ValueError, match="EP communication overlap"):
+        validate_packed_partial_moe_cuda_graph(config, has_packed_seq_params=True)
+
+    validate_packed_partial_moe_cuda_graph(config, has_packed_seq_params=False)
+    config.overlap_moe_expert_parallel_comm = False
+    validate_packed_partial_moe_cuda_graph(config, has_packed_seq_params=True)
+
+
+def test_packed_partial_moe_residual_uses_logical_replay_extent():
+    layer = SimpleNamespace(
+        config=SimpleNamespace(
+            cuda_graph_impl="transformer_engine",
+            cuda_graph_modules=[CudaGraphModule.moe_router, CudaGraphModule.moe_preprocess],
+            moe_shared_expert_overlap=False,
+            overlap_moe_expert_parallel_comm=False,
+        ),
+        mlp=SimpleNamespace(
+            cudagraph_tensor_store=SimpleNamespace(is_packed_seq_replay=True)
+        ),
     )
-    assert reconciled.shape == (12, 8)
-    layer_overlap.mlp.cudagraph_tensor_store.clear()
-    assert layer_overlap.mlp.cudagraph_tensor_store.is_packed_seq_replay is False
+    captured_residual = torch.empty(16, 1, 8)
+    replay_hidden_states = captured_residual.narrow(0, 0, 12)
+
+    residual = TransformerLayer._reconcile_packed_partial_cudagraph_residual(
+        layer, captured_residual, replay_hidden_states
+    )
+
+    assert residual.shape == (12, 1, 8)
+    assert residual.data_ptr() == captured_residual.data_ptr()
 
 
 def test_te_cuda_graph_replay_exits_offload_when_packed_state_setup_fails():

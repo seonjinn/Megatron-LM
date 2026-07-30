@@ -31,6 +31,7 @@ def _packed_partial_cudagraph_moe_layer(
         cuda_graph_impl="transformer_engine",
         cuda_graph_modules=cuda_graph_modules,
         moe_shared_expert_overlap=shared_expert_overlap,
+        overlap_moe_expert_parallel_comm=False,
     )
     moe_layer.cudagraph_tensor_store = SimpleNamespace(is_packed_seq_replay=True)
     return moe_layer

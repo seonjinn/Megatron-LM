@@ -613,6 +613,7 @@ class MoELayer(BaseMoELayer):
             and CudaGraphModule.moe_router in self.config.cuda_graph_modules
             and CudaGraphModule.moe_preprocess in self.config.cuda_graph_modules
             and not self.config.moe_shared_expert_overlap
+            and not self.config.overlap_moe_expert_parallel_comm
         ):
             return shared_expert_output
 
