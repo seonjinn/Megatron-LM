@@ -1,0 +1,15 @@
+# Joint SFT blend for the Nano v3.5 midtrain path.
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+      # Current VLM SFT blend.
+      - path:
+          ../../v3_baseline/sft_combined_omni_16k_vlm_only_webbrowse_dss_no_ultra.yaml
+        repetitions: 1
+
+      # Unpacked text/materialized soumyes+saffron source, mixed in at 1x.
+      - path:
+          /lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v10_closethink_unmask_512k_unpacked_sources_soumyes_saffron_materialized_text40/openai_messages.unpacked_sources.soumyes_saffron_materialized_text40.yaml
+        repetitions: 1

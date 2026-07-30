@@ -33,6 +33,8 @@ DURATION_MINS=""
 NODES=""
 PARTITION=""
 EXCLUDE=""
+SEGMENT=""
+QOS=""
 DEBUG=0
 TEST_NRT=0
 TEST_NRT_32N=0
@@ -50,6 +52,8 @@ while [[ "$#" -gt 0 ]]; do
         --nodes) NODES="$2"; shift ;;
         --partition) PARTITION="$2"; shift ;;
         --exclude) EXCLUDE="$2"; shift ;;
+        --segment) SEGMENT="$2"; shift ;;
+        --qos) QOS="$2"; shift ;;
         --overwrite-code-snapshot) OVERWRITE_CODE_SNAPSHOT=1 ;;
         --snapshot-folder) CODE_SNAPSHOT_FOLDER="$2"; shift ;;
         --dry-run) DRY_RUN=1 ;;
@@ -102,6 +106,8 @@ if [[ -z "$SBATCH_FILE" || -z "$MODEL_NAME" ]]; then
     echo "  --num-jobs <num_jobs> (default: 1)"
     echo "  --source <source_dir> (default: current directory)"
     echo "  --exclude <nodelist> (default: none)"
+    echo "  --segment <segment_size> (default: none)"
+    echo "  --qos <qos> (default: script/cluster default)"
     echo "  --overwrite-code-snapshot (default: no)"
     echo "  --snapshot-folder <snapshot_folder> (default: code_snapshot)"
     echo "  --update-code-only (default: no)"
@@ -162,6 +168,14 @@ fi
 
 if [[ ! -z "$EXCLUDE" ]]; then
     echo "  exclude: ${EXCLUDE}"
+fi
+
+if [[ ! -z "$SEGMENT" ]]; then
+    echo "  segment: ${SEGMENT}"
+fi
+
+if [[ ! -z "$QOS" ]]; then
+    echo "  qos: ${QOS}"
 fi
 
 # Verify script supports MODEL_NAME by checking `MODEL_NAME=${MODEL_NAME:-`
@@ -277,6 +291,14 @@ else
 
         if [[ ! -z "$EXCLUDE" ]]; then
             EXTRA_SBATCH_ARGS+="--exclude=${EXCLUDE} "
+        fi
+
+        if [[ ! -z "$SEGMENT" ]]; then
+            EXTRA_SBATCH_ARGS+="--segment=${SEGMENT} "
+        fi
+
+        if [[ ! -z "$QOS" ]]; then
+            EXTRA_SBATCH_ARGS+="--qos=${QOS} "
         fi
 
         sbatch \

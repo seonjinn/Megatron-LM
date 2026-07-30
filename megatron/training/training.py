@@ -2679,6 +2679,8 @@ def training_log(
     timers_to_log = []
     if args.timing_log_level >= 1:
         timers_to_log.extend([
+            'dataloader-next',
+            'batch-generator',
             'forward-backward',
             'layernorm-grads-all-reduce',
             'embedding-grads-all-reduce',
@@ -2694,7 +2696,6 @@ def training_log(
         ])
     if args.timing_log_level >= 2:
         timers_to_log.extend([
-            'batch-generator',
             'forward-compute',
             'backward-compute',
             'forward-recv',

@@ -101,7 +101,12 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
     # Broadcast data.
     nvtx_range_push("get_data")
     if data_iterator is not None and get_tensor_model_parallel_rank() == 0:
-        data = next(data_iterator)
+        timers = get_timers()
+        timers('dataloader-next', log_level=1).start()
+        try:
+            data = next(data_iterator)
+        finally:
+            timers('dataloader-next').stop()
     else:
         data = None
 
@@ -464,7 +469,7 @@ def forward_step(data_iterator, model: LLaVAModel):
     timers = get_timers()
 
     # Get the batch.
-    timers('batch-generator', log_level=2).start()
+    timers('batch-generator', log_level=1).start()
     (
         tokens,
         labels,

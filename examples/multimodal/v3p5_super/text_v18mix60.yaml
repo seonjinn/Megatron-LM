@@ -1,0 +1,820 @@
+__module__: megatron.energon
+__class__: MetadatasetV2
+splits:
+  train:
+    blend_epochized:
+    - repetitions: 4.93071115
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_00.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_00.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 11001
+        orig_length: 11001
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_00.mat"
+    - repetitions: 4.99767261
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_01.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_01.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 10986
+        orig_length: 10986
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_01.mat"
+    - repetitions: 4.76868485
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_02.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_02.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 10840
+        orig_length: 10840
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_02.mat"
+    - repetitions: 4.75206334
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_03.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_03.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 11365
+        orig_length: 11365
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_03.mat"
+    - repetitions: 4.95799092
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_04.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_04.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 10810
+        orig_length: 10810
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_04.mat"
+    - repetitions: 4.87491997
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_05.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_05.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 10820
+        orig_length: 10820
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_05.mat"
+    - repetitions: 4.81197585
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_06.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_06.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 11170
+        orig_length: 11170
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_06.mat"
+    - repetitions: 4.94535967
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_07.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_07.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 10763
+        orig_length: 10763
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_07.mat"
+    - repetitions: 4.55223821
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_08.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_08.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 11905
+        orig_length: 11905
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_08.mat"
+    - repetitions: 4.82693113
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_09.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_09.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 10983
+        orig_length: 10983
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_09.mat"
+    - repetitions: 4.87749273
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_10.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_10.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 11188
+        orig_length: 11188
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_10.mat"
+    - repetitions: 4.73277171
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_11.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_11.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 11384
+        orig_length: 11384
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_11.mat"
+    - repetitions: 5.10007600
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_12.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_12.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 10523
+        orig_length: 10523
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_12.mat"
+    - repetitions: 5.01233392
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_13.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_13.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 10820
+        orig_length: 10820
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_13.mat"
+    - repetitions: 4.97346032
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_14.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_14.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 10629
+        orig_length: 10629
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_14.mat"
+    - repetitions: 4.77396229
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_15.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_15.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 11300
+        orig_length: 11300
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_15.mat"
+    - repetitions: 4.89422653
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_16.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_16.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 10858
+        orig_length: 10858
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_16.mat"
+    - repetitions: 4.96828006
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_17.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_17.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 10956
+        orig_length: 10956
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_17.mat"
+    - repetitions: 4.91797753
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_18.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_18.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 11217
+        orig_length: 11217
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_18.mat"
+    - repetitions: 4.92440845
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_19.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_19.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 10949
+        orig_length: 10949
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_19.mat"
+    - repetitions: 5.05338870
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_20.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_20.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 10544
+        orig_length: 10544
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_20.mat"
+    - repetitions: 4.79262677
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_21.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_21.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 11302
+        orig_length: 11302
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_21.mat"
+    - repetitions: 4.88771039
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_22.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_22.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 11111
+        orig_length: 11111
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_22.mat"
+    - repetitions: 4.81375960
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_23.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_23.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 11238
+        orig_length: 11238
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_23.mat"
+    - repetitions: 4.80362401
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_24.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_24.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 11117
+        orig_length: 11117
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_24.mat"
+    - repetitions: 4.89953759
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_25.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_25.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 11231
+        orig_length: 11231
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_25.mat"
+    - repetitions: 4.96416457
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_26.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_26.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 10789
+        orig_length: 10789
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_26.mat"
+    - repetitions: 4.82542051
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_27.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_27.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 11370
+        orig_length: 11370
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_27.mat"
+    - repetitions: 5.11053305
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_28.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_28.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 10481
+        orig_length: 10481
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_28.mat"
+    - repetitions: 5.06246782
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_29.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_29.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 10416
+        orig_length: 10416
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_29.mat"
+    - repetitions: 4.88524590
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_30.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_30.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 10873
+        orig_length: 10873
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_30.mat"
+    - repetitions: 4.91097025
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_31.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_31.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 10885
+        orig_length: 10885
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_31.mat"
+    - repetitions: 4.95307247
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_32.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_32.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 10880
+        orig_length: 10880
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_32.mat"
+    - repetitions: 5.04254535
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_33.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_33.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 10750
+        orig_length: 10750
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_33.mat"
+    - repetitions: 4.94288665
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_34.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_34.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 10921
+        orig_length: 10921
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_34.mat"
+    - repetitions: 5.00019187
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_35.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_35.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 10717
+        orig_length: 10717
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_35.mat"
+    - repetitions: 5.05867030
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_36.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_36.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 10556
+        orig_length: 10556
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_36.mat"
+    - repetitions: 4.88750014
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_37.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_37.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 10862
+        orig_length: 10862
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_37.mat"
+    - repetitions: 4.85612630
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_38.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_38.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 11099
+        orig_length: 11099
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_38.mat"
+    - repetitions: 4.77636682
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_39.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_39.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 11348
+        orig_length: 11348
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_39.mat"
+    - repetitions: 4.90671666
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_40.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_40.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 10936
+        orig_length: 10936
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_40.mat"
+    - repetitions: 5.07424954
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_41.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_41.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 10861
+        orig_length: 10861
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_41.mat"
+    - repetitions: 4.56026055
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_42.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_42.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 11640
+        orig_length: 11640
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_42.mat"
+    - repetitions: 4.68337754
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_43.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_43.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 11303
+        orig_length: 11303
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_43.mat"
+    - repetitions: 4.64006277
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_44.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_44.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 11685
+        orig_length: 11685
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_44.mat"
+    - repetitions: 5.10528921
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_45.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_45.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 10853
+        orig_length: 10853
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_45.mat"
+    - repetitions: 5.05890985
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_46.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_46.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 10623
+        orig_length: 10623
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_46.mat"
+    - repetitions: 4.94605772
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_47.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_47.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 10999
+        orig_length: 10999
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_47.mat"
+    - repetitions: 5.10414199
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_48.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_48.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 10438
+        orig_length: 10438
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_48.mat"
+    - repetitions: 4.78319500
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/data_v18/part_49.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "part_49.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 11122
+        orig_length: 11122
+        category: "openai_messages_jsonl"
+        component: "data_v18"
+        source_key: "part_49.mat"
+    - repetitions: 1.00755442
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v10_closethink_unmask_512k_unpacked_sources_soumyes_saffron_materialized_text40/jsonl_links/saffron_narwhal_agentic_v5/split_00.materialized.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "split_00.materialized.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 98588
+        orig_length: 98588
+        category: "openai_messages_jsonl"
+        materialized: true
+        component: "saffron_narwhal_agentic_v5"
+        source_key: "split_00.materialized"
+    - repetitions: 0.99881313
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v10_closethink_unmask_512k_unpacked_sources_soumyes_saffron_materialized_text40/jsonl_links/saffron_narwhal_agentic_v5/split_01.materialized.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "split_01.materialized.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 99084
+        orig_length: 99084
+        category: "openai_messages_jsonl"
+        materialized: true
+        component: "saffron_narwhal_agentic_v5"
+        source_key: "split_01.materialized"
+    - repetitions: 0.99418414
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v10_closethink_unmask_512k_unpacked_sources_soumyes_saffron_materialized_text40/jsonl_links/saffron_narwhal_agentic_v5/split_02.materialized.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "split_02.materialized.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 99166
+        orig_length: 99166
+        category: "openai_messages_jsonl"
+        materialized: true
+        component: "saffron_narwhal_agentic_v5"
+        source_key: "split_02.materialized"
+    - repetitions: 1.00320466
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v10_closethink_unmask_512k_unpacked_sources_soumyes_saffron_materialized_text40/jsonl_links/saffron_narwhal_agentic_v5/split_03.materialized.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "split_03.materialized.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 99067
+        orig_length: 99067
+        category: "openai_messages_jsonl"
+        materialized: true
+        component: "saffron_narwhal_agentic_v5"
+        source_key: "split_03.materialized"
+    - repetitions: 1.00090527
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v10_closethink_unmask_512k_unpacked_sources_soumyes_saffron_materialized_text40/jsonl_links/saffron_narwhal_agentic_v5/split_04.materialized.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "split_04.materialized.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 98567
+        orig_length: 98567
+        category: "openai_messages_jsonl"
+        materialized: true
+        component: "saffron_narwhal_agentic_v5"
+        source_key: "split_04.materialized"
+    - repetitions: 1.00371954
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v10_closethink_unmask_512k_unpacked_sources_soumyes_saffron_materialized_text40/jsonl_links/saffron_narwhal_agentic_v5/split_05.materialized.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "split_05.materialized.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 97671
+        orig_length: 97671
+        category: "openai_messages_jsonl"
+        materialized: true
+        component: "saffron_narwhal_agentic_v5"
+        source_key: "split_05.materialized"
+    - repetitions: 0.99697527
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v10_closethink_unmask_512k_unpacked_sources_soumyes_saffron_materialized_text40/jsonl_links/saffron_narwhal_agentic_v5/split_06.materialized.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "split_06.materialized.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 98659
+        orig_length: 98659
+        category: "openai_messages_jsonl"
+        materialized: true
+        component: "saffron_narwhal_agentic_v5"
+        source_key: "split_06.materialized"
+    - repetitions: 0.99842261
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v10_closethink_unmask_512k_unpacked_sources_soumyes_saffron_materialized_text40/jsonl_links/saffron_narwhal_agentic_v5/split_07.materialized.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "split_07.materialized.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 98484
+        orig_length: 98484
+        category: "openai_messages_jsonl"
+        materialized: true
+        component: "saffron_narwhal_agentic_v5"
+        source_key: "split_07.materialized"
+    - repetitions: 0.99542841
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v10_closethink_unmask_512k_unpacked_sources_soumyes_saffron_materialized_text40/jsonl_links/saffron_narwhal_agentic_v5/split_08.materialized.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "split_08.materialized.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 98847
+        orig_length: 98847
+        category: "openai_messages_jsonl"
+        component: "saffron_narwhal_agentic_v5"
+        source_key: "split_08.materialized"
+    - repetitions: 0.99380719
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v10_closethink_unmask_512k_unpacked_sources_soumyes_saffron_materialized_text40/jsonl_links/saffron_narwhal_agentic_v5/split_09.materialized.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "split_09.materialized.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 98791
+        orig_length: 98791
+        category: "openai_messages_jsonl"
+        component: "saffron_narwhal_agentic_v5"
+        source_key: "split_09.materialized"
+    - repetitions: 0.98377714
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v10_closethink_unmask_512k_unpacked_sources_soumyes_saffron_materialized_text40/jsonl_links/saffron_narwhal_agentic_v5/split_10.materialized.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "split_10.materialized.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 98611
+        orig_length: 98611
+        category: "openai_messages_jsonl"
+        component: "saffron_narwhal_agentic_v5"
+        source_key: "split_10.materialized"
+    - repetitions: 0.99464103
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v10_closethink_unmask_512k_unpacked_sources_soumyes_saffron_materialized_text40/jsonl_links/saffron_narwhal_agentic_v5/split_11.materialized.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "split_11.materialized.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 98967
+        orig_length: 98967
+        category: "openai_messages_jsonl"
+        component: "saffron_narwhal_agentic_v5"
+        source_key: "split_11.materialized"
+    - repetitions: 1.00470431
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v10_closethink_unmask_512k_unpacked_sources_soumyes_saffron_materialized_text40/jsonl_links/saffron_narwhal_agentic_v5/split_12.materialized.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "split_12.materialized.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 99005
+        orig_length: 99005
+        category: "openai_messages_jsonl"
+        component: "saffron_narwhal_agentic_v5"
+        source_key: "split_12.materialized"
+    - repetitions: 1.00166831
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v10_closethink_unmask_512k_unpacked_sources_soumyes_saffron_materialized_text40/jsonl_links/saffron_narwhal_agentic_v5/split_13.materialized.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "split_13.materialized.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 98228
+        orig_length: 98228
+        category: "openai_messages_jsonl"
+        component: "saffron_narwhal_agentic_v5"
+        source_key: "split_13.materialized"
+    - repetitions: 1.00708879
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v10_closethink_unmask_512k_unpacked_sources_soumyes_saffron_materialized_text40/jsonl_links/saffron_narwhal_agentic_v5/split_14.materialized.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "split_14.materialized.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 98130
+        orig_length: 98130
+        category: "openai_messages_jsonl"
+        component: "saffron_narwhal_agentic_v5"
+        source_key: "split_14.materialized"
+    - repetitions: 1.00607929
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v10_closethink_unmask_512k_unpacked_sources_soumyes_saffron_materialized_text40/jsonl_links/saffron_narwhal_agentic_v5/split_15.materialized.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "split_15.materialized.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 98656
+        orig_length: 98656
+        category: "openai_messages_jsonl"
+        component: "saffron_narwhal_agentic_v5"
+        source_key: "split_15.materialized"
+    - repetitions: 1.01090380
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v10_closethink_unmask_512k_unpacked_sources_soumyes_saffron_materialized_text40/jsonl_links/saffron_narwhal_agentic_v5/split_16.materialized.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "split_16.materialized.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 98585
+        orig_length: 98585
+        category: "openai_messages_jsonl"
+        component: "saffron_narwhal_agentic_v5"
+        source_key: "split_16.materialized"
+    - repetitions: 1.00697543
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v10_closethink_unmask_512k_unpacked_sources_soumyes_saffron_materialized_text40/jsonl_links/saffron_narwhal_agentic_v5/split_17.materialized.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "split_17.materialized.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 98909
+        orig_length: 98909
+        category: "openai_messages_jsonl"
+        component: "saffron_narwhal_agentic_v5"
+        source_key: "split_17.materialized"
+    - repetitions: 1.00367368
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v10_closethink_unmask_512k_unpacked_sources_soumyes_saffron_materialized_text40/jsonl_links/saffron_narwhal_agentic_v5/split_18.materialized.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "split_18.materialized.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 97789
+        orig_length: 97789
+        category: "openai_messages_jsonl"
+        component: "saffron_narwhal_agentic_v5"
+        source_key: "split_18.materialized"
+    - repetitions: 0.98838545
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v10_closethink_unmask_512k_unpacked_sources_soumyes_saffron_materialized_text40/jsonl_links/saffron_narwhal_agentic_v5/split_19.materialized.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "split_19.materialized.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 98681
+        orig_length: 98681
+        category: "openai_messages_jsonl"
+        component: "saffron_narwhal_agentic_v5"
+        source_key: "split_19.materialized"
+    - repetitions: 4.21017740
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/compaction_v3_1/compaction_v3.1.materialized.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "compaction_v3.1.materialized.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 15292
+        orig_length: 15292
+        category: "openai_messages_jsonl"
+        component: "compaction_v3_1"
+        source_key: "compaction_v3.1.materialized"
+  val:
+    blend_epochized:
+    - repetitions: 1.00000000
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/eval/gdpval_full_sft_val_20260411_152439.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "gdpval_full_sft_val_20260411_152439.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 1012
+        orig_length: 1012
+        category: "openai_messages_jsonl"
+        component: "eval"
+        source_key: "gdpval_full_sft_val_20260411_152439.mat"
+  test:
+    blend_epochized:
+    - repetitions: 1.00000000
+      path: "/lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v18_512k_unpacked_sources_soumyes_saffron_materialized_textmass/jsonl_links/eval/gdpval_full_sft_val_20260411_152439.mat.jsonl"
+      subflavors:
+        skip_chat_template: true
+        name: "gdpval_full_sft_val_20260411_152439.mat.jsonl"
+        cook: "openai_messages_jsonl"
+        length: 1012
+        orig_length: 1012
+        category: "openai_messages_jsonl"
+        component: "eval"
+        source_key: "gdpval_full_sft_val_20260411_152439.mat"
