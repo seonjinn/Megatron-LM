@@ -24,6 +24,7 @@ from megatron.core.transformer.cuda_graphs import (
 )
 from megatron.core.transformer.enums import CudaGraphModule
 from megatron.core.transformer.module import GraphableMegatronModule
+from megatron.core.transformer.moe.moe_layer import MoELayer
 from megatron.core.transformer.moe.moe_utils import MoECudaGraphTensorStore
 from megatron.core.transformer.transformer_layer import TransformerLayer
 
@@ -560,8 +561,7 @@ def test_te_cuda_graph_sample_kwargs_reject_overlapping_flattened_keys():
         )
 
 
-def test_te_cuda_graph_partial_attn_only_flow():
-    from megatron.core.transformer.enums import CudaGraphModule
+def test_te_cuda_graph_partial_replay_flow():
 
     class _ConfigStub:
         def __init__(self, cuda_graph_modules):
@@ -569,6 +569,8 @@ def test_te_cuda_graph_partial_attn_only_flow():
             self.delay_offload_until_cuda_graph = False
             self.moe_shared_expert_intermediate_size = 64
             self.moe_shared_expert_overlap = False
+            self.overlap_moe_expert_parallel_comm = False
+            self.cuda_graph_impl = "transformer_engine"
 
     class _TestLayer(_TransformerLayerCudaGraphStub):
         _te_cuda_graph_replay = TransformerLayer._te_cuda_graph_replay
@@ -596,6 +598,8 @@ def test_te_cuda_graph_partial_attn_only_flow():
             self.replay_impl_packed_seq = (
                 self.mlp.cudagraph_tensor_store.is_packed_seq_replay
             )
+            if self.is_moe_layer and self.config.overlap_moe_expert_parallel_comm:
+                self.mlp.cudagraph_tensor_store.hidden_states = torch.ones(2, 1, 4)
             return torch.ones(2, 1, 4) * 3.0
 
     # Case 1: When CudaGraphModule.attn is captured
@@ -642,6 +646,73 @@ def test_te_cuda_graph_partial_attn_only_flow():
 
     assert layer_moe.replay_impl_packed_seq is False
     assert layer_moe.mlp.cudagraph_tensor_store.is_packed_seq_replay is False
+
+    # Case 4: EP-overlap defers postprocess, so packed state must remain live until combine.
+    layer_overlap = _TestLayer(
+        [CudaGraphModule.moe_router, CudaGraphModule.moe_preprocess],
+        is_moe_layer=True,
+    )
+    layer_overlap.config.overlap_moe_expert_parallel_comm = True
+    layer_overlap._te_cuda_graph_replay(**kwargs)
+
+    assert layer_overlap.replay_impl_packed_seq is True
+    assert layer_overlap.mlp.cudagraph_tensor_store.is_packed_seq_replay is True
+
+    # A nested non-packed replay must see false without destroying the outer packed state.
+    layer_overlap.config.overlap_moe_expert_parallel_comm = False
+    layer_overlap._te_cuda_graph_replay(hidden_states=torch.ones(2, 1, 4))
+
+    assert layer_overlap.replay_impl_packed_seq is False
+    assert layer_overlap.mlp.cudagraph_tensor_store.is_packed_seq_replay is True
+
+    layer_overlap.config.overlap_moe_expert_parallel_comm = True
+    delayed_moe = SimpleNamespace(
+        config=layer_overlap.config,
+        cudagraph_tensor_store=layer_overlap.mlp.cudagraph_tensor_store,
+    )
+    reconciled = MoELayer._reconcile_packed_partial_cudagraph_shared_expert_output(
+        delayed_moe, torch.empty(12, 8), torch.empty(16, 8)
+    )
+    assert reconciled.shape == (12, 8)
+    layer_overlap.mlp.cudagraph_tensor_store.clear()
+    assert layer_overlap.mlp.cudagraph_tensor_store.is_packed_seq_replay is False
+
+
+def test_te_cuda_graph_replay_exits_offload_when_packed_state_setup_fails():
+    class FailingStore(MoECudaGraphTensorStore):
+        def set(self, **kwargs):
+            raise RuntimeError("packed state setup failed")
+
+    events = []
+    layer = _TransformerLayerCudaGraphStub()
+    layer._te_cuda_graph_replay = MethodType(TransformerLayer._te_cuda_graph_replay, layer)
+    layer._forward_attention = MethodType(
+        lambda bound_layer, *args, **kwargs: (torch.ones(2, 1, 4), None), layer
+    )
+    layer._te_cuda_graph_replay_impl = MethodType(
+        lambda bound_layer, args, kwargs, context: torch.ones(2, 1, 4), layer
+    )
+    layer.config = SimpleNamespace(
+        cuda_graph_modules=[CudaGraphModule.moe_router, CudaGraphModule.moe_preprocess],
+        delay_offload_until_cuda_graph=True,
+        moe_shared_expert_intermediate_size=64,
+        moe_shared_expert_overlap=False,
+        overlap_moe_expert_parallel_comm=False,
+    )
+    layer.is_moe_layer = True
+    layer.mlp = SimpleNamespace(cudagraph_tensor_store=FailingStore())
+    layer.off_interface = SimpleNamespace(
+        enter_replay=lambda: events.append("enter"),
+        exit_replay=lambda: events.append("exit"),
+    )
+
+    with pytest.raises(RuntimeError, match="packed state setup failed"):
+        layer._te_cuda_graph_replay(
+            hidden_states=torch.ones(2, 1, 4),
+            packed_seq_params=_make_packed_seq_params(),
+        )
+
+    assert events == ["enter", "exit"]
 
 
 def test_seq_idx_determinism_across_replays():

@@ -1417,30 +1417,38 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             "For inference cuda graph, please use cuda_graph_impl=local instead."
         )
 
-        if self.config.delay_offload_until_cuda_graph:
-            self.off_interface.enter_replay()
-
         packed_replay_store = None
         previous_packed_seq_replay = False
-        if (
-            is_packed_seq_replay
-            and getattr(self, 'is_moe_layer', False)
-            and self.config.cuda_graph_modules
-            and CudaGraphModule.moe_router in self.config.cuda_graph_modules
-            and CudaGraphModule.moe_preprocess in self.config.cuda_graph_modules
-            and self.config.moe_shared_expert_intermediate_size is not None
-            and not self.config.moe_shared_expert_overlap
-        ):
-            packed_replay_store = self.mlp.cudagraph_tensor_store
-            previous_packed_seq_replay = packed_replay_store.is_packed_seq_replay
-            packed_replay_store.set(is_packed_seq_replay=True)
-
+        preserve_packed_replay_state = False
+        offload_replay_entered = False
         try:
-            return self._te_cuda_graph_replay_impl(args, kwargs, context)
-        finally:
-            if packed_replay_store is not None:
-                packed_replay_store.is_packed_seq_replay = previous_packed_seq_replay
             if self.config.delay_offload_until_cuda_graph:
+                self.off_interface.enter_replay()
+                offload_replay_entered = True
+
+            if (
+                getattr(self, 'is_moe_layer', False)
+                and self.config.cuda_graph_modules
+                and CudaGraphModule.moe_router in self.config.cuda_graph_modules
+                and CudaGraphModule.moe_preprocess in self.config.cuda_graph_modules
+                and self.config.moe_shared_expert_intermediate_size is not None
+                and not self.config.moe_shared_expert_overlap
+            ):
+                packed_replay_store = self.mlp.cudagraph_tensor_store
+                previous_packed_seq_replay = packed_replay_store.is_packed_seq_replay
+                packed_replay_store.set(is_packed_seq_replay=is_packed_seq_replay)
+
+            output = self._te_cuda_graph_replay_impl(args, kwargs, context)
+            preserve_packed_replay_state = (
+                packed_replay_store is not None
+                and self.config.overlap_moe_expert_parallel_comm
+                and not packed_replay_store.is_empty()
+            )
+            return output
+        finally:
+            if packed_replay_store is not None and not preserve_packed_replay_state:
+                packed_replay_store.is_packed_seq_replay = previous_packed_seq_replay
+            if offload_replay_entered:
                 self.off_interface.exit_replay()
 
     def _te_cuda_graph_replay_impl(self, args, kwargs, context):

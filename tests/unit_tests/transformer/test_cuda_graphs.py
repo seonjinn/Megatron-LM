@@ -2064,8 +2064,8 @@ def _build_packed_partial_moe_model(cuda_graph_impl: str) -> GPTModel:
         moe_router_pre_softmax=True,
         moe_grouped_gemm=True,
         moe_token_dispatcher_type="alltoall",
-        moe_expert_capacity_factor=1.0,
-        moe_pad_expert_input_to_capacity=True,
+        moe_expert_capacity_factor=None,
+        moe_pad_expert_input_to_capacity=False,
         moe_router_load_balancing_type="none",
         moe_shared_expert_intermediate_size=128,
         moe_shared_expert_overlap=False,
@@ -2103,8 +2103,9 @@ def _build_packed_partial_moe_model(cuda_graph_impl: str) -> GPTModel:
 
 
 def _packed_partial_moe_inputs(logical_tokens: int) -> dict[str, object]:
-    """Build a packed model input whose physical extent is the logical token count."""
+    """Build a capacity-sized model input with a smaller packed logical token extent."""
     assert logical_tokens in (12, 16)
+    capacity = 16
     device = torch.device("cuda")
     cu_seqlens = torch.tensor(
         [0, logical_tokens // 2, logical_tokens], dtype=torch.int32, device=device
@@ -2120,12 +2121,10 @@ def _packed_partial_moe_inputs(logical_tokens: int) -> dict[str, object]:
         total_tokens=logical_tokens,
     )
     return {
-        "input_ids": torch.arange(logical_tokens, dtype=torch.int64, device=device)
+        "input_ids": torch.arange(capacity, dtype=torch.int64, device=device)
         .remainder(128)
         .unsqueeze(0),
-        "position_ids": torch.arange(
-            logical_tokens, dtype=torch.int64, device=device
-        ).unsqueeze(0),
+        "position_ids": torch.arange(capacity, dtype=torch.int64, device=device).unsqueeze(0),
         "attention_mask": None,
         "packed_seq_params": packed_seq_params,
     }
@@ -2146,6 +2145,7 @@ def test_packed_partial_moe_te_cuda_graph_shared_expert_parity() -> None:
     eager_model = None
     graph_model = None
     reconciliation_extents = []
+    logical_output_views = []
     try:
         initialize_rng_tracker(use_te_rng_tracker=True, force_reset=True)
         Utils.initialize_model_parallel(
@@ -2161,7 +2161,56 @@ def test_packed_partial_moe_te_cuda_graph_shared_expert_parity() -> None:
         torch.manual_seed(456)
         graph_model = _build_packed_partial_moe_model("transformer_engine")
         graph_model.load_state_dict(eager_model.state_dict())
+        torch.manual_seed(789)
+        graph_capacity_surface = torch.randn(
+            16, 1, graph_model.config.hidden_size, dtype=torch.bfloat16, device="cuda"
+        ).requires_grad_()
+        eager_capacity_surface = graph_capacity_surface.detach().clone().requires_grad_()
+
+        graph_layer = graph_model.decoder.layers[0]
+        eager_layer = eager_model.decoder.layers[0]
+
+        def graph_static_inputs(bound_layer, seq_length, micro_batch_size):
+            assert (seq_length, micro_batch_size) == (16, 1)
+            return {"hidden_states": graph_capacity_surface}
+
+        def logical_attention_view(capacity_surface):
+            def forward_attention(bound_layer, *args, **kwargs):
+                return capacity_surface.narrow(0, 0, 12), None
+
+            return forward_attention
+
+        graph_layer.get_layer_static_inputs = MethodType(graph_static_inputs, graph_layer)
+        graph_layer._forward_attention = MethodType(
+            logical_attention_view(graph_capacity_surface), graph_layer
+        )
+        eager_layer._forward_attention = MethodType(
+            logical_attention_view(eager_capacity_surface), eager_layer
+        )
+        logical_graph_surface = graph_capacity_surface.narrow(0, 0, 12)
+        assert logical_graph_surface.data_ptr() == graph_capacity_surface.data_ptr()
+        assert logical_graph_surface.shape == (12, 1, graph_model.config.hidden_size)
+        assert graph_capacity_surface.shape == (16, 1, graph_model.config.hidden_size)
+
         graph_moe_layer = graph_model.decoder.layers[0].mlp
+        graph_dispatcher = graph_moe_layer.token_dispatcher
+        original_combine_postprocess = graph_dispatcher.combine_postprocess
+
+        def return_logical_output_view(bound_dispatcher, output):
+            capacity_output = original_combine_postprocess(output)
+            logical_output = capacity_output.narrow(0, 0, 12)
+            logical_output_views.append(
+                (
+                    logical_output.size(0),
+                    capacity_output.size(0),
+                    logical_output.data_ptr() == capacity_output.data_ptr(),
+                )
+            )
+            return logical_output
+
+        graph_dispatcher.combine_postprocess = MethodType(
+            return_logical_output_view, graph_dispatcher
+        )
         original_reconcile = (
             graph_moe_layer._reconcile_packed_partial_cudagraph_shared_expert_output
         )
@@ -2204,6 +2253,7 @@ def test_packed_partial_moe_te_cuda_graph_shared_expert_parity() -> None:
 
         assert torch.equal(graph_output, eager_output)
         assert reconciliation_extents == [(12, 16)]
+        assert logical_output_views == [(12, 16, True)]
         eager_grads = _task5_named_main_grads(eager_model)
         graph_grads = _task5_named_main_grads(graph_model)
         for component in ("shared_experts", "router", "experts"):
