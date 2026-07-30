@@ -782,6 +782,25 @@ def test_packed_partial_moe_rejects_mlp_output_larger_than_replay_input():
         )
 
 
+def test_packed_partial_moe_rejects_mlp_output_larger_than_residual_capacity():
+    layer = _TransformerLayerCudaGraphStub()
+    layer.config = SimpleNamespace(
+        cuda_graph_impl="transformer_engine",
+        cuda_graph_modules=[CudaGraphModule.moe_router, CudaGraphModule.moe_preprocess],
+        overlap_moe_expert_parallel_comm=False,
+    )
+    layer.mlp = SimpleNamespace(
+        cudagraph_tensor_store=SimpleNamespace(is_packed_seq_replay=True)
+    )
+
+    with pytest.raises(RuntimeError, match="residual replay exceeds captured capacity"):
+        layer._reconcile_packed_partial_cudagraph_post_mlp_inputs(
+            (torch.empty(16, 1, 8), None),
+            torch.empty(12, 1, 8),
+            torch.empty(16, 1, 8),
+        )
+
+
 def test_te_cuda_graph_replay_exits_offload_when_packed_state_setup_fails():
     class FailingStore(MoECudaGraphTensorStore):
         def set(self, **kwargs):
