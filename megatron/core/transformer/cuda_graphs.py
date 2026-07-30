@@ -2504,17 +2504,11 @@ class TECudaGraphHelper:
             static_inputs = layer.get_layer_static_inputs(self.seq_length, self.micro_batch_size)
 
             from megatron.core.ssm.mamba_layer import MambaLayer
-            from megatron.core.transformer.identity_op import IdentityOp
             from megatron.core.transformer.transformer_layer import TransformerLayer
 
-            contains_self_attn = (
-                isinstance(layer, TransformerLayer)
-                and not isinstance(layer.self_attention, IdentityOp)
-                and (
-                    not self.config.cuda_graph_modules
-                    or CudaGraphModule.attn in self.config.cuda_graph_modules
-                )
-            )
+            contains_self_attn = isinstance(
+                layer, TransformerLayer
+            ) and layer._te_cuda_graph_captures_attention()
             contains_mamba = isinstance(layer, MambaLayer) and (
                 not self.config.cuda_graph_modules
                 or CudaGraphModule.mamba in self.config.cuda_graph_modules

@@ -31,6 +31,9 @@ from megatron.core.transformer.transformer_layer import TransformerLayer
 
 
 class _TransformerLayerCudaGraphStub:
+    _te_cuda_graph_captures_attention = (
+        TransformerLayer._te_cuda_graph_captures_attention
+    )
     _set_te_cuda_graph_packed_seq_params_static_metadata = (
         TransformerLayer._set_te_cuda_graph_packed_seq_params_static_metadata
     )

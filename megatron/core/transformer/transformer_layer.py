@@ -1103,10 +1103,7 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
         """
         static_inputs = super().get_layer_static_inputs(seq_length, micro_batch_size)
 
-        if not isinstance(self.self_attention, IdentityOp) and (
-            not self.config.cuda_graph_modules
-            or CudaGraphModule.attn in self.config.cuda_graph_modules
-        ):
+        if self._te_cuda_graph_captures_attention():
             slen_per_cp = seq_length // self.config.context_parallel_size
             static_inputs["attention_mask"] = (
                 ~(torch.tril(torch.ones((slen_per_cp, seq_length))).bool())
@@ -1124,7 +1121,7 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             return super()._get_submodules_under_cudagraphs()
 
         submodules = []
-        if CudaGraphModule.attn in self.config.cuda_graph_modules:
+        if self._te_cuda_graph_captures_attention():
             submodules += [
                 self.input_layernorm,
                 self.self_attention,
@@ -1333,6 +1330,13 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
         )
         kwargs.update(tensor_kwargs)
 
+    def _te_cuda_graph_captures_attention(self) -> bool:
+        """Return whether this layer contributes a real self-attention graph scope."""
+        return not isinstance(self.self_attention, IdentityOp) and (
+            not self.config.cuda_graph_modules
+            or CudaGraphModule.attn in self.config.cuda_graph_modules
+        )
+
     def _te_cuda_graph_capture(self, *args, **kwargs):
         """
         CUDA Graph capture for this layer using TE interface.
@@ -1361,10 +1365,7 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
         )
 
         context = None
-        if (
-            not self.config.cuda_graph_modules
-            or CudaGraphModule.attn in self.config.cuda_graph_modules
-        ):
+        if self._te_cuda_graph_captures_attention():
             hidden_states, context = self._forward_attention(*args, **kwargs)
         else:
             if len(args) > 0:
@@ -1411,10 +1412,7 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
         )
 
         context = None
-        if (
-            self.config.cuda_graph_modules
-            and CudaGraphModule.attn not in self.config.cuda_graph_modules
-        ):
+        if not self._te_cuda_graph_captures_attention():
             is_packed_seq_replay = kwargs.get('packed_seq_params') is not None
             hidden_states, context = self._forward_attention(*args, **kwargs)
             args = (hidden_states,)
@@ -1488,9 +1486,6 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             # residual is the last element in the CUDA graph output.
             residual = cuda_graph_output.pop()
             replay_hidden_states = args[0] if args else kwargs['hidden_states']
-            residual = self._reconcile_packed_partial_cudagraph_residual(
-                residual, replay_hidden_states
-            )
             if (
                 self.config.moe_shared_expert_intermediate_size is not None
                 and not self.config.moe_shared_expert_overlap
@@ -1537,6 +1532,13 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                 nvtx_range_pop(suffix="mlp")
                 return residual, hidden_states, probs, shared_expert_output
             mlp_output_with_bias = apply_module(self.mlp)(hidden_states)
+            mlp_output_with_bias, residual = (
+                self._reconcile_packed_partial_cudagraph_post_mlp_inputs(
+                    mlp_output_with_bias,
+                    residual,
+                    replay_hidden_states,
+                )
+            )
             self.mlp.cudagraph_tensor_store.clear()
             nvtx_range_pop(suffix="mlp")
 
@@ -1572,10 +1574,14 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             output = self._forward_mlp(*cuda_graph_output)
         return output, context
 
-    def _reconcile_packed_partial_cudagraph_residual(
-        self, residual: Tensor, replay_hidden_states: Tensor
+    def _reconcile_packed_partial_cudagraph_tensor(
+        self,
+        tensor: Tensor,
+        replay_hidden_states: Tensor,
+        *,
+        tensor_name: str,
     ) -> Tensor:
-        """Match a captured residual capacity buffer to the packed replay token extent."""
+        """Match a captured capacity tensor to the packed replay token extent."""
         if not (
             self.mlp.cudagraph_tensor_store.is_packed_seq_replay
             and self.config.cuda_graph_impl == "transformer_engine"
@@ -1583,29 +1589,58 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             and CudaGraphModule.moe_preprocess in self.config.cuda_graph_modules
             and not self.config.overlap_moe_expert_parallel_comm
         ):
-            return residual
+            return tensor
 
         if (
-            residual.ndim == 0
+            tensor.ndim == 0
             or replay_hidden_states.ndim == 0
-            or residual.ndim != replay_hidden_states.ndim
-            or residual.shape[1:] != replay_hidden_states.shape[1:]
+            or tensor.ndim != replay_hidden_states.ndim
+            or tensor.shape[1:] != replay_hidden_states.shape[1:]
         ):
             raise RuntimeError(
-                "Packed partial CUDA graph residual replay requires matching trailing "
-                f"dimensions, got captured residual {tuple(residual.shape)} and replay hidden "
-                f"states {tuple(replay_hidden_states.shape)}."
+                "Packed partial CUDA graph replay requires matching trailing dimensions, "
+                f"got captured {tensor_name} {tuple(tensor.shape)} and replay hidden states "
+                f"{tuple(replay_hidden_states.shape)}."
             )
 
         logical_tokens = replay_hidden_states.size(0)
-        captured_capacity = residual.size(0)
+        captured_capacity = tensor.size(0)
         if captured_capacity < logical_tokens:
             raise RuntimeError(
-                "Packed partial CUDA graph residual replay exceeds captured capacity: "
+                f"Packed partial CUDA graph {tensor_name} replay exceeds captured capacity: "
                 f"logical token extent {logical_tokens} is greater than captured capacity "
                 f"{captured_capacity}."
             )
-        return residual.narrow(0, 0, logical_tokens)
+        return tensor.narrow(0, 0, logical_tokens)
+
+    def _reconcile_packed_partial_cudagraph_residual(
+        self, residual: Tensor, replay_hidden_states: Tensor
+    ) -> Tensor:
+        """Match a captured residual capacity buffer to the packed replay token extent."""
+        return self._reconcile_packed_partial_cudagraph_tensor(
+            residual,
+            replay_hidden_states,
+            tensor_name="residual",
+        )
+
+    def _reconcile_packed_partial_cudagraph_post_mlp_inputs(
+        self,
+        mlp_output_with_bias: tuple[Tensor, Tensor | None],
+        residual: Tensor,
+        replay_hidden_states: Tensor,
+    ) -> tuple[tuple[Tensor, Tensor | None], Tensor]:
+        """Align both bias-dropout-add operands to the packed replay token extent."""
+        residual = self._reconcile_packed_partial_cudagraph_residual(
+            residual,
+            replay_hidden_states,
+        )
+        mlp_output, mlp_bias = mlp_output_with_bias
+        mlp_output = self._reconcile_packed_partial_cudagraph_tensor(
+            mlp_output,
+            replay_hidden_states,
+            tensor_name="MLP output",
+        )
+        return (mlp_output, mlp_bias), residual
 
     def _get_te_cuda_graph_replay_args(self, *args, **kwargs):
         """Helper function to get tensor arguments for TE CUDA graph."""
