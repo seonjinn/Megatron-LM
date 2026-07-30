@@ -12,6 +12,7 @@ from megatron.core import tensor_parallel, utils
 from megatron.core.extensions.transformer_engine import HAVE_TE
 from megatron.core.inference.utils import InferenceMode
 from megatron.core.process_groups_config import ProcessGroupCollection
+from megatron.core.transformer.enums import CudaGraphModule
 from megatron.core.transformer.module import MegatronModule
 from megatron.core.transformer.moe.moe_utils import (
     MoECudaGraphPartialCaptureSignal,
@@ -585,6 +586,11 @@ class MoELayer(BaseMoELayer):
             output, _ = self.fc2_latent_proj(output)
 
         if shared_expert_output is not None:
+            shared_expert_output = (
+                self._reconcile_packed_partial_cudagraph_shared_expert_output(
+                    output, shared_expert_output
+                )
+            )
             output = output + shared_expert_output
         elif (
             isinstance(self.token_dispatcher, NVLSAllGatherVDispatcher)
@@ -596,6 +602,41 @@ class MoELayer(BaseMoELayer):
             output = output + self._latent_shared_expert_output
             self._latent_shared_expert_output = None
         return output
+
+    def _reconcile_packed_partial_cudagraph_shared_expert_output(
+        self, output: torch.Tensor, shared_expert_output: torch.Tensor
+    ) -> torch.Tensor:
+        """Match a packed partial-graph shared-expert output to its logical token extent."""
+        if not (
+            self.cudagraph_tensor_store.is_packed_seq_replay
+            and self.config.cuda_graph_impl == "transformer_engine"
+            and CudaGraphModule.moe_router in self.config.cuda_graph_modules
+            and CudaGraphModule.moe_preprocess in self.config.cuda_graph_modules
+            and not self.config.moe_shared_expert_overlap
+        ):
+            return shared_expert_output
+
+        if (
+            output.ndim == 0
+            or shared_expert_output.ndim == 0
+            or output.ndim != shared_expert_output.ndim
+            or output.shape[1:] != shared_expert_output.shape[1:]
+        ):
+            raise RuntimeError(
+                "Packed partial CUDA graph shared-expert replay requires matching trailing "
+                f"dimensions, got routed expert output {tuple(output.shape)} and shared expert "
+                f"output {tuple(shared_expert_output.shape)}."
+            )
+
+        logical_tokens = output.size(0)
+        captured_capacity = shared_expert_output.size(0)
+        if captured_capacity < logical_tokens:
+            raise RuntimeError(
+                "Packed partial CUDA graph shared-expert replay exceeds captured capacity: "
+                f"logical token extent {logical_tokens} is greater than captured capacity "
+                f"{captured_capacity}."
+            )
+        return shared_expert_output.narrow(0, 0, logical_tokens)
 
     def router_and_preprocess(self, hidden_states: torch.Tensor):
         """This method is a combined method of route and preprocess. Deprecated."""

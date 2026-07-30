@@ -1534,12 +1534,14 @@ class MoECudaGraphTensorStore:
             were selected for each token. Used to skip the normal router step.
         shared_expert_output (Optional[torch.Tensor]): The output from shared experts
             computation. Used to skip the normal shared expert computation step.
+        is_packed_seq_replay (bool): Whether the stored tensors resume a packed-sequence replay.
     """
 
     hidden_states: Optional[torch.Tensor] = None
     probs: Optional[torch.Tensor] = None
     routing_map: Optional[torch.Tensor] = None
     shared_expert_output: Optional[torch.Tensor] = None
+    is_packed_seq_replay: bool = False
 
     def is_empty(self) -> bool:
         """Check if the store has any non-None tensors.
@@ -1560,7 +1562,15 @@ class MoECudaGraphTensorStore:
                 'probs',
                 'routing_map',
                 'shared_expert_output',
+                'is_packed_seq_replay',
             ], f"Invalid field name: {field_name}"
+            if field_name == 'is_packed_seq_replay':
+                assert isinstance(value, bool), (
+                    "is_packed_seq_replay must be a bool, "
+                    f"got {type(value)}"
+                )
+                self.is_packed_seq_replay = value
+                continue
             if value is not None:
                 assert isinstance(
                     value, torch.Tensor
@@ -1571,6 +1581,7 @@ class MoECudaGraphTensorStore:
         """Reset all stored tensors to None."""
         for field_name in ['hidden_states', 'probs', 'routing_map', 'shared_expert_output']:
             setattr(self, field_name, None)
+        self.is_packed_seq_replay = False
 
 
 def maybe_skip_or_early_return_by_cudagraph(step_condition):

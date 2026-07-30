@@ -2044,6 +2044,171 @@ def _task5_packed_mamba_inputs(boundaries: tuple[int, int]) -> dict[str, object]
     }
 
 
+def _build_packed_partial_moe_model(cuda_graph_impl: str) -> GPTModel:
+    config = TransformerConfig(
+        num_layers=1,
+        hidden_size=64,
+        ffn_hidden_size=128,
+        num_attention_heads=8,
+        use_cpu_initialization=True,
+        bf16=True,
+        params_dtype=torch.bfloat16,
+        pipeline_dtype=torch.bfloat16,
+        tensor_model_parallel_size=1,
+        pipeline_model_parallel_size=1,
+        context_parallel_size=1,
+        num_moe_experts=2,
+        moe_router_topk=1,
+        moe_router_pre_softmax=True,
+        moe_grouped_gemm=True,
+        moe_token_dispatcher_type="alltoall",
+        moe_expert_capacity_factor=1.0,
+        moe_pad_expert_input_to_capacity=True,
+        moe_router_load_balancing_type="none",
+        moe_shared_expert_intermediate_size=128,
+        moe_shared_expert_overlap=False,
+        add_bias_linear=False,
+        hidden_dropout=0.0,
+        attention_dropout=0.0,
+        deterministic_mode=True,
+        cuda_graph_impl=cuda_graph_impl,
+        cuda_graph_modules=(
+            [CudaGraphModule.moe_router, CudaGraphModule.moe_preprocess]
+            if cuda_graph_impl == "transformer_engine"
+            else []
+        ),
+        cuda_graph_warmup_steps=1,
+    )
+    model = GPTModel(
+        config=config,
+        transformer_layer_spec=get_gpt_layer_with_transformer_engine_spec(
+            num_experts=2, moe_grouped_gemm=True
+        ),
+        vocab_size=128,
+        max_sequence_length=16,
+        pre_process=True,
+        post_process=True,
+        fp16_lm_cross_entropy=False,
+        parallel_output=False,
+        share_embeddings_and_output_weights=False,
+        position_embedding_type="rope",
+        rotary_percent=1.0,
+    ).cuda()
+    model.train()
+    _task5_install_main_grads(model)
+    _task5_attach_zero_grad_buffer(model)
+    return model
+
+
+def _packed_partial_moe_inputs(logical_tokens: int) -> dict[str, object]:
+    """Keep a 16-token graph input while varying the packed logical token extent."""
+    assert logical_tokens in (12, 16)
+    capacity = 16
+    device = torch.device("cuda")
+    cu_seqlens = torch.tensor(
+        [0, logical_tokens // 2, logical_tokens], dtype=torch.int32, device=device
+    )
+    packed_seq_params = PackedSeqParams(
+        qkv_format="thd",
+        cu_seqlens_q=cu_seqlens,
+        cu_seqlens_kv=cu_seqlens,
+        cu_seqlens_q_padded=cu_seqlens,
+        cu_seqlens_kv_padded=cu_seqlens,
+        max_seqlen_q=8,
+        max_seqlen_kv=8,
+        total_tokens=logical_tokens,
+    )
+    return {
+        "input_ids": torch.arange(capacity, dtype=torch.int64, device=device)
+        .remainder(128)
+        .unsqueeze(0),
+        "position_ids": torch.arange(capacity, dtype=torch.int64, device=device).unsqueeze(0),
+        "attention_mask": None,
+        "packed_seq_params": packed_seq_params,
+    }
+
+
+@pytest.mark.launch_on_gb200
+@pytest.mark.skipif(
+    not (HAVE_TE and is_te_min_version("2.10.0")),
+    reason="Packed partial MoE CUDA graph support requires TransformerEngine >= 2.10.0",
+)
+def test_packed_partial_moe_te_cuda_graph_shared_expert_parity() -> None:
+    """A smaller packed replay must match eager after capturing shared experts at capacity."""
+    if Utils.world_size != 1:
+        pytest.skip("Packed partial MoE CUDA graph parity requires world size 1")
+
+    manager = None
+    bank = None
+    eager_model = None
+    graph_model = None
+    try:
+        initialize_rng_tracker(use_te_rng_tracker=True, force_reset=True)
+        Utils.initialize_model_parallel(
+            tensor_model_parallel_size=1,
+            pipeline_model_parallel_size=1,
+            context_parallel_size=1,
+            expert_model_parallel_size=1,
+        )
+        model_parallel_cuda_manual_seed(123)
+        torch.manual_seed(123)
+        eager_model = _build_packed_partial_moe_model("none")
+        torch.manual_seed(456)
+        graph_model = _build_packed_partial_moe_model("transformer_engine")
+        graph_model.load_state_dict(eager_model.state_dict())
+
+        helper = TECudaGraphHelper(
+            model=[graph_model],
+            config=graph_model.config,
+            seq_length=16,
+            micro_batch_size=1,
+            sample_packed_seq_params=_packed_partial_moe_inputs(16)["packed_seq_params"],
+        )
+        manager = TECudaGraphBankManager.from_helper(helper)
+        bank = helper.create_cuda_graph_bank(manager, num_microbatches=1)
+        bank.activate()
+
+        eager_inputs = _packed_partial_moe_inputs(12)
+        graph_inputs = _packed_partial_moe_inputs(12)
+        _task5_zero_grad_buffer(eager_model)
+        _task5_zero_grad_buffer(graph_model)
+        eager_output = eager_model(**eager_inputs)
+        graph_output = graph_model(**graph_inputs)
+        eager_loss = eager_output.float().square().mean()
+        graph_loss = graph_output.float().square().mean()
+        eager_loss.backward()
+        graph_loss.backward()
+
+        assert torch.equal(graph_output, eager_output)
+        eager_grads = _task5_named_main_grads(eager_model)
+        graph_grads = _task5_named_main_grads(graph_model)
+        for component in ("shared_experts", "router", "experts"):
+            expected = {
+                name: gradient
+                for name, gradient in eager_grads.items()
+                if f".mlp.{component}." in name
+            }
+            actual = {
+                name: gradient
+                for name, gradient in graph_grads.items()
+                if f".mlp.{component}." in name
+            }
+            assert expected, f"Missing {component} gradients"
+            _task5_assert_named_tensors_equal(expected, actual, tensor_kind=component)
+    finally:
+        if manager is not None and bank is not None:
+            torch.cuda.synchronize()
+            if manager.active_bank is not None:
+                manager.uninstall(manager.active_bank)
+            bank.reset()
+        del eager_model
+        del graph_model
+        Utils.destroy_model_parallel()
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+
 @pytest.mark.launch_on_gb200
 @pytest.mark.skipif(
     not (HAVE_TE and is_te_min_version("2.10.0")),

@@ -1,5 +1,7 @@
 # Copyright (c) 2023, NVIDIA CORPORATION. All rights reserved.
 
+from types import SimpleNamespace
+
 import pytest
 import torch
 
@@ -16,6 +18,84 @@ from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.utils import is_te_min_version
 from megatron.training.initialize import _set_random_seed
 from tests.unit_tests.test_utilities import Utils
+
+
+def _packed_partial_cudagraph_moe_layer(
+    *,
+    cuda_graph_modules: list,
+    shared_expert_overlap: bool = False,
+) -> MoELayer:
+    """Build the minimum MoE object needed to test replay output reconciliation."""
+    moe_layer = MoELayer.__new__(MoELayer)
+    moe_layer.config = SimpleNamespace(
+        cuda_graph_impl="transformer_engine",
+        cuda_graph_modules=cuda_graph_modules,
+        moe_shared_expert_overlap=shared_expert_overlap,
+    )
+    moe_layer.cudagraph_tensor_store = SimpleNamespace(is_packed_seq_replay=True)
+    return moe_layer
+
+
+def test_packed_partial_cudagraph_shared_expert_output_uses_logical_token_extent() -> None:
+    """Packed router+preprocess replay must not add the captured padded tail."""
+    from megatron.core.transformer.enums import CudaGraphModule
+
+    moe_layer = _packed_partial_cudagraph_moe_layer(
+        cuda_graph_modules=[CudaGraphModule.moe_router, CudaGraphModule.moe_preprocess]
+    )
+    routed_expert_output = torch.randn(12, 8, requires_grad=True)
+    captured_shared_expert_output = torch.randn(16, 8, requires_grad=True)
+
+    shared_expert_output = moe_layer._reconcile_packed_partial_cudagraph_shared_expert_output(
+        routed_expert_output, captured_shared_expert_output
+    )
+
+    assert shared_expert_output.shape == routed_expert_output.shape
+    assert shared_expert_output.data_ptr() == captured_shared_expert_output.data_ptr()
+    (routed_expert_output + shared_expert_output).sum().backward()
+    assert torch.equal(routed_expert_output.grad, torch.ones_like(routed_expert_output))
+    assert torch.equal(
+        captured_shared_expert_output.grad,
+        torch.cat(
+            [torch.ones_like(routed_expert_output), torch.zeros(4, 8)],
+            dim=0,
+        ),
+    )
+
+
+def test_packed_partial_cudagraph_shared_expert_output_rejects_invalid_replay() -> None:
+    """Replay must reject incompatible hidden dimensions and insufficient capture capacity."""
+    from megatron.core.transformer.enums import CudaGraphModule
+
+    moe_layer = _packed_partial_cudagraph_moe_layer(
+        cuda_graph_modules=[CudaGraphModule.moe_router, CudaGraphModule.moe_preprocess]
+    )
+
+    with pytest.raises(RuntimeError, match="trailing dimensions"):
+        moe_layer._reconcile_packed_partial_cudagraph_shared_expert_output(
+            torch.empty(12, 8), torch.empty(16, 7)
+        )
+    with pytest.raises(RuntimeError, match="captured capacity"):
+        moe_layer._reconcile_packed_partial_cudagraph_shared_expert_output(
+            torch.empty(17, 8), torch.empty(16, 8)
+        )
+
+
+def test_router_only_cudagraph_keeps_shared_expert_output_unchanged() -> None:
+    """The packed-output reconciliation is intentionally limited to router+preprocess graphs."""
+    from megatron.core.transformer.enums import CudaGraphModule
+
+    moe_layer = _packed_partial_cudagraph_moe_layer(
+        cuda_graph_modules=[CudaGraphModule.moe_router]
+    )
+    captured_shared_expert_output = torch.empty(16, 8)
+
+    assert (
+        moe_layer._reconcile_packed_partial_cudagraph_shared_expert_output(
+            torch.empty(12, 8), captured_shared_expert_output
+        )
+        is captured_shared_expert_output
+    )
 
 
 class TestMoELayerInit:

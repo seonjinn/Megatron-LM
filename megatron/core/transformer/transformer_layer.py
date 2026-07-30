@@ -1402,11 +1402,13 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             self.config.cuda_graph_modules
             and CudaGraphModule.attn not in self.config.cuda_graph_modules
         ):
+            is_packed_seq_replay = kwargs.get('packed_seq_params') is not None
             hidden_states, context = self._forward_attention(*args, **kwargs)
             args = (hidden_states,)
             kwargs = {}
         else:
             self._flatten_te_cuda_graph_packed_seq_params(kwargs)
+            is_packed_seq_replay = has_packed_seq_params_cuda_graph_kwargs(kwargs)
 
         assert kwargs.get('inference_context') is None, (
             "CUDA graph accepts only Tensor inputs. "
@@ -1419,12 +1421,14 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             self.off_interface.enter_replay()
 
         try:
-            return self._te_cuda_graph_replay_impl(args, kwargs, context)
+            return self._te_cuda_graph_replay_impl(
+                args, kwargs, context, is_packed_seq_replay=is_packed_seq_replay
+            )
         finally:
             if self.config.delay_offload_until_cuda_graph:
                 self.off_interface.exit_replay()
 
-    def _te_cuda_graph_replay_impl(self, args, kwargs, context):
+    def _te_cuda_graph_replay_impl(self, args, kwargs, context, *, is_packed_seq_replay=False):
         """Implementation of _te_cuda_graph_replay, separated for replay mode cleanup."""
         cuda_graph_output = list(super()._te_cuda_graph_replay(*args, **kwargs))
 
@@ -1492,6 +1496,7 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                 probs=probs,
                 routing_map=routing_map,
                 shared_expert_output=shared_expert_output,
+                is_packed_seq_replay=is_packed_seq_replay,
             )
             # If EP overlap is enabled, remaining of mlp will be called as fine_grained_callables
             # and should be skipped here.
