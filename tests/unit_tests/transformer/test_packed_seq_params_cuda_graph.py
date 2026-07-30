@@ -632,20 +632,28 @@ def test_te_cuda_graph_partial_replay_flow():
     assert layer_mlp.replay_impl_kwargs == {}
     assert layer_mlp.replay_impl_packed_seq is False
 
-    # Case 3: Packed partial MoE replay exposes scoped state without changing the impl contract.
-    layer_moe = _TestLayer(
-        [CudaGraphModule.moe_router, CudaGraphModule.moe_preprocess],
-        is_moe_layer=True,
-    )
-    layer_moe._te_cuda_graph_replay(**kwargs)
+    # Case 3: Every supported packed partial MoE replay exposes scoped state without
+    # changing the impl contract, independently of shared-expert configuration.
+    for shared_expert_intermediate_size, shared_expert_overlap in (
+        (64, False),
+        (None, False),
+        (64, True),
+    ):
+        layer_moe = _TestLayer(
+            [CudaGraphModule.moe_router, CudaGraphModule.moe_preprocess],
+            is_moe_layer=True,
+        )
+        layer_moe.config.moe_shared_expert_intermediate_size = shared_expert_intermediate_size
+        layer_moe.config.moe_shared_expert_overlap = shared_expert_overlap
+        layer_moe._te_cuda_graph_replay(**kwargs)
 
-    assert layer_moe.replay_impl_packed_seq is True
-    assert layer_moe.mlp.cudagraph_tensor_store.is_packed_seq_replay is False
+        assert layer_moe.replay_impl_packed_seq is True
+        assert layer_moe.mlp.cudagraph_tensor_store.is_packed_seq_replay is False
 
-    layer_moe._te_cuda_graph_replay(hidden_states=torch.ones(2, 1, 4))
+        layer_moe._te_cuda_graph_replay(hidden_states=torch.ones(2, 1, 4))
 
-    assert layer_moe.replay_impl_packed_seq is False
-    assert layer_moe.mlp.cudagraph_tensor_store.is_packed_seq_replay is False
+        assert layer_moe.replay_impl_packed_seq is False
+        assert layer_moe.mlp.cudagraph_tensor_store.is_packed_seq_replay is False
 
     # Case 4: Packed partial MoE fails closed with EP overlap and retains no global flag.
     layer_overlap = _TestLayer(
@@ -678,12 +686,20 @@ def test_validate_packed_partial_moe_cuda_graph_fails_closed_with_ep_overlap():
     validate_packed_partial_moe_cuda_graph(config, has_packed_seq_params=True)
 
 
-def test_packed_partial_moe_residual_uses_logical_replay_extent():
+@pytest.mark.parametrize(
+    ("shared_expert_intermediate_size", "shared_expert_overlap"),
+    ((64, False), (None, False), (64, True)),
+    ids=("shared-expert", "no-shared-expert", "shared-expert-overlap"),
+)
+def test_packed_partial_moe_residual_uses_logical_replay_extent(
+    shared_expert_intermediate_size, shared_expert_overlap
+):
     layer = SimpleNamespace(
         config=SimpleNamespace(
             cuda_graph_impl="transformer_engine",
             cuda_graph_modules=[CudaGraphModule.moe_router, CudaGraphModule.moe_preprocess],
-            moe_shared_expert_overlap=False,
+            moe_shared_expert_intermediate_size=shared_expert_intermediate_size,
+            moe_shared_expert_overlap=shared_expert_overlap,
             overlap_moe_expert_parallel_comm=False,
         ),
         mlp=SimpleNamespace(

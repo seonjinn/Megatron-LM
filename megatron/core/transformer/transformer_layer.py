@@ -1443,8 +1443,6 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                 and self.config.cuda_graph_modules
                 and CudaGraphModule.moe_router in self.config.cuda_graph_modules
                 and CudaGraphModule.moe_preprocess in self.config.cuda_graph_modules
-                and self.config.moe_shared_expert_intermediate_size is not None
-                and not self.config.moe_shared_expert_overlap
                 and not self.config.overlap_moe_expert_parallel_comm
             ):
                 packed_replay_store = self.mlp.cudagraph_tensor_store
@@ -1583,7 +1581,6 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             and self.config.cuda_graph_impl == "transformer_engine"
             and CudaGraphModule.moe_router in self.config.cuda_graph_modules
             and CudaGraphModule.moe_preprocess in self.config.cuda_graph_modules
-            and not self.config.moe_shared_expert_overlap
             and not self.config.overlap_moe_expert_parallel_comm
         ):
             return residual
