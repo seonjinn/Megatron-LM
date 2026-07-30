@@ -3,13 +3,14 @@
 import gc
 import os
 import sys
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 
 import pytest
 import torch
 from transformer_engine.pytorch.fp8 import check_fp8_support
 
 import megatron.core.transformer.cuda_graphs as cuda_graphs_module
+from megatron.core import parallel_state
 from megatron.core.enums import ModelType
 from megatron.core.models.gpt.gpt_layer_specs import (
     get_gpt_decoder_block_spec,
@@ -21,11 +22,14 @@ from megatron.core.models.gpt.gpt_model import GPTModel
 from megatron.core.models.hybrid.hybrid_block import HybridStack
 from megatron.core.models.hybrid.hybrid_layer_allocation import validate_segment_layers
 from megatron.core.models.hybrid.hybrid_layer_specs import hybrid_stack_spec
+from megatron.core.models.hybrid.hybrid_model import HybridModel
 from megatron.core.num_microbatches_calculator import (
     destroy_num_microbatches_calculator,
     init_num_microbatches_calculator,
+    reconfigure_num_microbatches_calculator,
 )
 from megatron.core.packed_seq_params import PackedSeqParams
+from megatron.core.pipeline_parallel import get_forward_backward_func
 from megatron.core.pipeline_parallel.schedules import set_current_microbatch
 from megatron.core.process_groups_config import ProcessGroupCollection
 from megatron.core.tensor_parallel.random import (
@@ -38,6 +42,7 @@ from megatron.core.transformer.cuda_graphs import (
     TECudaGraphHelper,
     _CudagraphGlobalRecord,
     create_cudagraphs,
+    is_graph_capturing,
 )
 from megatron.core.transformer.enums import (
     AttnBackend,
@@ -49,10 +54,11 @@ from megatron.core.transformer.mlp import MLPSubmodules
 from megatron.core.transformer.module import MegatronModule
 from megatron.core.transformer.moe.fused_a2a import reset_hybrid_ep_buffer
 from megatron.core.transformer.spec_utils import ModuleSpec, get_submodules
+from megatron.core.transformer.te_cuda_graph_bank import TECudaGraphBankManager
 from megatron.core.transformer.transformer_block import TransformerBlock
 from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.transformer.transformer_layer import TransformerLayer
-from megatron.core.utils import is_te_min_version
+from megatron.core.utils import get_batch_on_this_cp_rank, is_te_min_version
 from megatron.training import arguments as training_arguments
 from megatron.training.arguments import core_transformer_config_from_args, parse_args, validate_args
 from megatron.training.global_vars import (
@@ -1891,6 +1897,649 @@ class TestPartialCudaGraph:
 
             nccl_ep_finalize()
         Utils.destroy_model_parallel()
+
+
+def _task5_install_main_grads(model: torch.nn.Module) -> None:
+    for parameter in model.parameters():
+        if getattr(parameter, "main_grad", None) is None:
+            parameter.main_grad = torch.zeros_like(parameter)
+        parameter.main_grad.zero_()
+        parameter.grad = parameter.main_grad
+
+
+def _task5_zero_grad_buffer(model: torch.nn.Module) -> None:
+    for parameter in model.parameters():
+        assert parameter.main_grad is not None
+        parameter.main_grad.zero_()
+        parameter.grad = parameter.main_grad
+
+
+def _task5_named_main_grads(model: torch.nn.Module) -> dict[str, torch.Tensor]:
+    gradients = {}
+    for name, parameter in model.named_parameters():
+        assert parameter.main_grad is not None, f"{name} has no main_grad before optimizer.step()"
+        gradients[name] = parameter.main_grad.detach().clone()
+    return gradients
+
+
+def _task5_assert_named_tensors_equal(
+    expected: dict[str, torch.Tensor],
+    actual: dict[str, torch.Tensor],
+    *,
+    tensor_kind: str,
+) -> None:
+    assert actual.keys() == expected.keys(), f"{tensor_kind} parameter names differ"
+    for name in expected:
+        assert torch.equal(actual[name], expected[name]), (
+            f"{tensor_kind} differs for {name}: "
+            f"max_abs_diff={(actual[name].float() - expected[name].float()).abs().max().item()}"
+        )
+
+
+def _task5_named_parameters(model: torch.nn.Module) -> dict[str, torch.Tensor]:
+    return {name: parameter.detach().clone() for name, parameter in model.named_parameters()}
+
+
+def _task5_attach_zero_grad_buffer(model: torch.nn.Module) -> None:
+    def zero_grad_buffer(bound_model: torch.nn.Module) -> None:
+        _task5_zero_grad_buffer(bound_model)
+
+    model.zero_grad_buffer = MethodType(zero_grad_buffer, model)
+
+
+def _task5_build_packed_mamba_model(cuda_graph_impl: str) -> HybridModel:
+    config = TransformerConfig(
+        num_layers=1,
+        hidden_size=256,
+        num_attention_heads=8,
+        use_cpu_initialization=True,
+        bf16=True,
+        params_dtype=torch.bfloat16,
+        pipeline_dtype=torch.bfloat16,
+        tensor_model_parallel_size=1,
+        pipeline_model_parallel_size=1,
+        context_parallel_size=2,
+        hidden_dropout=0.0,
+        attention_dropout=0.0,
+        deterministic_mode=True,
+        cuda_graph_impl=cuda_graph_impl,
+        cuda_graph_modules=(
+            [CudaGraphModule.mamba] if cuda_graph_impl == "transformer_engine" else []
+        ),
+        cuda_graph_warmup_steps=1,
+    )
+    model = HybridModel(
+        config=config,
+        hybrid_stack_spec=hybrid_stack_spec,
+        vocab_size=128,
+        max_sequence_length=32,
+        hybrid_layer_pattern="M",
+        position_embedding_type="none",
+        parallel_output=False,
+        share_embeddings_and_output_weights=False,
+    ).cuda()
+    model.train()
+    _task5_install_main_grads(model)
+    _task5_attach_zero_grad_buffer(model)
+    return model
+
+
+def _task5_packed_mamba_inputs(boundaries: tuple[int, int]) -> dict[str, object]:
+    device = torch.device("cuda")
+    sequence_starts = (0, *boundaries)
+    sequence_ends = (*boundaries, 32)
+    cu_seqlens = torch.tensor(
+        (*sequence_starts, 32), dtype=torch.int32, device=device
+    )
+    sequence_ids = torch.repeat_interleave(
+        torch.arange(len(sequence_starts), dtype=torch.int32, device=device),
+        torch.tensor(
+            [end - start for start, end in zip(sequence_starts, sequence_ends)],
+            dtype=torch.int64,
+            device=device,
+        ),
+    ).unsqueeze(0)
+    position_values = [
+        position
+        for start, end in zip(sequence_starts, sequence_ends)
+        for position in range(end - start)
+    ]
+    batch = {
+        "tokens": torch.arange(32, dtype=torch.int64, device=device).remainder(128).unsqueeze(0),
+        "position_ids": torch.tensor(position_values, dtype=torch.int64, device=device).unsqueeze(0),
+        "labels": None,
+        "loss_mask": None,
+        "attention_mask": None,
+        "cu_seqlens": cu_seqlens.unsqueeze(0),
+        "cu_seqlens_padded": cu_seqlens.unsqueeze(0),
+        "max_seqlen": torch.tensor(
+            max(end - start for start, end in zip(sequence_starts, sequence_ends)),
+            dtype=torch.int32,
+            device=device,
+        ).unsqueeze(0),
+    }
+    batch = get_batch_on_this_cp_rank(
+        batch,
+        is_hybrid_cp=False,
+        cp_group=parallel_state.get_context_parallel_group(),
+    )
+    packed_seq_params = PackedSeqParams(
+        qkv_format="thd",
+        cu_seqlens_q=cu_seqlens,
+        cu_seqlens_kv=cu_seqlens,
+        cu_seqlens_q_padded=cu_seqlens,
+        cu_seqlens_kv_padded=cu_seqlens,
+        max_seqlen_q=int(batch["max_seqlen"].item()),
+        max_seqlen_kv=int(batch["max_seqlen"].item()),
+        local_cp_size=2,
+        cp_group=parallel_state.get_context_parallel_group(),
+        total_tokens=32,
+        seq_idx=sequence_ids,
+    )
+    return {
+        "input_ids": batch["tokens"],
+        "position_ids": batch["position_ids"],
+        "attention_mask": None,
+        "packed_seq_params": packed_seq_params,
+    }
+
+
+@pytest.mark.launch_on_gb200
+@pytest.mark.skipif(
+    not (HAVE_TE and is_te_min_version("2.10.0")),
+    reason="TE CUDA graph-bank reset requires TransformerEngine >= 2.10.0",
+)
+def test_packed_mamba_te_cuda_graph_parity() -> None:
+    """Packed Mamba replay must match eager across dynamic boundaries and one update."""
+    if Utils.world_size not in (2, 4):
+        pytest.skip("Packed Mamba TE graph parity requires world size 2 or 4")
+
+    original_env = {
+        "CUDA_DEVICE_MAX_CONNECTIONS": os.environ.get("CUDA_DEVICE_MAX_CONNECTIONS"),
+        "NVTE_ALLOW_NONDETERMINISTIC_ALGO": os.environ.get(
+            "NVTE_ALLOW_NONDETERMINISTIC_ALGO"
+        ),
+        "CUBLAS_WORKSPACE_CONFIG": os.environ.get("CUBLAS_WORKSPACE_CONFIG"),
+        "MAMBA_DETERMINISTIC": os.environ.get("MAMBA_DETERMINISTIC"),
+    }
+    os.environ["CUDA_DEVICE_MAX_CONNECTIONS"] = "1"
+    os.environ["NVTE_ALLOW_NONDETERMINISTIC_ALGO"] = "0"
+    os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+    os.environ["MAMBA_DETERMINISTIC"] = "1"
+
+    manager = None
+    bank = None
+    eager_model = None
+    graph_model = None
+    replay_telemetry = {"replays": 0, "fallbacks": 0}
+    try:
+        initialize_rng_tracker(use_te_rng_tracker=True, force_reset=True)
+        Utils.initialize_model_parallel(
+            tensor_model_parallel_size=1,
+            pipeline_model_parallel_size=1,
+            context_parallel_size=2,
+        )
+        model_parallel_cuda_manual_seed(123)
+        data_parallel_size = Utils.world_size // 2
+        init_num_microbatches_calculator(
+            rank=torch.distributed.get_rank(),
+            global_batch_size=data_parallel_size,
+            micro_batch_size=1,
+            data_parallel_size=data_parallel_size,
+        )
+
+        torch.manual_seed(123)
+        eager_model = _task5_build_packed_mamba_model("none")
+        torch.manual_seed(456)
+        graph_model = _task5_build_packed_mamba_model("transformer_engine")
+        graph_model.load_state_dict(eager_model.state_dict())
+        _task5_monitor_graph_fallbacks(graph_model, replay_telemetry)
+
+        eager_names = tuple(name for name, _ in eager_model.named_parameters())
+        graph_names = tuple(name for name, _ in graph_model.named_parameters())
+        assert graph_names == eager_names
+
+        capture_packed_seq_params = _task5_packed_mamba_inputs((8, 24))[
+            "packed_seq_params"
+        ]
+        helper = TECudaGraphHelper(
+            model=[graph_model],
+            config=graph_model.config,
+            seq_length=32,
+            micro_batch_size=1,
+            sample_packed_seq_params=capture_packed_seq_params,
+        )
+        manager = TECudaGraphBankManager.from_helper(helper)
+        bank = helper.create_cuda_graph_bank(manager, num_microbatches=1)
+        bank.activate()
+
+        eager_inputs = _task5_packed_mamba_inputs((12, 20))
+        graph_inputs = _task5_packed_mamba_inputs((12, 20))
+        _task5_zero_grad_buffer(eager_model)
+        _task5_zero_grad_buffer(graph_model)
+
+        eager_output = eager_model(**eager_inputs)
+        graph_output = graph_model(**graph_inputs)
+        eager_loss = eager_output.float().square().mean()
+        graph_loss = graph_output.float().square().mean()
+        eager_loss.backward()
+        graph_loss.backward()
+
+        assert torch.equal(graph_output, eager_output)
+        assert torch.equal(graph_loss, eager_loss)
+        eager_grads = _task5_named_main_grads(eager_model)
+        graph_grads = _task5_named_main_grads(graph_model)
+        _task5_assert_named_tensors_equal(eager_grads, graph_grads, tensor_kind="main_grad")
+
+        eager_optimizer = torch.optim.SGD(eager_model.parameters(), lr=0.1)
+        graph_optimizer = torch.optim.SGD(graph_model.parameters(), lr=0.1)
+        eager_before = _task5_named_parameters(eager_model)
+        eager_optimizer.step()
+        graph_optimizer.step()
+        eager_after = _task5_named_parameters(eager_model)
+        graph_after = _task5_named_parameters(graph_model)
+        _task5_assert_named_tensors_equal(eager_after, graph_after, tensor_kind="parameter")
+        assert any(not torch.equal(eager_before[name], eager_after[name]) for name in eager_before)
+        assert replay_telemetry == {"replays": 1, "fallbacks": 0}
+    finally:
+        if manager is not None and bank is not None:
+            torch.cuda.synchronize()
+            if manager.active_bank is not None:
+                manager.uninstall(manager.active_bank)
+            bank.reset()
+        del eager_model
+        del graph_model
+        destroy_num_microbatches_calculator()
+        destroy_global_vars()
+        Utils.destroy_model_parallel()
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        for name, value in original_env.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+
+def _task5_build_pipeline_moe_model(cuda_graph_impl: str) -> GPTModel:
+    config = TransformerConfig(
+        num_layers=2,
+        hidden_size=64,
+        ffn_hidden_size=128,
+        num_attention_heads=8,
+        use_cpu_initialization=True,
+        bf16=True,
+        params_dtype=torch.bfloat16,
+        pipeline_dtype=torch.bfloat16,
+        tensor_model_parallel_size=1,
+        pipeline_model_parallel_size=2,
+        context_parallel_size=1,
+        expert_model_parallel_size=1,
+        expert_tensor_parallel_size=1,
+        num_moe_experts=2,
+        moe_router_topk=1,
+        moe_grouped_gemm=True,
+        moe_token_dispatcher_type="alltoall",
+        moe_expert_capacity_factor=1.0,
+        moe_pad_expert_input_to_capacity=True,
+        moe_router_load_balancing_type="none",
+        add_bias_linear=False,
+        hidden_dropout=0.0,
+        attention_dropout=0.0,
+        deterministic_mode=True,
+        cuda_graph_impl=cuda_graph_impl,
+        cuda_graph_modules=(
+            [CudaGraphModule.moe_router, CudaGraphModule.moe_preprocess]
+            if cuda_graph_impl == "transformer_engine"
+            else []
+        ),
+        cuda_graph_warmup_steps=1,
+    )
+    model = GPTModel(
+        config=config,
+        transformer_layer_spec=get_gpt_layer_with_transformer_engine_spec(
+            num_experts=2, moe_grouped_gemm=True
+        ),
+        vocab_size=128,
+        max_sequence_length=8,
+        pre_process=parallel_state.is_pipeline_first_stage(),
+        post_process=parallel_state.is_pipeline_last_stage(),
+        fp16_lm_cross_entropy=False,
+        parallel_output=False,
+        share_embeddings_and_output_weights=False,
+        position_embedding_type="rope",
+        rotary_percent=1.0,
+    ).cuda()
+    model.train()
+    _task5_install_main_grads(model)
+    _task5_attach_zero_grad_buffer(model)
+    return model
+
+
+def _task5_pipeline_data_iterator(num_microbatches: int):
+    for microbatch in range(num_microbatches):
+        tokens = (
+            torch.arange(8, dtype=torch.int64, device="cuda")
+            .add(microbatch * 7)
+            .remainder(128)
+            .unsqueeze(0)
+        )
+        yield {
+            "input_ids": tokens,
+            "position_ids": torch.arange(8, dtype=torch.int64, device="cuda").unsqueeze(0),
+            "labels": tokens.roll(shifts=-1, dims=1),
+        }
+
+
+def _task5_append_moe_telemetry(
+    layer: torch.nn.Module,
+    telemetry: list[tuple[int, torch.Tensor, torch.Tensor]],
+) -> None:
+    dispatcher = layer.mlp.token_dispatcher
+    routing_map = dispatcher.routing_map
+    tokens_per_expert = dispatcher.tokens_per_expert
+    assert routing_map is not None
+    assert tokens_per_expert is not None
+    telemetry.append(
+        (
+            layer.layer_number,
+            routing_map.detach().cpu().clone(),
+            torch.as_tensor(tokens_per_expert).detach().cpu().clone(),
+        )
+    )
+
+
+def _task5_attach_moe_telemetry(
+    model: GPTModel,
+    *,
+    graph_replay: bool,
+) -> list[tuple[int, torch.Tensor, torch.Tensor]]:
+    telemetry = []
+    method_name = "_te_cuda_graph_replay" if graph_replay else "forward"
+    for layer in model.decoder.layers:
+        original_method = getattr(layer, method_name)
+
+        def monitored_method(
+            bound_layer,
+            *args,
+            _original_method=original_method,
+            **kwargs,
+        ):
+            output = _original_method(*args, **kwargs)
+            _task5_append_moe_telemetry(bound_layer, telemetry)
+            return output
+
+        setattr(layer, method_name, MethodType(monitored_method, layer))
+    return telemetry
+
+
+def _task5_run_pipeline_schedule(
+    model: GPTModel,
+    *,
+    num_microbatches: int,
+    schedule_state: dict[str, bool],
+    moe_telemetry: list[tuple[int, torch.Tensor, torch.Tensor]],
+) -> dict[str, object]:
+    _task5_zero_grad_buffer(model)
+    moe_telemetry.clear()
+
+    def forward_step(data_iterator, model_chunk):
+        batch = next(data_iterator)
+        output = model_chunk(
+            input_ids=batch["input_ids"],
+            position_ids=batch["position_ids"],
+            attention_mask=None,
+            labels=batch["labels"],
+        )
+
+        def loss_func(output_tensor):
+            loss = output_tensor.float().mean()
+            return loss, {
+                "loss": loss.detach().clone(),
+                "output": output_tensor.detach().clone(),
+            }
+
+        return output, loss_func
+
+    schedule_state["drained"] = False
+    try:
+        losses = get_forward_backward_func()(
+            forward_step_func=forward_step,
+            data_iterator=_task5_pipeline_data_iterator(num_microbatches),
+            model=[model],
+            num_microbatches=num_microbatches,
+            seq_length=8,
+            micro_batch_size=1,
+            forward_only=False,
+        )
+    finally:
+        torch.cuda.synchronize()
+        schedule_state["drained"] = True
+
+    expected_result_count = (
+        num_microbatches if parallel_state.is_pipeline_last_stage() else 0
+    )
+    assert len(losses) == expected_result_count
+    for entry in losses:
+        assert entry["output"].numel() > 0
+        assert torch.isfinite(entry["output"]).all()
+        assert entry["loss"].numel() == 1
+        assert torch.isfinite(entry["loss"]).all()
+
+    return {
+        "outputs": tuple(entry["output"] for entry in losses),
+        "losses": tuple(entry["loss"] for entry in losses),
+        "grads": _task5_named_main_grads(model),
+        "moe": tuple(moe_telemetry),
+    }
+
+
+def _task5_assert_pipeline_results_equal(
+    eager_result: dict[str, object], graph_result: dict[str, object]
+) -> None:
+    eager_outputs = eager_result["outputs"]
+    graph_outputs = graph_result["outputs"]
+    eager_losses = eager_result["losses"]
+    graph_losses = graph_result["losses"]
+    assert len(graph_outputs) == len(eager_outputs)
+    assert len(graph_losses) == len(eager_losses)
+    for eager_output, graph_output in zip(eager_outputs, graph_outputs):
+        assert torch.equal(graph_output, eager_output)
+    for eager_loss, graph_loss in zip(eager_losses, graph_losses):
+        assert torch.equal(graph_loss, eager_loss)
+    _task5_assert_named_tensors_equal(
+        eager_result["grads"], graph_result["grads"], tensor_kind="main_grad"
+    )
+
+    eager_moe = eager_result["moe"]
+    graph_moe = graph_result["moe"]
+    assert len(graph_moe) == len(eager_moe)
+    for eager_layer, graph_layer in zip(eager_moe, graph_moe):
+        assert graph_layer[0] == eager_layer[0]
+        assert torch.equal(graph_layer[1], eager_layer[1])
+        assert torch.equal(graph_layer[2], eager_layer[2])
+
+
+def _task5_monitor_graph_fallbacks(
+    model: torch.nn.Module, telemetry: dict[str, int]
+) -> None:
+    for layer in model.decoder.layers:
+        original_should_call = layer._should_call_te_cudagraph
+
+        def monitored_should_call(
+            bound_layer,
+            *args,
+            _original_should_call=original_should_call,
+            **kwargs,
+        ):
+            should_call = _original_should_call(*args, **kwargs)
+            if not is_graph_capturing():
+                if should_call and bound_layer.cuda_graphs:
+                    telemetry["replays"] += 1
+                else:
+                    telemetry["fallbacks"] += 1
+            return should_call
+
+        layer._should_call_te_cudagraph = MethodType(monitored_should_call, layer)
+
+
+@pytest.mark.launch_on_gb200
+@pytest.mark.skipif(
+    not (HAVE_TE and is_te_min_version("2.10.0")),
+    reason="TE CUDA graph-bank reset requires TransformerEngine >= 2.10.0",
+)
+def test_te_graph_bank_schedule_switch_5_3_5() -> None:
+    """PP2 must reuse the five-microbatch bank after switching through three."""
+    if Utils.world_size not in (2, 4):
+        pytest.skip("TE graph-bank schedule switching requires world size 2 or 4")
+
+    original_env = {
+        "CUDA_DEVICE_MAX_CONNECTIONS": os.environ.get("CUDA_DEVICE_MAX_CONNECTIONS"),
+        "NVTE_ALLOW_NONDETERMINISTIC_ALGO": os.environ.get(
+            "NVTE_ALLOW_NONDETERMINISTIC_ALGO"
+        ),
+        "CUBLAS_WORKSPACE_CONFIG": os.environ.get("CUBLAS_WORKSPACE_CONFIG"),
+    }
+    os.environ["CUDA_DEVICE_MAX_CONNECTIONS"] = "1"
+    os.environ["NVTE_ALLOW_NONDETERMINISTIC_ALGO"] = "0"
+    os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+
+    manager = None
+    banks = {}
+    eager_model = None
+    graph_model = None
+    schedule_state = {"drained": True}
+    capture_counts = {5: 0, 3: 0}
+    replay_telemetry = {"replays": 0, "fallbacks": 0}
+    eager_moe_telemetry = []
+    graph_moe_telemetry = []
+    try:
+        initialize_rng_tracker(use_te_rng_tracker=True, force_reset=True)
+        Utils.initialize_model_parallel(
+            tensor_model_parallel_size=1,
+            pipeline_model_parallel_size=2,
+            context_parallel_size=1,
+        )
+        model_parallel_cuda_manual_seed(123)
+        data_parallel_size = Utils.world_size // 2
+        init_num_microbatches_calculator(
+            rank=torch.distributed.get_rank(),
+            global_batch_size=5 * data_parallel_size,
+            micro_batch_size=1,
+            data_parallel_size=data_parallel_size,
+        )
+
+        torch.manual_seed(123)
+        eager_model = _task5_build_pipeline_moe_model("none")
+        torch.manual_seed(456)
+        graph_model = _task5_build_pipeline_moe_model("transformer_engine")
+        graph_model.load_state_dict(eager_model.state_dict())
+        assert tuple(name for name, _ in graph_model.named_parameters()) == tuple(
+            name for name, _ in eager_model.named_parameters()
+        )
+        _task5_monitor_graph_fallbacks(graph_model, replay_telemetry)
+        eager_moe_telemetry = _task5_attach_moe_telemetry(
+            eager_model, graph_replay=False
+        )
+        graph_moe_telemetry = _task5_attach_moe_telemetry(
+            graph_model, graph_replay=True
+        )
+
+        for num_microbatches in (5, 3, 5):
+            reconfigure_num_microbatches_calculator(
+                rank=torch.distributed.get_rank(),
+                global_batch_size=num_microbatches * data_parallel_size,
+                micro_batch_size=1,
+                data_parallel_size=data_parallel_size,
+            )
+            eager_result = _task5_run_pipeline_schedule(
+                eager_model,
+                num_microbatches=num_microbatches,
+                schedule_state=schedule_state,
+                moe_telemetry=eager_moe_telemetry,
+            )
+
+            bank = banks.get(num_microbatches)
+            if bank is None:
+                helper = TECudaGraphHelper(
+                    model=[graph_model],
+                    config=graph_model.config,
+                    seq_length=8,
+                    micro_batch_size=1,
+                )
+                if manager is None:
+                    manager = TECudaGraphBankManager.from_helper(
+                        helper,
+                        assert_model_drained=lambda: schedule_state["drained"],
+                    )
+                bank = helper.create_cuda_graph_bank(
+                    manager, num_microbatches=num_microbatches
+                )
+                banks[num_microbatches] = bank
+                capture_counts[num_microbatches] += 1
+            bank.activate()
+
+            graph_result = _task5_run_pipeline_schedule(
+                graph_model,
+                num_microbatches=num_microbatches,
+                schedule_state=schedule_state,
+                moe_telemetry=graph_moe_telemetry,
+            )
+            _task5_assert_pipeline_results_equal(eager_result, graph_result)
+            assert len(graph_result["moe"]) == (
+                num_microbatches * len(graph_model.decoder.layers)
+            )
+
+        assert capture_counts == {5: 1, 3: 1}
+        assert replay_telemetry["fallbacks"] == 0
+        assert replay_telemetry["replays"] == 13 * len(graph_model.decoder.layers)
+
+        eager_final_grads = eager_result["grads"]
+        graph_final_grads = graph_result["grads"]
+        assert any(torch.count_nonzero(grad).item() > 0 for grad in eager_final_grads.values())
+        assert any(torch.count_nonzero(grad).item() > 0 for grad in graph_final_grads.values())
+
+        eager_optimizer = torch.optim.SGD(eager_model.parameters(), lr=0.1)
+        graph_optimizer = torch.optim.SGD(graph_model.parameters(), lr=0.1)
+        eager_before = _task5_named_parameters(eager_model)
+        graph_before = _task5_named_parameters(graph_model)
+        eager_optimizer.step()
+        graph_optimizer.step()
+        eager_after = _task5_named_parameters(eager_model)
+        graph_after = _task5_named_parameters(graph_model)
+        _task5_assert_named_tensors_equal(
+            eager_after, graph_after, tensor_kind="parameter"
+        )
+        assert any(
+            not torch.equal(eager_before[name], eager_after[name])
+            for name in eager_before
+        )
+        assert any(
+            not torch.equal(graph_before[name], graph_after[name])
+            for name in graph_before
+        )
+    finally:
+        torch.cuda.synchronize()
+        schedule_state["drained"] = True
+        if manager is not None:
+            if manager.active_bank is not None:
+                manager.uninstall(manager.active_bank)
+            for bank in banks.values():
+                bank.reset()
+        del eager_model
+        del graph_model
+        destroy_num_microbatches_calculator()
+        destroy_global_vars()
+        Utils.destroy_model_parallel()
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        for name, value in original_env.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
 
 
 class _SimpleModule(MegatronModule):
