@@ -123,11 +123,12 @@ def test_mtp_pre_dispatch_applies_hybrid_empty_decoder_final_norm(monkeypatch):
 
     class FakeMTPConfig:
         sequence_parallel = False
+        cuda_graph_modules = []
 
     class FakeMTPLayer:
         config = FakeMTPConfig()
         eh_proj = object()
-        mtp_model_layer = object()
+        mtp_model_layer = _make_task7_fine_grained_transformer_leaf(moe=True)
 
         def _get_embeddings(
             self, input_ids, position_ids, embedding, hidden_states, packed_seq_params, padding_mask
