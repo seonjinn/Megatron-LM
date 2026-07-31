@@ -1781,6 +1781,7 @@ def test_real_mamba_helper_and_replay_route_flattened_packed_inputs(cuda_graph_m
         MAMBA_CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX,
     )
     from megatron.core.ssm.mamba_layer import MambaLayer
+    from megatron.core.transformer.cuda_graphs import _GraphableTELayerDescriptor
 
     layer = MambaLayer.__new__(MambaLayer)
     torch.nn.Module.__init__(layer)
@@ -1819,6 +1820,9 @@ def test_real_mamba_helper_and_replay_route_flattened_packed_inputs(cuda_graph_m
     helper.flattened_callables = [layer]
     helper.callables_per_chunk = [[layer]]
     helper.chunks_with_decoder = [chunk]
+    descriptor = _GraphableTELayerDescriptor(layer=layer, is_mtp=False, mtp_owner=None)
+    helper.layer_descriptors_per_chunk = [(descriptor,)]
+    helper.flattened_layer_descriptors = [descriptor]
 
     sample_args, sample_kwargs = helper._get_sample_arguments([1, -1])
 
@@ -2337,15 +2341,84 @@ def test_te_discovery_preserves_ordered_hybrid_mtp_leaf_descriptors(monkeypatch)
     assert manager.layers == (decoder, moe, mamba, dense)
 
     graphs = [object() for _ in range(8)]
-    owned_graph_lists = [[] for _ in leaves]
-    _map_te_graphs_to_layers(
-        graphs,
-        callables_per_chunk=helper.callables_per_chunk,
-        owned_graph_lists=owned_graph_lists,
-        num_microbatches=2,
-        overlap_moe_expert_parallel_comm=False,
+    for overlap, expected in (
+        (False, [[graphs[index], graphs[4 + index]] for index in range(4)]),
+        (True, [[graphs[2 * index], graphs[2 * index + 1]] for index in range(4)]),
+    ):
+        owned_graph_lists = [[] for _ in leaves]
+        _map_te_graphs_to_layers(
+            graphs,
+            callables_per_chunk=helper.callables_per_chunk,
+            owned_graph_lists=owned_graph_lists,
+            num_microbatches=2,
+            overlap_moe_expert_parallel_comm=overlap,
+        )
+        assert owned_graph_lists == expected
+
+
+def test_te_overlap_input_preparation_preserves_canonical_hybrid_topology(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    import megatron.core.transformer.cuda_graphs as cuda_graphs
+
+    helper, _, _, leaves = _make_task7_te_helper(monkeypatch)
+    observed = {}
+    canonical_descriptors = helper.layer_descriptors_per_chunk
+    canonical_callables = helper.callables_per_chunk
+    canonical_counts = helper.num_layers_per_chunk
+
+    helper.pp_group = SimpleNamespace(size=lambda: 2)
+    helper.p2p_communicator = object()
+    helper.config.overlap_moe_expert_parallel_comm = True
+    helper.config.delay_wgrad_compute = False
+    helper.config.moe_shared_expert_intermediate_size = None
+    helper.config.moe_shared_expert_overlap = False
+    helper.config.microbatch_group_size_per_vp_stage = 1
+    helper.config.cuda_graph_retain_backward_graph = False
+    helper.config.cuda_graph_warmup_steps = 3
+    helper.config.fp8 = None
+    helper.config.fp4 = None
+    helper.config.fine_grained_activation_offloading = False
+
+    monkeypatch.setattr(cuda_graphs, "get_num_microbatches", lambda: 2)
+    monkeypatch.setattr(cuda_graphs, "is_te_min_version", lambda _version: True)
+    monkeypatch.setattr(
+        "megatron.core.pipeline_parallel.schedules.get_pp_rank_microbatches",
+        lambda *_args, **_kwargs: (None, None, 0, None),
     )
-    assert owned_graph_lists == [[graphs[index], graphs[4 + index]] for index in range(4)]
+    monkeypatch.setattr(
+        "megatron.core.pipeline_parallel.schedules.get_schedule_table",
+        lambda *_args, **_kwargs: [(0, 0), (1, 0)],
+    )
+
+    def get_sample_arguments(
+        order, chunk_id_list, *, schedule_num_layers_per_chunk, schedule_num_model_chunks
+    ):
+        observed["order"] = order
+        observed["chunk_id_list"] = chunk_id_list
+        observed["num_layers_per_chunk"] = schedule_num_layers_per_chunk
+        observed["num_model_chunks"] = schedule_num_model_chunks
+        return [()] * 8, [{} for _ in range(8)]
+
+    monkeypatch.setattr(helper, "_get_sample_arguments", get_sample_arguments)
+
+    _, kwargs = helper._get_cuda_graph_input_data()
+
+    assert observed["num_layers_per_chunk"] == [1, 1, 1, 1]
+    assert observed["num_model_chunks"] == 4
+    assert kwargs["_num_layers_per_chunk"] is observed["num_layers_per_chunk"]
+    assert helper.layer_descriptors_per_chunk is canonical_descriptors
+    assert helper.callables_per_chunk is canonical_callables
+    assert helper.num_layers_per_chunk is canonical_counts
+    assert helper.num_model_chunks == 1
+    assert helper.num_layers_per_chunk == [4]
+    assert len(helper.layer_descriptors_per_chunk) == len(helper.callables_per_chunk) == 1
+    for descriptors, callables, count in zip(
+        helper.layer_descriptors_per_chunk, helper.callables_per_chunk, helper.num_layers_per_chunk
+    ):
+        assert [descriptor.layer for descriptor in descriptors] == callables
+        assert len(descriptors) == count
+    assert helper.flattened_callables == list(leaves)
 
 
 def test_te_hybrid_mtp_static_inputs_are_owned_by_inner_leaves(monkeypatch) -> None:

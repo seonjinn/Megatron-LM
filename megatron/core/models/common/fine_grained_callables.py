@@ -27,7 +27,7 @@ from megatron.core.transformer.transformer_layer import TransformerLayer, make_v
 
 
 def _get_fine_grained_mtp_inner_layer(layer: MultiTokenPredictionLayer) -> TransformerLayer:
-    """Return the only Hybrid MTP shape representable by the five-slot schedule."""
+    """Return the only MTP shape representable by the five-slot schedule."""
 
     inner_layer = layer.mtp_model_layer
 
@@ -35,20 +35,19 @@ def _get_fine_grained_mtp_inner_layer(layer: MultiTokenPredictionLayer) -> Trans
     # this type check local to avoid a model/common/hybrid import cycle.
     from megatron.core.models.hybrid.hybrid_block import HybridStack
 
-    if not isinstance(inner_layer, HybridStack):
-        return inner_layer
-
-    hybrid_layers = tuple(inner_layer.layers)
-    hybrid_layer_types = ", ".join(type(inner).__name__ for inner in hybrid_layers) or "none"
+    inner_layers = (
+        tuple(inner_layer.layers) if isinstance(inner_layer, HybridStack) else (inner_layer,)
+    )
+    inner_layer_types = ", ".join(type(inner).__name__ for inner in inner_layers) or "none"
     error = (
         "fine-grained MTP overlap requires exactly one graphable inner MoE "
-        "TransformerLayer; the HybridStack contains "
-        f"{len(hybrid_layers)} inner layer(s): {hybrid_layer_types}"
+        "TransformerLayer; found "
+        f"{len(inner_layers)} inner layer(s): {inner_layer_types}"
     )
-    if len(hybrid_layers) != 1:
+    if len(inner_layers) != 1:
         raise ValueError(error)
 
-    candidate = hybrid_layers[0]
+    candidate = inner_layers[0]
     if not isinstance(candidate, TransformerLayer) or not isinstance(candidate.mlp, MoELayer):
         raise ValueError(error)
 

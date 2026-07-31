@@ -356,6 +356,34 @@ def test_single_transformer_gpt_mtp_and_non_mtp_callable_dispatch_regressions(mo
     assert common_callables.get_layer_moe_metadata(moe) == (True, 2)
 
 
+@pytest.mark.parametrize("case", ["dense", "mamba", "opaque", "unscoped_moe"])
+def test_unsupported_direct_mtp_fails_before_callable_schedule(monkeypatch, case):
+    if case == "dense":
+        inner_layer = _make_task7_fine_grained_transformer_leaf(moe=False)
+    elif case == "mamba":
+        inner_layer = _make_task7_fine_grained_mamba_leaf()
+    elif case == "unscoped_moe":
+        inner_layer = _make_task7_fine_grained_transformer_leaf(moe=True)
+    else:
+        inner_layer = torch.nn.Identity()
+    mtp = _make_task7_mtp_wrapper(inner_layer)
+    if case == "unscoped_moe":
+        from megatron.core.transformer.enums import CudaGraphModule
+
+        mtp.config.cuda_graph_modules = [CudaGraphModule.mamba]
+    calls = []
+    monkeypatch.setattr(
+        common_callables,
+        "build_transformer_layer_callables",
+        lambda layer: _task7_fake_transformer_callables(layer, calls),
+    )
+
+    with pytest.raises(ValueError, match="fine-grained MTP.*exactly one.*MoE Transformer"):
+        build_layer_callables(mtp)
+
+    assert calls == []
+
+
 class TestTransformerLayerSubmoduleCallables:
     """
     Test class for transformer layer submodule callables.
