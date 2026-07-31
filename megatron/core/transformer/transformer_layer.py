@@ -29,6 +29,7 @@ from megatron.core.transformer.enums import CudaGraphModule, InferenceCudaGraphS
 from megatron.core.transformer.identity_op import IdentityFuncOp, IdentityOp
 from megatron.core.transformer.mlp import MLP
 from megatron.core.transformer.module import GraphableMegatronModule
+from megatron.core.transformer.moe.cuda_graph_replay import MoECudaGraphReplayState
 from megatron.core.transformer.spec_utils import ModuleSpec, build_module
 from megatron.core.transformer.torch_norm import LayerNormBuilder
 from megatron.core.transformer.transformer_config import TransformerConfig
@@ -1358,6 +1359,7 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
 
     def _te_cuda_graph_replay_impl(self, args, kwargs, context):
         """Implementation of _te_cuda_graph_replay, separated for replay mode cleanup."""
+        graph_index = getattr(self, 'current_microbatch', 0) % len(self.cuda_graphs)
         eager_mlp_kwargs = dict(kwargs)
         self._rebuild_te_cuda_graph_packed_seq_params(eager_mlp_kwargs)
         padding_mask = eager_mlp_kwargs.get("padding_mask")
@@ -1411,6 +1413,9 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                     for name in hier_attr_name[:-1]:
                         attr = getattr(attr, name)
                     setattr(attr, hier_attr_name[-1], attr_outputs[i])
+                dispatcher_replay_state = self._restore_te_cuda_graph_dispatcher_replay_state(
+                    graph_index, residual, hidden_states
+                )
             else:
                 # CUDA graph output is [hidden_states, probs, routing_map].
                 assert len(cuda_graph_output) == 3, (
@@ -1418,6 +1423,7 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                     f"but got {len(cuda_graph_output)} elements"
                 )
                 hidden_states, probs, routing_map = cuda_graph_output
+                dispatcher_replay_state = None
 
             # Resume the MoELayer forward pass from the end of the CUDA graph scope.
             # The MoE layer will skip redundant computations when we pass in the calculated values
@@ -1437,6 +1443,10 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                 nvtx_range_pop(suffix="mlp")
                 return residual, hidden_states, probs, shared_expert_output
             mlp_output_with_bias = apply_module(self.mlp)(hidden_states)
+            if dispatcher_replay_state is not None:
+                self.mlp.token_dispatcher.validate_cudagraph_continuation(
+                    dispatcher_replay_state, mlp_output_with_bias[0]
+                )
             self.mlp.cudagraph_tensor_store.clear()
             nvtx_range_pop(suffix="mlp")
 
@@ -1684,8 +1694,53 @@ class MoETransformerLayer(TransformerLayer):
         self.use_partial_cudagraphs = False
         self.moe_layer_recompute = False
         self._local_cudagraph_attr_names = None
+        self._te_cuda_graph_dispatcher_replay_states = ()
 
         super().__init__(*args, **kwargs)
+
+        if (
+            self.config.cuda_graph_impl == "transformer_engine"
+            and CudaGraphModule.moe_preprocess in self.config.cuda_graph_modules
+        ):
+            self.mlp.token_dispatcher.validate_cudagraph_replay_capability()
+
+    def _record_te_cuda_graph_dispatcher_replay_state(
+        self, graph_index: int, graph_input: torch.Tensor, preprocessed_hidden_states: torch.Tensor
+    ) -> MoECudaGraphReplayState:
+        """Pair one immutable dispatcher snapshot with an exact TE graph index."""
+
+        if graph_index < 0 or graph_index > len(self._te_cuda_graph_dispatcher_replay_states):
+            raise RuntimeError(
+                "TE CUDA graph capture did not provide contiguous dispatcher graph ownership: "
+                f"received index {graph_index} with "
+                f"{len(self._te_cuda_graph_dispatcher_replay_states)} recorded states."
+            )
+        state = self.mlp.token_dispatcher.snapshot_cudagraph_replay_state(
+            graph_input, preprocessed_hidden_states
+        )
+        if graph_index == len(self._te_cuda_graph_dispatcher_replay_states):
+            self._te_cuda_graph_dispatcher_replay_states += (state,)
+        elif self._te_cuda_graph_dispatcher_replay_states[graph_index] != state:
+            raise RuntimeError(
+                f"TE CUDA graph index {graph_index} produced conflicting dispatcher replay state."
+            )
+        return self._te_cuda_graph_dispatcher_replay_states[graph_index]
+
+    def _restore_te_cuda_graph_dispatcher_replay_state(
+        self, graph_index: int, graph_input: torch.Tensor, preprocessed_hidden_states: torch.Tensor
+    ) -> MoECudaGraphReplayState:
+        """Restore the dispatcher state paired with ``graph_index`` without fallback."""
+
+        if graph_index < 0 or graph_index >= len(self._te_cuda_graph_dispatcher_replay_states):
+            raise RuntimeError(
+                "No dispatcher replay state is paired with TE CUDA graph index "
+                f"{graph_index}; capture and graph-bank activation must install it explicitly."
+            )
+        state = self._te_cuda_graph_dispatcher_replay_states[graph_index]
+        self.mlp.token_dispatcher.restore_cudagraph_replay_state(
+            state, graph_input, preprocessed_hidden_states
+        )
+        return state
 
     def _should_call_local_cudagraph(self, *args, **kwargs):
         """
