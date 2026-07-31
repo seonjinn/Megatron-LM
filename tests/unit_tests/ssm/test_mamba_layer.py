@@ -77,6 +77,14 @@ def _make_mamba_packed_seq_params(total_tokens: int = 16) -> PackedSeqParams:
         max_seqlen_kv=4,
         local_cp_size=1,
         total_tokens=total_tokens,
+        seq_aux_loss_sample_ids=torch.cat(
+            (
+                torch.zeros(total_tokens // 2, dtype=torch.int64),
+                torch.ones(total_tokens - total_tokens // 2, dtype=torch.int64),
+            )
+        ),
+        seq_aux_loss_num_samples=torch.tensor(2, dtype=torch.int64),
+        seq_aux_loss_max_samples=3,
     )
 
 
@@ -95,6 +103,10 @@ def _capture_mamba_packed_seq_params(
     layer._set_te_cuda_graph_packed_seq_params_static_metadata(
         generic_static, generic_tensor_kwargs
     )
+    assert not any(key.startswith("_moe_packed_seq_params_") for key in generic_tensor_kwargs)
+    assert not any(key.startswith("_moe_packed_seq_params_") for key in mamba_tensor_kwargs)
+    assert "seq_aux_loss_max_samples" not in generic_static
+    assert "seq_aux_loss_max_samples" not in mamba_static
     return generic_tensor_kwargs, mamba_tensor_kwargs
 
 
@@ -134,6 +146,8 @@ def test_mamba_capture_rebuilds_packed_seq_params_without_recomputing_seq_idx() 
     hidden_states = torch.ones(16, 1, 4)
     graph_kwargs = {"hidden_states": hidden_states, **generic_tensor_kwargs, **mamba_tensor_kwargs}
 
+    assert not any(key.startswith("_moe_packed_seq_params_") for key in graph_kwargs)
+
     layer._te_cuda_graph_capture(**graph_kwargs)
 
     assert set(layer.forward_kwargs) == {"hidden_states", "packed_seq_params"}
@@ -142,6 +156,12 @@ def test_mamba_capture_rebuilds_packed_seq_params_without_recomputing_seq_idx() 
     assert rebuilt.seq_idx is packed_seq_params.seq_idx
     assert rebuilt.cu_seqlens_q is packed_seq_params.cu_seqlens_q
     assert rebuilt.cu_seqlens_kv is packed_seq_params.cu_seqlens_kv
+    assert rebuilt.seq_aux_loss_sample_ids is None
+    assert rebuilt.seq_aux_loss_num_samples is None
+    assert rebuilt.seq_aux_loss_max_samples is None
+    assert packed_seq_params.seq_aux_loss_sample_ids is not None
+    assert packed_seq_params.seq_aux_loss_num_samples is not None
+    assert packed_seq_params.seq_aux_loss_max_samples == 3
 
 
 def test_mamba_replay_flattens_generic_and_mamba_tensor_inputs() -> None:
@@ -156,6 +176,7 @@ def test_mamba_replay_flattens_generic_and_mamba_tensor_inputs() -> None:
 
     assert "packed_seq_params" not in kwargs
     assert set(kwargs) == set(generic_tensor_kwargs) | set(mamba_tensor_kwargs)
+    assert not any(key.startswith("_moe_packed_seq_params_") for key in kwargs)
     assert kwargs[f"{MAMBA_CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX}seq_idx"] is (
         packed_seq_params.seq_idx
     )

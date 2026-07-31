@@ -317,6 +317,7 @@ def test_unsupported_hybrid_mtp_fails_before_callable_schedule(monkeypatch, case
         layers = [
             _make_task7_fine_grained_transformer_leaf(moe=True),
             _make_task7_fine_grained_mamba_leaf(),
+            _make_task7_fine_grained_transformer_leaf(moe=False),
         ]
     else:
         layers = [
@@ -335,6 +336,62 @@ def test_unsupported_hybrid_mtp_fails_before_callable_schedule(monkeypatch, case
         build_layer_callables(mtp)
 
     assert calls == []
+
+
+def test_one_moe_leaf_fine_grained_mtp_keeps_packed_execution_unsupported(monkeypatch):
+    """The supported five-callable layout still fails before executing a packed MTP node."""
+
+    from types import MethodType, SimpleNamespace
+
+    from megatron.core.packed_seq_params import PackedSeqParams
+
+    moe = _make_task7_fine_grained_transformer_leaf(moe=True)
+    mtp = _make_task7_mtp_wrapper(_make_task7_hybrid_stack([moe]))
+    build_calls = []
+    execution_calls = []
+
+    def fake_transformer_callables(layer):
+        build_calls.append(layer)
+
+        def reject_execution(_node, hidden_states, *_args, **_kwargs):
+            execution_calls.append(layer)
+            return hidden_states
+
+        return (
+            [reject_execution, reject_execution, reject_execution, reject_execution, None],
+            {"pre_dispatch_computation": object()},
+        )
+
+    def fake_get_embeddings(
+        self, input_ids, position_ids, embedding, hidden_states, packed_seq_params, padding_mask
+    ):
+        return input_ids, position_ids, padding_mask, None, hidden_states
+
+    monkeypatch.setattr(
+        common_callables, "build_transformer_layer_callables", fake_transformer_callables
+    )
+    monkeypatch.setattr(mtp, "_get_embeddings", MethodType(fake_get_embeddings, mtp))
+    forward_funcs, _ = build_layer_callables(mtp)
+    node = DummyNode()
+    node.is_first_layer = False
+    node.chunk_state = DummyState()
+    node.chunk_state.input_ids = torch.ones((1, 4), dtype=torch.int64)
+    node.chunk_state.position_ids = torch.arange(4, dtype=torch.int64).unsqueeze(0)
+    node.chunk_state.padding_mask = torch.zeros((1, 4), dtype=torch.bool)
+    node.chunk_state.context = None
+    node.chunk_state.model = SimpleNamespace(embedding=object())
+    node.chunk_state.packed_seq_params = PackedSeqParams(
+        qkv_format="thd",
+        seq_aux_loss_sample_ids=torch.zeros(4, dtype=torch.int64),
+        seq_aux_loss_num_samples=torch.tensor(1, dtype=torch.int64),
+        seq_aux_loss_max_samples=2,
+    )
+
+    with pytest.raises(AssertionError, match="sequence packing.*not yet supported"):
+        forward_funcs[0](node, torch.ones((4, 1, 8)))
+
+    assert build_calls == [moe]
+    assert execution_calls == []
 
 
 def test_single_transformer_gpt_mtp_and_non_mtp_callable_dispatch_regressions(monkeypatch):

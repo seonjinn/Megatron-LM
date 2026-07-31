@@ -951,6 +951,203 @@ class TestRouterAuxLoss:
     @pytest.mark.internal
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
     @pytest.mark.parametrize(
+        "tp_size,cp_size,sequence_parallel",
+        (
+            pytest.param(1, 1, False, id="tp1_cp1"),
+            pytest.param(2, 1, True, id="tp2_cp1_sp"),
+            pytest.param(1, 2, False, id="tp1_cp2"),
+            pytest.param(2, 2, True, id="tp2_cp2_sp"),
+        ),
+    )
+    def test_variable_length_packed_seq_aux_loss_tp_cp_sp_matches_padded_oracle(
+        self, tp_size: int, cp_size: int, sequence_parallel: bool
+    ) -> None:
+        """TP/CP/SP production sharding preserves the literal padded router oracle."""
+
+        required_world_size = tp_size * cp_size
+        world_size = torch.distributed.get_world_size()
+        if world_size < required_world_size or world_size % required_world_size:
+            pytest.skip(
+                f"requires a world size divisible by TP*CP={required_world_size}, got {world_size}"
+            )
+
+        Utils.initialize_model_parallel(
+            tensor_model_parallel_size=tp_size,
+            context_parallel_size=cp_size,
+        )
+        tp_rank = parallel_state.get_tensor_model_parallel_rank()
+        cp_rank = parallel_state.get_context_parallel_rank()
+        router = self.new_router(
+            num_moe_experts=4,
+            moe_router_load_balancing_type="seq_aux_loss",
+            moe_router_topk=2,
+            moe_router_score_function="softmax",
+            moe_aux_loss_coeff=1.0,
+            moe_router_dtype="fp32",
+            params_dtype=torch.float32,
+            bf16=False,
+            tensor_model_parallel_size=tp_size,
+            context_parallel_size=cp_size,
+            sequence_parallel=sequence_parallel,
+        ).cuda()
+        with torch.no_grad():
+            router.weight.copy_(
+                torch.arange(
+                    router.weight.numel(), dtype=torch.float32, device=router.weight.device
+                ).reshape_as(router.weight)
+                / router.weight.numel()
+            )
+
+        hidden_size = router.config.hidden_size
+        padded_global = (
+            torch.arange(8 * 2 * hidden_size, dtype=torch.float32, device="cuda")
+            .reshape(8, 2, hidden_size)
+            .div_(100.0)
+        )
+        padded_mask_global = torch.ones((8, 2), dtype=torch.bool, device="cuda")
+        padded_mask_global[:3, 0] = False
+        padded_mask_global[:5, 1] = False
+        padded_tags_global = torch.full((8, 2), -1, dtype=torch.int64, device="cuda")
+        padded_tags_global[:3, 0] = torch.arange(3, device="cuda")
+        padded_tags_global[:5, 1] = 8 + torch.arange(5, device="cuda")
+
+        packed_global = torch.zeros((16, 1, hidden_size), dtype=torch.float32, device="cuda")
+        packed_global[:3, 0] = padded_global[:3, 0]
+        packed_global[4:9, 0] = padded_global[:5, 1]
+        packed_mask_global = torch.ones((16, 1), dtype=torch.bool, device="cuda")
+        packed_mask_global[:3, 0] = False
+        packed_mask_global[4:9, 0] = False
+        packed_tags_global = torch.full((16, 1), -1, dtype=torch.int64, device="cuda")
+        packed_tags_global[:3, 0] = torch.arange(3, device="cuda")
+        packed_tags_global[4:9, 0] = 8 + torch.arange(5, device="cuda")
+        packed_ids_global = torch.tensor(
+            [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0],
+            dtype=torch.int64,
+            device="cuda",
+        )
+
+        def cp_zigzag_shard(tensor: torch.Tensor) -> torch.Tensor:
+            if cp_size == 1:
+                return tensor
+            shard_width = tensor.shape[0] // (2 * cp_size)
+            first = tensor.narrow(0, cp_rank * shard_width, shard_width)
+            mirrored_rank = 2 * cp_size - cp_rank - 1
+            second = tensor.narrow(0, mirrored_rank * shard_width, shard_width)
+            return torch.cat((first, second), dim=0)
+
+        def maybe_sequence_parallel_shard(tensor: torch.Tensor) -> torch.Tensor:
+            if not sequence_parallel:
+                return tensor.contiguous()
+            shard_width = tensor.shape[0] // tp_size
+            return tensor.narrow(0, tp_rank * shard_width, shard_width).contiguous()
+
+        padded = maybe_sequence_parallel_shard(
+            torch.stack(
+                [cp_zigzag_shard(padded_global[:, sample]) for sample in range(2)], dim=1
+            )
+        )
+        padded_mask = maybe_sequence_parallel_shard(
+            torch.stack(
+                [cp_zigzag_shard(padded_mask_global[:, sample]) for sample in range(2)], dim=1
+            )
+        )
+        padded_tags = maybe_sequence_parallel_shard(
+            torch.stack(
+                [cp_zigzag_shard(padded_tags_global[:, sample]) for sample in range(2)], dim=1
+            )
+        )
+
+        physical_slices = (slice(0, 4), slice(4, 12), slice(12, 16))
+
+        def shard_packed_segments(tensor: torch.Tensor) -> torch.Tensor:
+            return maybe_sequence_parallel_shard(
+                torch.cat([cp_zigzag_shard(tensor[part]) for part in physical_slices], dim=0)
+            )
+
+        packed = shard_packed_segments(packed_global)
+        packed_mask = shard_packed_segments(packed_mask_global)
+        packed_tags = shard_packed_segments(packed_tags_global)
+        packed_ids = shard_packed_segments(packed_ids_global)
+
+        def run(
+            hidden_states: torch.Tensor,
+            padding_mask: torch.Tensor,
+            **ownership: object,
+        ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+            clear_aux_losses_tracker()
+            router.weight.grad = None
+            local_input = hidden_states.detach().clone().requires_grad_(True)
+            probs, routing_map = router(local_input, padding_mask=padding_mask, **ownership)
+            MoEAuxLossAutoScaler.set_loss_scale(torch.tensor(1.0, device=probs.device))
+            probs.backward(torch.zeros_like(probs))
+            tracker_loss = get_moe_layer_wise_logging_tracker()[
+                "seq_load_balancing_loss"
+            ]["values"][0].detach().clone()
+            router_grad = router.weight.grad.detach().clone()
+            torch.distributed.all_reduce(tracker_loss, group=router.tp_cp_group)
+            torch.distributed.all_reduce(router_grad, group=router.tp_cp_group)
+            return (
+                probs.detach(),
+                routing_map.detach(),
+                tracker_loss,
+                local_input.grad.detach(),
+                router_grad,
+            )
+
+        padded_result = run(padded, padded_mask)
+        packed_result = run(
+            packed,
+            packed_mask,
+            seq_aux_loss_sample_ids=packed_ids,
+            seq_aux_loss_num_samples=torch.tensor(2, dtype=torch.int64, device="cuda"),
+            seq_aux_loss_max_samples=3,
+        )
+
+        def gather_logical_valid(
+            local_tensor: torch.Tensor, local_tags: torch.Tensor
+        ) -> torch.Tensor:
+            flattened_tags = local_tags.reshape(-1)
+            flattened_values = local_tensor.reshape(flattened_tags.numel(), -1)
+            valid = flattened_tags >= 0
+            local_payload = (
+                flattened_tags[valid].detach().cpu(),
+                flattened_values[valid].detach().cpu(),
+            )
+            gathered_payloads = [None] * torch.distributed.get_world_size(router.tp_cp_group)
+            torch.distributed.all_gather_object(
+                gathered_payloads, local_payload, group=router.tp_cp_group
+            )
+            tags = torch.cat([payload[0] for payload in gathered_payloads])
+            values = torch.cat([payload[1] for payload in gathered_payloads])
+            order = torch.argsort(tags)
+            tags = tags[order]
+            assert torch.equal(tags, torch.tensor([0, 1, 2, 8, 9, 10, 11, 12]))
+            return values[order]
+
+        padded_probs, padded_map, padded_loss, padded_grad, padded_router_grad = padded_result
+        packed_probs, packed_map, packed_loss, packed_grad, packed_router_grad = packed_result
+        torch.testing.assert_close(
+            gather_logical_valid(packed_probs, packed_tags),
+            gather_logical_valid(padded_probs, padded_tags),
+        )
+        assert torch.equal(
+            gather_logical_valid(packed_map, packed_tags),
+            gather_logical_valid(padded_map, padded_tags),
+        )
+        torch.testing.assert_close(packed_loss, padded_loss)
+        torch.testing.assert_close(
+            gather_logical_valid(packed_grad, packed_tags),
+            gather_logical_valid(padded_grad, padded_tags),
+        )
+        torch.testing.assert_close(packed_router_grad, padded_router_grad)
+        padded_padding_grad = padded_grad.reshape(-1, hidden_size)[padded_tags.reshape(-1) < 0]
+        packed_padding_grad = packed_grad.reshape(-1, hidden_size)[packed_tags.reshape(-1) < 0]
+        assert torch.count_nonzero(padded_padding_grad) == 0
+        assert torch.count_nonzero(packed_padding_grad) == 0
+
+    @pytest.mark.internal
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+    @pytest.mark.parametrize(
         "missing_field",
         (
             "seq_aux_loss_sample_ids",

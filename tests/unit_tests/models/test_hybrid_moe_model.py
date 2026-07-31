@@ -98,7 +98,14 @@ def test_hybrid_mtp_receives_padding_mask() -> None:
     hidden_states = torch.randn(4, 1, 8)
     model = SimpleNamespace(mtp=Mock(return_value=hidden_states))
     mask = torch.tensor([[False, False, True, True]])
-    packed_seq_params = PackedSeqParams(qkv_format="thd")
+    sample_ids = torch.tensor([0, 0, 1, 1], dtype=torch.int64)
+    num_samples = torch.tensor(2, dtype=torch.int64)
+    packed_seq_params = PackedSeqParams(
+        qkv_format="thd",
+        seq_aux_loss_sample_ids=sample_ids,
+        seq_aux_loss_num_samples=num_samples,
+        seq_aux_loss_max_samples=3,
+    )
 
     HybridModel._forward_mtp(
         model,
@@ -114,7 +121,11 @@ def test_hybrid_mtp_receives_padding_mask() -> None:
     )
 
     assert model.mtp.call_args.kwargs["padding_mask"] is mask
-    assert model.mtp.call_args.kwargs["packed_seq_params"] is packed_seq_params
+    observed = model.mtp.call_args.kwargs["packed_seq_params"]
+    assert observed is packed_seq_params
+    assert observed.seq_aux_loss_sample_ids is sample_ids
+    assert observed.seq_aux_loss_num_samples is num_samples
+    assert observed.seq_aux_loss_max_samples == 3
 
 
 GOLDEN_CONFIG: Dict[str, Any] = {

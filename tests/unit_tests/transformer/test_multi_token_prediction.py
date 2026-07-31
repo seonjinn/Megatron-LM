@@ -61,10 +61,10 @@ class TestMultiTokenPredictionLayer:
         destroy_global_vars()
         destroy_num_microbatches_calculator()
 
-    def _create_config_and_mtp_block_spec(self, tp, cp, use_te=False):
+    def _create_config_and_mtp_block_spec(self, tp, cp, use_te=False, mtp_num_layers=2):
         Utils.initialize_model_parallel(tensor_model_parallel_size=tp, context_parallel_size=cp)
         config = TransformerConfig(
-            mtp_num_layers=2,
+            mtp_num_layers=mtp_num_layers,
             num_layers=4,
             hidden_size=64,
             num_attention_heads=8,
@@ -261,6 +261,184 @@ class TestMultiTokenPredictionLayer:
         expected_padding_mask, _ = roll_tensor(padding_mask, shifts=-1, dims=-1)
         assert torch.equal(seen["padding_mask"], expected_padding_mask)
         assert torch.equal(returned_padding_mask, expected_padding_mask)
+
+    @pytest.mark.parametrize("mtp_depth", (1, 2))
+    def test_normal_mtp_rolls_token_inputs_without_rolling_packed_ownership(
+        self, monkeypatch, mtp_depth
+    ):
+        """Every normal MTP depth rolls token inputs but preserves ownership identity."""
+
+        torch.manual_seed(_SEED)
+        config, mtp_block_spec = self._create_config_and_mtp_block_spec(
+            tp=1, cp=1, mtp_num_layers=mtp_depth
+        )
+        mtp = MultiTokenPredictionBlock(config=config, spec=mtp_block_spec)
+        sample_ids = torch.tensor(
+            [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0],
+            dtype=torch.int64,
+        )
+        num_samples = torch.tensor(2, dtype=torch.int64)
+        packed_seq_params = PackedSeqParams(
+            qkv_format="thd",
+            cu_seqlens_q=torch.tensor([0, 4, 12, 16], dtype=torch.int32),
+            cu_seqlens_kv=torch.tensor([0, 4, 12, 16], dtype=torch.int32),
+            seq_aux_loss_sample_ids=sample_ids,
+            seq_aux_loss_num_samples=num_samples,
+            seq_aux_loss_max_samples=3,
+        )
+        original_sample_ids = sample_ids.clone()
+        input_ids = torch.tensor(
+            [[10, 11, 12, 0, 20, 21, 22, 23, 24, 0, 0, 0, 0, 0, 0, 0]],
+            dtype=torch.int64,
+        )
+        position_ids = torch.tensor(
+            [[0, 1, 2, 3, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3]],
+            dtype=torch.int64,
+        )
+        padding_mask = torch.tensor(
+            [
+                [
+                    False,
+                    False,
+                    False,
+                    True,
+                    False,
+                    False,
+                    False,
+                    False,
+                    False,
+                    True,
+                    True,
+                    True,
+                    True,
+                    True,
+                    True,
+                    True,
+                ]
+            ]
+        )
+        hidden_states = torch.randn(16, 1, config.hidden_size)
+        embedding_calls = []
+        packed_calls = []
+
+        def recording_embedding(input_ids, position_ids):
+            embedding_calls.append((input_ids.clone(), position_ids.clone()))
+            return torch.zeros(16, 1, config.hidden_size, dtype=hidden_states.dtype)
+
+        def record_transformer_inputs(
+            self,
+            hidden_states,
+            decoder_input,
+            attention_mask=None,
+            padding_mask=None,
+            context=None,
+            context_mask=None,
+            rotary_pos_emb=None,
+            rotary_pos_cos=None,
+            rotary_pos_sin=None,
+            attention_bias=None,
+            inference_params=None,
+            packed_seq_params=None,
+            sequence_len_offset=None,
+        ):
+            packed_calls.append((packed_seq_params, padding_mask.clone()))
+            return hidden_states
+
+        for layer in mtp.layers:
+            monkeypatch.setattr(
+                layer,
+                "_proj_and_transformer_layer",
+                types.MethodType(record_transformer_inputs, layer),
+            )
+
+        output = mtp(
+            input_ids=input_ids,
+            position_ids=position_ids,
+            hidden_states=hidden_states,
+            attention_mask=torch.ones((1, 1, 16, 16), dtype=torch.bool),
+            padding_mask=padding_mask,
+            packed_seq_params=packed_seq_params,
+            embedding=recording_embedding,
+        )
+
+        expected_input_ids = (
+            torch.tensor(
+                [[11, 12, 0, 0, 21, 22, 23, 24, 0, 0, 0, 0, 0, 0, 0, 0]],
+                dtype=torch.int64,
+            ),
+            torch.tensor(
+                [[12, 0, 0, 0, 22, 23, 24, 0, 0, 0, 0, 0, 0, 0, 0, 0]],
+                dtype=torch.int64,
+            ),
+        )
+        expected_position_ids = (
+            torch.tensor(
+                [[1, 2, 3, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 0]],
+                dtype=torch.int64,
+            ),
+            torch.tensor(
+                [[2, 3, 0, 0, 2, 3, 4, 5, 6, 7, 0, 0, 2, 3, 0, 0]],
+                dtype=torch.int64,
+            ),
+        )
+        expected_padding_masks = (
+            torch.tensor(
+                [
+                    [
+                        False,
+                        False,
+                        True,
+                        False,
+                        False,
+                        False,
+                        False,
+                        False,
+                        True,
+                        True,
+                        True,
+                        False,
+                        True,
+                        True,
+                        True,
+                        False,
+                    ]
+                ]
+            ),
+            torch.tensor(
+                [
+                    [
+                        False,
+                        True,
+                        False,
+                        False,
+                        False,
+                        False,
+                        False,
+                        True,
+                        True,
+                        True,
+                        False,
+                        False,
+                        True,
+                        True,
+                        False,
+                        False,
+                    ]
+                ]
+            ),
+        )
+        assert len(embedding_calls) == len(packed_calls) == mtp_depth
+        for depth in range(mtp_depth):
+            torch.testing.assert_close(embedding_calls[depth][0], expected_input_ids[depth])
+            torch.testing.assert_close(embedding_calls[depth][1], expected_position_ids[depth])
+            assert packed_calls[depth][0] is packed_seq_params
+            torch.testing.assert_close(packed_calls[depth][1], expected_padding_masks[depth])
+            assert packed_calls[depth][0].seq_aux_loss_sample_ids is sample_ids
+            assert packed_calls[depth][0].seq_aux_loss_num_samples is num_samples
+            assert packed_calls[depth][0].seq_aux_loss_max_samples == 3
+        assert torch.equal(sample_ids, original_sample_ids)
+        assert packed_seq_params.seq_aux_loss_sample_ids is sample_ids
+        assert output.shape == (16 * (1 + mtp_depth), 1, config.hidden_size)
 
     def test_get_embeddings_detaches_decoder_input(self):
         """With mtp_detach_heads=True, _get_embeddings detaches decoder_input (severing

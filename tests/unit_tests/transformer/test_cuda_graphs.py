@@ -3002,6 +3002,42 @@ def _make_task7_hybrid_mtp_model():
     return chunk, stack, (decoder, moe, mamba, dense)
 
 
+def _make_task5_ordered_hybrid_mtp_model(mtp_depth: int):
+    """Build fresh ordered Hybrid leaves for the decoder and every MTP depth."""
+
+    from types import SimpleNamespace
+
+    def make_ordered_leaves():
+        return (
+            _make_task7_transformer_leaf(moe=True),
+            _make_task7_mamba_leaf(),
+            _make_task7_transformer_leaf(moe=False),
+        )
+
+    decoder_leaves = make_ordered_leaves()
+    mtp_owners = []
+    mtp_leaves = []
+    for _ in range(mtp_depth):
+        leaves = make_ordered_leaves()
+        stack = HybridStack.__new__(HybridStack)
+        torch.nn.Module.__init__(stack)
+        stack.layers = torch.nn.ModuleList(leaves)
+        mtp_owners.append(SimpleNamespace(mtp_model_layer=stack))
+        mtp_leaves.append(leaves)
+
+    config = SimpleNamespace(
+        cuda_graph_modules=[CudaGraphModule.moe_router, CudaGraphModule.mamba, CudaGraphModule.mlp],
+        multi_latent_attention=False,
+    )
+    chunk = SimpleNamespace(
+        config=config,
+        decoder=SimpleNamespace(layers=list(decoder_leaves)),
+    )
+    if mtp_depth:
+        chunk.mtp = SimpleNamespace(layers=mtp_owners)
+    return chunk, (decoder_leaves, *mtp_leaves)
+
+
 def _make_task7_te_helper(monkeypatch):
     import megatron.core.transformer.cuda_graphs as cuda_graphs
 
@@ -3075,6 +3111,67 @@ def test_te_discovery_preserves_ordered_hybrid_mtp_leaf_descriptors(monkeypatch)
             overlap_moe_expert_parallel_comm=overlap,
         )
         assert owned_graph_lists == expected
+
+
+@pytest.mark.parametrize("mtp_depth", (0, 1, 2))
+def test_te_descriptors_assign_moe_ownership_only_to_fresh_inner_leaves(
+    monkeypatch, mtp_depth
+) -> None:
+    """Canonical descriptors never assign MoE ownership to Hybrid or non-MoE owners."""
+
+    import megatron.core.transformer.cuda_graphs as cuda_graphs
+    from megatron.core.transformer.cuda_graphs import (
+        _add_moe_packed_seq_params_to_te_cuda_graph_sample_kwargs,
+    )
+    from megatron.core.transformer.moe.moe_layer import MoELayer
+
+    chunk, ordered_groups = _make_task5_ordered_hybrid_mtp_model(mtp_depth)
+    helper = TECudaGraphHelper.__new__(TECudaGraphHelper)
+    helper.model = [chunk]
+    helper.config = chunk.config
+    helper.num_model_chunks = 1
+    helper.tp_group = None
+    helper.dp_cp_group = None
+    monkeypatch.setattr(torch.distributed, "get_rank", lambda: 0)
+    monkeypatch.setattr(cuda_graphs, "log_on_each_pipeline_stage", lambda **_kwargs: None)
+
+    helper._discover_layers()
+
+    descriptors = helper.layer_descriptors_per_chunk[0]
+    expected_leaves = [leaf for group in ordered_groups for leaf in group]
+    assert len(descriptors) == 3 * (1 + mtp_depth)
+    assert [descriptor.layer for descriptor in descriptors] == expected_leaves
+    assert len({id(descriptor.layer) for descriptor in descriptors}) == len(descriptors)
+    assert [descriptor.is_mtp for descriptor in descriptors] == [False] * 3 + [
+        True
+    ] * (3 * mtp_depth)
+
+    packed = PackedSeqParams(
+        seq_aux_loss_sample_ids=torch.tensor([0, 0, 1, 1], dtype=torch.int64),
+        seq_aux_loss_num_samples=torch.tensor(2, dtype=torch.int64),
+        seq_aux_loss_max_samples=3,
+    )
+    moe_owners = []
+    for descriptor in descriptors:
+        sample_kwargs = {}
+        _add_moe_packed_seq_params_to_te_cuda_graph_sample_kwargs(
+            descriptor, chunk.config, sample_kwargs, packed
+        )
+        owns_moe_namespace = any(
+            key.startswith("_moe_packed_seq_params_") for key in sample_kwargs
+        )
+        if owns_moe_namespace:
+            moe_owners.append(descriptor.layer)
+        expected_owner = isinstance(descriptor.layer, TransformerLayer) and isinstance(
+            descriptor.layer.mlp, MoELayer
+        )
+        assert owns_moe_namespace is expected_owner
+
+    assert moe_owners == [group[0] for group in ordered_groups]
+    for descriptor in descriptors:
+        if descriptor.mtp_owner is not None:
+            assert descriptor.layer is not descriptor.mtp_owner
+            assert descriptor.layer is not descriptor.mtp_owner.mtp_model_layer
 
 
 def test_execution_counter_attaches_to_every_ordered_hybrid_mtp_leaf(monkeypatch) -> None:
