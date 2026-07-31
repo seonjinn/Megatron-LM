@@ -1965,6 +1965,23 @@ def test_moe_replay_state_is_paired_with_exact_graph_index() -> None:
     assert len(layer._te_cuda_graph_dispatcher_replay_states) == 2
 
 
+def test_moe_partial_te_replay_rejects_overlap_before_capture() -> None:
+    from types import SimpleNamespace
+
+    from megatron.core.transformer.moe.token_dispatcher import MoEAlltoAllTokenDispatcher
+    from megatron.core.transformer.transformer_layer import MoETransformerLayer
+
+    layer = MoETransformerLayer.__new__(MoETransformerLayer)
+    torch.nn.Module.__init__(layer)
+    layer.config = SimpleNamespace(overlap_moe_expert_parallel_comm=True)
+    layer.mlp = SimpleNamespace(
+        token_dispatcher=MoEAlltoAllTokenDispatcher.__new__(MoEAlltoAllTokenDispatcher)
+    )
+
+    with pytest.raises(RuntimeError, match="overlap_moe_expert_parallel_comm"):
+        layer._validate_te_cuda_graph_dispatcher_replay_capability()
+
+
 def _make_simple_module(config):
     return _SimpleModule(config).cuda().eval()
 
