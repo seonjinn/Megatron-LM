@@ -607,7 +607,11 @@ class TECudaGraphBankManager:
             if existing is None:
                 continue
             owner_ref = getattr(existing, "_owner_ref", None)
-            if not callable(owner_ref) or owner_ref() is not None:
+            if (
+                not isinstance(existing, _TECudaGraphExecutionCounter)
+                or not callable(owner_ref)
+                or owner_ref() is not None
+            ):
                 raise ValueError(
                     "TE CUDA graph execution counter is already owned by another manager"
                 )

@@ -784,6 +784,17 @@ def test_execution_counter_dead_owner_does_not_block_a_new_manager() -> None:
     replacement.close()
 
 
+def test_execution_counter_foreign_dead_owner_spoof_is_rejected() -> None:
+    layer = _FakeLayer("layer")
+    foreign_tracker = SimpleNamespace(_owner_ref=lambda: None)
+    layer._te_cuda_graph_execution_counter = foreign_tracker
+
+    with pytest.raises(ValueError, match="already owned"):
+        _make_manager([layer])
+
+    assert layer._te_cuda_graph_execution_counter is foreign_tracker
+
+
 def test_execution_counters_survive_uninstall_reset_and_eviction() -> None:
     layer = _FakeLayer("layer")
     manager = _make_manager([layer])
