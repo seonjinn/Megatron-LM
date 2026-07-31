@@ -1943,6 +1943,7 @@ def test_te_helper_manual_hook_setup_refreshes_owning_bank() -> None:
     manager = SimpleNamespace(refresh_manual_hooks=lambda target: refresh_calls.append(target))
     helper = TECudaGraphHelper.__new__(TECudaGraphHelper)
     helper.callables_per_chunk = [[layer]]
+    helper.layer_descriptors_per_chunk = [[SimpleNamespace(layer=layer)]]
     helper.model = [SimpleNamespace(_make_forward_pre_hook=object())]
     helper._compatibility_bank_manager = manager
     helper._compatibility_bank = bank
@@ -2220,6 +2221,222 @@ def test_transformer_layer_drain_check_rejects_pending_backward_dw_and_allows_id
     layer.unverifiable = unverifiable
     with pytest.raises(RuntimeError, match="Cannot verify.*queue drainage"):
         layer.assert_te_cuda_graph_bank_drained()
+
+
+def _make_task7_transformer_leaf(*, moe: bool) -> TransformerLayer:
+    from megatron.core.transformer.identity_op import IdentityOp
+    from megatron.core.transformer.mlp import MLP
+    from megatron.core.transformer.moe.moe_layer import MoELayer
+
+    layer = TransformerLayer.__new__(TransformerLayer)
+    torch.nn.Module.__init__(layer)
+    layer.self_attention = IdentityOp()
+    layer.cross_attention = IdentityOp()
+    if moe:
+        layer.mlp = MoELayer.__new__(MoELayer)
+        torch.nn.Module.__init__(layer.mlp)
+        layer.mlp.num_local_experts = 2
+    else:
+        layer.mlp = MLP.__new__(MLP)
+        torch.nn.Module.__init__(layer.mlp)
+    layer.cuda_graphs = []
+    layer.cuda_graph_manual_hooks = []
+    return layer
+
+
+def _make_task7_mamba_leaf():
+    from megatron.core.ssm.mamba_layer import MambaLayer
+
+    layer = MambaLayer.__new__(MambaLayer)
+    torch.nn.Module.__init__(layer)
+    layer.cuda_graphs = []
+    layer.cuda_graph_manual_hooks = []
+    return layer
+
+
+def _make_task7_hybrid_mtp_model():
+    from types import SimpleNamespace
+
+    decoder = _make_task7_transformer_leaf(moe=False)
+    moe = _make_task7_transformer_leaf(moe=True)
+    mamba = _make_task7_mamba_leaf()
+    dense = _make_task7_transformer_leaf(moe=False)
+    stack = HybridStack.__new__(HybridStack)
+    torch.nn.Module.__init__(stack)
+    stack.layers = torch.nn.ModuleList([moe, mamba, dense])
+    owner = SimpleNamespace(mtp_model_layer=stack)
+    config = SimpleNamespace(
+        cuda_graph_modules=[CudaGraphModule.moe_router, CudaGraphModule.mamba, CudaGraphModule.mlp],
+        multi_latent_attention=False,
+    )
+    chunk = SimpleNamespace(
+        config=config,
+        decoder=SimpleNamespace(layers=[decoder]),
+        mtp=SimpleNamespace(layers=[owner]),
+    )
+    return chunk, stack, (decoder, moe, mamba, dense)
+
+
+def _make_task7_te_helper(monkeypatch):
+    import megatron.core.transformer.cuda_graphs as cuda_graphs
+
+    chunk, stack, leaves = _make_task7_hybrid_mtp_model()
+    helper = TECudaGraphHelper.__new__(TECudaGraphHelper)
+    helper.model = [chunk]
+    helper.config = chunk.config
+    helper.num_model_chunks = 1
+    helper.tp_group = None
+    helper.dp_cp_group = None
+    monkeypatch.setattr(torch.distributed, "get_rank", lambda: 0)
+    monkeypatch.setattr(cuda_graphs, "log_on_each_pipeline_stage", lambda **_kwargs: None)
+    helper._discover_layers()
+    return helper, chunk, stack, leaves
+
+
+def test_te_discovery_preserves_ordered_hybrid_mtp_leaf_descriptors(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from megatron.core.transformer.cuda_graphs import (
+        _iter_graphable_te_leaves,
+        _map_te_graphs_to_layers,
+    )
+    from megatron.core.transformer.te_cuda_graph_bank import TECudaGraphBankManager
+
+    helper, _, stack, leaves = _make_task7_te_helper(monkeypatch)
+    decoder, moe, mamba, dense = leaves
+
+    assert list(_iter_graphable_te_leaves(stack, helper.config)) == [moe, mamba, dense]
+    assert helper.callables_per_chunk == [[decoder, moe, mamba, dense]]
+    assert helper.flattened_callables == [decoder, moe, mamba, dense]
+    assert helper.num_layers_per_chunk == [4]
+    assert helper.callables_per_chunk_is_mtp == [[False, True, True, True]]
+    assert helper.flattened_callables_is_mtp == [False, True, True, True]
+    assert [descriptor.layer for descriptor in helper.layer_descriptors_per_chunk[0]] == [
+        decoder,
+        moe,
+        mamba,
+        dense,
+    ]
+    assert [descriptor.mtp_owner for descriptor in helper.layer_descriptors_per_chunk[0]] == [
+        None,
+        helper.chunks_with_decoder[0].mtp.layers[0],
+        helper.chunks_with_decoder[0].mtp.layers[0],
+        helper.chunks_with_decoder[0].mtp.layers[0],
+    ]
+    assert [descriptor.layer for descriptor in helper.flattened_layer_descriptors] == [
+        decoder,
+        moe,
+        mamba,
+        dense,
+    ]
+
+    helper.pp_group = SimpleNamespace(size=lambda: 1)
+    helper.config.overlap_moe_expert_parallel_comm = False
+    monkeypatch.setattr("megatron.core.utils.is_te_min_version", lambda _version: False)
+    manager = TECudaGraphBankManager.from_helper(helper)
+    assert manager.layers == (decoder, moe, mamba, dense)
+
+    graphs = [object() for _ in range(8)]
+    owned_graph_lists = [[] for _ in leaves]
+    _map_te_graphs_to_layers(
+        graphs,
+        callables_per_chunk=helper.callables_per_chunk,
+        owned_graph_lists=owned_graph_lists,
+        num_microbatches=2,
+        overlap_moe_expert_parallel_comm=False,
+    )
+    assert owned_graph_lists == [[graphs[index], graphs[4 + index]] for index in range(4)]
+
+
+def test_te_hybrid_mtp_static_inputs_are_owned_by_inner_leaves(monkeypatch) -> None:
+    import megatron.core.transformer.cuda_graphs as cuda_graphs
+
+    helper, _, _, leaves = _make_task7_te_helper(monkeypatch)
+    packed = object()
+    calls = []
+
+    for leaf in leaves:
+        if leaf is leaves[2]:
+
+            def get_static_inputs(seq_length, micro_batch_size, packed_seq_params, leaf=leaf):
+                calls.append((leaf, seq_length, micro_batch_size, packed_seq_params))
+                return {"hidden_states": torch.ones((2, 1, 4))}
+
+        else:
+
+            def get_static_inputs(seq_length, micro_batch_size, leaf=leaf):
+                calls.append((leaf, seq_length, micro_batch_size, None))
+                return {"hidden_states": torch.ones((2, 1, 4))}
+
+        leaf.get_layer_static_inputs = get_static_inputs
+
+    helper.seq_length = 2
+    helper.micro_batch_size = 1
+    helper.sample_packed_seq_params = packed
+    helper.num_microbatches = 1
+    monkeypatch.setattr(cuda_graphs, "is_te_min_version", lambda _version: True)
+
+    sample_args, sample_kwargs = helper._get_sample_arguments([1, -1])
+
+    assert len(sample_args) == len(leaves)
+    assert len(sample_kwargs) == len(leaves)
+    assert [call[0] for call in calls] == list(leaves)
+    assert calls[2][3] is packed
+
+
+def test_set_current_microbatch_targets_each_hybrid_mtp_leaf_graph(monkeypatch) -> None:
+    from megatron.core.transformer.module import GraphableMegatronModule
+
+    _, chunk, stack, leaves = _make_task7_te_helper(monkeypatch)
+    selections = []
+
+    class FakeGraph:
+        def __init__(self, leaf_index, graph_index):
+            self.name = (leaf_index, graph_index)
+
+        def __call__(self, *_args, **_kwargs):
+            selections.append(("forward", self.name))
+            return self.name
+
+        def backward_dw(self):
+            selections.append(("backward_dw", self.name))
+
+    class FakeBackwardDWWrapper:
+        def __init__(self):
+            self.callable = None
+
+        def set_graphed_backward_dw_callable(self, callable_):
+            self.callable = callable_
+
+    for leaf_index, leaf in enumerate(leaves):
+        leaf.cuda_graphs = [FakeGraph(leaf_index, 0), FakeGraph(leaf_index, 1)]
+        leaf.cuda_graph_manual_hooks = []
+        leaf._get_te_cuda_graph_replay_args = lambda *args, **kwargs: (args, kwargs)
+
+    stack.current_microbatch = 101
+    stack.backward_dw_wrapper = object()
+    set_current_microbatch(chunk, 3)
+
+    for leaf_index, leaf in enumerate(leaves):
+        assert leaf.current_microbatch == 3
+        assert GraphableMegatronModule._te_cuda_graph_replay(leaf, torch.ones(1)) == (leaf_index, 1)
+
+    for leaf in (leaves[0], leaves[1], leaves[3]):
+        leaf.backward_dw_wrapper = FakeBackwardDWWrapper()
+        GraphableMegatronModule.set_te_cuda_graph_backward_dw_wrapper(leaf)
+        leaf.backward_dw_wrapper.callable()
+
+    assert stack.current_microbatch == 101
+    assert selections == [
+        ("forward", (0, 1)),
+        ("forward", (1, 1)),
+        ("forward", (2, 1)),
+        ("forward", (3, 1)),
+        ("backward_dw", (0, 1)),
+        ("backward_dw", (1, 1)),
+        ("backward_dw", (3, 1)),
+    ]
+    assert not hasattr(leaves[2], "backward_dw_wrapper")
 
 
 def _make_simple_module(config):

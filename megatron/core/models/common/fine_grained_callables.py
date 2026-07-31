@@ -26,6 +26,39 @@ from megatron.core.transformer.multi_token_prediction import (
 from megatron.core.transformer.transformer_layer import TransformerLayer, make_viewless_tensor
 
 
+def _get_fine_grained_mtp_inner_layer(layer: MultiTokenPredictionLayer) -> TransformerLayer:
+    """Return the only Hybrid MTP shape representable by the five-slot schedule."""
+
+    inner_layer = layer.mtp_model_layer
+
+    # HybridStack imports CUDA-graph helpers while it is initialized, so keep
+    # this type check local to avoid a model/common/hybrid import cycle.
+    from megatron.core.models.hybrid.hybrid_block import HybridStack
+
+    if not isinstance(inner_layer, HybridStack):
+        return inner_layer
+
+    hybrid_layers = tuple(inner_layer.layers)
+    hybrid_layer_types = ", ".join(type(inner).__name__ for inner in hybrid_layers) or "none"
+    error = (
+        "fine-grained MTP overlap requires exactly one graphable inner MoE "
+        "TransformerLayer; the HybridStack contains "
+        f"{len(hybrid_layers)} inner layer(s): {hybrid_layer_types}"
+    )
+    if len(hybrid_layers) != 1:
+        raise ValueError(error)
+
+    candidate = hybrid_layers[0]
+    if not isinstance(candidate, TransformerLayer) or not isinstance(candidate.mlp, MoELayer):
+        raise ValueError(error)
+
+    from megatron.core.transformer.cuda_graphs import _layer_is_graphable
+
+    if not _layer_is_graphable(candidate, layer.config):
+        raise ValueError(error)
+    return candidate
+
+
 def build_mtp_layer_callables(layer):
     """Callables for multi-token prediction layer nodes.
 
@@ -34,8 +67,9 @@ def build_mtp_layer_callables(layer):
     depths) steps.
     """
 
-    forward_funcs, backward_dw = build_layer_callables(layer.mtp_model_layer)
-    is_moe, _ = get_layer_moe_metadata(layer.mtp_model_layer)
+    inner_layer = _get_fine_grained_mtp_inner_layer(layer)
+    forward_funcs, backward_dw = build_layer_callables(inner_layer)
+    is_moe, _ = get_layer_moe_metadata(inner_layer)
     (pre_dispatch_forward, dispatch_forward, mlp_forward, combine_forward, _) = forward_funcs
     assert is_moe, "MTP layer in a2a overlap only supports MoE layer for now."
 
@@ -146,7 +180,7 @@ def get_layer_moe_metadata(layer):
     """Return ``(is_moe, num_local_experts)`` for schedule-node construction."""
 
     if isinstance(layer, MultiTokenPredictionLayer):
-        return get_layer_moe_metadata(layer.mtp_model_layer)
+        return get_layer_moe_metadata(_get_fine_grained_mtp_inner_layer(layer))
     if isinstance(layer, TransformerLayer):
         is_moe = isinstance(layer.mlp, MoELayer)
         num_local_experts = layer.mlp.num_local_experts if is_moe else None

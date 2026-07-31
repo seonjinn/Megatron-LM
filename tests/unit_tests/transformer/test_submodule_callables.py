@@ -225,6 +225,137 @@ def test_pre_dispatch_forwards_padding_mask_to_moe_route():
     assert mlp.preprocess_routing_map is routing_map
 
 
+def _make_task7_fine_grained_transformer_leaf(*, moe):
+    from megatron.core.transformer.identity_op import IdentityOp
+    from megatron.core.transformer.mlp import MLP
+
+    layer = TransformerLayer.__new__(TransformerLayer)
+    torch.nn.Module.__init__(layer)
+    layer.self_attention = IdentityOp()
+    layer.cross_attention = IdentityOp()
+    if moe:
+        layer.mlp = MoELayer.__new__(MoELayer)
+        torch.nn.Module.__init__(layer.mlp)
+        layer.mlp.num_local_experts = 2
+    else:
+        layer.mlp = MLP.__new__(MLP)
+        torch.nn.Module.__init__(layer.mlp)
+    return layer
+
+
+def _make_task7_fine_grained_mamba_leaf():
+    from megatron.core.ssm.mamba_layer import MambaLayer
+
+    layer = MambaLayer.__new__(MambaLayer)
+    torch.nn.Module.__init__(layer)
+    return layer
+
+
+def _make_task7_hybrid_stack(layers):
+    from megatron.core.models.hybrid.hybrid_block import HybridStack
+
+    stack = HybridStack.__new__(HybridStack)
+    torch.nn.Module.__init__(stack)
+    stack.layers = torch.nn.ModuleList(layers)
+    return stack
+
+
+def _make_task7_mtp_wrapper(inner_layer):
+    from types import SimpleNamespace
+
+    from megatron.core.transformer.multi_token_prediction import MultiTokenPredictionLayer
+
+    layer = MultiTokenPredictionLayer.__new__(MultiTokenPredictionLayer)
+    torch.nn.Module.__init__(layer)
+    layer.config = SimpleNamespace(sequence_parallel=False, cuda_graph_modules=[])
+    layer.mtp_model_layer = inner_layer
+    layer.eh_proj = torch.nn.Identity()
+    return layer
+
+
+def _task7_fake_transformer_callables(layer, calls):
+    calls.append(layer)
+
+    def passthrough(_node, hidden_states, *_args, **_kwargs):
+        return hidden_states
+
+    return (
+        [passthrough, passthrough, passthrough, passthrough, None],
+        {"pre_dispatch_computation": object()},
+    )
+
+
+def test_one_moe_leaf_hybrid_mtp_preserves_legacy_five_callable_contract(monkeypatch):
+    moe = _make_task7_fine_grained_transformer_leaf(moe=True)
+    mtp = _make_task7_mtp_wrapper(_make_task7_hybrid_stack([moe]))
+    calls = []
+    monkeypatch.setattr(
+        common_callables,
+        "build_transformer_layer_callables",
+        lambda layer: _task7_fake_transformer_callables(layer, calls),
+    )
+
+    forward_funcs, backward_dw = build_layer_callables(mtp)
+
+    assert calls == [moe]
+    assert len(forward_funcs) == 5
+    assert all(callable(func) for func in forward_funcs)
+    assert common_callables.get_layer_moe_metadata(mtp) == (True, 2)
+    assert backward_dw["pre_dispatch_computation"][1] is mtp.eh_proj
+
+
+@pytest.mark.parametrize("case", ["zero", "dense", "mamba", "mixed", "multi"])
+def test_unsupported_hybrid_mtp_fails_before_callable_schedule(monkeypatch, case):
+    if case == "zero":
+        layers = []
+    elif case == "dense":
+        layers = [_make_task7_fine_grained_transformer_leaf(moe=False)]
+    elif case == "mamba":
+        layers = [_make_task7_fine_grained_mamba_leaf()]
+    elif case == "mixed":
+        layers = [
+            _make_task7_fine_grained_transformer_leaf(moe=True),
+            _make_task7_fine_grained_mamba_leaf(),
+        ]
+    else:
+        layers = [
+            _make_task7_fine_grained_transformer_leaf(moe=True),
+            _make_task7_fine_grained_transformer_leaf(moe=True),
+        ]
+    mtp = _make_task7_mtp_wrapper(_make_task7_hybrid_stack(layers))
+    calls = []
+    monkeypatch.setattr(
+        common_callables,
+        "build_transformer_layer_callables",
+        lambda layer: _task7_fake_transformer_callables(layer, calls),
+    )
+
+    with pytest.raises(ValueError, match="fine-grained MTP.*exactly one.*MoE Transformer"):
+        build_layer_callables(mtp)
+
+    assert calls == []
+
+
+def test_single_transformer_gpt_mtp_and_non_mtp_callable_dispatch_regressions(monkeypatch):
+    moe = _make_task7_fine_grained_transformer_leaf(moe=True)
+    mtp = _make_task7_mtp_wrapper(moe)
+    calls = []
+    monkeypatch.setattr(
+        common_callables,
+        "build_transformer_layer_callables",
+        lambda layer: _task7_fake_transformer_callables(layer, calls),
+    )
+
+    mtp_forward_funcs, _ = build_layer_callables(mtp)
+    direct_forward_funcs, _ = build_layer_callables(moe)
+
+    assert len(mtp_forward_funcs) == 5
+    assert direct_forward_funcs[-1] is None
+    assert calls == [moe, moe]
+    assert common_callables.get_layer_moe_metadata(mtp) == (True, 2)
+    assert common_callables.get_layer_moe_metadata(moe) == (True, 2)
+
+
 class TestTransformerLayerSubmoduleCallables:
     """
     Test class for transformer layer submodule callables.

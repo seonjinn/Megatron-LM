@@ -15,7 +15,7 @@ from enum import Enum
 from functools import partial
 from itertools import chain, zip_longest
 from math import ceil
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterator, List
 
 import torch
 from torch.utils._pytree import tree_map as tree_map_pyt
@@ -2089,6 +2089,48 @@ def _layer_is_graphable(layer, config):
     return False
 
 
+def _iter_graphable_te_leaves(
+    module: object, config: TransformerConfig
+) -> Iterator[GraphableMegatronModule]:
+    """Yield the graphable leaves represented by one TE graph module."""
+
+    # HybridStack imports this module for layer annotations, so importing it at
+    # module scope would create a transformer/hybrid import cycle.
+    from megatron.core.models.hybrid.hybrid_block import HybridStack
+
+    candidates = module.layers if isinstance(module, HybridStack) else (module,)
+    for layer in candidates:
+        if _layer_is_graphable(layer, config):
+            yield layer
+
+
+@dataclass(frozen=True)
+class _GraphableTELayerDescriptor:
+    """One ordered graph leaf and the MTP wrapper that owns its static inputs."""
+
+    layer: GraphableMegatronModule
+    is_mtp: bool
+    mtp_owner: object | None
+
+
+def _iter_graphable_te_layer_descriptors(
+    chunk_with_decoder: object, config: TransformerConfig
+) -> Iterator[_GraphableTELayerDescriptor]:
+    """Yield decoder leaves, followed by MTP-depth and HybridStack leaf order."""
+
+    for layer in chunk_with_decoder.decoder.layers:
+        if _layer_is_graphable(layer, config):
+            yield _GraphableTELayerDescriptor(layer=layer, is_mtp=False, mtp_owner=None)
+
+    mtp = getattr(chunk_with_decoder, "mtp", None)
+    for mtp_owner in getattr(mtp, "layers", ()):
+        assert hasattr(
+            mtp_owner, "mtp_model_layer"
+        ), f"MTP layer {mtp_owner} must have 'mtp_model_layer' attribute"
+        for layer in _iter_graphable_te_leaves(mtp_owner.mtp_model_layer, config):
+            yield _GraphableTELayerDescriptor(layer=layer, is_mtp=True, mtp_owner=mtp_owner)
+
+
 def _add_packed_seq_params_to_te_cuda_graph_sample_kwargs(
     layer, sample_kwargs, sample_packed_seq_params
 ):
@@ -2224,18 +2266,23 @@ class TECudaGraphHelper:
     def _discover_layers(self):
         """Discover captureable layers from the model and populate internal data structures."""
         self.chunks_with_decoder = []
+        self.layer_descriptors_per_chunk = []
+        self.flattened_layer_descriptors = []
         self.num_layers_per_chunk = []
         self.callables_per_chunk = []
         self.callables_per_chunk_is_mtp = []
         self.flattened_callables = []
         self.flattened_callables_is_mtp = []
         for chunk_number, model_chunk in enumerate(self.model):
+            chunk_with_decoder = None
+            descriptors = ()
+            num_decoder_layers = 0
+            num_mtp_layers = 0
             try:
                 chunk_with_decoder = get_attr_wrapped_model(
                     model_chunk, 'decoder', allow_none=False, return_model_obj=True
                 )
             except RuntimeError:
-                num_graphable_layers = 0
                 log_on_each_pipeline_stage(
                     logger=logger,
                     tp_group=self.tp_group,
@@ -2248,22 +2295,9 @@ class TECudaGraphHelper:
                 num_decoder_layers = len(chunk_with_decoder.decoder.layers)
                 if hasattr(chunk_with_decoder, 'mtp'):
                     num_mtp_layers = len(chunk_with_decoder.mtp.layers)
-                else:
-                    num_mtp_layers = 0
-                num_graphable_layers = 0
-                callables, callables_is_mtp = [], []
-                for layer_number in range(num_decoder_layers):
-                    layer = chunk_with_decoder.decoder.layers[layer_number]
-                    if _layer_is_graphable(layer, self.config):
-                        num_graphable_layers += 1
-                        callables.append(layer)
-                        callables_is_mtp.append(False)
-                for layer_number in range(num_mtp_layers):
-                    layer = chunk_with_decoder.mtp.layers[layer_number].mtp_model_layer
-                    if _layer_is_graphable(layer, self.config):
-                        num_graphable_layers += 1
-                        callables.append(layer)
-                        callables_is_mtp.append(True)
+                descriptors = tuple(
+                    _iter_graphable_te_layer_descriptors(chunk_with_decoder, self.config)
+                )
                 log_on_each_pipeline_stage(
                     logger=logger,
                     tp_group=self.tp_group,
@@ -2271,21 +2305,19 @@ class TECudaGraphHelper:
                     level=logging.DEBUG,
                     msg=f'Rank {torch.distributed.get_rank()}: '
                     f'{num_decoder_layers} decoder layers and {num_mtp_layers} MTP layers in '
-                    f'model chunk {chunk_number}. {num_graphable_layers} graphable layers.',
+                    f'model chunk {chunk_number}. {len(descriptors)} graphable layers.',
                 )
-            finally:
-                if num_graphable_layers > 0:
-                    self.chunks_with_decoder.append(chunk_with_decoder)
-                    self.num_layers_per_chunk.append(num_graphable_layers)
-                    self.callables_per_chunk.append(callables)
-                    self.callables_per_chunk_is_mtp.append(callables_is_mtp)
-                    self.flattened_callables.extend(callables)
-                    self.flattened_callables_is_mtp.extend(callables_is_mtp)
-                else:
-                    self.chunks_with_decoder.append(None)
-                    self.num_layers_per_chunk.append(0)
-                    self.callables_per_chunk.append([])
-                    self.callables_per_chunk_is_mtp.append([])
+
+            callables = [descriptor.layer for descriptor in descriptors]
+            callables_is_mtp = [descriptor.is_mtp for descriptor in descriptors]
+            self.chunks_with_decoder.append(chunk_with_decoder if descriptors else None)
+            self.layer_descriptors_per_chunk.append(descriptors)
+            self.flattened_layer_descriptors.extend(descriptors)
+            self.num_layers_per_chunk.append(len(descriptors))
+            self.callables_per_chunk.append(callables)
+            self.callables_per_chunk_is_mtp.append(callables_is_mtp)
+            self.flattened_callables.extend(callables)
+            self.flattened_callables_is_mtp.extend(callables_is_mtp)
 
         log_on_each_pipeline_stage(
             logger=logger,
@@ -2380,13 +2412,16 @@ class TECudaGraphHelper:
 
         rotary_pos_emb_cache = {}
 
-        def _get_layer_static_inputs(layer, chunk_of_the_layer):
+        def _get_layer_static_inputs(layer, model_chunk_idx):
             """
             Get the static inputs for a layer.
             """
-            assert layer in chunk_of_the_layer.decoder.layers or any(
-                layer is mtp_layer.mtp_model_layer for mtp_layer in chunk_of_the_layer.mtp.layers
-            ), "Layer is not in the chunk"
+            descriptors = self.layer_descriptors_per_chunk[model_chunk_idx]
+            assert any(
+                descriptor.layer is layer for descriptor in descriptors
+            ), "Layer is not in the chunk's ordered TE graph descriptors"
+            chunk_of_the_layer = self.chunks_with_decoder[model_chunk_idx]
+            assert chunk_of_the_layer is not None
 
             def get_rotary_pos_emb(transformer_module, transformer_input):
                 if (
@@ -2515,9 +2550,7 @@ class TECudaGraphHelper:
                         # know the input signature of this layer. Generate the static inputs, and
                         # cache the signature.
                         sample_args[per_callable_fwd_idx], sample_kwargs[per_callable_fwd_idx] = (
-                            _get_layer_static_inputs(
-                                layer, self.chunks_with_decoder[model_chunk_idx]
-                            )
+                            _get_layer_static_inputs(layer, model_chunk_idx)
                         )
                         sample_args_keys = tuple(
                             (t.shape, t.dtype, t.layout) for t in sample_args[per_callable_fwd_idx]
@@ -2558,9 +2591,7 @@ class TECudaGraphHelper:
                         if chunk_id_list:
                             model_chunk_idx = chunk_id_list[idx][0]
                         sample_args[per_callable_fwd_idx], sample_kwargs[per_callable_fwd_idx] = (
-                            _get_layer_static_inputs(
-                                layer, self.chunks_with_decoder[model_chunk_idx]
-                            )
+                            _get_layer_static_inputs(layer, model_chunk_idx)
                         )
                         model_chunk_idx = abs(chunk_id) - 1
                 fwd_idx[model_chunk_idx] += 1
@@ -2720,12 +2751,12 @@ class TECudaGraphHelper:
                         from megatron.core.fp8_utils import is_first_last_bf16_layer
 
                         fp8_enabled = []
-                        for callable, is_mtp in zip(
-                            self.flattened_callables, self.flattened_callables_is_mtp
-                        ):
+                        for descriptor in self.flattened_layer_descriptors:
+                            callable = descriptor.layer
                             fp8_enabled.append(
                                 not is_first_last_bf16_layer(
-                                    self.config, callable.layer_number - 1 if not is_mtp else -1
+                                    self.config,
+                                    callable.layer_number - 1 if not descriptor.is_mtp else -1,
                                 )
                             )
                         return tuple(fp8_enabled)
@@ -2966,10 +2997,10 @@ class TECudaGraphHelper:
         Set CUDA Graph manual hooks for the modules that contain direct parameters and
         are covered by cudagraphs.
         """
-        for chunk_number, layers in enumerate(self.callables_per_chunk):
+        for chunk_number, descriptors in enumerate(self.layer_descriptors_per_chunk):
             model_chunk = self.model[chunk_number]
-            for layer in layers:
-                layer.setup_manual_hooks(model_chunk._make_forward_pre_hook)
+            for descriptor in descriptors:
+                descriptor.layer.setup_manual_hooks(model_chunk._make_forward_pre_hook)
         if self._compatibility_bank_manager is not None and self._compatibility_bank is not None:
             self._compatibility_bank_manager.refresh_manual_hooks(self._compatibility_bank)
 
@@ -3145,14 +3176,10 @@ def set_current_microbatch(model, microbatch_id):
     except RuntimeError:
         decoder_exists = False
     if decoder_exists and model_with_decoder is not None:
-        for layer in model_with_decoder.decoder.layers:
-            layer.current_microbatch = microbatch_id
-        if hasattr(model_with_decoder, 'mtp'):
-            for layer in model_with_decoder.mtp.layers:
-                assert hasattr(
-                    layer, 'mtp_model_layer'
-                ), f"MTP layer {layer} must have 'mtp_model_layer' attribute"
-                layer.mtp_model_layer.current_microbatch = microbatch_id
+        for descriptor in _iter_graphable_te_layer_descriptors(
+            model_with_decoder, model_with_decoder.config
+        ):
+            descriptor.layer.current_microbatch = microbatch_id
 
     # Also set current_microbatch on vision encoder layers so that
     # _te_cuda_graph_replay selects the correct graph index. Without this,
@@ -3305,7 +3332,13 @@ class VisionTECudaGraphHelper(TECudaGraphHelper):
                         vision_layers.append(layer)
 
         if vision_layers:
+            descriptors = tuple(
+                _GraphableTELayerDescriptor(layer=layer, is_mtp=False, mtp_owner=None)
+                for layer in vision_layers
+            )
             self.chunks_with_decoder = [self.vision_model]
+            self.layer_descriptors_per_chunk = [descriptors]
+            self.flattened_layer_descriptors = list(descriptors)
             self.num_layers_per_chunk = [len(vision_layers)]
             self.callables_per_chunk = [vision_layers]
             self.callables_per_chunk_is_mtp = [[False] * len(vision_layers)]
@@ -3318,6 +3351,8 @@ class VisionTECudaGraphHelper(TECudaGraphHelper):
                     'CUDA graphs will not be captured for vision encoder.'
                 )
             self.chunks_with_decoder = [None]
+            self.layer_descriptors_per_chunk = [()]
+            self.flattened_layer_descriptors = []
             self.num_layers_per_chunk = [0]
             self.callables_per_chunk = [[]]
             self.callables_per_chunk_is_mtp = [[]]
