@@ -4,9 +4,11 @@ import torch
 
 from megatron.core.models.common import fine_grained_callables as common_callables
 from megatron.core.models.common.fine_grained_callables import build_layer_callables
+from megatron.core.models.gpt import fine_grained_callables as gpt_callables
 from megatron.core.models.gpt.gpt_layer_specs import (
     get_gpt_layer_with_transformer_engine_submodules,
 )
+from megatron.core.transformer.moe.moe_layer import MoELayer
 from megatron.core.transformer.transformer_layer import TransformerLayer
 from megatron.core.utils import is_te_min_version
 from tests.unit_tests.a2a_overlap.utils import (
@@ -165,6 +167,62 @@ def test_mtp_pre_dispatch_applies_hybrid_empty_decoder_final_norm(monkeypatch):
 
     torch.testing.assert_close(output, expected)
     torch.testing.assert_close(node.chunk_state.mtp_hidden_states[0], expected)
+
+
+def test_pre_dispatch_forwards_padding_mask_to_moe_route():
+    """The split MoE route receives the structural padding mask by identity."""
+
+    routing_map = torch.tensor([[True, False], [False, True], [True, False]])
+
+    class RecordingMoELayer(MoELayer):
+        def __init__(self):
+            torch.nn.Module.__init__(self)
+            self.use_shared_expert = False
+            self.shared_expert_overlap = False
+            self.route_padding_mask = None
+            self.preprocess_routing_map = None
+
+        def shared_experts_compute(self, hidden_states):
+            return None
+
+        def route(self, hidden_states, padding_mask=None):
+            self.route_padding_mask = padding_mask
+            probs = torch.ones_like(routing_map, dtype=hidden_states.dtype)
+            return probs, routing_map
+
+        def preprocess(self, hidden_states, probs, received_routing_map):
+            self.preprocess_routing_map = received_routing_map
+            return hidden_states, probs
+
+    mlp = RecordingMoELayer()
+    layer = DummyState()
+    layer.config = DummyState()
+    layer.config.moe_token_dispatcher_type = "alltoall"
+    layer.config.moe_flex_dispatcher_backend = None
+    layer.mlp = mlp
+    layer.offload_mlp_norm = False
+    layer.recompute_pre_mlp_layernorm = False
+    layer.pre_mlp_layernorm = torch.nn.Identity()
+    layer._forward_attention = lambda **kwargs: (kwargs["hidden_states"], None)
+    layer._forward_mlp = lambda *_args, **_kwargs: None
+
+    def init_backward_dw_wrapper():
+        layer.backward_dw_wrapper = object()
+
+    layer.init_backward_dw_wrapper = init_backward_dw_wrapper
+
+    padding_mask = torch.tensor([[False], [True], [False]])
+    node = DummyNode()
+    node.layer_state = DummyState()
+    node.chunk_state = DummyState()
+    node.chunk_state.padding_mask = padding_mask
+    hidden_states = torch.arange(12, dtype=torch.float32).reshape(3, 1, 4)
+
+    forward_funcs, _ = gpt_callables.build_transformer_layer_callables(layer)
+    forward_funcs[0](node, hidden_states)
+
+    assert mlp.route_padding_mask is padding_mask
+    assert mlp.preprocess_routing_map is routing_map
 
 
 class TestTransformerLayerSubmoduleCallables:
