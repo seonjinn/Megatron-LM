@@ -6,7 +6,3 @@ splits:
     blend_epochized:
     - path: sft_combined_omni_16k_vlm_only_webbrowse_dss/sft_combined_omni_16k_vlm_only.yaml
       repetitions: 1
-    - path: sft_combined_omni_16k_vlm_only_webbrowse_dss/data_yamls/perplexity_holotron_distilled_molmoweb_v2.yaml
-      repetitions: 0.5
-    - path: sft_combined_omni_16k_vlm_only_webbrowse_dss/data_yamls/holotron_a3_webarea_success_momoweb_energon.yaml
-      repetitions: 0.5

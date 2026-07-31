@@ -1,0 +1,15 @@
+# Combined 512K VLM SFT mix using the de-duplicated DSS recipes.
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+    - path: sft_combined_omni_16k_vlm_only_webbrowse_no_ultra_text_dss.yaml
+      repetitions: 1
+    - path: sft_49k_video_dss.yaml
+      repetitions: 1
+    - path: mmlongbench_ultra_long_filtered_best_dss.yaml
+      repetitions: 1
+    # Unpacked text/materialized soumyes+saffron source.
+    - path: /lustre/fsw/portfolios/llmservice/users/guyueh/sft-data/omni_sft_pipeline/sft_mix_v10_closethink_unmask_512k_unpacked_sources_soumyes_saffron_materialized_text40/openai_messages.unpacked_sources.soumyes_saffron_materialized_text40.yaml
+      repetitions: 1

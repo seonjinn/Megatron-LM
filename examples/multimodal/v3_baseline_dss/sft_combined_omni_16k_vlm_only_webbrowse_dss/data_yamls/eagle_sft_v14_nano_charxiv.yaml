@@ -2790,7 +2790,9 @@ splits:
           category: Grounding
         aux:
           media_source: filesystem+dss://EgoObjects@v0
-      - repetitions: 0.5
+      # This DSS path previously appeared twice at 0.5. Keep the metadata that
+      # matches the clean dataset path and preserve its combined weight.
+      - repetitions: 1
         path: dss://refcoco+_pointing_llava_train_sft_clean@v0
         subflavors:
           name: refcoco+_pointing_llava_train_sft_clean
@@ -2798,17 +2800,6 @@ splits:
           data_augment: true
           length: 77013
           orig_length: 77013
-          category: Grounding_Pointing
-        aux:
-          media_source: filesystem+dss://coco_images@v0/train2014
-      - repetitions: 0.5
-        path: dss://refcoco+_pointing_llava_train_sft_clean@v0
-        subflavors:
-          name: refcoco+_pointing_llava_train_sft_reason
-          cook: conversation
-          data_augment: true
-          length: 66704
-          orig_length: 66704
           category: Grounding_Pointing
         aux:
           media_source: filesystem+dss://coco_images@v0/train2014
