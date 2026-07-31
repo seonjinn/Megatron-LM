@@ -1464,8 +1464,32 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                     hidden_states, residual = hidden_states
 
                 shared_expert_output = self.mlp.shared_experts_compute(hidden_states)
-                probs, routing_map = self.mlp.route(hidden_states)
-                hidden_states, probs = self.mlp.preprocess(hidden_states, probs, routing_map)
+                router_hidden_states, router_padding_mask, moe_unflatten_mbs = (
+                    self._maybe_unflatten_for_moe(hidden_states, padding_mask, packed_seq_params)
+                )
+                if router_padding_mask is not None:
+                    router_padding_mask = router_padding_mask.transpose(0, 1).contiguous()
+                probs, routing_map = self.mlp.route(
+                    router_hidden_states, padding_mask=router_padding_mask
+                )
+                if moe_unflatten_mbs is not None:
+                    tokens_per_sample = packed_seq_params.tokens_per_sample
+                    router_hidden_states = self._maybe_reflatten_from_moe(
+                        router_hidden_states, packed_seq_params, moe_unflatten_mbs
+                    )
+                    probs = (
+                        probs.view(tokens_per_sample, moe_unflatten_mbs, -1)
+                        .transpose(0, 1)
+                        .reshape(moe_unflatten_mbs * tokens_per_sample, -1)
+                        .contiguous()
+                    )
+                    routing_map = (
+                        routing_map.view(tokens_per_sample, moe_unflatten_mbs, -1)
+                        .transpose(0, 1)
+                        .reshape(moe_unflatten_mbs * tokens_per_sample, -1)
+                        .contiguous()
+                    )
+                hidden_states, probs = self.mlp.preprocess(router_hidden_states, probs, routing_map)
                 return residual, hidden_states, probs, shared_expert_output
 
             # CUDA Graph does not capture the MLP/MoE part at all.

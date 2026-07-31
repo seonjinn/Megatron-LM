@@ -20,6 +20,7 @@ from megatron.core.transformer.cuda_graphs import (
 from megatron.core.transformer.enums import CudaGraphModule
 from megatron.core.transformer.identity_op import IdentityOp
 from megatron.core.transformer.module import GraphableMegatronModule
+from megatron.core.transformer.moe.moe_layer import MoELayer
 from megatron.core.transformer.transformer_layer import TransformerLayer
 
 
@@ -115,6 +116,103 @@ def test_attention_only_replay_passes_packed_metadata_and_padding_mask_to_mlp(mo
     assert rebuilt.tokens_per_sample == 4
     assert rebuilt.pad_between_seqs is True
     assert torch.equal(rebuilt.cu_seqlens_q, packed_seq_params.cu_seqlens_q)
+
+
+def test_attention_only_replay_overlap_routes_local_packed_batch_and_restores_shape(
+    monkeypatch,
+) -> None:
+    observed = {}
+
+    class _RouterObserver(torch.nn.Module):
+        def forward(self, hidden_states, padding_mask=None):
+            observed["route_hidden_states"] = hidden_states.clone()
+            observed["route_padding_mask"] = padding_mask.clone()
+            token_ids = hidden_states.reshape(-1)
+            probs = torch.stack((token_ids, token_ids + 100), dim=-1)
+            routing_map = torch.stack(
+                (token_ids.remainder(2) == 0, token_ids.remainder(2) == 1), dim=-1
+            )
+            return probs, routing_map
+
+    class _TokenDispatcher:
+        def __init__(self):
+            self.hidden_shape = None
+
+        def combine_postprocess(self, output):
+            return output.view(self.hidden_shape)
+
+    class _OverlapMlp(torch.nn.Module):
+        route = MoELayer.route
+        postprocess = MoELayer.postprocess
+
+        def __init__(self):
+            super().__init__()
+            self.config = SimpleNamespace(cuda_graph_impl="none", moe_latent_size=None)
+            self.router = _RouterObserver()
+            self.token_dispatcher = _TokenDispatcher()
+
+        def shared_experts_compute(self, hidden_states):
+            observed["shared_expert_shape"] = hidden_states.shape
+            return hidden_states
+
+        def preprocess(self, hidden_states, probs, routing_map):
+            observed["preprocess_hidden_states"] = hidden_states.clone()
+            observed["preprocess_probs"] = probs.clone()
+            observed["preprocess_routing_map"] = routing_map.clone()
+            self.token_dispatcher.hidden_shape = hidden_states.shape
+            return hidden_states.reshape(-1, hidden_states.shape[-1]), probs
+
+    layer = TransformerLayer.__new__(TransformerLayer)
+    torch.nn.Module.__init__(layer)
+    layer.config = SimpleNamespace(
+        cuda_graph_modules=[CudaGraphModule.attn],
+        delay_offload_until_cuda_graph=False,
+        overlap_moe_expert_parallel_comm=True,
+    )
+    layer.is_moe_layer = True
+    layer.pre_mlp_layernorm = IdentityOp()
+    layer.mlp = _OverlapMlp()
+    packed_seq_params = PackedSeqParams(
+        qkv_format="thd",
+        cu_seqlens_q=torch.IntTensor([0, 4, 8]),
+        cu_seqlens_kv=torch.IntTensor([0, 4, 8]),
+        max_seqlen_q=4,
+        max_seqlen_kv=4,
+        tokens_per_sample=4,
+        pad_between_seqs=True,
+    )
+    tensor_kwargs, static_metadata = split_packed_seq_params_for_cuda_graph(packed_seq_params)
+    layer._set_te_cuda_graph_packed_seq_params_static_metadata(static_metadata, tensor_kwargs)
+    padding_mask = torch.tensor([[False, False, False, True], [False, False, True, True]])
+    hidden_states = torch.arange(8, dtype=torch.float32).reshape(8, 1, 1)
+    monkeypatch.setattr(
+        GraphableMegatronModule,
+        "_te_cuda_graph_replay",
+        lambda self, *args, **kwargs: (hidden_states,),
+    )
+
+    residual, local_tokens, probs, shared_expert_output = layer._te_cuda_graph_replay_impl(
+        (), {"padding_mask": padding_mask, **tensor_kwargs}, None
+    )
+
+    expected_route_hidden_states = torch.tensor(
+        [[[0.0], [4.0]], [[1.0], [5.0]], [[2.0], [6.0]], [[3.0], [7.0]]]
+    )
+    assert torch.equal(observed["route_hidden_states"], expected_route_hidden_states)
+    assert torch.equal(observed["route_padding_mask"], padding_mask.transpose(0, 1))
+    assert torch.equal(observed["preprocess_hidden_states"], hidden_states)
+    assert torch.equal(observed["preprocess_probs"][:, 0], torch.arange(8, dtype=torch.float32))
+    assert torch.equal(observed["preprocess_routing_map"][:, 0], torch.arange(8).remainder(2) == 0)
+    assert observed["shared_expert_shape"] == hidden_states.shape
+    assert residual.shape == hidden_states.shape
+    assert shared_expert_output.shape == hidden_states.shape
+    assert local_tokens.shape == (8, 1)
+    assert probs.shape == (8, 2)
+    assert layer.mlp.token_dispatcher.hidden_shape == hidden_states.shape
+
+    combined = layer.mlp.postprocess(local_tokens, shared_expert_output)
+    output = combined + residual
+    assert torch.equal(output, hidden_states * 3)
 
 
 def test_packed_graph_static_metadata_keeps_pad_between_seqs() -> None:
