@@ -5,6 +5,7 @@ from types import MethodType, SimpleNamespace
 import pytest
 import torch
 
+from megatron.core.extensions.transformer_engine import TEDotProductAttention
 from megatron.core.packed_seq_params import (
     CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX,
     PACKED_SEQ_PARAMS_CUDA_GRAPH_STATIC_FIELDS,
@@ -14,13 +15,15 @@ from megatron.core.packed_seq_params import (
     has_packed_seq_params_cuda_graph_kwargs,
     split_packed_seq_params_for_cuda_graph,
 )
+from megatron.core.process_groups_config import ProcessGroupCollection
 from megatron.core.transformer.cuda_graphs import (
     _add_packed_seq_params_to_te_cuda_graph_sample_kwargs,
 )
-from megatron.core.transformer.enums import CudaGraphModule
+from megatron.core.transformer.enums import AttnMaskType, CudaGraphModule
 from megatron.core.transformer.identity_op import IdentityOp
 from megatron.core.transformer.module import GraphableMegatronModule
 from megatron.core.transformer.moe.moe_layer import MoELayer
+from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.transformer.transformer_layer import TransformerLayer
 
 
@@ -47,6 +50,58 @@ class _TransformerLayerCudaGraphStub:
         TransformerLayer._flatten_te_cuda_graph_packed_seq_params
     )
     _te_cuda_graph_capture = TransformerLayer._te_cuda_graph_capture
+
+
+def test_te_attention_does_not_forward_seq_aux_loss_packed_fields(monkeypatch) -> None:
+    forwarded_kwargs: dict[str, object] = {}
+    te_attention_base = TEDotProductAttention.__mro__[1]
+
+    monkeypatch.setenv("NVTE_APPLY_QK_LAYER_SCALING", "0")
+    monkeypatch.setattr(te_attention_base, "__init__", lambda self, **kwargs: None)
+
+    def capture_forward(self, query, key, value, attention_mask, **kwargs):
+        forwarded_kwargs.update(kwargs)
+        return query
+
+    monkeypatch.setattr(te_attention_base, "forward", capture_forward)
+    config = TransformerConfig(
+        num_layers=1,
+        hidden_size=8,
+        num_attention_heads=2,
+        use_cpu_initialization=True,
+    )
+    attention = TEDotProductAttention(
+        config=config,
+        layer_number=1,
+        attn_mask_type=AttnMaskType.causal,
+        attention_type="self",
+        pg_collection=ProcessGroupCollection(tp=None, cp=None),
+    )
+    query = torch.ones(8, 1, 2, 4)
+    packed_seq_params = PackedSeqParams(
+        qkv_format="thd",
+        cu_seqlens_q=torch.tensor([0, 3, 8], dtype=torch.int32),
+        cu_seqlens_kv=torch.tensor([0, 3, 8], dtype=torch.int32),
+        seq_aux_loss_sample_ids=torch.tensor(
+            [0, 0, 0, 1, 1, 1, 1, 1], dtype=torch.int64
+        ),
+        seq_aux_loss_num_samples=torch.tensor(2, dtype=torch.int64),
+        seq_aux_loss_max_samples=3,
+    )
+
+    result = attention.forward(
+        query,
+        query,
+        query,
+        attention_mask=None,
+        attn_mask_type=AttnMaskType.causal,
+        packed_seq_params=packed_seq_params,
+    )
+
+    assert result is query
+    assert "seq_aux_loss_sample_ids" not in forwarded_kwargs
+    assert "seq_aux_loss_num_samples" not in forwarded_kwargs
+    assert "seq_aux_loss_max_samples" not in forwarded_kwargs
 
 
 def test_transformer_layer_thd_static_inputs_include_local_padding_mask(monkeypatch) -> None:

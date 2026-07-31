@@ -1,6 +1,7 @@
 # Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
 from __future__ import annotations
 
+from copy import copy
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Mapping, MutableMapping
 
@@ -14,6 +15,7 @@ if TYPE_CHECKING:
 
 CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX = "_packed_seq_params_"
 MAMBA_CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX = "_mamba_packed_seq_params_"
+MOE_CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX = "_moe_packed_seq_params_"
 
 PACKED_SEQ_PARAMS_CUDA_GRAPH_TENSOR_FIELDS = (
     "cu_seqlens_q",
@@ -41,6 +43,15 @@ MAMBA_PACKED_SEQ_PARAMS_CUDA_GRAPH_STATIC_FIELDS = (
     "total_tokens",
 )
 
+MOE_PACKED_SEQ_PARAMS_CUDA_GRAPH_TENSOR_FIELDS = (
+    "seq_aux_loss_sample_ids",
+    "seq_aux_loss_num_samples",
+)
+
+MOE_PACKED_SEQ_PARAMS_CUDA_GRAPH_STATIC_FIELDS = (
+    "seq_aux_loss_max_samples",
+)
+
 
 @dataclass
 class PackedSeqParams:
@@ -61,6 +72,9 @@ class PackedSeqParams:
     total_tokens: int = None
     seq_idx: Tensor = None
     tokens_per_sample: int = None
+    seq_aux_loss_sample_ids: Tensor | None = None
+    seq_aux_loss_num_samples: Tensor | None = None
+    seq_aux_loss_max_samples: int | None = None
     pad_between_seqs: bool = None
 
     def __post_init__(self):
@@ -319,6 +333,9 @@ def pad_sequence_for_thd(
         cp_group=packed_seq_params.cp_group,
         total_tokens=None if max_num_seqs is not None else target_len,
         tokens_per_sample=packed_seq_params.tokens_per_sample,
+        seq_aux_loss_sample_ids=packed_seq_params.seq_aux_loss_sample_ids,
+        seq_aux_loss_num_samples=packed_seq_params.seq_aux_loss_num_samples,
+        seq_aux_loss_max_samples=packed_seq_params.seq_aux_loss_max_samples,
         pad_between_seqs=True if max_num_seqs is not None else packed_seq_params.pad_between_seqs,
     )
     padding_mask = (
@@ -331,6 +348,55 @@ def _cuda_graph_packed_seq_params_key(field_name: str, prefix: str) -> str:
     return f"{prefix}{field_name}"
 
 
+def _validate_cuda_graph_packed_seq_params_tensor_field(
+    field_name: str, value: object, flattened_key: str | None = None
+) -> Tensor | None:
+    """Validate one dynamic CUDA graph field."""
+    if value is None or isinstance(value, Tensor):
+        return value
+    field = flattened_key or f"PackedSeqParams.{field_name}"
+    raise TypeError(
+        f"{field} must be a Tensor or None for CUDA graphs, got {type(value).__name__}."
+    )
+
+
+def _validate_cuda_graph_packed_seq_params_static_field(
+    field_name: str, value: object
+) -> None:
+    """Validate one static CUDA graph field."""
+    if isinstance(value, Tensor):
+        raise TypeError(
+            f"PackedSeqParams.{field_name} is static CUDA graph metadata and must not be a Tensor."
+        )
+
+
+def _split_packed_seq_params_fields_for_cuda_graph(
+    packed_seq_params: PackedSeqParams | None,
+    tensor_fields: tuple[str, ...],
+    static_fields: tuple[str, ...],
+    prefix: str,
+) -> tuple[dict[str, Tensor | None], dict[str, object]]:
+    """Split selected ``PackedSeqParams`` fields into dynamic and static graph inputs."""
+    if packed_seq_params is None:
+        return {}, {}
+
+    tensor_kwargs = {}
+    for field_name in tensor_fields:
+        value = _validate_cuda_graph_packed_seq_params_tensor_field(
+            field_name, getattr(packed_seq_params, field_name)
+        )
+        if value is not None:
+            tensor_kwargs[_cuda_graph_packed_seq_params_key(field_name, prefix)] = value
+
+    static_metadata = {}
+    for field_name in static_fields:
+        value = getattr(packed_seq_params, field_name)
+        _validate_cuda_graph_packed_seq_params_static_field(field_name, value)
+        static_metadata[field_name] = value
+
+    return tensor_kwargs, static_metadata
+
+
 def split_packed_seq_params_for_cuda_graph(
     packed_seq_params: PackedSeqParams | None, prefix: str = CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX
 ) -> tuple[dict[str, Tensor | None], dict[str, object]]:
@@ -341,31 +407,12 @@ def split_packed_seq_params_for_cuda_graph(
     format and max sequence lengths. This helper keeps only the fields TE attention consumes;
     Mamba-only fields such as ``total_tokens`` and ``seq_idx`` stay outside this graph boundary.
     """
-    if packed_seq_params is None:
-        return {}, {}
-
-    tensor_kwargs = {}
-    for field_name in PACKED_SEQ_PARAMS_CUDA_GRAPH_TENSOR_FIELDS:
-        value = getattr(packed_seq_params, field_name)
-        if value is not None and not isinstance(value, Tensor):
-            raise TypeError(
-                f"PackedSeqParams.{field_name} must be a Tensor or None for CUDA graphs, "
-                f"got {type(value).__name__}."
-            )
-        if value is not None:
-            tensor_kwargs[_cuda_graph_packed_seq_params_key(field_name, prefix)] = value
-
-    static_metadata = {}
-    for field_name in PACKED_SEQ_PARAMS_CUDA_GRAPH_STATIC_FIELDS:
-        value = getattr(packed_seq_params, field_name)
-        if isinstance(value, Tensor):
-            raise TypeError(
-                f"PackedSeqParams.{field_name} is static CUDA graph metadata and must not be "
-                "a Tensor."
-            )
-        static_metadata[field_name] = value
-
-    return tensor_kwargs, static_metadata
+    return _split_packed_seq_params_fields_for_cuda_graph(
+        packed_seq_params,
+        PACKED_SEQ_PARAMS_CUDA_GRAPH_TENSOR_FIELDS,
+        PACKED_SEQ_PARAMS_CUDA_GRAPH_STATIC_FIELDS,
+        prefix,
+    )
 
 
 def split_mamba_packed_seq_params_for_cuda_graph(
@@ -373,31 +420,25 @@ def split_mamba_packed_seq_params_for_cuda_graph(
     prefix: str = MAMBA_CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX,
 ) -> tuple[dict[str, Tensor | None], dict[str, object]]:
     """Split Mamba-only ``PackedSeqParams`` graph inputs from static metadata."""
-    if packed_seq_params is None:
-        return {}, {}
+    return _split_packed_seq_params_fields_for_cuda_graph(
+        packed_seq_params,
+        MAMBA_PACKED_SEQ_PARAMS_CUDA_GRAPH_TENSOR_FIELDS,
+        MAMBA_PACKED_SEQ_PARAMS_CUDA_GRAPH_STATIC_FIELDS,
+        prefix,
+    )
 
-    tensor_kwargs = {}
-    for field_name in MAMBA_PACKED_SEQ_PARAMS_CUDA_GRAPH_TENSOR_FIELDS:
-        value = getattr(packed_seq_params, field_name)
-        if value is not None and not isinstance(value, Tensor):
-            raise TypeError(
-                f"PackedSeqParams.{field_name} must be a Tensor or None for Mamba CUDA graphs, "
-                f"got {type(value).__name__}."
-            )
-        if value is not None:
-            tensor_kwargs[_cuda_graph_packed_seq_params_key(field_name, prefix)] = value
 
-    static_metadata = {}
-    for field_name in MAMBA_PACKED_SEQ_PARAMS_CUDA_GRAPH_STATIC_FIELDS:
-        value = getattr(packed_seq_params, field_name)
-        if isinstance(value, Tensor):
-            raise TypeError(
-                f"PackedSeqParams.{field_name} is static Mamba CUDA graph metadata and must not "
-                "be a Tensor."
-            )
-        static_metadata[field_name] = value
-
-    return tensor_kwargs, static_metadata
+def split_moe_packed_seq_params_for_cuda_graph(
+    packed_seq_params: PackedSeqParams | None,
+    prefix: str = MOE_CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX,
+) -> tuple[dict[str, Tensor | None], dict[str, object]]:
+    """Split MoE-only ``PackedSeqParams`` graph inputs from static metadata."""
+    return _split_packed_seq_params_fields_for_cuda_graph(
+        packed_seq_params,
+        MOE_PACKED_SEQ_PARAMS_CUDA_GRAPH_TENSOR_FIELDS,
+        MOE_PACKED_SEQ_PARAMS_CUDA_GRAPH_STATIC_FIELDS,
+        prefix,
+    )
 
 
 def has_packed_seq_params_cuda_graph_kwargs(
@@ -408,6 +449,42 @@ def has_packed_seq_params_cuda_graph_kwargs(
         _cuda_graph_packed_seq_params_key(field_name, prefix) in kwargs
         for field_name in PACKED_SEQ_PARAMS_CUDA_GRAPH_TENSOR_FIELDS
     )
+
+
+def _extract_packed_seq_params_cuda_graph_fields(
+    kwargs: MutableMapping[str, object],
+    static_metadata: Mapping[str, object] | None,
+    tensor_fields: tuple[str, ...],
+    static_fields: tuple[str, ...] | None,
+    prefix: str,
+    remove_from_kwargs: bool,
+) -> tuple[dict[str, object], bool]:
+    """Extract and validate selected flattened graph fields."""
+    if static_fields is None:
+        packed_seq_params_kwargs = dict(static_metadata or {})
+        found_field = bool(packed_seq_params_kwargs)
+    else:
+        packed_seq_params_kwargs = {}
+        found_field = False
+        for field_name in static_fields:
+            if static_metadata is None or field_name not in static_metadata:
+                continue
+            found_field = True
+            value = static_metadata[field_name]
+            _validate_cuda_graph_packed_seq_params_static_field(field_name, value)
+            packed_seq_params_kwargs[field_name] = value
+
+    for field_name in tensor_fields:
+        key = _cuda_graph_packed_seq_params_key(field_name, prefix)
+        if key not in kwargs:
+            continue
+        found_field = True
+        value = _validate_cuda_graph_packed_seq_params_tensor_field(
+            field_name, kwargs.pop(key) if remove_from_kwargs else kwargs[key], key
+        )
+        packed_seq_params_kwargs[field_name] = value
+
+    return packed_seq_params_kwargs, found_field
 
 
 def build_packed_seq_params_from_cuda_graph_kwargs(
@@ -425,22 +502,49 @@ def build_packed_seq_params_from_cuda_graph_kwargs(
         prefix: Prefix used for flattened Tensor fields.
         remove_from_kwargs: Whether to pop consumed flattened fields from ``kwargs``.
     """
-    packed_seq_params_kwargs = dict(static_metadata or {})
-    found_tensor_field = False
-    for field_name in PACKED_SEQ_PARAMS_CUDA_GRAPH_TENSOR_FIELDS:
-        key = _cuda_graph_packed_seq_params_key(field_name, prefix)
-        if key not in kwargs:
-            continue
-        found_tensor_field = True
-        value = kwargs.pop(key) if remove_from_kwargs else kwargs[key]
-        if value is not None and not isinstance(value, Tensor):
-            raise TypeError(
-                f"Flattened PackedSeqParams field {key} must be a Tensor or None, "
-                f"got {type(value).__name__}."
-            )
-        packed_seq_params_kwargs[field_name] = value
-
-    if not packed_seq_params_kwargs and not found_tensor_field:
+    packed_seq_params_kwargs, found_field = _extract_packed_seq_params_cuda_graph_fields(
+        kwargs,
+        static_metadata,
+        PACKED_SEQ_PARAMS_CUDA_GRAPH_TENSOR_FIELDS,
+        None,
+        prefix,
+        remove_from_kwargs,
+    )
+    if not found_field:
         return None
 
     return PackedSeqParams(**packed_seq_params_kwargs)
+
+
+def merge_moe_packed_seq_params_from_cuda_graph_kwargs(
+    packed_seq_params: PackedSeqParams | None,
+    kwargs: MutableMapping[str, object],
+    static_metadata: Mapping[str, object] | None,
+    prefix: str = MOE_CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX,
+    remove_from_kwargs: bool = True,
+) -> PackedSeqParams | None:
+    """Merge flattened MoE graph fields into a new ``PackedSeqParams`` object.
+
+    Args:
+        packed_seq_params: Existing packed-sequence metadata to shallow-copy, or None.
+        kwargs: Graph kwargs that may contain flattened MoE Tensor fields.
+        static_metadata: MoE non-Tensor metadata produced by
+            :func:`split_moe_packed_seq_params_for_cuda_graph`.
+        prefix: Prefix used for flattened MoE Tensor fields.
+        remove_from_kwargs: Whether to pop consumed flattened fields from ``kwargs``.
+    """
+    updates, found_field = _extract_packed_seq_params_cuda_graph_fields(
+        kwargs,
+        static_metadata,
+        MOE_PACKED_SEQ_PARAMS_CUDA_GRAPH_TENSOR_FIELDS,
+        MOE_PACKED_SEQ_PARAMS_CUDA_GRAPH_STATIC_FIELDS,
+        prefix,
+        remove_from_kwargs,
+    )
+    if packed_seq_params is None and not found_field:
+        return None
+
+    merged = copy(packed_seq_params) if packed_seq_params is not None else PackedSeqParams()
+    for field_name, value in updates.items():
+        setattr(merged, field_name, value)
+    return merged
