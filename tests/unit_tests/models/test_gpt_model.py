@@ -4,6 +4,7 @@ import inspect
 import logging
 import os
 from datetime import timedelta
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -31,6 +32,121 @@ from megatron.core.transformer.module import Float16Module
 from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.utils import is_fa_min_version, is_te_min_version
 from tests.unit_tests.test_utilities import Utils
+
+
+def test_preprocess_scatters_padding_mask_on_sequence_parallel_pipeline_stage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = SimpleNamespace(
+        config=SimpleNamespace(sequence_parallel=True),
+        pg_collection=SimpleNamespace(tp=object()),
+        position_embedding_type="none",
+        pre_process=False,
+    )
+    padding_mask = torch.tensor(
+        [[False, True, False, True, False, True], [True, False, True, False, True, False]]
+    )
+    scatter_inputs: list[torch.Tensor] = []
+
+    def scatter_to_sequence_parallel_region(tensor: torch.Tensor) -> torch.Tensor:
+        scatter_inputs.append(tensor)
+        return tensor[:3]
+
+    monkeypatch.setattr(
+        "megatron.core.models.gpt.gpt_model." "tensor_parallel.scatter_to_sequence_parallel_region",
+        scatter_to_sequence_parallel_region,
+    )
+
+    preprocessed = GPTModel._preprocess(
+        model,
+        input_ids=torch.ones(2, 6, dtype=torch.long),
+        position_ids=torch.arange(6).repeat(2, 1),
+        padding_mask=padding_mask,
+    )
+
+    observed_mask = preprocessed[5]
+    hidden_states = torch.zeros(3, 2, 8)
+    routing_map = torch.zeros(6, 4, dtype=torch.bool)
+    assert preprocessed[0] is None
+    assert len(scatter_inputs) == 1
+    assert torch.equal(scatter_inputs[0], padding_mask.transpose(0, 1))
+    assert scatter_inputs[0].is_contiguous()
+    assert observed_mask.shape == (2, 3)
+    assert observed_mask.numel() == routing_map.shape[0]
+    assert observed_mask.numel() == hidden_states.shape[0] * hidden_states.shape[1]
+
+
+def test_preprocess_preserves_padding_mask_without_sequence_parallel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = SimpleNamespace(
+        config=SimpleNamespace(sequence_parallel=False),
+        pg_collection=SimpleNamespace(tp=object()),
+        position_embedding_type="none",
+        pre_process=False,
+    )
+    padding_mask = torch.tensor([[False, True, False, True]])
+
+    def unexpected_scatter(tensor: torch.Tensor) -> torch.Tensor:
+        pytest.fail("sequence-parallel scatter must stay disabled")
+
+    monkeypatch.setattr(
+        "megatron.core.models.gpt.gpt_model." "tensor_parallel.scatter_to_sequence_parallel_region",
+        unexpected_scatter,
+    )
+
+    preprocessed = GPTModel._preprocess(
+        model,
+        input_ids=torch.ones(1, 4, dtype=torch.long),
+        position_ids=torch.arange(4).unsqueeze(0),
+        padding_mask=padding_mask,
+    )
+
+    assert preprocessed[5] is padding_mask
+
+
+def test_preprocess_preserves_embedding_stage_sequence_parallel_behavior(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hidden_states = torch.zeros(3, 2, 8)
+
+    class Embedding:
+        scatter_to_sequence_parallel = True
+
+        def __call__(self, *, input_ids: torch.Tensor, position_ids: torch.Tensor) -> torch.Tensor:
+            return hidden_states
+
+    model = SimpleNamespace(
+        config=SimpleNamespace(sequence_parallel=True),
+        embedding=Embedding(),
+        pg_collection=SimpleNamespace(tp=object()),
+        position_embedding_type="none",
+        pre_process=True,
+    )
+    padding_mask = torch.tensor(
+        [[False, True, False, True, False, True], [True, False, True, False, True, False]]
+    )
+    scatter_inputs: list[torch.Tensor] = []
+
+    def scatter_to_sequence_parallel_region(tensor: torch.Tensor) -> torch.Tensor:
+        scatter_inputs.append(tensor)
+        return tensor[:3]
+
+    monkeypatch.setattr(
+        "megatron.core.models.gpt.gpt_model." "tensor_parallel.scatter_to_sequence_parallel_region",
+        scatter_to_sequence_parallel_region,
+    )
+
+    preprocessed = GPTModel._preprocess(
+        model,
+        input_ids=torch.ones(2, 6, dtype=torch.long),
+        position_ids=torch.arange(6).repeat(2, 1),
+        padding_mask=padding_mask,
+    )
+
+    assert preprocessed[0] is hidden_states
+    assert len(scatter_inputs) == 1
+    assert torch.equal(preprocessed[5], padding_mask[:, :3])
 
 
 class TestGPTModel:
