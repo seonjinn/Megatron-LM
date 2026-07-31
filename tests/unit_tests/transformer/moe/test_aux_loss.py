@@ -15,6 +15,7 @@ from megatron.core.tensor_parallel.random import (
     model_parallel_cuda_manual_seed,
 )
 from megatron.core.transformer.moe.moe_utils import (
+    MoEAuxLossAutoScaler,
     clear_aux_losses_tracker,
     get_default_pg_collection,
     get_moe_layer_wise_logging_tracker,
@@ -1312,6 +1313,11 @@ class TestFixedCapacitySeqAuxLossValidation:
         router = _new_cpu_fixed_capacity_router()
         logits = torch.randn((2, 1, router.config.num_moe_experts), requires_grad=True)
         assertions = []
+        monkeypatch.setattr(
+            MoEAuxLossAutoScaler,
+            "main_loss_backward_scale",
+            torch.tensor(1.0, device=logits.device),
+        )
 
         def record_assertion(condition, message):
             assertions.append((condition.detach().clone(), message))
