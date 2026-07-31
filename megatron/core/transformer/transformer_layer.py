@@ -51,6 +51,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _is_te_cuda_graph_stream_capturing() -> bool:
+    """Return whether this forward is the committed TE stream capture, not warmup."""
+
+    return torch.cuda.is_current_stream_capturing()
+
+
 def _get_offloading_interface():
     """Get the offloading interface for fine-grained activation offloading."""
     # Keep this import lazy to avoid a transformer/pipeline circular import.
@@ -1155,6 +1161,78 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                 submodules += [self.mlp.shared_experts]
         return submodules
 
+    def te_cuda_graph_bank_schema(self) -> tuple[str, ...]:
+        """Return the ordered MoE Tensor-output schema restored before continuation."""
+
+        if not self.is_moe_layer:
+            return ()
+        return tuple(self.mlp.token_dispatcher.valid_cudagraph_attrs or ())
+
+    def _resolve_te_cuda_graph_dispatcher_attr(self, attr_name: str) -> tuple[Any, str]:
+        parent_name, _, leaf_name = attr_name.rpartition('.')
+        owner = self.mlp.token_dispatcher
+        for component in parent_name.split('.') if parent_name else ():
+            owner = getattr(owner, component)
+        return owner, leaf_name or attr_name
+
+    def assert_te_cuda_graph_bank_drained(self) -> None:
+        """Reject graph-bank transitions while per-forward MoE work remains live."""
+
+        if not self.is_moe_layer:
+            return
+        tensor_store = self.mlp.cudagraph_tensor_store
+        for field_name in ("hidden_states", "probs", "routing_map", "shared_expert_output"):
+            if getattr(tensor_store, field_name) is not None:
+                raise RuntimeError(f"MoE CUDA graph tensor store field {field_name} is still live")
+
+        token_dispatcher = self.mlp.token_dispatcher
+        for owner_name, owner in (
+            ("token dispatcher", token_dispatcher),
+            ("Flex communication manager", getattr(token_dispatcher, "_comm_manager", None)),
+        ):
+            if owner is None:
+                continue
+            for field_name in ("handle", "_buffer"):
+                if getattr(owner, field_name, None) is not None:
+                    raise RuntimeError(f"MoE {owner_name} field {field_name} is still live")
+
+        experts = getattr(self.mlp, "experts", None)
+        activation_checkpoint = getattr(experts, "activation_checkpoint", None)
+        if activation_checkpoint is not None:
+            for field_name in ("ctx", "outputs"):
+                if getattr(activation_checkpoint, field_name, None) is not None:
+                    raise RuntimeError(
+                        f"MoE activation checkpoint field {field_name} is still live"
+                    )
+
+        if self.config.moe_shared_expert_overlap:
+            from megatron.core.transformer.moe.shared_experts import SharedExpertState
+
+            shared_experts = self.mlp.shared_experts
+            if shared_experts._overlap_state is not SharedExpertState.IDLE:
+                raise RuntimeError(
+                    "MoE shared expert overlap state is not IDLE at the graph bank boundary"
+                )
+            for field_name in (
+                "cached_fc1_input",
+                "cached_fc2_input",
+                "cached_fc2_output",
+                "cached_output",
+                "gate_score",
+            ):
+                if getattr(shared_experts, field_name, None) is not None:
+                    raise RuntimeError(f"MoE shared expert field {field_name} is still live")
+
+    def clear_te_cuda_graph_bank_references(self) -> None:
+        """Clear active per-forward Tensor leaves only after the model is drained."""
+
+        if not self.is_moe_layer:
+            return
+        for attr_name in self.te_cuda_graph_bank_schema():
+            owner, leaf_name = self._resolve_te_cuda_graph_dispatcher_attr(attr_name)
+            setattr(owner, leaf_name, None)
+        self.mlp.cudagraph_tensor_store.clear()
+
     def _set_te_cuda_graph_packed_seq_params_static_metadata(
         self, static_metadata, tensor_kwarg_names=None
     ):
@@ -1267,6 +1345,18 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
            attribute can be set to control the scope of the CUDA graph.
         2. If context is None, it cannot be returned as output.
         """
+        capture_index = None
+        capture_count = getattr(self, "_te_cuda_graph_capture_num_microbatches", None)
+        if capture_count is not None and _is_te_cuda_graph_stream_capturing():
+            capture_cursor = self._te_cuda_graph_capture_cursor
+            if capture_cursor >= capture_count:
+                raise RuntimeError(
+                    "TE stream capture invoked more committed forwards than the graph bank "
+                    f"owns ({capture_cursor + 1} > {capture_count})."
+                )
+            capture_index = capture_cursor
+            self._te_cuda_graph_capture_cursor = capture_cursor + 1
+
         # Record the backward event on cuda graph stream in backward pass.
         # This is to ensure the main stream waits for computing on cuda graph stream to complete,
         # and overlaps with the H2D transfer on reload stream.
@@ -1309,6 +1399,15 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             hidden_states = self._forward_mlp(
                 hidden_states, padding_mask=padding_mask, packed_seq_params=packed_seq_params
             )
+            if (
+                capture_index is not None
+                and self.is_moe_layer
+                and CudaGraphModule.moe_preprocess in self.config.cuda_graph_modules
+                and isinstance(hidden_states, (list, tuple))
+            ):
+                self._record_te_cuda_graph_dispatcher_replay_state(
+                    capture_index, hidden_states[-1], hidden_states[0]
+                )
         if not isinstance(hidden_states, list) and not isinstance(hidden_states, tuple):
             cuda_graph_outputs = [hidden_states]
         else:
@@ -1359,7 +1458,7 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
 
     def _te_cuda_graph_replay_impl(self, args, kwargs, context):
         """Implementation of _te_cuda_graph_replay, separated for replay mode cleanup."""
-        graph_index = getattr(self, 'current_microbatch', 0) % len(self.cuda_graphs)
+        graph_index = self._te_cuda_graph_replay_index(getattr(self, 'current_microbatch', 0))
         eager_mlp_kwargs = dict(kwargs)
         self._rebuild_te_cuda_graph_packed_seq_params(eager_mlp_kwargs)
         padding_mask = eager_mlp_kwargs.get("padding_mask")
@@ -1707,12 +1806,40 @@ class MoETransformerLayer(TransformerLayer):
     def _validate_te_cuda_graph_dispatcher_replay_capability(self) -> None:
         """Fail before capture when Task 5 cannot validate the eager continuation."""
 
-        self.mlp.token_dispatcher.validate_cudagraph_replay_capability()
+        from megatron.core.transformer.moe.token_dispatcher import (
+            MoEAlltoAllTokenDispatcher,
+            MoEFlexTokenDispatcher,
+        )
+
         if self.config.overlap_moe_expert_parallel_comm:
             raise RuntimeError(
                 "overlap_moe_expert_parallel_comm is unsupported with partial TE MoE preprocess "
                 "CUDA graphs until the fine-grained schedule carries exact-index dispatcher "
                 "state through combine and validates the continuation there."
+            )
+        dispatcher = self.mlp.token_dispatcher
+        dispatcher.validate_cudagraph_replay_capability()
+        if (
+            isinstance(dispatcher, MoEAlltoAllTokenDispatcher)
+            and not dispatcher.drop_and_pad
+            and (
+                dispatcher.moe_expert_capacity_factor is not None
+                or getattr(dispatcher.config, "moe_router_padding_for_quantization", False)
+            )
+        ):
+            raise RuntimeError(
+                "Partial TE MoE preprocess capture cannot snapshot the routing-dependent CUDA "
+                "scalar num_out_tokens during actual stream capture. Use dropless static output "
+                "geometry or drop-and-pad fixed capacity."
+            )
+        if (
+            isinstance(dispatcher, MoEFlexTokenDispatcher)
+            and dispatcher.config.moe_flex_dispatcher_backend == "hybridep"
+            and dispatcher.config.moe_hybridep_pad_uneven_dispatch_inputs
+        ):
+            raise RuntimeError(
+                "Partial TE HybridEP uneven-input padding requires a GPU-to-host maximum-token "
+                "read during metadata setup and is unsafe inside actual stream capture."
             )
 
     def _record_te_cuda_graph_dispatcher_replay_state(

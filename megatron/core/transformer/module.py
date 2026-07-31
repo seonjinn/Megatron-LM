@@ -229,10 +229,18 @@ class GraphableMegatronModule(MegatronModule):
         """
         CUDA Graph backward weight gradient computation for current layer.
         """
-        cg_index = microbatch_idx % len(self.cuda_graphs)
+        cg_index = GraphableMegatronModule._te_cuda_graph_replay_index(self, microbatch_idx)
         if not hasattr(self.cuda_graphs[cg_index], 'backward_dw'):
             return
         self.cuda_graphs[cg_index].backward_dw()
+
+    def _te_cuda_graph_replay_index(self, microbatch_idx: int) -> int:
+        """Validate an active bank before selecting its exact graph index."""
+
+        replay_guard = getattr(self, "_te_cuda_graph_bank_replay_guard", None)
+        if replay_guard is not None:
+            return replay_guard(self, self.cuda_graphs, microbatch_idx)
+        return microbatch_idx % len(self.cuda_graphs)
 
     def get_layer_static_inputs(self, seq_length, micro_batch_size):
         """
@@ -309,7 +317,9 @@ class GraphableMegatronModule(MegatronModule):
                 v, torch.Tensor
             ), "CUDA graph accepts only Tensor inputs."
 
-        cg_index = getattr(self, 'current_microbatch', 0) % len(self.cuda_graphs)
+        cg_index = GraphableMegatronModule._te_cuda_graph_replay_index(
+            self, getattr(self, 'current_microbatch', 0)
+        )
         cudagraph_args, cudagraph_kwargs = self._get_te_cuda_graph_replay_args(*args, **kwargs)
 
         for hook, hook_args in self.cuda_graph_manual_hooks:
