@@ -468,7 +468,11 @@ class GraphableMegatronModule(MegatronModule):
             from megatron.core.transformer.cuda_graphs import is_graph_capturing, is_graph_warmup
 
             if not is_graph_capturing() and not is_graph_warmup():
-                execution_counter.record_eligible_call()
+                from megatron.core.transformer.te_cuda_graph_bank import (
+                    _record_te_cuda_graph_eligible_call,
+                )
+
+                _record_te_cuda_graph_eligible_call(self)
         if self._should_call_local_cudagraph(*args, **kwargs):
             return self.cudagraph_manager(self, args, kwargs)
         elif self._should_call_te_cudagraph(*args, **kwargs):

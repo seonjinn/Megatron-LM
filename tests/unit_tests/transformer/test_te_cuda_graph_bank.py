@@ -743,6 +743,24 @@ def test_execution_counter_snapshot_delta_and_owner_validation() -> None:
     manager.close()
 
 
+def test_execution_counter_endpoints_ignore_instance_snapshot_override() -> None:
+    layer = _FakeLayer("layer")
+    manager = _make_manager([layer])
+    tracker = layer._te_cuda_graph_execution_counter
+    start = manager.snapshot_execution_counters()
+
+    tracker.record_eligible_call()
+    tracker.record_graph_call()
+    tracker.snapshot = lambda: dataclasses.replace(start, eligible_calls=777, graph_calls=888)
+
+    current = manager.snapshot_execution_counters()
+    delta = manager.execution_counter_delta(start)
+    assert (current.eligible_calls, current.graph_calls) == (1, 1)
+    assert (delta.eligible_calls, delta.graph_calls) == (1, 1)
+
+    manager.close()
+
+
 def test_execution_counter_owner_collision_and_identity_safe_close() -> None:
     layer = _FakeLayer("layer")
     manager = _make_manager([layer])

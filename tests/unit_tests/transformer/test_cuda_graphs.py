@@ -1894,6 +1894,35 @@ def test_execution_counter_counts_three_eager_warmups_and_checkpoint_recompute(m
     manager.close()
 
 
+def test_execution_counter_eligible_call_ignores_instance_method_override(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    import megatron.core.transformer.cuda_graphs as cuda_graphs
+    from megatron.core.transformer.module import GraphableMegatronModule
+    from megatron.core.transformer.te_cuda_graph_bank import TECudaGraphBankManager
+
+    monkeypatch.setattr(cuda_graphs, "is_graph_capturing", lambda: False)
+    monkeypatch.setattr(cuda_graphs, "is_graph_warmup", lambda: False)
+    layer = _make_task7_transformer_leaf(moe=False)
+    layer.config = SimpleNamespace(cuda_graph_impl="transformer_engine")
+    layer.training = True
+    layer.forward = lambda hidden_states: hidden_states
+    manager = TECudaGraphBankManager(
+        [layer],
+        graph_reset_supported=False,
+        synchronize=lambda: None,
+        runtime_num_microbatches=lambda: 1,
+    )
+    tracker = layer._te_cuda_graph_execution_counter
+    tracker.record_eligible_call = lambda: None
+    hidden_states = torch.ones(1)
+
+    assert GraphableMegatronModule.__call__(layer, hidden_states) is hidden_states
+    assert manager.snapshot_execution_counters().eligible_calls == 1
+
+    manager.close()
+
+
 def test_transformer_execution_counter_counts_once_after_double_guard_and_preparation(
     monkeypatch,
 ) -> None:
@@ -1919,6 +1948,8 @@ def test_transformer_execution_counter_counts_once_after_double_guard_and_prepar
     layer._get_te_cuda_graph_replay_args = lambda *args, **kwargs: (args, kwargs)
     graph = _Task9ReplayGraph(tuple_output=True)
     manager, bank, runtime = _make_task9_active_bank(layer, graph)
+    tracker = layer._te_cuda_graph_execution_counter
+    tracker.record_graph_call = lambda: None
     guard_calls = 0
     assert_replay_ready = manager._assert_replay_ready
 
@@ -1974,6 +2005,48 @@ def test_transformer_execution_counter_counts_once_after_double_guard_and_prepar
     assert (snapshot.eligible_calls, snapshot.graph_calls) == (5, 2)
 
     graph.fail_launch = False
+    bank.reset()
+    manager.close()
+
+
+def test_active_te_replay_uses_unbound_prelaunch_validation_after_graph_swap(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    import megatron.core.transformer.cuda_graphs as cuda_graphs
+
+    monkeypatch.setattr(cuda_graphs, "is_graph_capturing", lambda: False)
+    monkeypatch.setattr(cuda_graphs, "is_graph_warmup", lambda: False)
+    layer = _make_task7_transformer_leaf(moe=False)
+    layer.config = SimpleNamespace(
+        cuda_graph_impl="transformer_engine",
+        cuda_graph_modules=[],
+        delay_offload_until_cuda_graph=False,
+        overlap_moe_expert_parallel_comm=False,
+        fine_grained_activation_offloading=False,
+    )
+    layer.training = True
+    layer.current_microbatch = 0
+    layer._flatten_te_cuda_graph_packed_seq_params = lambda _kwargs: None
+    layer._rebuild_te_cuda_graph_packed_seq_params = lambda _kwargs: None
+    canonical_graph = _Task9ReplayGraph(tuple_output=True)
+    foreign_graph = _Task9ReplayGraph(tuple_output=True)
+    manager, bank, _ = _make_task9_active_bank(layer, canonical_graph)
+
+    def swap_selected_graph(*args, **kwargs):
+        layer.cuda_graphs[0] = foreign_graph
+        return args, kwargs
+
+    layer._get_te_cuda_graph_replay_args = swap_selected_graph
+    manager._validate_graph_call = lambda *_args, **_kwargs: None
+    hidden_states = torch.ones(1)
+
+    with pytest.raises(RuntimeError, match="selected callable changed before launch"):
+        layer(hidden_states)
+    assert manager.snapshot_execution_counters().graph_calls == 0
+    assert canonical_graph.calls == 0
+    assert foreign_graph.calls == 0
+
+    layer.cuda_graphs[0] = canonical_graph
     bank.reset()
     manager.close()
 
