@@ -179,7 +179,7 @@ class TestMultiTokenPredictionLayer:
         input_ids = torch.tensor([[1, 2, 3, 4, 0, 0], [5, 6, 7, 0, 0, 0]], dtype=torch.int64)
         position_ids = torch.arange(seq_len, dtype=torch.int64).repeat(batch_size, 1)
         padding_mask = torch.tensor(
-            [[True, True, True, True, False, False], [True, True, True, False, False, False]]
+            [[False, False, False, False, True, True], [False, False, False, True, True, True]]
         )
         hidden_states = torch.randn(seq_len, batch_size, config.hidden_size)
 
@@ -199,11 +199,16 @@ class TestMultiTokenPredictionLayer:
 
         expected_input_ids, _ = roll_tensor(input_ids, shifts=-1, dims=-1)
         expected_position_ids, _ = roll_tensor(position_ids, shifts=-1, dims=-1)
-        expected_padding_mask, _ = roll_tensor(padding_mask, shifts=-1, dims=-1)
+        expected_padding_mask = torch.tensor(
+            [[False, False, False, True, True, True], [False, False, True, True, True, True]]
+        )
 
         assert torch.equal(rolled_input_ids, expected_input_ids)
         assert torch.equal(rolled_position_ids, expected_position_ids)
         assert torch.equal(rolled_padding_mask, expected_padding_mask)
+        assert rolled_padding_mask[:, -1].all()
+        assert rolled_padding_mask[0, 3:].all()
+        assert rolled_padding_mask[1, 2:].all()
 
     def test_forward_propagates_rolled_padding_mask(self, monkeypatch):
         """Test forward passes rolled padding_mask to transformer path."""
@@ -216,7 +221,7 @@ class TestMultiTokenPredictionLayer:
         batch_size = 2
         input_ids = torch.tensor([[1, 2, 3, 0], [4, 5, 0, 0]], dtype=torch.int64)
         position_ids = torch.arange(seq_len, dtype=torch.int64).repeat(batch_size, 1)
-        padding_mask = torch.tensor([[True, True, True, False], [True, True, False, False]])
+        padding_mask = torch.tensor([[False, False, False, True], [False, False, True, True]])
         hidden_states = torch.randn(seq_len, batch_size, config.hidden_size)
         attention_mask = torch.ones((batch_size, 1, seq_len, seq_len), dtype=torch.bool)
         seen = {}
@@ -258,9 +263,103 @@ class TestMultiTokenPredictionLayer:
             embedding=fake_embedding,
         )
 
-        expected_padding_mask, _ = roll_tensor(padding_mask, shifts=-1, dims=-1)
+        expected_padding_mask = torch.tensor(
+            [[False, False, True, True], [False, True, True, True]]
+        )
         assert torch.equal(seen["padding_mask"], expected_padding_mask)
         assert torch.equal(returned_padding_mask, expected_padding_mask)
+        assert seen["padding_mask"][:, -1].all()
+
+    def test_get_embeddings_keeps_packed_segment_and_capacity_tails_padded(self) -> None:
+        """Packed MTP shifts cannot revive per-segment or fixed-capacity padding."""
+
+        torch.manual_seed(_SEED)
+        config, mtp_block_spec = self._create_config_and_mtp_block_spec(tp=1, cp=1)
+        mtp_layer = MultiTokenPredictionBlock(config=config, spec=mtp_block_spec).layers[0]
+        sample_ids = torch.tensor(
+            [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0],
+            dtype=torch.int64,
+        )
+        num_samples = torch.tensor(2, dtype=torch.int64)
+        original_sample_ids = sample_ids.clone()
+        original_num_samples = num_samples.clone()
+        packed_seq_params = PackedSeqParams(
+            qkv_format="thd",
+            cu_seqlens_q=torch.tensor([0, 4, 12, 16], dtype=torch.int32),
+            cu_seqlens_kv=torch.tensor([0, 4, 12, 16], dtype=torch.int32),
+            seq_aux_loss_sample_ids=sample_ids,
+            seq_aux_loss_num_samples=num_samples,
+            seq_aux_loss_max_samples=3,
+        )
+        padding_mask = torch.tensor(
+            [
+                [
+                    False,
+                    False,
+                    False,
+                    True,
+                    False,
+                    False,
+                    False,
+                    False,
+                    False,
+                    True,
+                    True,
+                    True,
+                    True,
+                    True,
+                    True,
+                    True,
+                ]
+            ]
+        )
+        hidden_states = torch.randn(16, 1, config.hidden_size)
+
+        def fake_embedding(
+            input_ids: torch.Tensor, position_ids: torch.Tensor
+        ) -> torch.Tensor:
+            return torch.zeros(16, 1, config.hidden_size, dtype=hidden_states.dtype)
+
+        _, _, rolled_padding_mask, _, _ = mtp_layer._get_embeddings(
+            input_ids=torch.arange(16, dtype=torch.int64).unsqueeze(0),
+            position_ids=torch.arange(16, dtype=torch.int64).unsqueeze(0),
+            padding_mask=padding_mask,
+            embedding=fake_embedding,
+            hidden_states=hidden_states,
+            packed_seq_params=packed_seq_params,
+        )
+
+        expected_padding_mask = torch.tensor(
+            [
+                [
+                    False,
+                    False,
+                    True,
+                    True,
+                    False,
+                    False,
+                    False,
+                    False,
+                    True,
+                    True,
+                    True,
+                    True,
+                    True,
+                    True,
+                    True,
+                    True,
+                ]
+            ]
+        )
+        assert torch.equal(rolled_padding_mask, expected_padding_mask)
+        assert rolled_padding_mask[0, 2:4].all()
+        assert rolled_padding_mask[0, 8:12].all()
+        assert rolled_padding_mask[0, 12:].all()
+        assert packed_seq_params.seq_aux_loss_sample_ids is sample_ids
+        assert packed_seq_params.seq_aux_loss_num_samples is num_samples
+        assert packed_seq_params.seq_aux_loss_max_samples == 3
+        assert torch.equal(sample_ids, original_sample_ids)
+        assert torch.equal(num_samples, original_num_samples)
 
     @pytest.mark.parametrize("mtp_depth", (1, 2))
     def test_normal_mtp_rolls_token_inputs_without_rolling_packed_ownership(
@@ -287,6 +386,7 @@ class TestMultiTokenPredictionLayer:
             seq_aux_loss_max_samples=3,
         )
         original_sample_ids = sample_ids.clone()
+        original_num_samples = num_samples.clone()
         input_ids = torch.tensor(
             [[10, 11, 12, 0, 20, 21, 22, 23, 24, 0, 0, 0, 0, 0, 0, 0]],
             dtype=torch.int64,
@@ -388,7 +488,7 @@ class TestMultiTokenPredictionLayer:
                         False,
                         False,
                         True,
-                        False,
+                        True,
                         False,
                         False,
                         False,
@@ -396,11 +496,11 @@ class TestMultiTokenPredictionLayer:
                         True,
                         True,
                         True,
-                        False,
                         True,
                         True,
                         True,
-                        False,
+                        True,
+                        True,
                     ]
                 ]
             ),
@@ -409,20 +509,20 @@ class TestMultiTokenPredictionLayer:
                     [
                         False,
                         True,
-                        False,
-                        False,
+                        True,
+                        True,
                         False,
                         False,
                         False,
                         True,
                         True,
                         True,
-                        False,
-                        False,
                         True,
                         True,
-                        False,
-                        False,
+                        True,
+                        True,
+                        True,
+                        True,
                     ]
                 ]
             ),
@@ -436,7 +536,9 @@ class TestMultiTokenPredictionLayer:
             assert packed_calls[depth][0].seq_aux_loss_sample_ids is sample_ids
             assert packed_calls[depth][0].seq_aux_loss_num_samples is num_samples
             assert packed_calls[depth][0].seq_aux_loss_max_samples == 3
+            assert packed_calls[depth][1][0, 12:].all()
         assert torch.equal(sample_ids, original_sample_ids)
+        assert torch.equal(num_samples, original_num_samples)
         assert packed_seq_params.seq_aux_loss_sample_ids is sample_ids
         assert output.shape == (16 * (1 + mtp_depth), 1, config.hidden_size)
 

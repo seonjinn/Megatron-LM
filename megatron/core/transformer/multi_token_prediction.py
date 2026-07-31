@@ -1093,13 +1093,14 @@ class MultiTokenPredictionLayer(MegatronModule):
             packed_seq_params=packed_seq_params,
         )
         if padding_mask is not None:
-            padding_mask, _ = roll_tensor(
-                padding_mask,
+            valid_token_mask, _ = roll_tensor(
+                ~padding_mask,
                 shifts=-1,
                 dims=-1,
                 cp_group=self.cp_group,
                 packed_seq_params=packed_seq_params,
             )
+            padding_mask = ~valid_token_mask
         # embedding
         decoder_input = embedding(input_ids=input_ids, position_ids=position_ids)
 
