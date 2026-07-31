@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from megatron.core.model_parallel_config import ModelParallelConfig
 
 CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX = "_packed_seq_params_"
+MAMBA_CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX = "_mamba_packed_seq_params_"
 
 PACKED_SEQ_PARAMS_CUDA_GRAPH_TENSOR_FIELDS = (
     "cu_seqlens_q",
@@ -29,6 +30,15 @@ PACKED_SEQ_PARAMS_CUDA_GRAPH_STATIC_FIELDS = (
     "cp_group",
     "pad_between_seqs",
     "tokens_per_sample",
+)
+
+MAMBA_PACKED_SEQ_PARAMS_CUDA_GRAPH_TENSOR_FIELDS = ("seq_idx",)
+
+MAMBA_PACKED_SEQ_PARAMS_CUDA_GRAPH_STATIC_FIELDS = (
+    "qkv_format",
+    "local_cp_size",
+    "cp_group",
+    "total_tokens",
 )
 
 
@@ -352,6 +362,38 @@ def split_packed_seq_params_for_cuda_graph(
             raise TypeError(
                 f"PackedSeqParams.{field_name} is static CUDA graph metadata and must not be "
                 "a Tensor."
+            )
+        static_metadata[field_name] = value
+
+    return tensor_kwargs, static_metadata
+
+
+def split_mamba_packed_seq_params_for_cuda_graph(
+    packed_seq_params: PackedSeqParams | None,
+    prefix: str = MAMBA_CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX,
+) -> tuple[dict[str, Tensor | None], dict[str, object]]:
+    """Split Mamba-only ``PackedSeqParams`` graph inputs from static metadata."""
+    if packed_seq_params is None:
+        return {}, {}
+
+    tensor_kwargs = {}
+    for field_name in MAMBA_PACKED_SEQ_PARAMS_CUDA_GRAPH_TENSOR_FIELDS:
+        value = getattr(packed_seq_params, field_name)
+        if value is not None and not isinstance(value, Tensor):
+            raise TypeError(
+                f"PackedSeqParams.{field_name} must be a Tensor or None for Mamba CUDA graphs, "
+                f"got {type(value).__name__}."
+            )
+        if value is not None:
+            tensor_kwargs[_cuda_graph_packed_seq_params_key(field_name, prefix)] = value
+
+    static_metadata = {}
+    for field_name in MAMBA_PACKED_SEQ_PARAMS_CUDA_GRAPH_STATIC_FIELDS:
+        value = getattr(packed_seq_params, field_name)
+        if isinstance(value, Tensor):
+            raise TypeError(
+                f"PackedSeqParams.{field_name} is static Mamba CUDA graph metadata and must not "
+                "be a Tensor."
             )
         static_metadata[field_name] = value
 
