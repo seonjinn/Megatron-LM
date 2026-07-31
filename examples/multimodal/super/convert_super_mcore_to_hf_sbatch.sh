@@ -8,6 +8,7 @@ DEFAULT_INPUT_PATH="${SUPER_MCORE_INPUT_PATH:-}"
 DEFAULT_SAVE_DIR="${SUPER_HF_SAVE_DIR:-}"
 DEFAULT_CONTAINER="${SUPER_CONTAINER_IMAGE:-}"
 DEFAULT_TOKENIZER_SRC="${SUPER_HF_TOKENIZER_SRC:-}"
+DEFAULT_CHAT_TEMPLATE_SRC="${SUPER_CHAT_TEMPLATE_SRC:-}"
 DEFAULT_RADIO_HF_SRC="${SUPER_HF_RADIO_SRC:-}"
 
 usage() {
@@ -30,8 +31,12 @@ Options:
                         Required unless SUPER_CONTAINER_IMAGE is set.
   --hf-config-src PATH  HF config/template directory.
                         Default: <repo>/examples/multimodal/super/super_mcore_to_hf
-  --tokenizer-src PATH  Optional tokenizer asset directory to copy into HF output.
-                        Default: SUPER_HF_TOKENIZER_SRC if set.
+  --tokenizer-src PATH  Tokenizer directory or tokenizer.json. When omitted,
+                        derive tokenizer-model from the checkpoint config.
+  --chat-template-src PATH
+                        Super Ultra chat template. Default:
+                        <repo>/examples/multimodal/v3p5_super_chat_templates/
+                        proposed_super_3p5_vl_template.jinja
   --radio-hf-src PATH   Optional local nvidia/C-RADIOv2-H HF-code checkout to copy
                         into HF output for offline loading. Default: SUPER_HF_RADIO_SRC if set.
   --account NAME        Slurm account. Default: llmservice_fm_vision
@@ -56,6 +61,7 @@ CKPT_STEP=""
 REPO="${DEFAULT_REPO}"
 CONTAINER_IMAGE="${DEFAULT_CONTAINER}"
 TOKENIZER_SRC="${DEFAULT_TOKENIZER_SRC}"
+CHAT_TEMPLATE_SRC="${DEFAULT_CHAT_TEMPLATE_SRC}"
 RADIO_HF_SRC="${DEFAULT_RADIO_HF_SRC}"
 HF_CONFIG_SRC=""
 ACCOUNT="llmservice_fm_vision"
@@ -94,6 +100,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --tokenizer-src)
             TOKENIZER_SRC="$2"
+            shift 2
+            ;;
+        --chat-template-src)
+            CHAT_TEMPLATE_SRC="$2"
             shift 2
             ;;
         --radio-hf-src)
@@ -162,10 +172,14 @@ SAVE_DIR=${SAVE_DIR%/}
 if [[ -n "$TOKENIZER_SRC" ]]; then
     TOKENIZER_SRC=$(readlink -f "$TOKENIZER_SRC")
 fi
+if [[ -n "$CHAT_TEMPLATE_SRC" ]]; then
+    CHAT_TEMPLATE_SRC=$(readlink -f "$CHAT_TEMPLATE_SRC")
+fi
 if [[ -n "$RADIO_HF_SRC" ]]; then
     RADIO_HF_SRC=$(readlink -f "$RADIO_HF_SRC")
 fi
 HF_CONFIG_SRC=${HF_CONFIG_SRC:-"${REPO}/examples/multimodal/super/super_mcore_to_hf"}
+CHAT_TEMPLATE_SRC=${CHAT_TEMPLATE_SRC:-"${REPO}/examples/multimodal/v3p5_super_chat_templates/proposed_super_3p5_vl_template.jinja"}
 
 MCORE_PATH="$INPUT_PATH"
 INPUT_BASENAME=$(basename "$INPUT_PATH")
@@ -209,8 +223,16 @@ if [[ ! -d "$HF_CONFIG_SRC" ]]; then
     echo "HF config/template directory not found: $HF_CONFIG_SRC" >&2
     exit 1
 fi
-if [[ -n "$TOKENIZER_SRC" && ! -d "$TOKENIZER_SRC" ]]; then
-    echo "Tokenizer source directory not found: $TOKENIZER_SRC" >&2
+if [[ -n "$TOKENIZER_SRC" && ! -e "$TOKENIZER_SRC" ]]; then
+    echo "Tokenizer source not found: $TOKENIZER_SRC" >&2
+    exit 1
+fi
+if [[ ! -f "$CHAT_TEMPLATE_SRC" ]]; then
+    echo "Super chat template not found: $CHAT_TEMPLATE_SRC" >&2
+    exit 1
+fi
+if ! grep -q "enable_thinking" "$CHAT_TEMPLATE_SRC"; then
+    echo "Super chat template does not support enable_thinking: $CHAT_TEMPLATE_SRC" >&2
     exit 1
 fi
 if [[ -n "$RADIO_HF_SRC" && ! -d "$RADIO_HF_SRC" ]]; then
@@ -228,6 +250,7 @@ Resolved conversion settings:
   save dir:       $SAVE_DIR
   HF template:    $HF_CONFIG_SRC
   tokenizer src:  ${TOKENIZER_SRC:-<none>}
+  chat template:  $CHAT_TEMPLATE_SRC
   RADIO HF src:   ${RADIO_HF_SRC:-<none>}
   container:      $CONTAINER_IMAGE
   account:        $ACCOUNT
@@ -251,7 +274,7 @@ sbatch \
     -t "$TIME_LIMIT" \
     --job-name="$JOB_NAME" \
     --output="${LOG_DIR}/convert_%j.log" \
-    --export=REPO="$REPO",MCORE_PATH="$MCORE_PATH",CKPT_STEP="$CKPT_STEP_DEC",HF_PATH="$SAVE_DIR",HF_CONFIG_SRC="$HF_CONFIG_SRC",TOKENIZER_SRC="$TOKENIZER_SRC",RADIO_HF_SRC="$RADIO_HF_SRC",CONTAINER_IMAGE="$CONTAINER_IMAGE",MAX_QUEUE_SIZE="$MAX_QUEUE_SIZE" <<'SBATCH'
+    --export=REPO="$REPO",MCORE_PATH="$MCORE_PATH",CKPT_STEP="$CKPT_STEP_DEC",HF_PATH="$SAVE_DIR",HF_CONFIG_SRC="$HF_CONFIG_SRC",TOKENIZER_SRC="$TOKENIZER_SRC",CHAT_TEMPLATE_SRC="$CHAT_TEMPLATE_SRC",RADIO_HF_SRC="$RADIO_HF_SRC",CONTAINER_IMAGE="$CONTAINER_IMAGE",MAX_QUEUE_SIZE="$MAX_QUEUE_SIZE" <<'SBATCH'
 #!/bin/bash
 set -euo pipefail
 
@@ -308,20 +331,35 @@ python -u examples/multimodal/tools/create_yaml_inference_config.py \
     --output_config "$HF_PATH/config.yaml" \
     --update_hf_config "$HF_PATH"
 
-if [[ -n "${TOKENIZER_SRC:-}" ]]; then
-    printf "Copying tokenizer assets from %s at %s\n" "$TOKENIZER_SRC" "$(date -Is)"
-    rsync -aL --ignore-missing-args \
-        "$TOKENIZER_SRC/tokenizer.json" \
-        "$TOKENIZER_SRC/tokenizer_config.json" \
-        "$TOKENIZER_SRC/special_tokens_map.json" \
-        "$TOKENIZER_SRC/chat_template.jinja" \
-        "$HF_PATH/"
+if [[ -z "${TOKENIZER_SRC:-}" ]]; then
+    TOKENIZER_SRC=$(sed -n 's/^tokenizer-model:[[:space:]]*//p' "$HF_PATH/config.yaml" | head -n 1)
+    TOKENIZER_SRC=${TOKENIZER_SRC#\"}
+    TOKENIZER_SRC=${TOKENIZER_SRC%\"}
+    TOKENIZER_SRC=${TOKENIZER_SRC#\'}
+    TOKENIZER_SRC=${TOKENIZER_SRC%\'}
+fi
+if [[ -f "$TOKENIZER_SRC" ]]; then
+    TOKENIZER_DIR=$(dirname "$TOKENIZER_SRC")
+else
+    TOKENIZER_DIR="${TOKENIZER_SRC%/}"
+fi
+if [[ ! -f "$TOKENIZER_DIR/tokenizer.json" ]]; then
+    echo "Could not resolve tokenizer.json from '$TOKENIZER_SRC'" >&2
+    echo "Pass --tokenizer-src with the tokenizer used for training." >&2
+    exit 1
 fi
 
-if [[ -f "$HF_CONFIG_SRC/chat_template.jinja" ]]; then
-    printf "Installing super VLM chat template from %s at %s\n" "$HF_CONFIG_SRC/chat_template.jinja" "$(date -Is)"
-    cp -L "$HF_CONFIG_SRC/chat_template.jinja" "$HF_PATH/chat_template.jinja"
-fi
+printf "Copying tokenizer assets from %s at %s\n" "$TOKENIZER_DIR" "$(date -Is)"
+rsync -aL --ignore-missing-args \
+    "$TOKENIZER_DIR/tokenizer.json" \
+    "$TOKENIZER_DIR/tokenizer_config.json" \
+    "$TOKENIZER_DIR/special_tokens_map.json" \
+    "$HF_PATH/"
+
+# Install the training-compatible Ultra template after tokenizer assets so a
+# generic tokenizer chat template cannot overwrite it.
+printf "Installing Super Ultra chat template from %s at %s\n" "$CHAT_TEMPLATE_SRC" "$(date -Is)"
+cp -L "$CHAT_TEMPLATE_SRC" "$HF_PATH/chat_template.jinja"
 
 if [[ -n "${RADIO_HF_SRC:-}" ]]; then
     printf "Copying RADIO HF code from %s at %s\n" "$RADIO_HF_SRC" "$(date -Is)"
@@ -373,15 +411,18 @@ with config_path.open("w") as f:
 
 tokenizer_config_path = hf_path / "tokenizer_config.json"
 chat_template_path = hf_path / "chat_template.jinja"
-if tokenizer_config_path.exists() and chat_template_path.exists():
-    with tokenizer_config_path.open() as f:
-        tokenizer_config = json.load(f)
-    tokenizer_config["chat_template"] = chat_template_path.read_text()
-    tokenizer_config["pad_token"] = "<|im_end|>"
-    tokenizer_config["padding_side"] = "left"
-    with tokenizer_config_path.open("w") as f:
-        json.dump(tokenizer_config, f, indent=2)
-        f.write("\n")
+if not tokenizer_config_path.exists():
+    raise FileNotFoundError(f"Missing tokenizer config: {tokenizer_config_path}")
+if not chat_template_path.exists():
+    raise FileNotFoundError(f"Missing chat template: {chat_template_path}")
+with tokenizer_config_path.open() as f:
+    tokenizer_config = json.load(f)
+tokenizer_config["chat_template"] = chat_template_path.read_text()
+tokenizer_config["pad_token"] = "<|im_end|>"
+tokenizer_config["padding_side"] = "left"
+with tokenizer_config_path.open("w") as f:
+    json.dump(tokenizer_config, f, indent=2)
+    f.write("\n")
 PY
 
 printf "original mcore path: %s at iteration %s\n" "$MCORE_PATH" "$CKPT_STEP" > "$HF_PATH/mcore_to_hf_info.txt"

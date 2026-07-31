@@ -72,25 +72,31 @@ class HFCheckpointSaver:
         # Target head dim (rows per head we want in HF); default to hidden_size/nh
         dim_tgt = target_head_dim if target_head_dim is not None else (self.md.hidden_size // nh_total)
 
+        if ng_total < tp:
+            assert nh_total % ng_total == 0, (
+                f"num_attention_heads {nh_total} must be divisible by "
+                f"num_query_groups {ng_total}"
+            )
+            q_heads_per_group = nh_total // ng_total
+            qkv = qkv_weight.reshape(
+                ng_total, dim_src * (q_heads_per_group + 2), -1
+            )
+            q = qkv[:, : dim_src * q_heads_per_group, :]
+            k = qkv[
+                :,
+                dim_src * q_heads_per_group : dim_src * (q_heads_per_group + 1),
+                :,
+            ]
+            v = qkv[:, dim_src * (q_heads_per_group + 1) :, :]
+            q = q.reshape(ng_total, q_heads_per_group, dim_src, -1)
+            return (
+                q[:, :, :dim_tgt, :].reshape(dim_tgt * nh_total, -1),
+                k[:, :dim_tgt, :].reshape(dim_tgt * ng_total, -1),
+                v[:, :dim_tgt, :].reshape(dim_tgt * ng_total, -1),
+            )
+
         nh = nh_total // tp
         ng = ng_total // tp
-
-        if ng_total < tp:
-            # MCore shards a single KV group across several TP ranks in this case.
-            # The loader has already concatenated those shards back into the global qkv tensor.
-            qkv = qkv_weight.reshape(
-                ng_total,
-                dim_src * (nh_total // ng_total) + 2 * dim_src,
-                -1,
-            )
-            q = qkv[:, : dim_tgt * (nh_total // ng_total), :].reshape(
-                dim_tgt * nh_total, -1
-            )
-            k_start = dim_src * (nh_total // ng_total)
-            k = qkv[:, k_start : k_start + dim_tgt, :].reshape(dim_tgt * ng_total, -1)
-            v_start = k_start + dim_src
-            v = qkv[:, v_start : v_start + dim_tgt, :].reshape(dim_tgt * ng_total, -1)
-            return q, k, v
 
         params_per_tp = torch.chunk(qkv_weight, tp, dim=0)
 
@@ -151,20 +157,30 @@ class HFCheckpointSaver:
         dim_src = total_elems // denom
         dim_tgt = target_head_dim if target_head_dim is not None else (nh_total and (self.md.hidden_size // nh_total))
 
+        if ng_total < tp:
+            assert nh_total % ng_total == 0, (
+                f"num_attention_heads {nh_total} must be divisible by "
+                f"num_query_groups {ng_total}"
+            )
+            q_heads_per_group = nh_total // ng_total
+            qkv = qkv_bias.reshape(
+                ng_total, dim_src * (q_heads_per_group + 2)
+            )
+            q = qkv[:, : dim_src * q_heads_per_group]
+            k = qkv[
+                :,
+                dim_src * q_heads_per_group : dim_src * (q_heads_per_group + 1),
+            ]
+            v = qkv[:, dim_src * (q_heads_per_group + 1) :]
+            q = q.reshape(ng_total, q_heads_per_group, dim_src)
+            return (
+                q[:, :, :dim_tgt].reshape(-1),
+                k[:, :dim_tgt].reshape(-1),
+                v[:, :dim_tgt].reshape(-1),
+            )
+
         nh = nh_total // tp
         ng = ng_total // tp
-
-        if ng_total < tp:
-            qkvb = qkv_bias.reshape(
-                ng_total,
-                dim_src * (nh_total // ng_total) + 2 * dim_src,
-            )
-            qb = qkvb[:, : dim_tgt * (nh_total // ng_total)].reshape(-1)
-            k_start = dim_src * (nh_total // ng_total)
-            kb = qkvb[:, k_start : k_start + dim_tgt].reshape(-1)
-            v_start = k_start + dim_src
-            vb = qkvb[:, v_start : v_start + dim_tgt].reshape(-1)
-            return qb, kb, vb
 
         bias_per_tp = torch.chunk(qkv_bias, tp, dim=0)
 
