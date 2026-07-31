@@ -1,11 +1,11 @@
-# Current V14 VLM-only 16K DSS mix without the ultra text include.
+# V14 VLM-only 16K DSS mix with legacy-aligned weights and no ultra text.
 __class__: MetadatasetV2
 __module__: megatron.energon
 splits:
   train:
     blend_epochized:
     - path: data_yamls/eagle_sft_v14_nano_charxiv.yaml
-      repetitions: 1.2
+      repetitions: 1.0
     - path: data_yamls/short_video_qa_0318_newreps_mcq_shuffled.yaml
       repetitions: 1.2
     - path: data_yamls/video_qa_v1_v2_all_0519.yaml
@@ -17,11 +17,11 @@ splits:
     - path: dss://filtered_textsafety_energon_dataset@v1/filtered_textsafety_energon_dataset.jsonl
       subflavors:
         cook: general_conversations_jsonl
-      repetitions: 2.4
+      repetitions: 2.0
     - path: dss://image_safety_energon_dataset@v1/image_safety_energon_dataset.jsonl
       subflavors:
         cook: general_conversations_jsonl
-      repetitions: 2.4
+      repetitions: 2.0
       aux:
         media_source: filesystem+dss://mm_safety@v0
     - path: dss://benchfit_qa@v1/03-10a_stage5_output.jsonl
@@ -30,23 +30,23 @@ splits:
         cook: conversation
       aux:
         media_source: dss://image_shards@v0
-      repetitions: 0.72
+      repetitions: 0.6
     - path: dss://dense_ocr_qa@v1/03-10a_stage5_qa_output.jsonl
       subflavors:
         name: dense_ocr_qa
         cook: conversation
       aux:
         media_source: dss://image_shards@v0
-      repetitions: 0.72
+      repetitions: 0.6
     - path: data_yamls/charxiv_blend.yaml
-      repetitions: 1.0
+      repetitions: 0.5
     - path: data_yamls/charts_additional.yaml
       repetitions: 1.0
     - path: data_yamls/charts_additional2.yaml
       repetitions: 1.0
     - path: data_yamls/perplexity_holotron_distilled_molmoweb_v2.yaml
-      repetitions: 1.0
+      repetitions: 0.5
     - path: data_yamls/holotron_a3_webarea_success_momoweb_energon.yaml
-      repetitions: 1.0
+      repetitions: 0.5
     - path: data_yamls/hopchain_documents_plusnew_coco_multipagetiny.yaml
       repetitions: 1.0

@@ -1,4 +1,5 @@
 # V14 VLM-only 16K web-browsing DSS recipe without ultra text data.
+# Component weights follow the legacy v3_generalist VLM-only recipe.
 __class__: MetadatasetV2
 __module__: megatron.energon
 splits:
