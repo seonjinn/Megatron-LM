@@ -2247,7 +2247,7 @@ class TECudaGraphHelper:
         self.p2p_communicator = P2PCommunicator(pp_group=self.pp_group, config=self.config)
         self.num_model_chunks = len(model)
 
-        # Number of microbatches to capture. The value will be set in _get_cuda_graph_input_data().
+        # Number of microbatches to capture. The value is set from the manager's capture request.
         self.num_microbatches = None
 
         self._discover_layers()
@@ -2658,7 +2658,7 @@ class TECudaGraphHelper:
                 assert self.pg_collection.tp is not None
                 return self.pg_collection.tp
 
-    def _get_cuda_graph_input_data(self):
+    def _get_cuda_graph_input_data(self, *, num_microbatches: int):
         """
         Create the CUDA Graph capturing input data.
         The data is organized per-chunk per-microbatch per-layer.
@@ -2677,7 +2677,7 @@ class TECudaGraphHelper:
             ), "If PP is not enabled, there should be only one model chunk."
             self.num_microbatches = 1
         else:
-            self.num_microbatches = get_num_microbatches()
+            self.num_microbatches = num_microbatches
 
         _, _, num_warmup_microbatches, _ = get_pp_rank_microbatches(
             self.num_microbatches,
@@ -2755,7 +2755,7 @@ class TECudaGraphHelper:
             kwargs['num_warmup_iters'] = max(
                 1,
                 math.ceil(
-                    (10 - self.config.cuda_graph_warmup_steps * get_num_microbatches())
+                    (10 - self.config.cuda_graph_warmup_steps * self.num_microbatches)
                     / self.num_microbatches
                 ),
             )
@@ -2974,7 +2974,9 @@ class TECudaGraphHelper:
                     'TECudaGraphHelper: No graphable layers found. Skipping CUDA graph capture.'
                 )
             else:
-                sample_args, kwargs = self._get_cuda_graph_input_data()
+                sample_args, kwargs = self._get_cuda_graph_input_data(
+                    num_microbatches=num_microbatches
+                )
                 if self.num_microbatches != num_microbatches:
                     raise ValueError(
                         "num_microbatches requested by the graph bank does not match "

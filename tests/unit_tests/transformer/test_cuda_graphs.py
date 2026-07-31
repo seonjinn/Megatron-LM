@@ -1149,7 +1149,9 @@ class TestTECudaGraphHelper:
         )
 
         # Call _get_cuda_graph_input_data (which internally calls _get_sample_arguments)
-        sample_args, make_graphed_callables_kwargs = cuda_graph_helper._get_cuda_graph_input_data()
+        sample_args, make_graphed_callables_kwargs = (
+            cuda_graph_helper._get_cuda_graph_input_data(num_microbatches=num_microbatches)
+        )
 
         # Extract sample_kwargs from the kwargs dict
         # For TE >= 1.10.0, sample_kwargs should always be present
@@ -2376,7 +2378,8 @@ def test_te_helper_abort_restores_capture_globals_and_partial_graphs(monkeypatch
         helper._capture_gc_frozen = True
         return 0.0
 
-    def fail_inputs():
+    def fail_inputs(*, num_microbatches):
+        assert num_microbatches == 2
         layer.cuda_graphs.append(graph)
         raise RuntimeError("input failure")
 
@@ -3030,7 +3033,7 @@ def test_te_overlap_input_preparation_preserves_canonical_hybrid_topology(monkey
 
     monkeypatch.setattr(helper, "_get_sample_arguments", get_sample_arguments)
 
-    _, kwargs = helper._get_cuda_graph_input_data()
+    _, kwargs = helper._get_cuda_graph_input_data(num_microbatches=2)
 
     assert observed["num_layers_per_chunk"] == [1, 1, 1, 1]
     assert observed["num_model_chunks"] == 4
@@ -3047,6 +3050,86 @@ def test_te_overlap_input_preparation_preserves_canonical_hybrid_topology(monkey
         assert [descriptor.layer for descriptor in descriptors] == callables
         assert len(descriptors) == count
     assert helper.flattened_callables == list(leaves)
+
+
+def test_te_capture_uses_requested_runtime_schedule_when_global_disagrees(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    import megatron.core.transformer.cuda_graphs as cuda_graphs
+
+    requested_count = 3
+    global_count = 2
+    observed_schedule_counts = []
+    observed_capture_kwargs = []
+    layer = SimpleNamespace(cuda_graphs=[])
+    helper = TECudaGraphHelper.__new__(TECudaGraphHelper)
+    helper.flattened_callables = [layer]
+    helper.callables_per_chunk = [[layer]]
+    helper.num_layers_per_chunk = [1]
+    helper.num_model_chunks = 1
+    helper.pp_group = SimpleNamespace(size=lambda: 2)
+    helper.p2p_communicator = object()
+    helper.tp_group = None
+    helper.dp_cp_group = None
+    helper.config = SimpleNamespace(
+        overlap_moe_expert_parallel_comm=False,
+        microbatch_group_size_per_vp_stage=1,
+        cuda_graph_retain_backward_graph=False,
+        cuda_graph_warmup_steps=1,
+        sequence_parallel=False,
+        fp8=None,
+        fp4=None,
+        fine_grained_activation_offloading=False,
+    )
+    helper._graphs_created = False
+    helper._capture_finished = False
+    helper._capture_gc_frozen = False
+
+    monkeypatch.setattr(cuda_graphs, "get_num_microbatches", lambda: global_count)
+    monkeypatch.setattr(cuda_graphs, "is_te_min_version", lambda _version: True)
+    monkeypatch.setattr(helper, "_start_capturing", lambda: 0.0)
+    monkeypatch.setattr(helper, "_finish_capturing", lambda _start_time: None)
+    monkeypatch.setattr(helper, "_abort_capturing", lambda: None)
+    monkeypatch.setattr(
+        "megatron.core.pipeline_parallel.schedules.get_pp_rank_microbatches",
+        lambda num_microbatches, *_args, **_kwargs: (
+            observed_schedule_counts.append(num_microbatches) or None,
+            None,
+            0,
+            None,
+        ),
+    )
+
+    def get_schedule_table(num_microbatches, *_args, **_kwargs):
+        observed_schedule_counts.append(num_microbatches)
+        return [(microbatch, 0) for microbatch in range(num_microbatches)]
+
+    monkeypatch.setattr(
+        "megatron.core.pipeline_parallel.schedules.get_schedule_table",
+        get_schedule_table,
+    )
+    monkeypatch.setattr(
+        helper,
+        "_get_sample_arguments",
+        lambda *_args, **_kwargs: (
+            [()] * requested_count,
+            [{} for _ in range(requested_count)],
+        ),
+    )
+
+    def make_graphs(_callables, sample_args, **kwargs):
+        assert len(sample_args) == requested_count
+        observed_capture_kwargs.append(kwargs)
+        return tuple(object() for _ in range(requested_count))
+
+    monkeypatch.setattr(cuda_graphs, "make_graphed_callables", make_graphs)
+
+    captured = helper._capture_cuda_graph_lists(num_microbatches=requested_count)
+
+    assert observed_schedule_counts == [requested_count, requested_count]
+    assert observed_capture_kwargs[0]["num_warmup_iters"] == 3
+    assert helper.num_microbatches == requested_count
+    assert captured == ((layer, tuple(layer.cuda_graphs)),)
 
 
 def test_te_hybrid_mtp_static_inputs_are_owned_by_inner_leaves(monkeypatch) -> None:
