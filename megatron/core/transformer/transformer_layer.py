@@ -1266,6 +1266,8 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                 hidden_states = self.off_interface.backward_record(hidden_states)
                 kwargs["hidden_states"] = hidden_states
         self._rebuild_te_cuda_graph_packed_seq_params(kwargs)
+        packed_seq_params = kwargs.get("packed_seq_params")
+        padding_mask = kwargs.get("padding_mask")
 
         context = None
         if (
@@ -1290,7 +1292,9 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                 )
             )
         ):
-            hidden_states = self._forward_mlp(hidden_states)
+            hidden_states = self._forward_mlp(
+                hidden_states, padding_mask=padding_mask, packed_seq_params=packed_seq_params
+            )
         if not isinstance(hidden_states, list) and not isinstance(hidden_states, tuple):
             cuda_graph_outputs = [hidden_states]
         else:

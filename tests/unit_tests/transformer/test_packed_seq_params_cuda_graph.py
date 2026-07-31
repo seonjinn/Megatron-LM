@@ -40,6 +40,7 @@ class _TransformerLayerCudaGraphStub:
     _flatten_te_cuda_graph_packed_seq_params = (
         TransformerLayer._flatten_te_cuda_graph_packed_seq_params
     )
+    _te_cuda_graph_capture = TransformerLayer._te_cuda_graph_capture
 
 
 def test_packed_graph_static_metadata_keeps_pad_between_seqs() -> None:
@@ -213,6 +214,49 @@ def test_transformer_layer_rebuilds_flattened_cuda_graph_packed_seq_params():
     assert rebuilt.max_seqlen_kv == 8
     assert torch.equal(rebuilt.cu_seqlens_q, packed_seq_params.cu_seqlens_q)
     assert torch.equal(rebuilt.cu_seqlens_kv, packed_seq_params.cu_seqlens_kv)
+
+
+def test_whole_layer_capture_passes_packed_metadata_and_padding_mask_to_mlp():
+    class _ConfigStub:
+        cuda_graph_modules = []
+
+    class _CaptureLayer(_TransformerLayerCudaGraphStub):
+        def __init__(self):
+            self.config = _ConfigStub()
+            self.offload_module_in_cuda_graph = False
+            self.is_moe_layer = True
+            self.mlp_kwargs = None
+
+        def _forward_attention(self, *args, **kwargs):
+            return kwargs["hidden_states"], None
+
+        def _forward_mlp(self, hidden_states, padding_mask=None, packed_seq_params=None):
+            self.mlp_kwargs = {"padding_mask": padding_mask, "packed_seq_params": packed_seq_params}
+            return hidden_states
+
+    layer = _CaptureLayer()
+    packed_seq_params = PackedSeqParams(
+        qkv_format="thd",
+        cu_seqlens_q=torch.IntTensor([0, 4, 8]),
+        cu_seqlens_kv=torch.IntTensor([0, 4, 8]),
+        max_seqlen_q=4,
+        max_seqlen_kv=4,
+        tokens_per_sample=4,
+        pad_between_seqs=True,
+    )
+    tensor_kwargs, static_metadata = split_packed_seq_params_for_cuda_graph(packed_seq_params)
+    layer._set_te_cuda_graph_packed_seq_params_static_metadata(static_metadata, tensor_kwargs)
+    hidden_states = torch.ones(8, 1, 4)
+    padding_mask = torch.tensor([[False, False, False, True, False, False, True, True]])
+
+    layer._te_cuda_graph_capture(
+        hidden_states=hidden_states, padding_mask=padding_mask, **tensor_kwargs
+    )
+
+    assert layer.mlp_kwargs["padding_mask"] is padding_mask
+    rebuilt = layer.mlp_kwargs["packed_seq_params"]
+    assert rebuilt.tokens_per_sample == 4
+    assert rebuilt.pad_between_seqs is True
 
 
 def test_transformer_layer_flattens_replay_time_packed_seq_params():

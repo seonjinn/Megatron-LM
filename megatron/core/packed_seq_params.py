@@ -181,20 +181,49 @@ def pad_sequence_for_thd(
         else packed_seq_params.cu_seqlens_q
     )
     assert physical_q is not None, "THD padding requires cu_seqlens_q metadata."
-    global_actual_len = int(physical_q[-1].item())
+    physical_kv = (
+        packed_seq_params.cu_seqlens_kv_padded
+        if packed_seq_params.cu_seqlens_kv_padded is not None
+        else packed_seq_params.cu_seqlens_kv
+    )
+    if physical_kv is None:
+        physical_kv = physical_q
+    global_q_actual_len = int(physical_q[-1].item())
+    global_kv_actual_len = int(physical_kv[-1].item())
     cp_size = _resolve_thd_context_parallel_size(packed_seq_params, context_parallel_size)
+
+    local_tensor_lengths = [
+        int(tensor.shape[-1])
+        for tensor in (tokens, labels, loss_mask, position_ids)
+        if tensor is not None
+    ]
+    if local_tensor_lengths:
+        assert all(length == local_tensor_lengths[0] for length in local_tensor_lengths), (
+            "THD token-like tensors must have the same pre-padding local length, "
+            f"got {local_tensor_lengths}."
+        )
+        local_actual_len = local_tensor_lengths[0]
+    else:
+        assert cp_size == 1, (
+            "THD CP metadata-only padding requires a pre-padding local token-like tensor "
+            "to determine exact local occupancy."
+        )
+        local_actual_len = global_q_actual_len
 
     if target_len is None:
         assert alignment is not None and alignment > 0
-        local_actual_len = (global_actual_len + cp_size - 1) // cp_size
         target_len = ((local_actual_len + alignment - 1) // alignment) * alignment
     else:
         target_len = int(target_len)
-        local_actual_len = min(global_actual_len, target_len)
 
     global_target_len = target_len * cp_size
-    assert global_actual_len <= global_target_len, (
-        f"Packed THD length ({global_actual_len}) exceeds padding target " f"({global_target_len})."
+    assert global_q_actual_len <= global_target_len, (
+        f"Packed THD Q length ({global_q_actual_len}) exceeds padding target "
+        f"({global_target_len})."
+    )
+    assert global_kv_actual_len <= global_target_len, (
+        f"Packed THD KV length ({global_kv_actual_len}) exceeds padding target "
+        f"({global_target_len})."
     )
 
     tokens = _pad_sequence_tensor(tokens, target_len)
@@ -220,29 +249,32 @@ def pad_sequence_for_thd(
         else cu_seqlens_kv
     )
 
-    dummy_len = global_target_len - global_actual_len
-    if dummy_len:
+    q_dummy_len = global_target_len - int(cu_seqlens_q_padded[-1].item())
+    kv_dummy_len = global_target_len - int(cu_seqlens_kv_padded[-1].item())
+    if q_dummy_len or kv_dummy_len:
         if cp_size > 1:
-            assert dummy_len % (2 * cp_size) == 0, (
-                f"THD dummy padding length ({dummy_len}) must be divisible by "
-                f"2 * context_parallel_size ({2 * cp_size}) for zigzag partitioning."
-            )
+            for name, dummy_len in (("Q", q_dummy_len), ("KV", kv_dummy_len)):
+                assert dummy_len % (2 * cp_size) == 0, (
+                    f"THD {name} dummy padding length ({dummy_len}) must be divisible by "
+                    f"2 * context_parallel_size ({2 * cp_size}) for zigzag partitioning."
+                )
 
-        has_inter_sequence_padding = packed_seq_params.pad_between_seqs is True or any(
-            not torch.equal(logical, physical)
-            for logical, physical in (
-                (cu_seqlens_q, cu_seqlens_q_padded),
-                (cu_seqlens_kv, cu_seqlens_kv_padded),
-            )
+        q_has_inter_sequence_padding = (
+            packed_seq_params.pad_between_seqs is True
+            or not torch.equal(cu_seqlens_q, cu_seqlens_q_padded)
+        )
+        kv_has_inter_sequence_padding = (
+            packed_seq_params.pad_between_seqs is True
+            or not torch.equal(cu_seqlens_kv, cu_seqlens_kv_padded)
         )
         q_dummy_end = (
-            int(cu_seqlens_q[-1].item()) + dummy_len
-            if has_inter_sequence_padding
+            int(cu_seqlens_q[-1].item()) + q_dummy_len
+            if q_has_inter_sequence_padding
             else global_target_len
         )
         kv_dummy_end = (
-            int(cu_seqlens_kv[-1].item()) + dummy_len
-            if has_inter_sequence_padding
+            int(cu_seqlens_kv[-1].item()) + kv_dummy_len
+            if kv_has_inter_sequence_padding
             else global_target_len
         )
         cu_seqlens_q = _append_cu_seqlens_endpoint(cu_seqlens_q, q_dummy_end)
@@ -266,12 +298,12 @@ def pad_sequence_for_thd(
         max_seqlen_q=(
             global_target_len
             if max_num_seqs is not None
-            else max(packed_seq_params.max_seqlen_q or 0, dummy_len)
+            else max(packed_seq_params.max_seqlen_q or 0, q_dummy_len)
         ),
         max_seqlen_kv=(
             global_target_len
             if max_num_seqs is not None
-            else max(packed_seq_params.max_seqlen_kv or 0, dummy_len)
+            else max(packed_seq_params.max_seqlen_kv or 0, kv_dummy_len)
         ),
         local_cp_size=packed_seq_params.local_cp_size,
         cp_group=packed_seq_params.cp_group,
