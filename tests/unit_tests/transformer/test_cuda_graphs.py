@@ -2321,6 +2321,7 @@ def test_real_mamba_helper_and_replay_route_flattened_packed_inputs(cuda_graph_m
     assert any(key.startswith(CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX) for key in sample_kwargs[0])
     seq_idx_key = f"{MAMBA_CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX}seq_idx"
     assert seq_idx_key in sample_kwargs[0]
+    assert not any(key.startswith("_moe_packed_seq_params_") for key in sample_kwargs[0])
     assert all(not isinstance(value, PackedSeqParams) for value in sample_kwargs[0].values())
     seq_idx = packed.seq_idx
     observed = {}
@@ -3136,7 +3137,11 @@ def test_te_hybrid_mtp_static_inputs_are_owned_by_inner_leaves(monkeypatch) -> N
     import megatron.core.transformer.cuda_graphs as cuda_graphs
 
     helper, _, _, leaves = _make_task7_te_helper(monkeypatch)
-    packed = object()
+    packed = PackedSeqParams(
+        seq_aux_loss_sample_ids=torch.tensor([0, 0], dtype=torch.int64),
+        seq_aux_loss_num_samples=torch.tensor(1, dtype=torch.int64),
+        seq_aux_loss_max_samples=2,
+    )
     calls = []
 
     for leaf in leaves:
@@ -3166,6 +3171,68 @@ def test_te_hybrid_mtp_static_inputs_are_owned_by_inner_leaves(monkeypatch) -> N
     assert len(sample_kwargs) == len(leaves)
     assert [call[0] for call in calls] == list(leaves)
     assert calls[2][3] is packed
+    assert not any(key.startswith("_moe_packed_seq_params_") for key in sample_kwargs[0])
+    assert {
+        key for key in sample_kwargs[1] if key.startswith("_moe_packed_seq_params_")
+    } == {
+        "_moe_packed_seq_params_seq_aux_loss_sample_ids",
+        "_moe_packed_seq_params_seq_aux_loss_num_samples",
+    }
+    assert not any(key.startswith("_moe_packed_seq_params_") for key in sample_kwargs[2])
+    assert not any(key.startswith("_moe_packed_seq_params_") for key in sample_kwargs[3])
+
+
+@pytest.mark.parametrize(
+    ("cuda_graph_modules", "expected"),
+    [
+        ([], True),
+        ([CudaGraphModule.moe], True),
+        ([CudaGraphModule.moe_router], True),
+        ([CudaGraphModule.moe_router, CudaGraphModule.moe_preprocess], True),
+        ([CudaGraphModule.attn], False),
+        ([CudaGraphModule.mamba], False),
+    ],
+)
+def test_te_moe_sample_ownership_follows_canonical_inner_leaf_descriptor(
+    monkeypatch, cuda_graph_modules, expected
+) -> None:
+    from types import SimpleNamespace
+
+    from megatron.core.packed_seq_params import MOE_CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX
+    from megatron.core.transformer.cuda_graphs import (
+        _add_moe_packed_seq_params_to_te_cuda_graph_sample_kwargs,
+    )
+    from megatron.core.transformer.identity_op import IdentityOp
+
+    helper, _, stack, leaves = _make_task7_te_helper(monkeypatch)
+    descriptor = helper.layer_descriptors_per_chunk[0][1]
+    assert descriptor.layer is leaves[1]
+    assert descriptor.mtp_owner is not None
+    assert descriptor.layer is not descriptor.mtp_owner
+    assert descriptor.layer is not stack
+    assert isinstance(descriptor.layer.self_attention, IdentityOp)
+    packed = PackedSeqParams(
+        seq_aux_loss_sample_ids=torch.tensor([0, 0, 1, 1], dtype=torch.int64),
+        seq_aux_loss_num_samples=torch.tensor(2, dtype=torch.int64),
+        seq_aux_loss_max_samples=3,
+    )
+    sample_kwargs = {}
+    config = SimpleNamespace(cuda_graph_modules=cuda_graph_modules)
+
+    _add_moe_packed_seq_params_to_te_cuda_graph_sample_kwargs(
+        descriptor, config, sample_kwargs, packed
+    )
+
+    moe_keys = {
+        key for key in sample_kwargs if key.startswith(MOE_CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX)
+    }
+    if expected:
+        assert moe_keys == {
+            f"{MOE_CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX}seq_aux_loss_sample_ids",
+            f"{MOE_CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX}seq_aux_loss_num_samples",
+        }
+    else:
+        assert not moe_keys
 
 
 def test_set_current_microbatch_targets_each_hybrid_mtp_leaf_graph(monkeypatch) -> None:

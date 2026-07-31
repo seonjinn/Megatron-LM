@@ -21,7 +21,10 @@ import torch
 from torch.utils._pytree import tree_map as tree_map_pyt
 
 from megatron.core.num_microbatches_calculator import get_num_microbatches
-from megatron.core.packed_seq_params import split_packed_seq_params_for_cuda_graph
+from megatron.core.packed_seq_params import (
+    split_moe_packed_seq_params_for_cuda_graph,
+    split_packed_seq_params_for_cuda_graph,
+)
 from megatron.core.process_groups_config import ProcessGroupCollection
 from megatron.core.tensor_parallel.random import (
     CudaRNGStatesTracker,
@@ -2156,6 +2159,63 @@ def _add_packed_seq_params_to_te_cuda_graph_sample_kwargs(
     sample_kwargs.update(tensor_kwargs)
 
 
+def _te_descriptor_owns_moe_packed_seq_params(
+    descriptor: _GraphableTELayerDescriptor, config: TransformerConfig
+) -> bool:
+    """Return whether one canonical inner leaf captures a MoE routing boundary."""
+
+    from megatron.core.transformer.moe.moe_layer import MoELayer
+    from megatron.core.transformer.transformer_layer import TransformerLayer
+
+    layer = descriptor.layer
+    if not isinstance(layer, TransformerLayer) or not isinstance(layer.mlp, MoELayer):
+        return False
+    cuda_graph_modules = config.cuda_graph_modules
+    return not cuda_graph_modules or any(
+        module in cuda_graph_modules
+        for module in (
+            CudaGraphModule.moe,
+            CudaGraphModule.moe_router,
+            CudaGraphModule.moe_preprocess,
+        )
+    )
+
+
+def _add_moe_packed_seq_params_to_te_cuda_graph_sample_kwargs(
+    descriptor, config, sample_kwargs, sample_packed_seq_params
+):
+    """Add fixed-signature MoE ownership only to its canonical Transformer leaf."""
+
+    if sample_packed_seq_params is None or not _te_descriptor_owns_moe_packed_seq_params(
+        descriptor, config
+    ):
+        return
+
+    tensor_kwargs, static_metadata = split_moe_packed_seq_params_for_cuda_graph(
+        sample_packed_seq_params
+    )
+    has_contract = bool(tensor_kwargs) or any(
+        value is not None for value in static_metadata.values()
+    )
+    if not has_contract:
+        return
+    duplicate_keys = set(sample_kwargs) & set(tensor_kwargs)
+    if duplicate_keys:
+        raise ValueError(
+            "MoE PackedSeqParams CUDA graph Tensor kwargs overlap with existing sample kwargs: "
+            f"{sorted(duplicate_keys)}"
+        )
+    layer = descriptor.layer
+    if not hasattr(layer, "_set_te_cuda_graph_moe_packed_seq_params_static_metadata"):
+        raise TypeError(
+            "MoE Transformer leaves using TE CUDA graphs must support packed ownership metadata"
+        )
+    layer._set_te_cuda_graph_moe_packed_seq_params_static_metadata(
+        static_metadata, tensor_kwargs
+    )
+    sample_kwargs.update(tensor_kwargs)
+
+
 def _map_te_graphs_to_layers(
     graphs,
     *,
@@ -2371,7 +2431,7 @@ class TECudaGraphHelper:
             means that once a microbatch's backward pass completes, its input buffers are no
             longer needed. This method tracks buffer lifecycle and reuses "consumed" buffers
             (those whose backward has completed) for new forward passes with matching tensor
-            signatures (shape, dtype, layout).
+            signatures (shape, dtype, device, layout, and stride).
 
             Example schedule: [1, 1, 1, 2, 2, 2, -2, 1, -2, 1, -2, 2, -1, 2, -1, -1, -2, -2, -1, -1]
             - Positive values indicate forward passes (chunk_id = value)
@@ -2406,8 +2466,8 @@ class TECudaGraphHelper:
                 Queue of forward samples per chunk awaiting their backward pass.
             - consumed_sample_queue: Dict[sample_keys, List[fwd_idx]]
                 Pool of buffer indices whose backward is complete, keyed by tensor signature.
-            - sample_keys: Tuple of (shape, dtype, layout) for args + (key, shape, dtype, layout)
-                for kwargs, used to match compatible buffers for reuse.
+            - sample_keys: Exact Tensor replay signatures for args plus keyed signatures for
+                kwargs, used to match compatible buffers for reuse.
         """
         if schedule_num_layers_per_chunk is None:
             schedule_num_layers_per_chunk = self.num_layers_per_chunk
@@ -2440,9 +2500,13 @@ class TECudaGraphHelper:
             Get the static inputs for a layer.
             """
             descriptors = self.layer_descriptors_per_chunk[model_chunk_idx]
-            assert any(
-                descriptor.layer is layer for descriptor in descriptors
-            ), "Layer is not in the chunk's ordered TE graph descriptors"
+            matching_descriptors = tuple(
+                descriptor for descriptor in descriptors if descriptor.layer is layer
+            )
+            assert len(matching_descriptors) == 1, (
+                "Layer must have exactly one canonical ordered TE graph descriptor per chunk"
+            )
+            descriptor = matching_descriptors[0]
             chunk_of_the_layer = self.chunks_with_decoder[model_chunk_idx]
             assert chunk_of_the_layer is not None
 
@@ -2509,6 +2573,12 @@ class TECudaGraphHelper:
                     _add_packed_seq_params_to_te_cuda_graph_sample_kwargs(
                         layer, static_inputs, self.sample_packed_seq_params
                     )
+                _add_moe_packed_seq_params_to_te_cuda_graph_sample_kwargs(
+                    descriptor,
+                    self.config,
+                    static_inputs,
+                    self.sample_packed_seq_params,
+                )
                 _sample_kwargs = static_inputs
             elif contains_self_attn:
                 _sample_args = (
@@ -2579,10 +2649,10 @@ class TECudaGraphHelper:
                             _get_layer_static_inputs(layer, model_chunk_idx)
                         )
                         sample_args_keys = tuple(
-                            (t.shape, t.dtype, t.layout) for t in sample_args[per_callable_fwd_idx]
+                            tensor_signature(t) for t in sample_args[per_callable_fwd_idx]
                         )
                         sample_kwargs_keys = tuple(
-                            (k, v.shape, v.dtype, v.layout)
+                            (k, tensor_signature(v))
                             for k, v in sorted(sample_kwargs[per_callable_fwd_idx].items())
                         )
                         sample_keys = sample_args_keys + sample_kwargs_keys

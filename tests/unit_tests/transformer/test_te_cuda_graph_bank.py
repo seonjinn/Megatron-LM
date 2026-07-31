@@ -263,6 +263,23 @@ def _graphs(prefix: str, count: int, layers: int = 1) -> list[list[_FakeGraph]]:
     ]
 
 
+def _install_fake_moe_packed_contract(
+    layer: _FakeLayer,
+    *,
+    sample_ids: torch.Tensor,
+    num_samples: torch.Tensor,
+    max_samples: int,
+) -> None:
+    tensor_signature = _load_bank_module().tensor_signature
+    layer._te_cuda_graph_moe_packed_seq_params_static_metadata = {
+        "seq_aux_loss_max_samples": max_samples
+    }
+    layer._te_cuda_graph_moe_packed_seq_params_tensor_signatures = {
+        "_moe_packed_seq_params_seq_aux_loss_sample_ids": tensor_signature(sample_ids),
+        "_moe_packed_seq_params_seq_aux_loss_num_samples": tensor_signature(num_samples),
+    }
+
+
 def test_graph_bank_capture_owns_exact_lists_and_contracts() -> None:
     generic = _FakeLayer("attention")
     mamba = _FakeLayer("mamba")
@@ -310,6 +327,130 @@ def test_graph_bank_capture_owns_exact_lists_and_contracts() -> None:
         assert layer.cuda_graphs is bank._owned_graph_lists[index]
         assert tuple(layer.cuda_graphs) == tuple(helper_graphs[index])
         assert layer.cuda_graph_manual_hooks is old_hooks[index]
+
+
+def test_graph_bank_fingerprints_and_installs_moe_sample_ownership() -> None:
+    layer = _FakeMoELayer("moe")
+    sample_ids = torch.tensor([0, 0, 1, 1], dtype=torch.int64)
+    num_samples = torch.tensor(2, dtype=torch.int64)
+
+    def setup() -> None:
+        _install_fake_moe_packed_contract(
+            layer,
+            sample_ids=sample_ids,
+            num_samples=num_samples,
+            max_samples=3,
+        )
+
+    manager = _make_manager([layer], modules=("moe_router",))
+    bank = manager.capture(
+        _FakeHelper([layer], _graphs("moe", 2), modules=("moe_router",), setup=setup),
+        num_microbatches=2,
+    )
+
+    packed_signature = dict(bank.fingerprint.packed_input_signatures)[id(layer)]
+    assert packed_signature == (
+        (
+            "moe",
+            (("seq_aux_loss_max_samples", 3),),
+            (
+                (
+                    "_moe_packed_seq_params_seq_aux_loss_num_samples",
+                    _load_bank_module().tensor_signature(num_samples),
+                ),
+                (
+                    "_moe_packed_seq_params_seq_aux_loss_sample_ids",
+                    _load_bank_module().tensor_signature(sample_ids),
+                ),
+            ),
+        ),
+    )
+
+    bank.activate()
+
+    assert layer._te_cuda_graph_moe_packed_seq_params_static_metadata == {
+        "seq_aux_loss_max_samples": 3
+    }
+    assert layer._te_cuda_graph_moe_packed_seq_params_tensor_signatures[
+        "_moe_packed_seq_params_seq_aux_loss_sample_ids"
+    ] == _load_bank_module().tensor_signature(sample_ids)
+
+    bank.reset()
+
+    assert not hasattr(layer, "_te_cuda_graph_moe_packed_seq_params_static_metadata")
+    assert not hasattr(layer, "_te_cuda_graph_moe_packed_seq_params_tensor_signatures")
+
+
+def test_failed_activation_restores_padding_dispatcher_and_moe_contract() -> None:
+    layer = _FakeMoELayer("moe")
+    manager = _make_manager([layer], modules=("moe_router",))
+    first_ids = torch.tensor([0, 0, 1, 1], dtype=torch.int64)
+    second_ids = torch.tensor([0, 1, 2, 2], dtype=torch.int64)
+
+    def setup_first() -> None:
+        _install_fake_moe_packed_contract(
+            layer,
+            sample_ids=first_ids,
+            num_samples=torch.tensor(2, dtype=torch.int64),
+            max_samples=3,
+        )
+        layer._te_cuda_graph_padding_mask_signature = _load_bank_module().tensor_signature(
+            torch.zeros((1, 4), dtype=torch.bool)
+        )
+
+    def setup_second() -> None:
+        _install_fake_moe_packed_contract(
+            layer,
+            sample_ids=second_ids,
+            num_samples=torch.tensor(3, dtype=torch.int64),
+            max_samples=4,
+        )
+        layer._te_cuda_graph_padding_mask_signature = _load_bank_module().tensor_signature(
+            torch.zeros((1, 8), dtype=torch.bool)
+        )
+
+    first = manager.capture(
+        _FakeHelper(
+            [layer], _graphs("first", 2), modules=("moe_router",), setup=setup_first
+        ),
+        num_microbatches=2,
+    )
+    second = manager.capture(
+        _FakeHelper(
+            [layer], _graphs("second", 2), modules=("moe_router",), setup=setup_second
+        ),
+        num_microbatches=2,
+    )
+    first.activate()
+    installation = (
+        layer.cuda_graphs,
+        layer.cuda_graph_manual_hooks,
+        layer._te_cuda_graph_padding_mask_signature,
+        layer._te_cuda_graph_dispatcher_replay_states,
+        layer._te_cuda_graph_moe_packed_seq_params_static_metadata,
+        layer._te_cuda_graph_moe_packed_seq_params_tensor_signatures,
+        layer._te_cuda_graph_bank_replay_guard,
+    )
+    real_install = manager._install_bank
+
+    def fail_install(bank) -> None:
+        real_install(bank)
+        raise RuntimeError("installation failed")
+
+    manager._install_bank = fail_install
+    with pytest.raises(RuntimeError, match="installation failed"):
+        second.activate()
+
+    assert manager.active_bank is first
+    assert (
+        layer.cuda_graphs,
+        layer.cuda_graph_manual_hooks,
+        layer._te_cuda_graph_padding_mask_signature,
+        layer._te_cuda_graph_dispatcher_replay_states,
+        layer._te_cuda_graph_moe_packed_seq_params_static_metadata,
+        layer._te_cuda_graph_moe_packed_seq_params_tensor_signatures,
+        layer._te_cuda_graph_bank_replay_guard,
+    ) == installation
 
 
 def test_graph_bank_activation_restores_dispatcher_states() -> None:

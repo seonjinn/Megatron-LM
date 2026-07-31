@@ -18,9 +18,13 @@ from megatron.core.dist_checkpointing.utils import apply_prefix_mapping
 from megatron.core.inference.utils import InferenceMode
 from megatron.core.packed_seq_params import (
     CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX,
+    MOE_CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX,
+    MOE_PACKED_SEQ_PARAMS_CUDA_GRAPH_TENSOR_FIELDS,
     PackedSeqParams,
     build_packed_seq_params_from_cuda_graph_kwargs,
     has_packed_seq_params_cuda_graph_kwargs,
+    merge_moe_packed_seq_params_from_cuda_graph_kwargs,
+    split_moe_packed_seq_params_for_cuda_graph,
     split_packed_seq_params_for_cuda_graph,
 )
 from megatron.core.process_groups_config import ProcessGroupCollection
@@ -31,6 +35,7 @@ from megatron.core.transformer.mlp import MLP
 from megatron.core.transformer.module import GraphableMegatronModule
 from megatron.core.transformer.moe.cuda_graph_replay import MoECudaGraphReplayState
 from megatron.core.transformer.spec_utils import ModuleSpec, build_module
+from megatron.core.transformer.te_cuda_graph_bank import tensor_signature
 from megatron.core.transformer.torch_norm import LayerNormBuilder
 from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.typed_torch import apply_module, copy_signature
@@ -53,6 +58,11 @@ logger = logging.getLogger(__name__)
 _TECudaGraphBankReferences = tuple[
     tuple[tuple[str, bool, object], ...], tuple[tuple[str, bool, object], ...]
 ]
+
+_MOE_CUDA_GRAPH_PACKED_SEQ_PARAMS_TENSOR_KEYS = frozenset(
+    f"{MOE_CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX}{field_name}"
+    for field_name in MOE_PACKED_SEQ_PARAMS_CUDA_GRAPH_TENSOR_FIELDS
+)
 
 
 def _is_te_cuda_graph_stream_capturing() -> bool:
@@ -871,12 +881,25 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             and not isinstance(self.mlp, IdentityOp)
             and not self.config.transformer_impl == "inference_optimized"
         )
+        has_explicit_moe_sample_ownership = packed_seq_params is not None and any(
+            getattr(packed_seq_params, field_name, None) is not None
+            for field_name in (
+                "seq_aux_loss_sample_ids",
+                "seq_aux_loss_num_samples",
+                "seq_aux_loss_max_samples",
+            )
+        )
         should_chunk_mlp_for_training = (
             self.config.mlp_chunks_for_training > 1
             and inference_context is None
             and self.training
             and not isinstance(self.mlp, IdentityOp)
+            and not has_explicit_moe_sample_ownership
         )
+
+        mlp_kwargs = {"padding_mask": padding_mask}
+        if self.is_moe_layer:
+            mlp_kwargs["packed_seq_params"] = packed_seq_params
 
         using_fused_tp_inference_kernel = (
             InferenceMode.is_active() and self.config.inference_fuse_tp_communication
@@ -893,11 +916,11 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                     tensor_parallel.random.get_cuda_rng_tracker,
                     self.pg_collection.tp,
                     pre_mlp_layernorm_output,
-                    padding_mask=padding_mask,
+                    **mlp_kwargs,
                 )
             else:
                 mlp_output_with_bias = tensor_parallel.checkpoint(
-                    functools.partial(apply_module(self.mlp), padding_mask=padding_mask),
+                    functools.partial(apply_module(self.mlp), **mlp_kwargs),
                     False,
                     pre_mlp_layernorm_output,
                 )
@@ -915,7 +938,10 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             chunks = pre_mlp_layernorm_output.chunk(num_chunks, dim=0)
 
             # Compute outputs for each chunk
-            outputs = [apply_module(self.mlp)(chunk) for chunk in chunks]
+            chunk_mlp_kwargs = (
+                {"packed_seq_params": packed_seq_params} if self.is_moe_layer else {}
+            )
+            outputs = [apply_module(self.mlp)(chunk, **chunk_mlp_kwargs) for chunk in chunks]
 
             # Aggregate chunk outputs
             mlp_output = torch.cat([out for out, _ in outputs], dim=0)
@@ -928,9 +954,7 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                 # Set the residual for fused reduce-scatter + add + layer-norm + all-gather
                 # operation in MLP's fc2.
                 self._set_fc2_residual(residual)
-            mlp_output_with_bias = apply_module(self.mlp)(
-                pre_mlp_layernorm_output, padding_mask=padding_mask
-            )
+            mlp_output_with_bias = apply_module(self.mlp)(pre_mlp_layernorm_output, **mlp_kwargs)
 
         if moe_unflatten_mbs is not None:
             mlp_output, mlp_bias = mlp_output_with_bias
@@ -1377,6 +1401,228 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
         )
         kwargs.update(tensor_kwargs)
 
+    def _te_cuda_graph_owns_moe_packed_seq_params(self) -> bool:
+        """Return whether this Transformer leaf captures the MoE routing boundary."""
+
+        if not getattr(self, "is_moe_layer", False):
+            return False
+        cuda_graph_modules = self.config.cuda_graph_modules
+        return not cuda_graph_modules or any(
+            module in cuda_graph_modules
+            for module in (
+                CudaGraphModule.moe,
+                CudaGraphModule.moe_router,
+                CudaGraphModule.moe_preprocess,
+            )
+        )
+
+    def _set_te_cuda_graph_moe_packed_seq_params_static_metadata(
+        self, static_metadata, tensor_kwargs=None
+    ) -> None:
+        """Store the exact MoE packed-sequence capture contract."""
+
+        if static_metadata is None:
+            if tensor_kwargs is not None:
+                raise ValueError("MoE Tensor kwargs require static capture metadata")
+            self._te_cuda_graph_moe_packed_seq_params_static_metadata = None
+            self._te_cuda_graph_moe_packed_seq_params_tensor_signatures = None
+            return
+
+        static_metadata = dict(static_metadata)
+        expected_static_names = {"seq_aux_loss_max_samples"}
+        if set(static_metadata) != expected_static_names:
+            raise ValueError(
+                "MoE PackedSeqParams static fields must be exactly "
+                f"{sorted(expected_static_names)}, got {sorted(static_metadata)}"
+            )
+        max_samples = static_metadata["seq_aux_loss_max_samples"]
+        if isinstance(max_samples, bool) or not isinstance(max_samples, int) or max_samples < 1:
+            raise ValueError("seq_aux_loss_max_samples must be a positive Python int")
+
+        tensor_kwargs = dict(tensor_kwargs or {})
+        actual_names = set(tensor_kwargs)
+        missing_names = sorted(_MOE_CUDA_GRAPH_PACKED_SEQ_PARAMS_TENSOR_KEYS - actual_names)
+        extra_names = sorted(actual_names - _MOE_CUDA_GRAPH_PACKED_SEQ_PARAMS_TENSOR_KEYS)
+        if missing_names or extra_names:
+            raise ValueError(
+                "MoE PackedSeqParams Tensor fields differ from the fixed graph contract: "
+                f"missing {missing_names}, unexpected {extra_names}"
+            )
+        if any(not isinstance(value, Tensor) for value in tensor_kwargs.values()):
+            raise ValueError("MoE PackedSeqParams graph inputs must be Tensors")
+
+        self._te_cuda_graph_moe_packed_seq_params_static_metadata = static_metadata
+        self._te_cuda_graph_moe_packed_seq_params_tensor_signatures = {
+            key: tensor_signature(value) for key, value in tensor_kwargs.items()
+        }
+
+    def _get_te_cuda_graph_moe_packed_seq_params_static_metadata(self):
+        """Return MoE packed-sequence static metadata used during capture."""
+
+        return getattr(self, "_te_cuda_graph_moe_packed_seq_params_static_metadata", None)
+
+    def _validate_te_cuda_graph_moe_packed_seq_params_static_metadata(
+        self, static_metadata
+    ) -> None:
+        """Validate static MoE ownership against the captured graph contract."""
+
+        expected = self._get_te_cuda_graph_moe_packed_seq_params_static_metadata()
+        if expected is None:
+            raise ValueError(
+                "TE CUDA graph replay received MoE packed-sequence ownership, but capture did not"
+            )
+        actual = dict(static_metadata)
+        mismatched_fields = [
+            field_name
+            for field_name in sorted(set(expected) | set(actual))
+            if expected.get(field_name) != actual.get(field_name)
+        ]
+        if mismatched_fields:
+            raise ValueError(
+                "TE CUDA graph replay received MoE PackedSeqParams static metadata that differs "
+                f"from capture: {', '.join(mismatched_fields)}"
+            )
+
+    def _validate_te_cuda_graph_moe_packed_seq_params_tensor_kwargs(
+        self, tensor_kwargs
+    ) -> None:
+        """Validate MoE Tensor presence and exact replay signatures."""
+
+        expected_signatures = getattr(
+            self, "_te_cuda_graph_moe_packed_seq_params_tensor_signatures", None
+        )
+        if expected_signatures is None:
+            if tensor_kwargs:
+                raise ValueError(
+                    "TE CUDA graph replay received MoE packed-sequence Tensor inputs, but "
+                    "capture did not"
+                )
+            return
+
+        actual_names = set(tensor_kwargs)
+        expected_names = set(expected_signatures)
+        missing_names = sorted(expected_names - actual_names)
+        extra_names = sorted(actual_names - expected_names)
+        if missing_names or extra_names:
+            raise ValueError(
+                "TE CUDA graph replay received MoE PackedSeqParams Tensor fields that differ "
+                f"from capture: missing {missing_names}, unexpected {extra_names}"
+            )
+
+        signature_fields = ("shape", "dtype", "device", "layout", "stride")
+        for key in sorted(expected_names):
+            value = tensor_kwargs[key]
+            if not isinstance(value, Tensor):
+                raise ValueError(f"MoE PackedSeqParams input {key} must be a Tensor")
+            expected_signature = expected_signatures[key]
+            actual_signature = tensor_signature(value)
+            mismatched_signature_fields = [
+                field_name
+                for field_name in signature_fields
+                if getattr(expected_signature, field_name) != getattr(actual_signature, field_name)
+            ]
+            if mismatched_signature_fields:
+                raise ValueError(
+                    f"TE CUDA graph replay received MoE PackedSeqParams Tensor input {key} "
+                    "with a signature that differs from capture: "
+                    f"{', '.join(mismatched_signature_fields)}"
+                )
+
+    def _validate_te_cuda_graph_moe_packed_seq_params_kwargs(
+        self, kwargs, *, require_complete: bool = False
+    ) -> None:
+        """Reject unknown MoE-prefixed inputs before eager or graph execution."""
+
+        tensor_kwargs = {
+            key: value
+            for key, value in kwargs.items()
+            if key.startswith(MOE_CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX)
+        }
+        unexpected_names = sorted(
+            set(tensor_kwargs) - _MOE_CUDA_GRAPH_PACKED_SEQ_PARAMS_TENSOR_KEYS
+        )
+        if unexpected_names:
+            raise ValueError(
+                "TE CUDA graph received unexpected MoE PackedSeqParams keys: "
+                f"{unexpected_names}"
+            )
+
+        expected_signatures = getattr(
+            self, "_te_cuda_graph_moe_packed_seq_params_tensor_signatures", None
+        )
+        if expected_signatures is None and tensor_kwargs:
+            raise ValueError(
+                "TE CUDA graph received MoE PackedSeqParams keys for a scope captured without "
+                "MoE ownership"
+            )
+        if require_complete:
+            self._validate_te_cuda_graph_moe_packed_seq_params_tensor_kwargs(tensor_kwargs)
+        elif expected_signatures is not None:
+            for key, value in tensor_kwargs.items():
+                if not isinstance(value, Tensor):
+                    raise ValueError(f"MoE PackedSeqParams input {key} must be a Tensor")
+                expected_signature = expected_signatures[key]
+                actual_signature = tensor_signature(value)
+                if actual_signature != expected_signature:
+                    raise ValueError(
+                        f"TE CUDA graph replay received MoE PackedSeqParams Tensor input {key} "
+                        "with a signature that differs from capture"
+                    )
+
+    def _rebuild_te_cuda_graph_moe_packed_seq_params(self, kwargs) -> None:
+        """Merge flattened MoE ownership into a newly rebuilt packed object."""
+
+        tensor_kwargs = {
+            key: value
+            for key, value in kwargs.items()
+            if key.startswith(MOE_CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX)
+        }
+        expected_static_metadata = (
+            self._get_te_cuda_graph_moe_packed_seq_params_static_metadata()
+        )
+        if not tensor_kwargs and expected_static_metadata is None:
+            return
+        self._validate_te_cuda_graph_moe_packed_seq_params_kwargs(
+            kwargs, require_complete=True
+        )
+        if expected_static_metadata is None:
+            raise ValueError("Flattened MoE ownership requires captured static metadata")
+
+        kwargs["packed_seq_params"] = merge_moe_packed_seq_params_from_cuda_graph_kwargs(
+            kwargs.get("packed_seq_params"), kwargs, expected_static_metadata
+        )
+
+    def _flatten_te_cuda_graph_moe_packed_seq_params(
+        self, kwargs, packed_seq_params: PackedSeqParams | None = None
+    ) -> None:
+        """Flatten replay-time MoE ownership without mutating its producer object."""
+
+        expected_static_metadata = (
+            self._get_te_cuda_graph_moe_packed_seq_params_static_metadata()
+        )
+        if expected_static_metadata is None:
+            return
+        if packed_seq_params is None:
+            packed_seq_params = kwargs.get("packed_seq_params")
+        if packed_seq_params is None:
+            raise ValueError(
+                "TE CUDA graph was captured with MoE packed ownership, so replay requires "
+                "packed_seq_params"
+            )
+
+        tensor_kwargs, static_metadata = split_moe_packed_seq_params_for_cuda_graph(
+            packed_seq_params
+        )
+        self._validate_te_cuda_graph_moe_packed_seq_params_static_metadata(static_metadata)
+        self._validate_te_cuda_graph_moe_packed_seq_params_tensor_kwargs(tensor_kwargs)
+        duplicate_keys = set(kwargs) & set(tensor_kwargs)
+        if duplicate_keys:
+            raise ValueError(
+                "MoE PackedSeqParams CUDA graph Tensor kwargs overlap with replay kwargs: "
+                f"{sorted(duplicate_keys)}"
+            )
+        kwargs.update(tensor_kwargs)
+
     def _te_cuda_graph_capture(self, *args, **kwargs):
         """
         CUDA Graph capture for this layer using TE interface.
@@ -1385,6 +1631,7 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
            attribute can be set to control the scope of the CUDA graph.
         2. If context is None, it cannot be returned as output.
         """
+        self._validate_te_cuda_graph_moe_packed_seq_params_kwargs(kwargs)
         capture_index = None
         capture_count = getattr(self, "_te_cuda_graph_capture_num_microbatches", None)
         if capture_count is not None and _is_te_cuda_graph_stream_capturing():
@@ -1410,6 +1657,7 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                 hidden_states = self.off_interface.backward_record(hidden_states)
                 kwargs["hidden_states"] = hidden_states
         self._rebuild_te_cuda_graph_packed_seq_params(kwargs)
+        self._rebuild_te_cuda_graph_moe_packed_seq_params(kwargs)
         packed_seq_params = kwargs.get("packed_seq_params")
         padding_mask = kwargs.get("padding_mask")
 
@@ -1469,6 +1717,13 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
         Hence, `inference_context` is excluded from input list. `packed_seq_params` is split
         into Tensor graph inputs and static metadata when attention is in the graph scope.
         """
+        self._validate_te_cuda_graph_moe_packed_seq_params_kwargs(kwargs)
+        producer_packed_seq_params = kwargs.get("packed_seq_params")
+        moe_graph_kwargs = {}
+        self._flatten_te_cuda_graph_moe_packed_seq_params(
+            moe_graph_kwargs, producer_packed_seq_params
+        )
+
         context = None
         if (
             self.config.cuda_graph_modules
@@ -1476,9 +1731,22 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
         ):
             hidden_states, context = self._forward_attention(*args, **kwargs)
             args = (hidden_states,)
-            kwargs = {}
+            padding_mask = kwargs.get("padding_mask")
+            kwargs = dict(moe_graph_kwargs)
+            if padding_mask is not None:
+                kwargs["padding_mask"] = padding_mask
         else:
-            self._flatten_te_cuda_graph_packed_seq_params(kwargs)
+            if self._get_te_cuda_graph_packed_seq_params_static_metadata() is None:
+                kwargs.pop("packed_seq_params", None)
+            else:
+                self._flatten_te_cuda_graph_packed_seq_params(kwargs)
+            duplicate_keys = set(kwargs) & set(moe_graph_kwargs)
+            if duplicate_keys:
+                raise ValueError(
+                    "MoE PackedSeqParams CUDA graph Tensor kwargs overlap with replay kwargs: "
+                    f"{sorted(duplicate_keys)}"
+                )
+            kwargs.update(moe_graph_kwargs)
 
         assert kwargs.get('inference_context') is None, (
             "CUDA graph accepts only Tensor inputs. "
@@ -1491,18 +1759,46 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             self.off_interface.enter_replay()
 
         try:
-            return self._te_cuda_graph_replay_impl(args, kwargs, context)
+            eager_packed_seq_params = (
+                None
+                if self._te_cuda_graph_owns_moe_packed_seq_params()
+                else producer_packed_seq_params
+            )
+            return self._te_cuda_graph_replay_impl(
+                args,
+                kwargs,
+                context,
+                eager_packed_seq_params=eager_packed_seq_params,
+            )
         finally:
             if self.config.delay_offload_until_cuda_graph:
                 self.off_interface.exit_replay()
 
-    def _te_cuda_graph_replay_impl(self, args, kwargs, context):
+    def _te_cuda_graph_replay_impl(
+        self, args, kwargs, context, *, eager_packed_seq_params=None
+    ):
         """Implementation of _te_cuda_graph_replay, separated for replay mode cleanup."""
         graph_index = self._te_cuda_graph_replay_index(getattr(self, 'current_microbatch', 0))
         eager_mlp_kwargs = dict(kwargs)
         self._rebuild_te_cuda_graph_packed_seq_params(eager_mlp_kwargs)
+        self._rebuild_te_cuda_graph_moe_packed_seq_params(eager_mlp_kwargs)
         padding_mask = eager_mlp_kwargs.get("padding_mask")
-        packed_seq_params = eager_mlp_kwargs.get("packed_seq_params")
+        packed_seq_params = (
+            eager_packed_seq_params
+            if eager_packed_seq_params is not None
+            else eager_mlp_kwargs.get("packed_seq_params")
+        )
+        moe_route_kwargs = {
+            "seq_aux_loss_sample_ids": getattr(
+                packed_seq_params, "seq_aux_loss_sample_ids", None
+            ),
+            "seq_aux_loss_num_samples": getattr(
+                packed_seq_params, "seq_aux_loss_num_samples", None
+            ),
+            "seq_aux_loss_max_samples": getattr(
+                packed_seq_params, "seq_aux_loss_max_samples", None
+            ),
+        }
         cuda_graph_output = list(super()._te_cuda_graph_replay(*args, **kwargs))
 
         # Flush delayed offload groups from previous layers after graph replay.
@@ -1577,11 +1873,13 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             # If EP overlap is enabled, remaining of mlp will be called as fine_grained_callables
             # and should be skipped here.
             if self.config.overlap_moe_expert_parallel_comm:
-                probs, routing_map = self.mlp.route(hidden_states)
+                probs, routing_map = self.mlp.route(hidden_states, **moe_route_kwargs)
                 hidden_states, probs = self.mlp.preprocess(hidden_states, probs, routing_map)
                 nvtx_range_pop(suffix="mlp")
                 return residual, hidden_states, probs, shared_expert_output
-            mlp_output_with_bias = apply_module(self.mlp)(hidden_states)
+            mlp_output_with_bias = apply_module(self.mlp)(
+                hidden_states, packed_seq_params=packed_seq_params
+            )
             if dispatcher_replay_state is not None:
                 self.mlp.token_dispatcher.validate_cudagraph_continuation(
                     dispatcher_replay_state, mlp_output_with_bias[0]
@@ -1619,7 +1917,9 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                 if router_padding_mask is not None:
                     router_padding_mask = router_padding_mask.transpose(0, 1).contiguous()
                 probs, routing_map = self.mlp.route(
-                    router_hidden_states, padding_mask=router_padding_mask
+                    router_hidden_states,
+                    padding_mask=router_padding_mask,
+                    **moe_route_kwargs,
                 )
                 if moe_unflatten_mbs is not None:
                     tokens_per_sample = packed_seq_params.tokens_per_sample
@@ -2026,7 +2326,7 @@ class MoETransformerLayer(TransformerLayer):
 
         return tuple(attr_names), token_dispatcher_attr_outputs
 
-    def _forward_mlp_router(self, hidden_states, padding_mask=None):
+    def _forward_mlp_router(self, hidden_states, padding_mask=None, packed_seq_params=None):
         """
         Executes the router phase of the MoE block.
 
@@ -2051,7 +2351,10 @@ class MoETransformerLayer(TransformerLayer):
             residual = residual.float()
 
         hidden_states, probs, shared_expert_output = apply_module(self.mlp)(
-            pre_mlp_layernorm_output, intermediate_tensors=(), padding_mask=padding_mask
+            pre_mlp_layernorm_output,
+            intermediate_tensors=(),
+            padding_mask=padding_mask,
+            packed_seq_params=packed_seq_params,
         )
 
         if self.use_partial_cudagraphs:
@@ -2072,7 +2375,9 @@ class MoETransformerLayer(TransformerLayer):
             *token_dispatcher_attr_outputs,
         )
 
-    def _forward_mlp_expert_compute(self, hidden_states, probs, token_dispatcher_attr_outputs):
+    def _forward_mlp_expert_compute(
+        self, hidden_states, probs, token_dispatcher_attr_outputs, packed_seq_params=None
+    ):
         """
         Executes the actual computation of the experts.
 
@@ -2086,9 +2391,15 @@ class MoETransformerLayer(TransformerLayer):
             self._restore_token_dispatcher_attrs(token_dispatcher_attr_outputs)
 
         self.mlp.fwd_execution_map = "expert_compute"
-        return apply_module(self.mlp)(None, intermediate_tensors=(hidden_states, probs))
+        return apply_module(self.mlp)(
+            None,
+            intermediate_tensors=(hidden_states, probs),
+            packed_seq_params=packed_seq_params,
+        )
 
-    def _forward_mlp_postprocess(self, residual, output, shared_expert_output, mlp_bias):
+    def _forward_mlp_postprocess(
+        self, residual, output, shared_expert_output, mlp_bias, packed_seq_params=None
+    ):
         """
         Executes the post-processing phase of the MoE block.
 
@@ -2099,7 +2410,11 @@ class MoETransformerLayer(TransformerLayer):
         """
 
         self.mlp.fwd_execution_map = "postprocess"
-        output = apply_module(self.mlp)(None, intermediate_tensors=(output, shared_expert_output))
+        output = apply_module(self.mlp)(
+            None,
+            intermediate_tensors=(output, shared_expert_output),
+            packed_seq_params=packed_seq_params,
+        )
         return self._forward_post_mlp((output, mlp_bias), residual)
 
     def _forward_mlp(
@@ -2122,7 +2437,11 @@ class MoETransformerLayer(TransformerLayer):
         def _forward_mlp_partial_cudagraphs(
             hidden_states, inference_context=None, padding_mask=None
         ):
-            router_outputs = self._forward_mlp_router(hidden_states, padding_mask=padding_mask)
+            router_outputs = self._forward_mlp_router(
+                hidden_states,
+                padding_mask=padding_mask,
+                packed_seq_params=packed_seq_params,
+            )
             (
                 residual,
                 hidden_states,
@@ -2139,10 +2458,17 @@ class MoETransformerLayer(TransformerLayer):
             self._router_dtoh_event.synchronize()
 
             expert_output, mlp_bias = self._forward_mlp_expert_compute(
-                hidden_states, probs, token_dispatcher_attr_outputs
+                hidden_states,
+                probs,
+                token_dispatcher_attr_outputs,
+                packed_seq_params=packed_seq_params,
             )
             return self._forward_mlp_postprocess(
-                residual, expert_output, shared_expert_output, mlp_bias
+                residual,
+                expert_output,
+                shared_expert_output,
+                mlp_bias,
+                packed_seq_params=packed_seq_params,
             )
 
         if self.use_partial_cudagraphs:

@@ -23,6 +23,8 @@ _PACKED_REPLAY_ATTRIBUTES = (
     "_te_cuda_graph_packed_seq_params_tensor_kwarg_names",
     "_te_cuda_graph_mamba_packed_seq_params_static_metadata",
     "_te_cuda_graph_mamba_packed_seq_params_tensor_signatures",
+    "_te_cuda_graph_moe_packed_seq_params_static_metadata",
+    "_te_cuda_graph_moe_packed_seq_params_tensor_signatures",
 )
 _PADDING_MASK_SIGNATURE_ATTRIBUTE = "_te_cuda_graph_padding_mask_signature"
 _DISPATCHER_STATES_ATTRIBUTE = "_te_cuda_graph_dispatcher_replay_states"
@@ -1003,6 +1005,18 @@ class TECudaGraphBankManager:
                         "mamba",
                         _freeze_signature(mamba_static[1]) if mamba_static[0] else None,
                         _freeze_signature(mamba_tensors[1]) if mamba_tensors[0] else (),
+                    )
+                )
+            moe_static = attributes["_te_cuda_graph_moe_packed_seq_params_static_metadata"]
+            moe_tensors = attributes[
+                "_te_cuda_graph_moe_packed_seq_params_tensor_signatures"
+            ]
+            if moe_static[0] or moe_tensors[0]:
+                layer_signature.append(
+                    (
+                        "moe",
+                        _freeze_signature(moe_static[1]) if moe_static[0] else None,
+                        _freeze_signature(moe_tensors[1]) if moe_tensors[0] else (),
                     )
                 )
             signatures.append((id(layer), tuple(layer_signature)))

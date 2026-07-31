@@ -8,11 +8,13 @@ import torch
 from megatron.core.extensions.transformer_engine import TEDotProductAttention
 from megatron.core.packed_seq_params import (
     CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX,
+    MOE_CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX,
     PACKED_SEQ_PARAMS_CUDA_GRAPH_STATIC_FIELDS,
     PACKED_SEQ_PARAMS_CUDA_GRAPH_TENSOR_FIELDS,
     PackedSeqParams,
     build_packed_seq_params_from_cuda_graph_kwargs,
     has_packed_seq_params_cuda_graph_kwargs,
+    split_moe_packed_seq_params_for_cuda_graph,
     split_packed_seq_params_for_cuda_graph,
 )
 from megatron.core.process_groups_config import ProcessGroupCollection
@@ -49,7 +51,178 @@ class _TransformerLayerCudaGraphStub:
     _flatten_te_cuda_graph_packed_seq_params = (
         TransformerLayer._flatten_te_cuda_graph_packed_seq_params
     )
+    _set_te_cuda_graph_moe_packed_seq_params_static_metadata = (
+        TransformerLayer._set_te_cuda_graph_moe_packed_seq_params_static_metadata
+    )
+    _get_te_cuda_graph_moe_packed_seq_params_static_metadata = (
+        TransformerLayer._get_te_cuda_graph_moe_packed_seq_params_static_metadata
+    )
+    _validate_te_cuda_graph_moe_packed_seq_params_kwargs = (
+        TransformerLayer._validate_te_cuda_graph_moe_packed_seq_params_kwargs
+    )
+    _rebuild_te_cuda_graph_moe_packed_seq_params = (
+        TransformerLayer._rebuild_te_cuda_graph_moe_packed_seq_params
+    )
+    _flatten_te_cuda_graph_moe_packed_seq_params = (
+        TransformerLayer._flatten_te_cuda_graph_moe_packed_seq_params
+    )
+    _te_cuda_graph_owns_moe_packed_seq_params = (
+        TransformerLayer._te_cuda_graph_owns_moe_packed_seq_params
+    )
     _te_cuda_graph_capture = TransformerLayer._te_cuda_graph_capture
+    _te_cuda_graph_replay = TransformerLayer._te_cuda_graph_replay
+
+
+def _make_seq_aux_loss_packed_seq_params(
+    *,
+    num_tokens: int = 8,
+    num_samples: int = 2,
+    max_samples: int = 3,
+    device: torch.device | str = "cpu",
+) -> PackedSeqParams:
+    sample_ids = torch.arange(num_tokens, device=device, dtype=torch.int64).remainder(num_samples)
+    return PackedSeqParams(
+        qkv_format="thd",
+        cu_seqlens_q=torch.tensor([0, 4, 8], dtype=torch.int32, device=device),
+        cu_seqlens_kv=torch.tensor([0, 4, 8], dtype=torch.int32, device=device),
+        max_seqlen_q=4,
+        max_seqlen_kv=4,
+        pad_between_seqs=True,
+        seq_aux_loss_sample_ids=sample_ids,
+        seq_aux_loss_num_samples=torch.tensor(num_samples, dtype=torch.int64, device=device),
+        seq_aux_loss_max_samples=max_samples,
+    )
+
+
+def _install_moe_graph_contract(
+    layer: _TransformerLayerCudaGraphStub, packed_seq_params: PackedSeqParams
+) -> dict[str, torch.Tensor]:
+    tensor_kwargs, static_metadata = split_moe_packed_seq_params_for_cuda_graph(
+        packed_seq_params
+    )
+    layer._set_te_cuda_graph_moe_packed_seq_params_static_metadata(
+        static_metadata, tensor_kwargs
+    )
+    return tensor_kwargs
+
+
+def _make_mlp_propagation_layer(mlp: torch.nn.Module, *, is_moe: bool) -> TransformerLayer:
+    layer = TransformerLayer.__new__(TransformerLayer)
+    torch.nn.Module.__init__(layer)
+    layer.config = SimpleNamespace(
+        fp32_residual_connection=False,
+        mlp_chunks_for_prefill=1,
+        mlp_chunks_for_training=4,
+        transformer_impl="transformer_engine",
+        inference_fuse_tp_communication=False,
+        cuda_graph_impl="none",
+    )
+    layer.is_moe_layer = is_moe
+    layer.mlp = mlp
+    layer.recompute_mlp = False
+    layer._forward_pre_mlp_layernorm = MethodType(lambda self, hidden: hidden, layer)
+    layer._forward_post_mlp = MethodType(lambda self, output, _residual: output[0], layer)
+    layer.train()
+    return layer
+
+
+def test_moe_sample_ownership_disables_training_chunks_and_reaches_eager_mlp(
+    monkeypatch,
+) -> None:
+    calls = []
+
+    class _MoEObserver(torch.nn.Module):
+        def forward(self, hidden_states, padding_mask=None, packed_seq_params=None):
+            calls.append((hidden_states, padding_mask, packed_seq_params))
+            return hidden_states, None
+
+    layer = _make_mlp_propagation_layer(_MoEObserver(), is_moe=True)
+    packed = _make_seq_aux_loss_packed_seq_params()
+    hidden_states = torch.zeros((8, 1, 4))
+    padding_mask = torch.ones((1, 8), dtype=torch.bool)
+    monkeypatch.setattr(
+        "megatron.core.transformer.transformer_layer.nvtx_range_push", lambda **_kwargs: None
+    )
+    monkeypatch.setattr(
+        "megatron.core.transformer.transformer_layer.nvtx_range_pop", lambda **_kwargs: None
+    )
+
+    layer._forward_mlp(
+        hidden_states,
+        padding_mask=padding_mask,
+        packed_seq_params=packed,
+    )
+
+    assert len(calls) == 1
+    assert calls[0][0] is hidden_states
+    assert calls[0][1] is padding_mask
+    assert calls[0][2] is packed
+
+
+def test_recomputed_moe_mlp_receives_original_sample_ownership(monkeypatch) -> None:
+    observed = {}
+
+    class _MoEObserver(torch.nn.Module):
+        def forward(self, hidden_states, padding_mask=None, packed_seq_params=None):
+            observed["packed_seq_params"] = packed_seq_params
+            observed["padding_mask"] = padding_mask
+            return hidden_states, None
+
+    layer = _make_mlp_propagation_layer(_MoEObserver(), is_moe=True)
+    layer.recompute_mlp = True
+    layer.config.fp8 = None
+    layer.config.fp4 = None
+    packed = _make_seq_aux_loss_packed_seq_params()
+    padding_mask = torch.ones((1, 8), dtype=torch.bool)
+    monkeypatch.setattr(
+        "megatron.core.transformer.transformer_layer.nvtx_range_push", lambda **_kwargs: None
+    )
+    monkeypatch.setattr(
+        "megatron.core.transformer.transformer_layer.nvtx_range_pop", lambda **_kwargs: None
+    )
+    monkeypatch.setattr(
+        "megatron.core.transformer.transformer_layer.tensor_parallel.checkpoint",
+        lambda function, _distribute_saved_activations, *args: function(*args),
+    )
+
+    layer._forward_mlp(
+        torch.zeros((8, 1, 4)),
+        padding_mask=padding_mask,
+        packed_seq_params=packed,
+    )
+
+    assert observed["packed_seq_params"] is packed
+    assert observed["padding_mask"] is padding_mask
+
+
+def test_dense_mlp_does_not_receive_moe_packed_seq_params(monkeypatch) -> None:
+    calls = []
+
+    class _DenseObserver(torch.nn.Module):
+        def forward(self, hidden_states, padding_mask=None):
+            calls.append((hidden_states, padding_mask))
+            return hidden_states, None
+
+    layer = _make_mlp_propagation_layer(_DenseObserver(), is_moe=False)
+    layer.config.mlp_chunks_for_training = 1
+    hidden_states = torch.zeros((8, 1, 4))
+    padding_mask = torch.ones((1, 8), dtype=torch.bool)
+    monkeypatch.setattr(
+        "megatron.core.transformer.transformer_layer.nvtx_range_push", lambda **_kwargs: None
+    )
+    monkeypatch.setattr(
+        "megatron.core.transformer.transformer_layer.nvtx_range_pop", lambda **_kwargs: None
+    )
+
+    layer._forward_mlp(
+        hidden_states,
+        padding_mask=padding_mask,
+        packed_seq_params=_make_seq_aux_loss_packed_seq_params(),
+    )
+
+    assert len(calls) == 1
+    assert calls[0][0] is hidden_states
+    assert calls[0][1] is padding_mask
 
 
 def test_te_attention_does_not_forward_seq_aux_loss_packed_fields(monkeypatch) -> None:
@@ -143,12 +316,16 @@ def test_attention_only_replay_passes_packed_metadata_and_padding_mask_to_mlp(mo
         max_seqlen_kv=4,
         tokens_per_sample=4,
         pad_between_seqs=True,
+        seq_aux_loss_sample_ids=torch.tensor([0, 0, 0, 0, 1, 1, 1, 1]),
+        seq_aux_loss_num_samples=torch.tensor(2, dtype=torch.int64),
+        seq_aux_loss_max_samples=3,
     )
     tensor_kwargs, static_metadata = split_packed_seq_params_for_cuda_graph(packed_seq_params)
     layer._set_te_cuda_graph_packed_seq_params_static_metadata(static_metadata, tensor_kwargs)
     padding_mask = torch.tensor([[False, False, False, True, False, False, True, True]])
     hidden_states = torch.ones(8, 1, 4)
     observed = {}
+    graph_kwargs = {}
 
     def forward_mlp(self, hidden_states, padding_mask=None, packed_seq_params=None):
         observed["hidden_states"] = hidden_states
@@ -157,20 +334,195 @@ def test_attention_only_replay_passes_packed_metadata_and_padding_mask_to_mlp(mo
         return hidden_states
 
     layer._forward_mlp = MethodType(forward_mlp, layer)
+    layer._te_cuda_graph_replay_index = MethodType(lambda self, _microbatch: 0, layer)
+
+    def replay_graph(self, *args, **kwargs):
+        graph_kwargs.update(kwargs)
+        return (hidden_states,)
+
     monkeypatch.setattr(
         GraphableMegatronModule,
         "_te_cuda_graph_replay",
-        lambda self, *args, **kwargs: (hidden_states,),
+        replay_graph,
     )
 
-    layer._te_cuda_graph_replay_impl((), {"padding_mask": padding_mask, **tensor_kwargs}, None)
+    layer._te_cuda_graph_replay(
+        hidden_states,
+        padding_mask=padding_mask,
+        packed_seq_params=packed_seq_params,
+    )
 
     assert observed["hidden_states"] is hidden_states
     assert observed["padding_mask"] is padding_mask
-    rebuilt = observed["packed_seq_params"]
-    assert rebuilt.tokens_per_sample == 4
-    assert rebuilt.pad_between_seqs is True
-    assert torch.equal(rebuilt.cu_seqlens_q, packed_seq_params.cu_seqlens_q)
+    assert observed["packed_seq_params"] is packed_seq_params
+    assert observed["packed_seq_params"].seq_aux_loss_sample_ids is (
+        packed_seq_params.seq_aux_loss_sample_ids
+    )
+    assert "packed_seq_params" not in graph_kwargs
+    assert any(key.startswith(CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX) for key in graph_kwargs)
+    assert not any(key.startswith(MOE_CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX) for key in graph_kwargs)
+
+
+def test_non_attention_moe_replay_preserves_padding_and_graph_owned_sample_inputs() -> None:
+    captured = _make_seq_aux_loss_packed_seq_params()
+
+    class _RouterReplayLayer(_TransformerLayerCudaGraphStub):
+        def __init__(self) -> None:
+            self.config = SimpleNamespace(
+                cuda_graph_modules=[CudaGraphModule.moe_router],
+                delay_offload_until_cuda_graph=False,
+            )
+            self.is_moe_layer = True
+            self.attention_inputs = None
+            self.replay_inputs = None
+            self.graph_calls = 0
+            self.fallback_calls = 0
+
+        def _forward_attention(self, hidden_states, **kwargs):
+            self.attention_inputs = kwargs
+            return hidden_states + 1, "context"
+
+        def _te_cuda_graph_replay_impl(
+            self, args, kwargs, context, *, eager_packed_seq_params=None
+        ):
+            self.graph_calls += 1
+            self.replay_inputs = (args, kwargs, context, eager_packed_seq_params)
+            return args[0]
+
+    layer = _RouterReplayLayer()
+    _install_moe_graph_contract(layer, captured)
+    replay = _make_seq_aux_loss_packed_seq_params(num_samples=1)
+    replay.seq_aux_loss_sample_ids.zero_()
+    padding_mask = torch.ones((1, 8), dtype=torch.bool)
+    hidden_states = torch.zeros((8, 1, 4))
+
+    layer._te_cuda_graph_replay(
+        hidden_states, packed_seq_params=replay, padding_mask=padding_mask
+    )
+
+    assert layer.attention_inputs["packed_seq_params"] is replay
+    args, graph_kwargs, context, eager_packed_seq_params = layer.replay_inputs
+    assert torch.equal(args[0], hidden_states + 1)
+    assert context == "context"
+    assert eager_packed_seq_params is None
+    assert graph_kwargs["padding_mask"] is padding_mask
+    assert graph_kwargs[
+        f"{MOE_CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX}seq_aux_loss_sample_ids"
+    ] is replay.seq_aux_loss_sample_ids
+    assert graph_kwargs[
+        f"{MOE_CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX}seq_aux_loss_num_samples"
+    ] is replay.seq_aux_loss_num_samples
+    assert replay.seq_aux_loss_num_samples.item() == 1
+    assert not replay.seq_aux_loss_sample_ids.any()
+    assert graph_kwargs["padding_mask"].all()
+    assert "packed_seq_params" not in graph_kwargs
+    assert layer.graph_calls == 1
+    assert layer.fallback_calls == 0
+
+
+@pytest.mark.parametrize(
+    ("mutation", "match"),
+    [
+        ("shape", "shape"),
+        ("dtype", "dtype"),
+        ("device", "device"),
+        ("layout", "layout"),
+        ("stride", "stride"),
+        ("type", "must be a Tensor"),
+        ("presence", "missing"),
+        ("capacity", "seq_aux_loss_max_samples"),
+    ],
+)
+def test_moe_replay_rejects_signature_drift_before_eager_attention(
+    mutation: str, match: str
+) -> None:
+    captured = _make_seq_aux_loss_packed_seq_params()
+
+    class _RejectingReplayLayer(_TransformerLayerCudaGraphStub):
+        def __init__(self) -> None:
+            self.config = SimpleNamespace(
+                cuda_graph_modules=[CudaGraphModule.moe_router],
+                delay_offload_until_cuda_graph=False,
+            )
+            self.is_moe_layer = True
+            self.attention_calls = 0
+            self.graph_calls = 0
+
+        def _forward_attention(self, hidden_states, **_kwargs):
+            self.attention_calls += 1
+            return hidden_states, None
+
+        def _te_cuda_graph_replay_impl(
+            self, args, kwargs, context, *, eager_packed_seq_params=None
+        ):
+            self.graph_calls += 1
+            return args[0]
+
+    layer = _RejectingReplayLayer()
+    _install_moe_graph_contract(layer, captured)
+    replay = _make_seq_aux_loss_packed_seq_params()
+    if mutation == "shape":
+        replay.seq_aux_loss_sample_ids = torch.zeros(7, dtype=torch.int64)
+    elif mutation == "dtype":
+        replay.seq_aux_loss_sample_ids = replay.seq_aux_loss_sample_ids.to(torch.int32)
+    elif mutation == "device":
+        replay.seq_aux_loss_sample_ids = torch.empty(8, dtype=torch.int64, device="meta")
+    elif mutation == "layout":
+        replay.seq_aux_loss_sample_ids = torch.sparse_coo_tensor(
+            torch.tensor([[0, 3]]), torch.tensor([0, 1]), (8,), dtype=torch.int64
+        )
+    elif mutation == "stride":
+        replay.seq_aux_loss_sample_ids = torch.empty_strided((8,), (2,), dtype=torch.int64)
+    elif mutation == "type":
+        replay.seq_aux_loss_sample_ids = object()
+    elif mutation == "presence":
+        replay.seq_aux_loss_num_samples = None
+    else:
+        replay.seq_aux_loss_max_samples = 4
+
+    with pytest.raises((AssertionError, ValueError), match=match):
+        layer._te_cuda_graph_replay(
+            torch.zeros((8, 1, 4)),
+            packed_seq_params=replay,
+            padding_mask=torch.zeros((1, 8), dtype=torch.bool),
+        )
+
+    assert layer.attention_calls == 0
+    assert layer.graph_calls == 0
+
+
+def test_moe_replay_rejects_unknown_prefixed_key_before_eager_attention() -> None:
+    captured = _make_seq_aux_loss_packed_seq_params()
+
+    class _RejectingReplayLayer(_TransformerLayerCudaGraphStub):
+        def __init__(self) -> None:
+            self.config = SimpleNamespace(
+                cuda_graph_modules=[CudaGraphModule.moe_router],
+                delay_offload_until_cuda_graph=False,
+            )
+            self.is_moe_layer = True
+            self.attention_calls = 0
+
+        def _forward_attention(self, hidden_states, **_kwargs):
+            self.attention_calls += 1
+            return hidden_states, None
+
+        def _te_cuda_graph_replay_impl(
+            self, args, kwargs, context, *, eager_packed_seq_params=None
+        ):
+            raise AssertionError("graph callable must not be reached")
+
+    layer = _RejectingReplayLayer()
+    _install_moe_graph_contract(layer, captured)
+
+    with pytest.raises(ValueError, match="unexpected"):
+        layer._te_cuda_graph_replay(
+            torch.zeros((8, 1, 4)),
+            packed_seq_params=captured,
+            _moe_packed_seq_params_unexpected=torch.zeros((), dtype=torch.int64),
+        )
+
+    assert layer.attention_calls == 0
 
 
 def test_attention_only_replay_overlap_routes_local_packed_batch_and_restores_shape(
@@ -179,9 +531,20 @@ def test_attention_only_replay_overlap_routes_local_packed_batch_and_restores_sh
     observed = {}
 
     class _RouterObserver(torch.nn.Module):
-        def forward(self, hidden_states, padding_mask=None):
+        def forward(
+            self,
+            hidden_states,
+            padding_mask=None,
+            *,
+            seq_aux_loss_sample_ids=None,
+            seq_aux_loss_num_samples=None,
+            seq_aux_loss_max_samples=None,
+        ):
             observed["route_hidden_states"] = hidden_states.clone()
             observed["route_padding_mask"] = padding_mask.clone()
+            observed["seq_aux_loss_sample_ids"] = seq_aux_loss_sample_ids
+            observed["seq_aux_loss_num_samples"] = seq_aux_loss_num_samples
+            observed["seq_aux_loss_max_samples"] = seq_aux_loss_max_samples
             token_ids = hidden_states.reshape(-1)
             probs = torch.stack((token_ids, token_ids + 100), dim=-1)
             routing_map = torch.stack(
@@ -235,6 +598,9 @@ def test_attention_only_replay_overlap_routes_local_packed_batch_and_restores_sh
         max_seqlen_kv=4,
         tokens_per_sample=4,
         pad_between_seqs=True,
+        seq_aux_loss_sample_ids=torch.tensor([0, 0, 0, 0, 1, 1, 1, 1]),
+        seq_aux_loss_num_samples=torch.tensor(2, dtype=torch.int64),
+        seq_aux_loss_max_samples=3,
     )
     tensor_kwargs, static_metadata = split_packed_seq_params_for_cuda_graph(packed_seq_params)
     layer._set_te_cuda_graph_packed_seq_params_static_metadata(static_metadata, tensor_kwargs)
@@ -247,7 +613,10 @@ def test_attention_only_replay_overlap_routes_local_packed_batch_and_restores_sh
     )
 
     residual, local_tokens, probs, shared_expert_output = layer._te_cuda_graph_replay_impl(
-        (), {"padding_mask": padding_mask, **tensor_kwargs}, None
+        (),
+        {"padding_mask": padding_mask, **tensor_kwargs},
+        None,
+        eager_packed_seq_params=packed_seq_params,
     )
 
     expected_route_hidden_states = torch.tensor(
@@ -255,6 +624,9 @@ def test_attention_only_replay_overlap_routes_local_packed_batch_and_restores_sh
     )
     assert torch.equal(observed["route_hidden_states"], expected_route_hidden_states)
     assert torch.equal(observed["route_padding_mask"], padding_mask.transpose(0, 1))
+    assert observed["seq_aux_loss_sample_ids"] is packed_seq_params.seq_aux_loss_sample_ids
+    assert observed["seq_aux_loss_num_samples"] is packed_seq_params.seq_aux_loss_num_samples
+    assert observed["seq_aux_loss_max_samples"] == 3
     assert torch.equal(observed["preprocess_hidden_states"], hidden_states)
     assert torch.equal(observed["preprocess_probs"][:, 0], torch.arange(8, dtype=torch.float32))
     assert torch.equal(observed["preprocess_routing_map"][:, 0], torch.arange(8).remainder(2) == 0)
@@ -470,20 +842,31 @@ def test_whole_layer_capture_passes_packed_metadata_and_padding_mask_to_mlp():
         max_seqlen_kv=4,
         tokens_per_sample=4,
         pad_between_seqs=True,
+        seq_aux_loss_sample_ids=torch.tensor([0, 0, 0, 0, 1, 1, 1, 1]),
+        seq_aux_loss_num_samples=torch.tensor(2, dtype=torch.int64),
+        seq_aux_loss_max_samples=3,
     )
     tensor_kwargs, static_metadata = split_packed_seq_params_for_cuda_graph(packed_seq_params)
     layer._set_te_cuda_graph_packed_seq_params_static_metadata(static_metadata, tensor_kwargs)
+    moe_tensor_kwargs = _install_moe_graph_contract(layer, packed_seq_params)
     hidden_states = torch.ones(8, 1, 4)
     padding_mask = torch.tensor([[False, False, False, True, False, False, True, True]])
 
     layer._te_cuda_graph_capture(
-        hidden_states=hidden_states, padding_mask=padding_mask, **tensor_kwargs
+        hidden_states=hidden_states,
+        padding_mask=padding_mask,
+        **tensor_kwargs,
+        **moe_tensor_kwargs,
     )
 
     assert layer.mlp_kwargs["padding_mask"] is padding_mask
     rebuilt = layer.mlp_kwargs["packed_seq_params"]
+    assert rebuilt is not packed_seq_params
     assert rebuilt.tokens_per_sample == 4
     assert rebuilt.pad_between_seqs is True
+    assert rebuilt.seq_aux_loss_sample_ids is packed_seq_params.seq_aux_loss_sample_ids
+    assert rebuilt.seq_aux_loss_num_samples is packed_seq_params.seq_aux_loss_num_samples
+    assert rebuilt.seq_aux_loss_max_samples == 3
 
 
 def test_transformer_layer_flattens_replay_time_packed_seq_params():
