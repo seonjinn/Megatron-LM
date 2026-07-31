@@ -1044,6 +1044,16 @@ class TransformerConfig(ModelParallelConfig):
     cuda_graph_modules has no effect when cuda_graph_impl="none" and must be empty when
     cuda_graph_impl="full_iteration"."""
 
+    thd_max_packed_sequences: Optional[int] = field(
+        default=None, metadata={"argparse_meta": {"arg_names": ["--thd-max-packed-sequences"]}}
+    )
+    """Maximum THD sequences per microbatch, including one appended dummy sequence.
+
+    When set, all cumulative sequence-length tensors use a fixed physical entry
+    capacity of ``thd_max_packed_sequences + 1``. Transformer Engine CUDA graphs
+    require this value.
+    """
+
     cuda_graph_modules: Union[str, CudaGraphModule, List[str], List[CudaGraphModule]] = "full"
     """Selects training capture coverage within per-layer CUDA graphs (local and
     transformer_engine implementations).

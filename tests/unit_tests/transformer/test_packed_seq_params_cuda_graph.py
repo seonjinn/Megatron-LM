@@ -42,6 +42,48 @@ class _TransformerLayerCudaGraphStub:
     )
 
 
+def test_packed_graph_static_metadata_keeps_pad_between_seqs() -> None:
+    params = PackedSeqParams(
+        qkv_format="thd",
+        cu_seqlens_q=torch.tensor([0, 3, 7], dtype=torch.int32),
+        cu_seqlens_kv=torch.tensor([0, 3, 7], dtype=torch.int32),
+        cu_seqlens_q_padded=torch.tensor([0, 4, 8], dtype=torch.int32),
+        cu_seqlens_kv_padded=torch.tensor([0, 4, 8], dtype=torch.int32),
+        max_seqlen_q=4,
+        max_seqlen_kv=4,
+        tokens_per_sample=8,
+        pad_between_seqs=True,
+    )
+
+    tensor_kwargs, static = split_packed_seq_params_for_cuda_graph(params)
+    rebuilt = build_packed_seq_params_from_cuda_graph_kwargs(dict(tensor_kwargs), static)
+
+    assert rebuilt.pad_between_seqs is True
+    assert rebuilt.tokens_per_sample == 8
+
+
+def test_packed_graph_rejects_changed_static_pad_between_seqs() -> None:
+    layer = _TransformerLayerCudaGraphStub()
+    captured = PackedSeqParams(qkv_format="thd", pad_between_seqs=True, tokens_per_sample=8)
+    tensor_kwargs, static = split_packed_seq_params_for_cuda_graph(captured)
+    layer._set_te_cuda_graph_packed_seq_params_static_metadata(static, tensor_kwargs)
+    replay = PackedSeqParams(qkv_format="thd", pad_between_seqs=False, tokens_per_sample=8)
+
+    with pytest.raises(AssertionError, match="pad_between_seqs"):
+        layer._flatten_te_cuda_graph_packed_seq_params({"packed_seq_params": replay})
+
+
+def test_packed_graph_rejects_changed_static_tokens_per_sample() -> None:
+    layer = _TransformerLayerCudaGraphStub()
+    captured = PackedSeqParams(qkv_format="thd", pad_between_seqs=True, tokens_per_sample=8)
+    tensor_kwargs, static = split_packed_seq_params_for_cuda_graph(captured)
+    layer._set_te_cuda_graph_packed_seq_params_static_metadata(static, tensor_kwargs)
+    replay = PackedSeqParams(qkv_format="thd", pad_between_seqs=True, tokens_per_sample=16)
+
+    with pytest.raises(AssertionError, match="tokens_per_sample"):
+        layer._flatten_te_cuda_graph_packed_seq_params({"packed_seq_params": replay})
+
+
 def _make_packed_seq_params():
     cu_seqlens = torch.IntTensor([0, 4, 9, 16])
     cu_seqlens_padded = torch.IntTensor([0, 8, 12, 16])
@@ -69,6 +111,8 @@ def test_split_packed_seq_params_for_cuda_graph_separates_tensors_from_metadata(
         "max_seqlen_kv": 8,
         "local_cp_size": 1,
         "cp_group": None,
+        "pad_between_seqs": None,
+        "tokens_per_sample": None,
     }
     assert all(not isinstance(value, torch.Tensor) for value in static_metadata.values())
 
@@ -365,4 +409,3 @@ def test_seq_idx_determinism_across_replays():
     assert torch.equal(params1.seq_idx, params2.seq_idx)
     assert params1.seq_idx.shape == params2.seq_idx.shape
     assert params1.seq_idx.dtype == torch.int32
-

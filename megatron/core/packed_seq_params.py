@@ -1,10 +1,16 @@
 # Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Mapping, MutableMapping
+from typing import TYPE_CHECKING, Mapping, MutableMapping
 
 import torch
 import torch.distributed as dist
+import torch.nn.functional as F
 from torch import Tensor
+
+if TYPE_CHECKING:
+    from megatron.core.model_parallel_config import ModelParallelConfig
 
 CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX = "_packed_seq_params_"
 
@@ -21,6 +27,8 @@ PACKED_SEQ_PARAMS_CUDA_GRAPH_STATIC_FIELDS = (
     "max_seqlen_kv",
     "local_cp_size",
     "cp_group",
+    "pad_between_seqs",
+    "tokens_per_sample",
 )
 
 
@@ -84,6 +92,197 @@ class PackedSeqParams:
                 .to(torch.int32)
                 .unsqueeze(0)  # Add a batch dimension
             )
+
+
+def get_thd_padding_kwargs(
+    config: ModelParallelConfig,
+) -> tuple[int | None, int | None, int | None]:
+    """Return THD token alignment, fixed token length, and sequence capacity."""
+    alignment = config.pad_packed_seq_alignment
+    target_len = config.pad_packed_seq_to
+    max_sequences = config.thd_max_packed_sequences
+    if config.cuda_graph_impl == "transformer_engine":
+        assert max_sequences is not None, (
+            "THD Transformer Engine CUDA graphs require " "thd_max_packed_sequences."
+        )
+    return alignment, target_len, max_sequences
+
+
+def _pad_sequence_tensor(tensor: Tensor | None, target_len: int) -> Tensor | None:
+    """Pad a token-like tensor along its final dimension."""
+    if tensor is None:
+        return None
+    actual_len = tensor.shape[-1]
+    assert (
+        actual_len <= target_len
+    ), f"Packed THD tensor length ({actual_len}) exceeds padding target ({target_len})."
+    return F.pad(tensor, (0, target_len - actual_len)) if actual_len < target_len else tensor
+
+
+def _pad_cu_seqlens(cu_seqlens: Tensor, target_entries: int) -> Tensor:
+    """Pad cumulative sequence lengths to a fixed entry capacity."""
+    actual_entries = cu_seqlens.numel()
+    assert actual_entries <= target_entries, (
+        f"Actual THD sequence count ({actual_entries - 1}) exceeds configured capacity "
+        f"({target_entries - 1})."
+    )
+    if actual_entries == target_entries:
+        return cu_seqlens
+    padded = torch.full(
+        (target_entries,), cu_seqlens[-1].item(), dtype=cu_seqlens.dtype, device=cu_seqlens.device
+    )
+    padded[:actual_entries] = cu_seqlens
+    return padded
+
+
+def _append_cu_seqlens_endpoint(cu_seqlens: Tensor, endpoint: int) -> Tensor:
+    """Append one dummy-sequence endpoint."""
+    tail = torch.full((1,), endpoint, dtype=cu_seqlens.dtype, device=cu_seqlens.device)
+    return torch.cat((cu_seqlens, tail))
+
+
+def _resolve_thd_context_parallel_size(
+    packed_seq_params: PackedSeqParams, context_parallel_size: int | None
+) -> int:
+    """Resolve CP size without reading a global process group."""
+    if context_parallel_size is not None:
+        return int(context_parallel_size)
+    if packed_seq_params.cp_group is not None:
+        return int(dist.get_world_size(group=packed_seq_params.cp_group))
+    if packed_seq_params.local_cp_size is not None:
+        return int(packed_seq_params.local_cp_size)
+    return 1
+
+
+def pad_sequence_for_thd(
+    tokens: Tensor | None,
+    labels: Tensor | None,
+    loss_mask: Tensor | None,
+    position_ids: Tensor | None,
+    packed_seq_params: PackedSeqParams,
+    alignment: int | None = None,
+    target_len: int | None = None,
+    max_num_seqs: int | None = None,
+    context_parallel_size: int | None = None,
+) -> tuple[Tensor | None, Tensor | None, Tensor | None, Tensor | None, PackedSeqParams, Tensor]:
+    """Pad packed THD inputs and cumulative metadata for CUDA graph replay.
+
+    The token tail is represented as one appended dummy sequence. Logical
+    cumulative lengths preserve compact valid-token coordinates, while padded
+    cumulative lengths preserve physical storage coordinates.
+    """
+    assert (alignment is None) != (
+        target_len is None
+    ), "Exactly one of alignment or target_len must be provided for THD padding."
+
+    physical_q = (
+        packed_seq_params.cu_seqlens_q_padded
+        if packed_seq_params.cu_seqlens_q_padded is not None
+        else packed_seq_params.cu_seqlens_q
+    )
+    assert physical_q is not None, "THD padding requires cu_seqlens_q metadata."
+    global_actual_len = int(physical_q[-1].item())
+    cp_size = _resolve_thd_context_parallel_size(packed_seq_params, context_parallel_size)
+
+    if target_len is None:
+        assert alignment is not None and alignment > 0
+        local_actual_len = (global_actual_len + cp_size - 1) // cp_size
+        target_len = ((local_actual_len + alignment - 1) // alignment) * alignment
+    else:
+        target_len = int(target_len)
+        local_actual_len = min(global_actual_len, target_len)
+
+    global_target_len = target_len * cp_size
+    assert global_actual_len <= global_target_len, (
+        f"Packed THD length ({global_actual_len}) exceeds padding target " f"({global_target_len})."
+    )
+
+    tokens = _pad_sequence_tensor(tokens, target_len)
+    labels = _pad_sequence_tensor(labels, target_len)
+    loss_mask = _pad_sequence_tensor(loss_mask, target_len)
+    position_ids = _pad_sequence_tensor(position_ids, target_len)
+
+    cu_seqlens_q = packed_seq_params.cu_seqlens_q
+    assert cu_seqlens_q is not None, "THD padding requires cu_seqlens_q metadata."
+    cu_seqlens_kv = (
+        packed_seq_params.cu_seqlens_kv
+        if packed_seq_params.cu_seqlens_kv is not None
+        else cu_seqlens_q
+    )
+    cu_seqlens_q_padded = (
+        packed_seq_params.cu_seqlens_q_padded
+        if packed_seq_params.cu_seqlens_q_padded is not None
+        else cu_seqlens_q
+    )
+    cu_seqlens_kv_padded = (
+        packed_seq_params.cu_seqlens_kv_padded
+        if packed_seq_params.cu_seqlens_kv_padded is not None
+        else cu_seqlens_kv
+    )
+
+    dummy_len = global_target_len - global_actual_len
+    if dummy_len:
+        if cp_size > 1:
+            assert dummy_len % (2 * cp_size) == 0, (
+                f"THD dummy padding length ({dummy_len}) must be divisible by "
+                f"2 * context_parallel_size ({2 * cp_size}) for zigzag partitioning."
+            )
+
+        has_inter_sequence_padding = packed_seq_params.pad_between_seqs is True or any(
+            not torch.equal(logical, physical)
+            for logical, physical in (
+                (cu_seqlens_q, cu_seqlens_q_padded),
+                (cu_seqlens_kv, cu_seqlens_kv_padded),
+            )
+        )
+        q_dummy_end = (
+            int(cu_seqlens_q[-1].item()) + dummy_len
+            if has_inter_sequence_padding
+            else global_target_len
+        )
+        kv_dummy_end = (
+            int(cu_seqlens_kv[-1].item()) + dummy_len
+            if has_inter_sequence_padding
+            else global_target_len
+        )
+        cu_seqlens_q = _append_cu_seqlens_endpoint(cu_seqlens_q, q_dummy_end)
+        cu_seqlens_kv = _append_cu_seqlens_endpoint(cu_seqlens_kv, kv_dummy_end)
+        cu_seqlens_q_padded = _append_cu_seqlens_endpoint(cu_seqlens_q_padded, global_target_len)
+        cu_seqlens_kv_padded = _append_cu_seqlens_endpoint(cu_seqlens_kv_padded, global_target_len)
+
+    if max_num_seqs is not None:
+        target_entries = int(max_num_seqs) + 1
+        cu_seqlens_q = _pad_cu_seqlens(cu_seqlens_q, target_entries)
+        cu_seqlens_kv = _pad_cu_seqlens(cu_seqlens_kv, target_entries)
+        cu_seqlens_q_padded = _pad_cu_seqlens(cu_seqlens_q_padded, target_entries)
+        cu_seqlens_kv_padded = _pad_cu_seqlens(cu_seqlens_kv_padded, target_entries)
+
+    padded_params = PackedSeqParams(
+        qkv_format=packed_seq_params.qkv_format,
+        cu_seqlens_q=cu_seqlens_q,
+        cu_seqlens_kv=cu_seqlens_kv,
+        cu_seqlens_q_padded=cu_seqlens_q_padded,
+        cu_seqlens_kv_padded=cu_seqlens_kv_padded,
+        max_seqlen_q=(
+            global_target_len
+            if max_num_seqs is not None
+            else max(packed_seq_params.max_seqlen_q or 0, dummy_len)
+        ),
+        max_seqlen_kv=(
+            global_target_len
+            if max_num_seqs is not None
+            else max(packed_seq_params.max_seqlen_kv or 0, dummy_len)
+        ),
+        local_cp_size=packed_seq_params.local_cp_size,
+        cp_group=packed_seq_params.cp_group,
+        total_tokens=None if max_num_seqs is not None else target_len,
+        tokens_per_sample=packed_seq_params.tokens_per_sample,
+        pad_between_seqs=True if max_num_seqs is not None else packed_seq_params.pad_between_seqs,
+    )
+    padding_mask = (
+        torch.arange(target_len, device=physical_q.device).unsqueeze(0) >= local_actual_len
+    )
+    return tokens, labels, loss_mask, position_ids, padded_params, padding_mask
 
 
 def _cuda_graph_packed_seq_params_key(field_name: str, prefix: str) -> str:

@@ -124,6 +124,12 @@ class ModelParallelConfig:
     Please set max_seqlen_per_dp_cp_rank when using hybrid_context_parallel.
     """
 
+    pad_packed_seq_alignment: Optional[int] = None
+    """Pad THD token-like tensors to a multiple of this value after packing."""
+
+    pad_packed_seq_to: Optional[int] = None
+    """Pad THD token-like tensors to this fixed CP-local length after packing."""
+
     expert_model_parallel_size: int = 1
     """Distributes Moe Experts across sub data parallel dimension."""
 
