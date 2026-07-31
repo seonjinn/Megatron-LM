@@ -239,6 +239,11 @@ class GraphableMegatronModule(MegatronModule):
         cg_index = GraphableMegatronModule._te_cuda_graph_replay_index(self, microbatch_idx)
         if not hasattr(self.cuda_graphs[cg_index], 'backward_dw'):
             return
+        from megatron.core.transformer.te_cuda_graph_bank import (
+            _validate_and_record_te_cuda_graph_launch,
+        )
+
+        _validate_and_record_te_cuda_graph_launch(self, self.cuda_graphs, cg_index, record=False)
         self.cuda_graphs[cg_index].backward_dw()
 
     def _te_cuda_graph_replay_index(self, microbatch_idx: int) -> int:
@@ -390,7 +395,6 @@ class GraphableMegatronModule(MegatronModule):
                 v, torch.Tensor
             ), "CUDA graph accepts only Tensor inputs."
 
-        replay_guard = getattr(self, "_te_cuda_graph_bank_replay_guard", None)
         cg_index = GraphableMegatronModule._te_cuda_graph_replay_index(
             self, getattr(self, 'current_microbatch', 0)
         )
@@ -398,17 +402,18 @@ class GraphableMegatronModule(MegatronModule):
 
         for hook, hook_args in self.cuda_graph_manual_hooks:
             hook(*hook_args)
-        execution_counter = getattr(self, "_te_cuda_graph_execution_counter", None)
-        if execution_counter is not None and replay_guard is not None:
-            from megatron.core.transformer.cuda_graphs import is_graph_capturing, is_graph_warmup
+        from megatron.core.transformer.cuda_graphs import is_graph_capturing, is_graph_warmup
 
-            if not is_graph_capturing() and not is_graph_warmup():
-                record_graph_call = getattr(replay_guard, "record_graph_call", None)
-                if not callable(record_graph_call):
-                    raise RuntimeError(
-                        "TE CUDA graph replay guard cannot record execution counters"
-                    )
-                record_graph_call(self, self.cuda_graphs, cg_index, execution_counter)
+        internal_te_call = is_graph_capturing() or is_graph_warmup()
+        guard_present = hasattr(self, "_te_cuda_graph_bank_replay_guard")
+        if not internal_te_call or guard_present:
+            from megatron.core.transformer.te_cuda_graph_bank import (
+                _validate_and_record_te_cuda_graph_launch,
+            )
+
+            _validate_and_record_te_cuda_graph_launch(
+                self, self.cuda_graphs, cg_index, record=not internal_te_call
+            )
         return self.cuda_graphs[cg_index](*cudagraph_args, **cudagraph_kwargs)
 
     def _get_te_cuda_graph_replay_args(self, *args, **kwargs):

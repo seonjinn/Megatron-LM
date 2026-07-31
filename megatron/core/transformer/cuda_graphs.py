@@ -3042,8 +3042,17 @@ class TECudaGraphHelper:
         Delete all CUDA graphs.
         """
         assert self._compatibility_bank is not None, "No CUDA Graph bank was created to delete."
-        graph_count = sum(len(graphs) for _, graphs in self._compatibility_bank.graphs_by_layer)
-        self._compatibility_bank.reset()
+        assert (
+            self._compatibility_bank_manager is not None
+        ), "CUDA Graph bank manager is missing during deletion."
+        bank = self._compatibility_bank
+        manager = self._compatibility_bank_manager
+        graph_count = sum(len(graphs) for _, graphs in bank.graphs_by_layer)
+        bank.reset()
+        manager.close()
+        self._compatibility_bank = None
+        self._compatibility_bank_manager = None
+        self._graphs_created = False
 
         log_on_each_pipeline_stage(
             logger=logger,
@@ -3053,9 +3062,6 @@ class TECudaGraphHelper:
             msg=f'Rank {torch.distributed.get_rank()}: '
             f'{graph_count} owned TE CUDA graphs deleted.',
         )
-        self._compatibility_bank = None
-        self._compatibility_bank_manager = None
-        self._graphs_created = False
 
 
 def convert_schedule_table_to_order(num_warmup_microbatches, num_model_chunks, schedule_table):

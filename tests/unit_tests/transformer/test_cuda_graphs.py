@@ -1763,13 +1763,15 @@ def test_te_graph_bank_guard_index_is_used_for_forward_and_backward() -> None:
         cuda_graphs=graphs,
         cuda_graph_manual_hooks=[],
         current_microbatch=3,
-        _te_cuda_graph_bank_replay_guard=lambda layer, installed, microbatch: 1,
         _get_te_cuda_graph_replay_args=lambda *args, **kwargs: (args, kwargs),
     )
+    manager, bank, _ = _make_task9_active_bank(layer, graphs)
 
     assert GraphableMegatronModule._te_cuda_graph_replay(layer, torch.empty(1)) == "one"
     GraphableMegatronModule._te_cuda_graph_backward_dw_graph(layer, 3)
     assert selections == ["forward-one", "backward-one"]
+    bank.reset()
+    manager.close()
 
 
 class _Task9ReplayGraph:
@@ -1777,6 +1779,7 @@ class _Task9ReplayGraph:
         self.tuple_output = tuple_output
         self.fail_launch = False
         self.calls = 0
+        self.backward_dw_calls = 0
 
     def __call__(self, *args, **kwargs):
         self.calls += 1
@@ -1785,13 +1788,17 @@ class _Task9ReplayGraph:
         output = args[0]
         return (output,) if self.tuple_output else output
 
+    def backward_dw(self):
+        self.backward_dw_calls += 1
+
 
 def _make_task9_active_bank(layer, graph):
     from types import SimpleNamespace
 
     from megatron.core.transformer.te_cuda_graph_bank import TECudaGraphBankManager
 
-    runtime = {"count": 1}
+    graphs = list(graph) if isinstance(graph, (list, tuple)) else [graph]
+    runtime = {"count": len(graphs)}
     manager = TECudaGraphBankManager(
         [layer],
         graph_reset_supported=False,
@@ -1808,8 +1815,8 @@ def _make_task9_active_bank(layer, graph):
     )
 
     def capture(*, num_microbatches):
-        assert num_microbatches == 1
-        layer.cuda_graphs.append(graph)
+        assert num_microbatches == len(graphs)
+        layer.cuda_graphs.extend(graphs)
         helper.num_microbatches = num_microbatches
         helper._capture_finished = True
         helper._graphs_created = True
@@ -1821,9 +1828,22 @@ def _make_task9_active_bank(layer, graph):
     layer.restore_te_cuda_graph_bank_references = lambda _snapshot: None
     layer.clear_te_cuda_graph_bank_references = lambda: None
     layer.te_cuda_graph_bank_schema = lambda: ()
-    bank = manager.capture(helper, num_microbatches=1)
+    bank = manager.capture(helper, num_microbatches=len(graphs))
     bank.activate()
     return manager, bank, runtime
+
+
+def _make_task9_compatibility_helper(layer, graph):
+    from types import SimpleNamespace
+
+    manager, bank, _ = _make_task9_active_bank(layer, graph)
+    helper = TECudaGraphHelper.__new__(TECudaGraphHelper)
+    helper._compatibility_bank_manager = manager
+    helper._compatibility_bank = bank
+    helper._graphs_created = True
+    helper.tp_group = SimpleNamespace()
+    helper.dp_cp_group = SimpleNamespace()
+    return helper, manager, bank
 
 
 def test_execution_counter_counts_three_eager_warmups_and_checkpoint_recompute(monkeypatch) -> None:
@@ -1958,6 +1978,188 @@ def test_transformer_execution_counter_counts_once_after_double_guard_and_prepar
     manager.close()
 
 
+@pytest.mark.parametrize(
+    "corruption",
+    [
+        "missing_tracker",
+        "foreign_tracker",
+        "missing_guard",
+        "foreign_guard",
+        "guard_subclass",
+        "both_missing",
+    ],
+)
+def test_active_te_replay_rejects_missing_or_foreign_counter_ownership(
+    monkeypatch, corruption
+) -> None:
+    from types import SimpleNamespace
+
+    import megatron.core.transformer.cuda_graphs as cuda_graphs
+    from megatron.core.transformer.te_cuda_graph_bank import _BankReplayGuard
+
+    monkeypatch.setattr(cuda_graphs, "is_graph_capturing", lambda: False)
+    monkeypatch.setattr(cuda_graphs, "is_graph_warmup", lambda: False)
+    layer = _make_task7_transformer_leaf(moe=False)
+    layer.config = SimpleNamespace(
+        cuda_graph_impl="transformer_engine",
+        cuda_graph_modules=[],
+        delay_offload_until_cuda_graph=False,
+        overlap_moe_expert_parallel_comm=False,
+        fine_grained_activation_offloading=False,
+    )
+    layer.training = True
+    layer.current_microbatch = 0
+    layer._flatten_te_cuda_graph_packed_seq_params = lambda _kwargs: None
+    layer._rebuild_te_cuda_graph_packed_seq_params = lambda _kwargs: None
+    layer._get_te_cuda_graph_replay_args = lambda *args, **kwargs: (args, kwargs)
+    graph = _Task9ReplayGraph(tuple_output=True)
+    manager, bank, _ = _make_task9_active_bank(layer, graph)
+    tracker = layer._te_cuda_graph_execution_counter
+    guard = layer._te_cuda_graph_bank_replay_guard
+
+    class _ForeignGuard:
+        def __call__(self, _layer, _graphs, _microbatch):
+            return 0
+
+        def record_graph_call(self, _layer, _graphs, _index, _counter):
+            return None
+
+    class _GuardSubclass(_BankReplayGuard):
+        def __call__(self, _layer, _graphs, _microbatch):
+            return 0
+
+        def record_graph_call(self, _layer, _graphs, _index, _counter):
+            return None
+
+        def validate_graph_call(self, _layer, _graphs, _index, _counter):
+            return None
+
+    if corruption == "missing_tracker":
+        del layer._te_cuda_graph_execution_counter
+    elif corruption == "foreign_tracker":
+        layer._te_cuda_graph_execution_counter = object()
+    elif corruption == "missing_guard":
+        del layer._te_cuda_graph_bank_replay_guard
+    elif corruption == "foreign_guard":
+        layer._te_cuda_graph_bank_replay_guard = _ForeignGuard()
+    elif corruption == "guard_subclass":
+        layer._te_cuda_graph_bank_replay_guard = _GuardSubclass(guard._manager, guard._bank)
+    else:
+        del layer._te_cuda_graph_execution_counter
+        del layer._te_cuda_graph_bank_replay_guard
+
+    with pytest.raises(RuntimeError, match="TE CUDA graph"):
+        layer._te_cuda_graph_replay(torch.ones(1))
+    assert graph.calls == 0
+
+    layer._te_cuda_graph_execution_counter = tracker
+    layer._te_cuda_graph_bank_replay_guard = guard
+    assert manager.snapshot_execution_counters().graph_calls == 0
+    bank.reset()
+    manager.close()
+
+
+@pytest.mark.parametrize("internal_state", ["capturing", "warmup"])
+def test_internal_te_replay_allows_tracker_before_guard_installation(
+    monkeypatch, internal_state
+) -> None:
+    from types import SimpleNamespace
+
+    import megatron.core.transformer.cuda_graphs as cuda_graphs
+    from megatron.core.transformer.module import GraphableMegatronModule
+    from megatron.core.transformer.te_cuda_graph_bank import TECudaGraphBankManager
+
+    state = {"capturing": False, "warmup": False}
+    state[internal_state] = True
+    monkeypatch.setattr(cuda_graphs, "is_graph_capturing", lambda: state["capturing"])
+    monkeypatch.setattr(cuda_graphs, "is_graph_warmup", lambda: state["warmup"])
+    layer = _make_task7_transformer_leaf(moe=False)
+    layer.config = SimpleNamespace(fine_grained_activation_offloading=False)
+    layer.training = True
+    layer.current_microbatch = 0
+    layer._get_te_cuda_graph_replay_args = lambda *args, **kwargs: (args, kwargs)
+    graph = _Task9ReplayGraph(tuple_output=False)
+    layer.cuda_graphs = [graph]
+    manager = TECudaGraphBankManager(
+        [layer],
+        graph_reset_supported=False,
+        synchronize=lambda: None,
+        runtime_num_microbatches=lambda: 1,
+    )
+
+    hidden_states = torch.ones(1)
+    assert GraphableMegatronModule._te_cuda_graph_replay(layer, hidden_states) is hidden_states
+    snapshot = manager.snapshot_execution_counters()
+    assert (snapshot.eligible_calls, snapshot.graph_calls) == (0, 0)
+
+    manager.close()
+
+
+@pytest.mark.parametrize(
+    "corruption",
+    [
+        "missing_tracker",
+        "foreign_tracker",
+        "missing_guard",
+        "foreign_guard",
+        "guard_subclass",
+        "both_missing",
+    ],
+)
+def test_active_te_backward_dw_replay_rejects_missing_or_foreign_counter_ownership(
+    corruption,
+) -> None:
+    from megatron.core.transformer.module import GraphableMegatronModule
+    from megatron.core.transformer.te_cuda_graph_bank import _BankReplayGuard
+
+    layer = _make_task7_transformer_leaf(moe=False)
+    layer.current_microbatch = 0
+    graph = _Task9ReplayGraph(tuple_output=True)
+    manager, bank, _ = _make_task9_active_bank(layer, graph)
+    tracker = layer._te_cuda_graph_execution_counter
+    guard = layer._te_cuda_graph_bank_replay_guard
+
+    class _ForeignGuard:
+        def __call__(self, _layer, _graphs, _microbatch):
+            return 0
+
+        def record_graph_call(self, _layer, _graphs, _index, _counter):
+            return None
+
+    class _GuardSubclass(_BankReplayGuard):
+        def __call__(self, _layer, _graphs, _microbatch):
+            return 0
+
+        def record_graph_call(self, _layer, _graphs, _index, _counter):
+            return None
+
+        def validate_graph_call(self, _layer, _graphs, _index, _counter):
+            return None
+
+    if corruption == "missing_tracker":
+        del layer._te_cuda_graph_execution_counter
+    elif corruption == "foreign_tracker":
+        layer._te_cuda_graph_execution_counter = object()
+    elif corruption == "missing_guard":
+        del layer._te_cuda_graph_bank_replay_guard
+    elif corruption == "foreign_guard":
+        layer._te_cuda_graph_bank_replay_guard = _ForeignGuard()
+    elif corruption == "guard_subclass":
+        layer._te_cuda_graph_bank_replay_guard = _GuardSubclass(guard._manager, guard._bank)
+    else:
+        del layer._te_cuda_graph_execution_counter
+        del layer._te_cuda_graph_bank_replay_guard
+
+    with pytest.raises(RuntimeError, match="TE CUDA graph"):
+        GraphableMegatronModule._te_cuda_graph_backward_dw_graph(layer, 0)
+    assert graph.backward_dw_calls == 0
+
+    layer._te_cuda_graph_execution_counter = tracker
+    layer._te_cuda_graph_bank_replay_guard = guard
+    bank.reset()
+    manager.close()
+
+
 def test_mamba_execution_counter_uses_common_replay_boundary(monkeypatch) -> None:
     from types import SimpleNamespace
 
@@ -2053,7 +2255,7 @@ def test_real_mamba_helper_and_replay_route_flattened_packed_inputs(cuda_graph_m
         observed["kwargs"] = kwargs
         return args[0]
 
-    layer.cuda_graphs = [replay]
+    bank_manager, bank, _ = _make_task9_active_bank(layer, replay)
     layer.current_microbatch = 0
     hidden_states = torch.empty((8, 1, 8), dtype=torch.bfloat16, device="cuda")
     layer._te_cuda_graph_replay(hidden_states, packed_seq_params=packed)
@@ -2066,6 +2268,8 @@ def test_real_mamba_helper_and_replay_route_flattened_packed_inputs(cuda_graph_m
         layer._te_cuda_graph_replay(
             hidden_states, packed_seq_params=packed, inference_context=object()
         )
+    bank.reset()
+    bank_manager.close()
 
 
 def test_te_helper_abort_restores_capture_globals_and_partial_graphs(monkeypatch) -> None:
@@ -2170,6 +2374,114 @@ def test_te_helper_manual_hook_setup_refreshes_owning_bank() -> None:
 
     assert layer.cuda_graph_manual_hooks is hook_list
     assert refresh_calls == [bank]
+
+
+def test_te_helper_delete_closes_counter_manager_and_allows_recreation(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    import megatron.core.transformer.cuda_graphs as cuda_graphs
+    from megatron.core.transformer.te_cuda_graph_bank import TECudaGraphBankManager
+
+    monkeypatch.setattr(cuda_graphs, "log_on_each_pipeline_stage", lambda **_kwargs: None)
+    monkeypatch.setattr(torch.distributed, "get_rank", lambda: 0)
+    monkeypatch.setattr("megatron.core.utils.is_te_min_version", lambda _version: False)
+    layer = _make_task7_transformer_leaf(moe=False)
+    helper, manager, _ = _make_task9_compatibility_helper(
+        layer, _Task9ReplayGraph(tuple_output=True)
+    )
+
+    helper.delete_cuda_graphs()
+
+    assert not hasattr(layer, "_te_cuda_graph_execution_counter")
+    assert helper._compatibility_bank is None
+    assert helper._compatibility_bank_manager is None
+    assert helper._graphs_created is False
+    with pytest.raises(RuntimeError, match="manager is closed"):
+        manager.snapshot_execution_counters()
+
+    recreated_helper = SimpleNamespace(
+        flattened_callables=[layer],
+        pp_group=SimpleNamespace(size=lambda: 1),
+        config=SimpleNamespace(overlap_moe_expert_parallel_comm=False, cuda_graph_modules=()),
+    )
+    replacement = TECudaGraphBankManager.from_helper(recreated_helper)
+    replacement.close()
+
+
+def test_te_helper_delete_retains_ownership_when_bank_reset_fails(monkeypatch) -> None:
+    import megatron.core.transformer.cuda_graphs as cuda_graphs
+
+    monkeypatch.setattr(cuda_graphs, "log_on_each_pipeline_stage", lambda **_kwargs: None)
+    monkeypatch.setattr(torch.distributed, "get_rank", lambda: 0)
+    layer = _make_task7_transformer_leaf(moe=False)
+    helper, manager, bank = _make_task9_compatibility_helper(
+        layer, _Task9ReplayGraph(tuple_output=True)
+    )
+    layer.clear_te_cuda_graph_bank_references = lambda: (_ for _ in ()).throw(
+        RuntimeError("bank reset failed")
+    )
+
+    with pytest.raises(RuntimeError, match="bank reset failed"):
+        helper.delete_cuda_graphs()
+
+    assert helper._compatibility_bank is bank
+    assert helper._compatibility_bank_manager is manager
+    assert helper._graphs_created is True
+    assert manager.active_bank is bank
+    manager.snapshot_execution_counters()
+
+    layer.clear_te_cuda_graph_bank_references = lambda: None
+    helper.delete_cuda_graphs()
+
+
+def test_te_helper_delete_retains_ownership_when_manager_close_fails(monkeypatch) -> None:
+    import megatron.core.transformer.cuda_graphs as cuda_graphs
+
+    monkeypatch.setattr(cuda_graphs, "log_on_each_pipeline_stage", lambda **_kwargs: None)
+    monkeypatch.setattr(torch.distributed, "get_rank", lambda: 0)
+    layer = _make_task7_transformer_leaf(moe=False)
+    helper, manager, bank = _make_task9_compatibility_helper(
+        layer, _Task9ReplayGraph(tuple_output=True)
+    )
+    tracker = layer._te_cuda_graph_execution_counter
+    layer._te_cuda_graph_execution_counter = object()
+
+    with pytest.raises(ValueError, match="ownership changed"):
+        helper.delete_cuda_graphs()
+
+    assert helper._compatibility_bank is bank
+    assert helper._compatibility_bank_manager is manager
+    assert helper._graphs_created is True
+    assert manager.active_bank is None
+    assert manager.registered_bank_count == 0
+
+    layer._te_cuda_graph_execution_counter = tracker
+    helper.delete_cuda_graphs()
+
+
+def test_te_helper_delete_clears_closed_ownership_before_logging(monkeypatch) -> None:
+    import megatron.core.transformer.cuda_graphs as cuda_graphs
+
+    monkeypatch.setattr(
+        cuda_graphs,
+        "log_on_each_pipeline_stage",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("logging failed")),
+    )
+    monkeypatch.setattr(torch.distributed, "get_rank", lambda: 0)
+    layer = _make_task7_transformer_leaf(moe=False)
+    helper, manager, _ = _make_task9_compatibility_helper(
+        layer, _Task9ReplayGraph(tuple_output=True)
+    )
+
+    with pytest.raises(RuntimeError, match="logging failed"):
+        helper.delete_cuda_graphs()
+
+    assert not hasattr(layer, "_te_cuda_graph_execution_counter")
+    assert helper._compatibility_bank is None
+    assert helper._compatibility_bank_manager is None
+    assert helper._graphs_created is False
+    with pytest.raises(RuntimeError, match="manager is closed"):
+        manager.snapshot_execution_counters()
 
 
 def test_transformer_layer_restores_exact_moe_references_after_detach_rollback() -> None:
@@ -2724,10 +3036,14 @@ def test_set_current_microbatch_targets_each_hybrid_mtp_leaf_graph(monkeypatch) 
         def set_graphed_backward_dw_callable(self, callable_):
             self.callable = callable_
 
+    managers_and_banks = []
     for leaf_index, leaf in enumerate(leaves):
-        leaf.cuda_graphs = [FakeGraph(leaf_index, 0), FakeGraph(leaf_index, 1)]
         leaf.cuda_graph_manual_hooks = []
         leaf._get_te_cuda_graph_replay_args = lambda *args, **kwargs: (args, kwargs)
+        manager, bank, _ = _make_task9_active_bank(
+            leaf, [FakeGraph(leaf_index, 0), FakeGraph(leaf_index, 1)]
+        )
+        managers_and_banks.append((manager, bank))
 
     stack.current_microbatch = 101
     stack.backward_dw_wrapper = object()
@@ -2753,6 +3069,9 @@ def test_set_current_microbatch_targets_each_hybrid_mtp_leaf_graph(monkeypatch) 
         ("backward_dw", (3, 1)),
     ]
     assert not hasattr(leaves[2], "backward_dw_wrapper")
+    for manager, bank in managers_and_banks:
+        bank.reset()
+        manager.close()
 
 
 def _make_simple_module(config):

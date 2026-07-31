@@ -795,6 +795,36 @@ def test_execution_counter_foreign_dead_owner_spoof_is_rejected() -> None:
     assert layer._te_cuda_graph_execution_counter is foreign_tracker
 
 
+@pytest.mark.parametrize("mutation", ["delete", "replace"])
+@pytest.mark.parametrize("endpoint", ["snapshot", "current_delta", "explicit_delta"])
+def test_execution_counter_endpoints_reject_changed_layer_attachment(
+    mutation: str, endpoint: str
+) -> None:
+    first = _FakeLayer("first")
+    second = _FakeLayer("second")
+    manager = _make_manager([first, second])
+    start = manager.snapshot_execution_counters()
+    tracker = second._te_cuda_graph_execution_counter
+    tracker.record_eligible_call()
+    end = manager.snapshot_execution_counters()
+
+    if mutation == "delete":
+        del second._te_cuda_graph_execution_counter
+    else:
+        second._te_cuda_graph_execution_counter = object()
+
+    with pytest.raises(ValueError, match="ownership changed"):
+        if endpoint == "snapshot":
+            manager.snapshot_execution_counters()
+        elif endpoint == "current_delta":
+            manager.execution_counter_delta(start)
+        else:
+            manager.execution_counter_delta(start, end)
+
+    second._te_cuda_graph_execution_counter = tracker
+    manager.close()
+
+
 def test_execution_counters_survive_uninstall_reset_and_eviction() -> None:
     layer = _FakeLayer("layer")
     manager = _make_manager([layer])
