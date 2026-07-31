@@ -11,6 +11,7 @@ import torch
 from megatron.core import tensor_parallel, utils
 from megatron.core.extensions.transformer_engine import HAVE_TE
 from megatron.core.inference.utils import InferenceMode
+from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.process_groups_config import ProcessGroupCollection
 from megatron.core.transformer.module import MegatronModule
 from megatron.core.transformer.moe.moe_utils import (
@@ -124,7 +125,16 @@ class SharedExpertsBuilder(Protocol):
 class RouterInterface(Protocol):
     """Interface for the router used in an MoELayer."""
 
-    def forward(self, input: torch.Tensor, /) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(
+        self,
+        input: torch.Tensor,
+        /,
+        padding_mask: torch.Tensor | None = None,
+        *,
+        seq_aux_loss_sample_ids: torch.Tensor | None = None,
+        seq_aux_loss_num_samples: torch.Tensor | None = None,
+        seq_aux_loss_max_samples: int | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Forward pass of the router.
 
         Returns:
@@ -435,13 +445,35 @@ class MoELayer(BaseMoELayer):
             self._delayed_wgrad_stream = torch.cuda.Stream(device="cuda")
 
     @maybe_skip_or_early_return_by_cudagraph("route")
-    def route(self, hidden_states: torch.Tensor, padding_mask: Optional[torch.Tensor] = None):
+    def route(
+        self,
+        hidden_states: torch.Tensor,
+        padding_mask: torch.Tensor | None = None,
+        *,
+        seq_aux_loss_sample_ids: torch.Tensor | None = None,
+        seq_aux_loss_num_samples: torch.Tensor | None = None,
+        seq_aux_loss_max_samples: int | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute token routing for preprocessing.
 
         This method uses the router to determine which experts to send each token to,
         producing routing probabilities and a mapping.
         """
-        probs, routing_map = apply_module(self.router)(hidden_states, padding_mask)
+        ownership_values = (
+            seq_aux_loss_sample_ids,
+            seq_aux_loss_num_samples,
+            seq_aux_loss_max_samples,
+        )
+        if any(value is not None for value in ownership_values):
+            probs, routing_map = apply_module(self.router)(
+                hidden_states,
+                padding_mask,
+                seq_aux_loss_sample_ids=seq_aux_loss_sample_ids,
+                seq_aux_loss_num_samples=seq_aux_loss_num_samples,
+                seq_aux_loss_max_samples=seq_aux_loss_max_samples,
+            )
+        else:
+            probs, routing_map = apply_module(self.router)(hidden_states, padding_mask)
         return probs, routing_map
 
     @maybe_skip_or_early_return_by_cudagraph("preprocess")
@@ -597,10 +629,31 @@ class MoELayer(BaseMoELayer):
             self._latent_shared_expert_output = None
         return output
 
-    def router_and_preprocess(self, hidden_states: torch.Tensor):
+    def router_and_preprocess(
+        self,
+        hidden_states: torch.Tensor,
+        padding_mask: torch.Tensor | None = None,
+        *,
+        seq_aux_loss_sample_ids: torch.Tensor | None = None,
+        seq_aux_loss_num_samples: torch.Tensor | None = None,
+        seq_aux_loss_max_samples: int | None = None,
+    ):
         """This method is a combined method of route and preprocess. Deprecated."""
 
-        probs, routing_map = self.route(hidden_states)
+        if any(
+            value is not None
+            for value in (
+                seq_aux_loss_sample_ids,
+                seq_aux_loss_num_samples,
+                seq_aux_loss_max_samples,
+            )
+        ):
+            raise ValueError(
+                "router_and_preprocess does not support variable packed seq_aux_loss metadata; "
+                "call route and preprocess separately"
+            )
+
+        probs, routing_map = self.route(hidden_states, padding_mask)
         hidden_states, probs, residual = self.preprocess(hidden_states, probs, routing_map)
         return hidden_states, probs, residual
 
@@ -608,8 +661,9 @@ class MoELayer(BaseMoELayer):
         self,
         hidden_states: torch.Tensor,
         intermediate_tensors=None,
-        padding_mask: Optional[torch.Tensor] = None,
-    ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+        padding_mask: torch.Tensor | None = None,
+        packed_seq_params: PackedSeqParams | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """Forward pass for the MoE layer.
 
         The forward pass comprises four main steps:
@@ -620,9 +674,11 @@ class MoELayer(BaseMoELayer):
 
         Args:
             hidden_states (torch.Tensor): The input tensor shape [seq_length, bsz, hidden_size].
-            padding_mask (torch.Tensor, optional): Boolean mask indicating non-padding tokens.
-                                                   Shape [seq_length, bsz]. True for valid tokens,
-                                                   False for padding tokens. Defaults to None.
+            padding_mask (torch.Tensor, optional): Boolean mask indicating padding tokens.
+                                                   Shape [bsz, seq_length]. True for padding,
+                                                   False for valid tokens. Defaults to None.
+            packed_seq_params (PackedSeqParams, optional): Explicit variable-packed sequence
+                ownership metadata for sequence auxiliary loss.
         Returns:
             A tuple containing the output tensor and the MLP bias, if any.
         """
@@ -643,6 +699,14 @@ class MoELayer(BaseMoELayer):
             else:
                 self.token_dispatcher = self._training_token_dispatcher
                 self.shared_expert_overlap = self.config.moe_shared_expert_overlap
+        if packed_seq_params is None:
+            seq_aux_loss_sample_ids = None
+            seq_aux_loss_num_samples = None
+            seq_aux_loss_max_samples = None
+        else:
+            seq_aux_loss_sample_ids = packed_seq_params.seq_aux_loss_sample_ids
+            seq_aux_loss_num_samples = packed_seq_params.seq_aux_loss_num_samples
+            seq_aux_loss_max_samples = packed_seq_params.seq_aux_loss_max_samples
         # Transpose from [bsz, seq_length] to [seq_length, bsz] to align with hidden_states
         if padding_mask is not None:
             padding_mask = padding_mask.transpose(0, 1).bool()
@@ -652,7 +716,13 @@ class MoELayer(BaseMoELayer):
             try:
                 if "route" in self.fwd_execution_map:
                     shared_expert_output = self.shared_experts_compute(hidden_states)
-                    probs, routing_map = self.route(hidden_states, padding_mask)
+                    probs, routing_map = self.route(
+                        hidden_states,
+                        padding_mask,
+                        seq_aux_loss_sample_ids=seq_aux_loss_sample_ids,
+                        seq_aux_loss_num_samples=seq_aux_loss_num_samples,
+                        seq_aux_loss_max_samples=seq_aux_loss_max_samples,
+                    )
                     hidden_states, probs = self.preprocess(hidden_states, probs, routing_map)
 
                     if intermediate_tensors is not None:

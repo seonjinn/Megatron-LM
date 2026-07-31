@@ -7,6 +7,7 @@ import torch
 
 from megatron.core.inference.utils import InferenceMode
 from megatron.core.jit import jit_fuser
+from megatron.core.tensor_parallel.mappings import reduce_from_tensor_model_parallel_region
 from megatron.core.transformer.module import MegatronModule
 from megatron.core.transformer.moe.moe_logging import get_moe_metrics_tracker
 from megatron.core.transformer.moe.moe_utils import (
@@ -109,7 +110,15 @@ class Router(ABC, MegatronModule):
         return logits
 
     @abstractmethod
-    def routing(self, logits: torch.Tensor):
+    def routing(
+        self,
+        logits: torch.Tensor,
+        padding_mask: torch.Tensor | None = None,
+        *,
+        seq_aux_loss_sample_ids: torch.Tensor | None = None,
+        seq_aux_loss_num_samples: torch.Tensor | None = None,
+        seq_aux_loss_max_samples: int | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Routing function.
 
         Args:
@@ -122,7 +131,15 @@ class Router(ABC, MegatronModule):
         raise NotImplementedError("Routing function not implemented.")
 
     @abstractmethod
-    def forward(self, input: torch.Tensor):
+    def forward(
+        self,
+        input: torch.Tensor,
+        padding_mask: torch.Tensor | None = None,
+        *,
+        seq_aux_loss_sample_ids: torch.Tensor | None = None,
+        seq_aux_loss_num_samples: torch.Tensor | None = None,
+        seq_aux_loss_max_samples: int | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass of the router.
 
@@ -404,6 +421,64 @@ class TopKRouter(Router):
                 return True
         return False
 
+    def _validate_variable_packed_seq_aux_loss_metadata(
+        self,
+        logits: torch.Tensor,
+        seq_aux_loss_sample_ids: torch.Tensor | None,
+        seq_aux_loss_num_samples: torch.Tensor | None,
+        seq_aux_loss_max_samples: int | None,
+    ) -> bool:
+        """Validate the static contract for fixed-capacity packed sequence auxiliary loss."""
+        if self.get_aux_loss_coeff("seq_aux_loss") == 0:
+            return False
+
+        ownership_values = (
+            seq_aux_loss_sample_ids,
+            seq_aux_loss_num_samples,
+            seq_aux_loss_max_samples,
+        )
+        if not any(value is not None for value in ownership_values):
+            return False
+        if (
+            seq_aux_loss_sample_ids is None
+            or seq_aux_loss_num_samples is None
+            or seq_aux_loss_max_samples is None
+        ):
+            raise ValueError(
+                "seq_aux_loss_sample_ids, seq_aux_loss_num_samples, and "
+                "seq_aux_loss_max_samples must be provided together"
+            )
+        if (
+            not isinstance(seq_aux_loss_max_samples, int)
+            or isinstance(seq_aux_loss_max_samples, bool)
+            or seq_aux_loss_max_samples < 1
+        ):
+            raise ValueError("seq_aux_loss_max_samples must be an integer of at least 1")
+        if not isinstance(seq_aux_loss_sample_ids, torch.Tensor):
+            raise ValueError("seq_aux_loss_sample_ids must be a Tensor")
+        if not isinstance(seq_aux_loss_num_samples, torch.Tensor):
+            raise ValueError("seq_aux_loss_num_samples must be a Tensor")
+        if seq_aux_loss_sample_ids.ndim != 1 or seq_aux_loss_sample_ids.shape[0] != logits.shape[0]:
+            raise ValueError(
+                "seq_aux_loss_sample_ids must have shape (num_tokens,), "
+                f"got {tuple(seq_aux_loss_sample_ids.shape)} for {logits.shape[0]} tokens"
+            )
+        if seq_aux_loss_sample_ids.dtype != torch.int64:
+            raise ValueError("seq_aux_loss_sample_ids must have dtype torch.int64")
+        if seq_aux_loss_sample_ids.device != logits.device:
+            raise ValueError("seq_aux_loss_sample_ids must be on the same device as router logits")
+        if seq_aux_loss_num_samples.ndim != 0:
+            raise ValueError("seq_aux_loss_num_samples must be a scalar Tensor")
+        if seq_aux_loss_num_samples.dtype != torch.int64:
+            raise ValueError("seq_aux_loss_num_samples must have dtype torch.int64")
+        if seq_aux_loss_num_samples.device != logits.device:
+            raise ValueError("seq_aux_loss_num_samples must be on the same device as router logits")
+        if self.config.moe_router_fusion:
+            raise ValueError(
+                "variable packed seq_aux_loss does not support moe_router_fusion; disable fusion"
+            )
+        return True
+
     def _apply_aux_loss(
         self,
         probs: torch.Tensor,
@@ -452,17 +527,109 @@ class TopKRouter(Router):
         seq_length: int,
         bsz: int,
         with_padding_mask: bool = False,
+        *,
+        seq_aux_loss_sample_ids: torch.Tensor | None = None,
+        seq_aux_loss_num_samples: torch.Tensor | None = None,
+        seq_aux_loss_max_samples: int | None = None,
     ):
         """Apply the sequence-level auxiliary loss for the given scores and routing map.
 
         To calculate the sequence-level aux loss, we reshape the batch_size dimension to
         experts dimension. The resulted loss by switch_load_balancing_loss_func is equal
         to the sum of aux loss for each sequence in the batch. And then we divide the aux
-        loss by the batch size to get averaged aux loss.
+        loss by the batch size to get averaged aux loss. Variable packed inputs instead
+        scatter into a fixed-capacity sample-by-expert tensor.
         """
         seq_aux_loss_coeff = self.get_aux_loss_coeff("seq_aux_loss")
         if seq_aux_loss_coeff == 0:
             return probs
+
+        if seq_aux_loss_sample_ids is not None:
+            if seq_aux_loss_num_samples is None or seq_aux_loss_max_samples is None:
+                raise ValueError(
+                    "seq_aux_loss_sample_ids, seq_aux_loss_num_samples, and "
+                    "seq_aux_loss_max_samples must be provided together"
+                )
+
+            num_samples_is_valid = (
+                (seq_aux_loss_num_samples >= 1)
+                & (seq_aux_loss_num_samples <= seq_aux_loss_max_samples)
+            )
+            torch._assert_async(
+                num_samples_is_valid,
+                "seq_aux_loss_num_samples must be in [1, seq_aux_loss_max_samples]",
+            )
+            sample_ids_are_valid = (
+                (seq_aux_loss_sample_ids >= 0)
+                & (seq_aux_loss_sample_ids < seq_aux_loss_num_samples)
+            ).all()
+            torch._assert_async(
+                sample_ids_are_valid,
+                "seq_aux_loss_sample_ids must be in [0, seq_aux_loss_num_samples)",
+            )
+            safe_sample_ids = seq_aux_loss_sample_ids.clamp(
+                min=0, max=seq_aux_loss_max_samples - 1
+            )
+            num_experts = self.config.num_moe_experts
+            scatter_indices = safe_sample_ids.unsqueeze(-1).expand(-1, num_experts)
+            local_counts = torch.zeros(
+                (seq_aux_loss_max_samples, num_experts),
+                dtype=torch.int64,
+                device=routing_map.device,
+            )
+            local_counts.scatter_add_(
+                0, scatter_indices, routing_map.to(dtype=local_counts.dtype)
+            )
+            global_counts = reduce_from_tensor_model_parallel_region(
+                local_counts, self.tp_cp_group
+            )
+            local_scores = scores_for_aux_loss.new_zeros(
+                (seq_aux_loss_max_samples, num_experts)
+            )
+            local_scores.scatter_add_(0, scatter_indices, scores_for_aux_loss)
+
+            num_samples_float = seq_aux_loss_num_samples.to(dtype=local_scores.dtype)
+            safe_num_samples_float = torch.where(
+                num_samples_is_valid,
+                num_samples_float,
+                torch.ones_like(num_samples_float),
+            )
+            total_routes = global_counts.sum().to(dtype=local_scores.dtype)
+            has_valid_routes = total_routes > 0
+            total_num_tokens = total_routes / (self.topk * safe_num_samples_float)
+            safe_total_num_tokens = torch.where(
+                has_valid_routes,
+                total_num_tokens,
+                torch.ones_like(total_num_tokens),
+            )
+            aux_loss = (
+                switch_load_balancing_loss_func(
+                    probs=local_scores.reshape(
+                        1, seq_aux_loss_max_samples * num_experts
+                    ),
+                    tokens_per_expert=global_counts.reshape(-1),
+                    total_num_tokens=safe_total_num_tokens,
+                    topk=self.topk,
+                    num_experts=self.config.num_moe_experts,
+                    moe_aux_loss_coeff=seq_aux_loss_coeff,
+                    fused=False,
+                )
+                / safe_num_samples_float
+            )
+            aux_loss = torch.where(
+                num_samples_is_valid & has_valid_routes,
+                aux_loss,
+                torch.zeros_like(aux_loss),
+            )
+            valid_token_count = local_counts.sum() / self.topk
+            return self.attach_and_log_load_balancing_loss(
+                probs,
+                seq_aux_loss_coeff,
+                aux_loss,
+                "seq_load_balancing_loss",
+                self.tp_cp_group,
+                valid_token_count=valid_token_count,
+            )
 
         scores_for_aux_loss = scores_for_aux_loss.reshape(seq_length, -1)
         routing_map = routing_map.reshape(seq_length, -1)
@@ -742,7 +909,15 @@ class TopKRouter(Router):
                     routing_map = routing_map & (~flat_mask).unsqueeze(-1)
                 self.local_tokens_per_expert += routing_map.sum(dim=0)
 
-    def routing(self, logits: torch.Tensor, padding_mask: Optional[torch.Tensor] = None):
+    def routing(
+        self,
+        logits: torch.Tensor,
+        padding_mask: torch.Tensor | None = None,
+        *,
+        seq_aux_loss_sample_ids: torch.Tensor | None = None,
+        seq_aux_loss_num_samples: torch.Tensor | None = None,
+        seq_aux_loss_max_samples: int | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Top-k routing function
 
         Args:
@@ -750,6 +925,10 @@ class TopKRouter(Router):
             padding_mask (torch.Tensor, optional): Boolean mask indicating padding positions.
                                                    Shape [seq_length, bsz]. True for padding,
                                                    False for valid tokens. Defaults to None.
+            seq_aux_loss_sample_ids (torch.Tensor, optional): Logical sample ownership for each
+                local token in a variable packed input.
+            seq_aux_loss_num_samples (torch.Tensor, optional): Scalar dynamic logical sample count.
+            seq_aux_loss_max_samples (int, optional): Static sample capacity.
 
         Returns:
             probs (torch.Tensor): The probabilities of token to experts assignment.
@@ -758,6 +937,12 @@ class TopKRouter(Router):
         """
         seq_length, bsz = logits.shape[:2]
         logits = logits.view(-1, self.config.num_moe_experts)
+        variable_packed_seq_aux_loss = self._validate_variable_packed_seq_aux_loss_metadata(
+            logits,
+            seq_aux_loss_sample_ids,
+            seq_aux_loss_num_samples,
+            seq_aux_loss_max_samples,
+        )
 
         # Flatten padding_mask to [num_tokens] if provided
         if padding_mask is not None:
@@ -836,6 +1021,15 @@ class TopKRouter(Router):
                 seq_length,
                 bsz,
                 with_padding_mask=padding_mask is not None,
+                seq_aux_loss_sample_ids=(
+                    seq_aux_loss_sample_ids if variable_packed_seq_aux_loss else None
+                ),
+                seq_aux_loss_num_samples=(
+                    seq_aux_loss_num_samples if variable_packed_seq_aux_loss else None
+                ),
+                seq_aux_loss_max_samples=(
+                    seq_aux_loss_max_samples if variable_packed_seq_aux_loss else None
+                ),
             )
             probs = self._apply_global_aux_loss(
                 probs,
@@ -855,7 +1049,15 @@ class TopKRouter(Router):
             self.global_tokens_per_expert.zero_()
             self.ga_steps.zero_()
 
-    def forward(self, input: torch.Tensor, padding_mask: Optional[torch.Tensor] = None):
+    def forward(
+        self,
+        input: torch.Tensor,
+        padding_mask: torch.Tensor | None = None,
+        *,
+        seq_aux_loss_sample_ids: torch.Tensor | None = None,
+        seq_aux_loss_num_samples: torch.Tensor | None = None,
+        seq_aux_loss_max_samples: int | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass of the router.
 
@@ -864,6 +1066,10 @@ class TopKRouter(Router):
             padding_mask (torch.Tensor, optional): Boolean mask indicating padding positions.
                                                    Shape [seq_length, bsz]. True for padding,
                                                    False for valid tokens. Defaults to None.
+            seq_aux_loss_sample_ids (torch.Tensor, optional): Logical sample ownership for each
+                local token in a variable packed input.
+            seq_aux_loss_num_samples (torch.Tensor, optional): Scalar dynamic logical sample count.
+            seq_aux_loss_max_samples (int, optional): Static sample capacity.
         """
         self._maintain_float32_expert_bias()
 
@@ -881,7 +1087,13 @@ class TopKRouter(Router):
                 logits, self.config.moe_router_force_biased, self.layer_number
             )
 
-        probs, routing_map = self.routing(logits, padding_mask=padding_mask)
+        probs, routing_map = self.routing(
+            logits,
+            padding_mask=padding_mask,
+            seq_aux_loss_sample_ids=seq_aux_loss_sample_ids,
+            seq_aux_loss_num_samples=seq_aux_loss_num_samples,
+            seq_aux_loss_max_samples=seq_aux_loss_max_samples,
+        )
 
         return probs, routing_map
 
@@ -987,12 +1199,23 @@ class InferenceTopKRouter(TopKRouter):
         )
         return probs.squeeze(1), top_indices.squeeze(1)
 
-    def forward(self, input: torch.Tensor, padding_mask: Optional[torch.Tensor] = None):
+    def forward(
+        self,
+        input: torch.Tensor,
+        padding_mask: torch.Tensor | None = None,
+        *,
+        seq_aux_loss_sample_ids: torch.Tensor | None = None,
+        seq_aux_loss_num_samples: torch.Tensor | None = None,
+        seq_aux_loss_max_samples: int | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Simplified forward pass for inference - returns dense tensors only.
 
         Args:
             input (torch.Tensor): Input tensor of shape [seq_length, bsz, hidden_size].
             padding_mask (torch.Tensor, optional): Not used in inference.
+            seq_aux_loss_sample_ids (torch.Tensor, optional): Used by the training fallback only.
+            seq_aux_loss_num_samples (torch.Tensor, optional): Used by the training fallback only.
+            seq_aux_loss_max_samples (int, optional): Used by the training fallback only.
 
         Returns:
             Tuple[torch.Tensor, torch.Tensor]:
@@ -1001,6 +1224,12 @@ class InferenceTopKRouter(TopKRouter):
         """
 
         if not InferenceMode.is_active():
-            return super().forward(input, padding_mask)
+            return super().forward(
+                input,
+                padding_mask,
+                seq_aux_loss_sample_ids=seq_aux_loss_sample_ids,
+                seq_aux_loss_num_samples=seq_aux_loss_num_samples,
+                seq_aux_loss_max_samples=seq_aux_loss_max_samples,
+            )
 
         return self._forward(input, padding_mask)

@@ -56,7 +56,7 @@ else:
 def switch_load_balancing_loss_func(
     probs: torch.Tensor,
     tokens_per_expert: torch.Tensor,
-    total_num_tokens: int,
+    total_num_tokens: int | torch.Tensor,
     topk: int,
     num_experts: int,
     moe_aux_loss_coeff: float,
@@ -106,7 +106,7 @@ def switch_load_balancing_loss_func(
                               Shape in [num_tokens, num_experts].
         tokens_per_expert (torch.Tensor): Number of tokens assigned to each expert in the batch.
                                           Shape in [num_experts]
-        total_num_tokens (int): Total number of tokens in the batch.
+        total_num_tokens (int or torch.Tensor): Total number of tokens in the batch.
         topk (int): The number of experts selected for each token.
         num_experts (int): The number of experts.
         moe_aux_loss_coeff (float): The coefficient for the auxiliary loss.

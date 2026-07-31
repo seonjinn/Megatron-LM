@@ -4,8 +4,11 @@ import dataclasses
 
 import pytest
 import torch
+from torch.utils._python_dispatch import TorchDispatchMode
 
 from megatron.core import parallel_state
+from megatron.core.packed_seq_params import PackedSeqParams
+from megatron.core.process_groups_config import ProcessGroupCollection
 from megatron.core.tensor_parallel.mappings import reduce_from_tensor_model_parallel_region
 from megatron.core.tensor_parallel.random import (
     get_cuda_rng_tracker,
@@ -16,7 +19,7 @@ from megatron.core.transformer.moe.moe_utils import (
     get_default_pg_collection,
     get_moe_layer_wise_logging_tracker,
 )
-from megatron.core.transformer.moe.router import TopKRouter
+from megatron.core.transformer.moe.router import InferenceTopKRouter, TopKRouter
 from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.typed_torch import apply_module
 from megatron.training.initialize import _set_random_seed
@@ -37,6 +40,49 @@ try:
     )
 except Exception:  # pragma: no cover - defensive
     HAVE_ROUTER_FUSION = False
+
+
+class _SingleRankProcessGroup:
+    """Minimal process-group surface for CPU-only router validation tests."""
+
+    def size(self) -> int:
+        """Return the single-rank world size."""
+        return 1
+
+
+class _RejectTensorToHostScalarMode(TorchDispatchMode):
+    """Reject Tensor-to-Python scalar conversions in graph-safe validation tests."""
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        if func is torch.ops.aten._local_scalar_dense.default:
+            raise AssertionError("Tensor ownership validation synchronized with the host")
+        return func(*args, **(kwargs or {}))
+
+
+def _new_cpu_fixed_capacity_router() -> TopKRouter:
+    """Build a real single-rank router without initializing CUDA or distributed state."""
+    group = _SingleRankProcessGroup()
+    pg_collection = ProcessGroupCollection()
+    pg_collection.tp = group
+    pg_collection.cp = group
+    pg_collection.tp_cp = group
+    pg_collection.tp_dp_cp = group
+    config = TransformerConfig(
+        num_layers=1,
+        hidden_size=4,
+        num_attention_heads=1,
+        num_moe_experts=4,
+        use_cpu_initialization=True,
+        moe_router_load_balancing_type="seq_aux_loss",
+        moe_router_topk=2,
+        moe_aux_loss_coeff=1.0,
+        moe_router_dtype="fp32",
+        params_dtype=torch.float32,
+        add_bias_linear=False,
+    )
+    router = TopKRouter(config=config, pg_collection=pg_collection)
+    router.set_layer_number(0)
+    return router
 
 
 class AuxlossTestContainer(MoEModelTestContainer):
@@ -769,6 +815,554 @@ class TestRouterAuxLoss:
         )
 
         torch.testing.assert_close(loss_with_implicit_reshape, loss_baseline)
+
+    @pytest.mark.internal
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+    @pytest.mark.parametrize("topk", (1, 2), ids=("top1", "top2"))
+    @pytest.mark.parametrize("score_function", ("softmax", "sigmoid", "sqrtsoftplus"))
+    @pytest.mark.parametrize(
+        "logical_lengths,physical_lengths,max_samples,dummy_tail",
+        (
+            pytest.param((3, 5), (8, 8), 4, 0, id="two_equal_physical_unused_rows"),
+            pytest.param((3, 5), (4, 8), 4, 0, id="two_unequal_physical_unused_rows"),
+            pytest.param((1, 7, 2), (1, 7, 2), 3, 0, id="three_exact_n_eq_capacity"),
+            pytest.param((1, 7, 2), (4, 8, 4), 5, 4, id="three_aligned_dummy_tail"),
+            pytest.param((5,), (5,), 1, 0, id="one_exact_n_eq_capacity"),
+        ),
+    )
+    def test_variable_length_packed_seq_aux_loss_matches_padded_router_oracle(
+        self,
+        logical_lengths,
+        physical_lengths,
+        max_samples,
+        dummy_tail,
+        score_function,
+        topk,
+    ):
+        """Static segmented ownership preserves padded seq_aux routing and gradients."""
+        router = self.new_router(
+            num_moe_experts=8,
+            moe_router_load_balancing_type="seq_aux_loss",
+            moe_router_topk=topk,
+            moe_router_score_function=score_function,
+            moe_aux_loss_coeff=1.0,
+            moe_router_dtype="fp32",
+            params_dtype=torch.float32,
+            bf16=False,
+        ).cuda()
+        hidden_size = router.config.hidden_size
+        samples = [
+            torch.randn((length, hidden_size), dtype=torch.float32, device="cuda")
+            for length in logical_lengths
+        ]
+
+        def run(hidden_states, padding_mask, **ownership):
+            clear_aux_losses_tracker()
+            router.weight.grad = None
+            hidden_states = hidden_states.detach().clone().requires_grad_(True)
+            probs, routing_map = router(hidden_states, padding_mask=padding_mask, **ownership)
+            probs.backward(torch.zeros_like(probs))
+            aux_loss = get_moe_layer_wise_logging_tracker()["seq_load_balancing_loss"][
+                "values"
+            ][0].clone()
+            return (
+                probs.detach().clone(),
+                routing_map.detach().clone(),
+                aux_loss,
+                hidden_states.grad.detach().clone(),
+                router.weight.grad.detach().clone(),
+            )
+
+        max_length = max(logical_lengths)
+        padded = torch.zeros(
+            (max_length, len(samples), hidden_size), dtype=torch.float32, device="cuda"
+        )
+        padded_mask = torch.ones(
+            (max_length, len(samples)), dtype=torch.bool, device="cuda"
+        )
+        for sample_id, sample in enumerate(samples):
+            padded[: sample.shape[0], sample_id] = sample
+            padded_mask[: sample.shape[0], sample_id] = False
+        padded_result = run(padded, padded_mask)
+
+        packed_parts = []
+        packed_masks = []
+        sample_ids = []
+        for sample_id, (sample, physical_length) in enumerate(zip(samples, physical_lengths)):
+            packed_parts.append(
+                torch.cat(
+                    (
+                        sample,
+                        torch.zeros(
+                            (physical_length - sample.shape[0], hidden_size),
+                            dtype=sample.dtype,
+                            device=sample.device,
+                        ),
+                    )
+                )
+            )
+            packed_masks.append(
+                torch.arange(physical_length, device="cuda") >= sample.shape[0]
+            )
+            sample_ids.extend([sample_id] * physical_length)
+        if dummy_tail:
+            packed_parts.append(
+                torch.zeros((dummy_tail, hidden_size), dtype=torch.float32, device="cuda")
+            )
+            packed_masks.append(torch.ones(dummy_tail, dtype=torch.bool, device="cuda"))
+            sample_ids.extend([0] * dummy_tail)
+        packed = torch.cat(packed_parts).unsqueeze(1)
+        packed_mask = torch.cat(packed_masks).unsqueeze(1)
+        packed_result = run(
+            packed,
+            packed_mask,
+            seq_aux_loss_sample_ids=torch.tensor(sample_ids, dtype=torch.long, device="cuda"),
+            seq_aux_loss_num_samples=torch.tensor(len(samples), dtype=torch.long, device="cuda"),
+            seq_aux_loss_max_samples=max_samples,
+        )
+
+        padded_probs, padded_map, padded_loss, padded_grad, padded_weight_grad = padded_result
+        packed_probs, packed_map, packed_loss, packed_grad, packed_weight_grad = packed_result
+        padded_valid = ~padded_mask.transpose(0, 1)
+        packed_valid = ~packed_mask[:, 0]
+        torch.testing.assert_close(
+            packed_probs[packed_valid],
+            padded_probs.view(max_length, len(samples), -1).transpose(0, 1)[padded_valid],
+        )
+        assert torch.equal(
+            packed_map[packed_valid],
+            padded_map.view(max_length, len(samples), -1).transpose(0, 1)[padded_valid],
+        )
+        assert torch.equal(
+            packed_map[packed_valid].sum(dim=-1),
+            torch.full(
+                (sum(logical_lengths),), topk, dtype=torch.long, device=packed_map.device
+            ),
+        )
+        torch.testing.assert_close(packed_loss, padded_loss)
+        torch.testing.assert_close(
+            packed_grad[:, 0][packed_valid], padded_grad.transpose(0, 1)[padded_valid]
+        )
+        torch.testing.assert_close(packed_weight_grad, padded_weight_grad)
+        assert torch.count_nonzero(padded_grad[padded_mask]) == 0
+        assert torch.count_nonzero(packed_grad[:, 0][~packed_valid]) == 0
+
+    @pytest.mark.internal
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+    @pytest.mark.parametrize(
+        "missing_field",
+        (
+            "seq_aux_loss_sample_ids",
+            "seq_aux_loss_num_samples",
+            "seq_aux_loss_max_samples",
+        ),
+    )
+    def test_fixed_capacity_seq_aux_moe_route_rejects_missing_ownership(
+        self, missing_field
+    ):
+        """The real MoELayer.route API rejects an incomplete ownership tuple."""
+        container = AuxlossTestContainer(
+            tp_size=1,
+            ep_size=1,
+            pp_size=1,
+            num_moe_experts=4,
+            moe_router_topk=2,
+            moe_router_load_balancing_type="seq_aux_loss",
+            moe_aux_loss_coeff=1.0,
+        )
+        hidden_states = torch.randn((8, 1, container.config.hidden_size), device="cuda")
+        ownership = {
+            "seq_aux_loss_sample_ids": torch.zeros(8, dtype=torch.long, device="cuda"),
+            "seq_aux_loss_num_samples": torch.tensor(1, dtype=torch.long, device="cuda"),
+            "seq_aux_loss_max_samples": 2,
+        }
+        ownership.pop(missing_field)
+
+        with pytest.raises(ValueError, match="must be provided together"):
+            container.moe_layer.route(hidden_states, **ownership)
+
+    @pytest.mark.internal
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+    @pytest.mark.parametrize(
+        "invalid_case,error_match",
+        (
+            pytest.param("max_samples_zero", "at least 1", id="max_samples_zero"),
+            pytest.param("max_samples_bool", "at least 1", id="max_samples_bool"),
+            pytest.param("ids_not_tensor", "sample_ids.*Tensor", id="ids_not_tensor"),
+            pytest.param("ids_rank", "sample_ids.*shape", id="ids_rank"),
+            pytest.param("ids_length", "sample_ids.*shape", id="ids_length"),
+            pytest.param("ids_dtype", "sample_ids.*torch.int64", id="ids_dtype"),
+            pytest.param("ids_device", "sample_ids.*same device", id="ids_device"),
+            pytest.param("count_not_tensor", "num_samples.*Tensor", id="count_not_tensor"),
+            pytest.param("count_rank", "num_samples.*scalar", id="count_rank"),
+            pytest.param("count_dtype", "num_samples.*torch.int64", id="count_dtype"),
+            pytest.param("count_device", "num_samples.*same device", id="count_device"),
+        ),
+    )
+    def test_fixed_capacity_seq_aux_moe_route_rejects_static_metadata_errors(
+        self, invalid_case, error_match
+    ):
+        """The real MoELayer.route API validates static ownership metadata without Tensor reads."""
+        container = AuxlossTestContainer(
+            tp_size=1,
+            ep_size=1,
+            pp_size=1,
+            num_moe_experts=4,
+            moe_router_topk=2,
+            moe_router_load_balancing_type="seq_aux_loss",
+            moe_aux_loss_coeff=1.0,
+        )
+        hidden_states = torch.randn((8, 1, container.config.hidden_size), device="cuda")
+        ownership = {
+            "seq_aux_loss_sample_ids": torch.zeros(8, dtype=torch.long, device="cuda"),
+            "seq_aux_loss_num_samples": torch.tensor(1, dtype=torch.long, device="cuda"),
+            "seq_aux_loss_max_samples": 2,
+        }
+        if invalid_case == "max_samples_zero":
+            ownership["seq_aux_loss_max_samples"] = 0
+        elif invalid_case == "max_samples_bool":
+            ownership["seq_aux_loss_max_samples"] = True
+        elif invalid_case == "ids_not_tensor":
+            ownership["seq_aux_loss_sample_ids"] = [0] * 8
+        elif invalid_case == "ids_rank":
+            ownership["seq_aux_loss_sample_ids"] = torch.zeros(
+                (8, 1), dtype=torch.long, device="cuda"
+            )
+        elif invalid_case == "ids_length":
+            ownership["seq_aux_loss_sample_ids"] = torch.zeros(
+                7, dtype=torch.long, device="cuda"
+            )
+        elif invalid_case == "ids_dtype":
+            ownership["seq_aux_loss_sample_ids"] = torch.zeros(
+                8, dtype=torch.int32, device="cuda"
+            )
+        elif invalid_case == "ids_device":
+            ownership["seq_aux_loss_sample_ids"] = torch.zeros(8, dtype=torch.long)
+        elif invalid_case == "count_not_tensor":
+            ownership["seq_aux_loss_num_samples"] = 1
+        elif invalid_case == "count_rank":
+            ownership["seq_aux_loss_num_samples"] = torch.tensor(
+                [1], dtype=torch.long, device="cuda"
+            )
+        elif invalid_case == "count_dtype":
+            ownership["seq_aux_loss_num_samples"] = torch.tensor(
+                1, dtype=torch.int32, device="cuda"
+            )
+        elif invalid_case == "count_device":
+            ownership["seq_aux_loss_num_samples"] = torch.tensor(1, dtype=torch.long)
+
+        with pytest.raises(ValueError, match=error_match):
+            container.moe_layer.route(hidden_states, **ownership)
+
+    @pytest.mark.internal
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+    def test_fixed_capacity_seq_aux_fusion_fails_closed(self, monkeypatch):
+        """Variable packed seq_aux rejects router fusion before any unfused fallback."""
+        import megatron.core.transformer.moe.router as router_module
+
+        container = AuxlossTestContainer(
+            tp_size=1,
+            ep_size=1,
+            pp_size=1,
+            num_moe_experts=4,
+            moe_router_topk=2,
+            moe_router_load_balancing_type="seq_aux_loss",
+            moe_aux_loss_coeff=1.0,
+        )
+        container.moe_layer.router.config.moe_router_fusion = True
+        hidden_states = torch.randn((8, 1, container.config.hidden_size), device="cuda")
+
+        def reject_unfused_fallback(*args, **kwargs):
+            raise AssertionError("variable packed seq_aux silently called the loss fallback")
+
+        monkeypatch.setattr(
+            router_module, "switch_load_balancing_loss_func", reject_unfused_fallback
+        )
+        with pytest.raises(ValueError, match="variable packed seq_aux_loss.*moe_router_fusion"):
+            container.moe_layer.route(
+                hidden_states,
+                seq_aux_loss_sample_ids=torch.zeros(8, dtype=torch.long, device="cuda"),
+                seq_aux_loss_num_samples=torch.tensor(1, dtype=torch.long, device="cuda"),
+                seq_aux_loss_max_samples=2,
+            )
+
+    @pytest.mark.internal
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+    def test_fixed_capacity_seq_aux_recompute_closure_forwards_ownership(self, monkeypatch):
+        """MoELayer recomputation routes with the same explicit dynamic ownership tensors."""
+        container = AuxlossTestContainer(
+            tp_size=1,
+            ep_size=1,
+            pp_size=1,
+            num_moe_experts=4,
+            moe_router_topk=2,
+            moe_router_load_balancing_type="seq_aux_loss",
+            moe_aux_loss_coeff=1.0,
+        )
+        moe_layer = container.new_moe_layer(
+            recompute_granularity="selective", recompute_modules=["moe"]
+        )
+        sample_ids = torch.tensor([0, 0, 0, 0, 1, 1, 1, 1], dtype=torch.long, device="cuda")
+        num_samples = torch.tensor(2, dtype=torch.long, device="cuda")
+        packed_seq_params = PackedSeqParams(
+            seq_aux_loss_sample_ids=sample_ids,
+            seq_aux_loss_num_samples=num_samples,
+            seq_aux_loss_max_samples=4,
+        )
+        route_calls = []
+        original_route = moe_layer.route
+
+        def record_route(
+            hidden_states,
+            padding_mask=None,
+            *,
+            seq_aux_loss_sample_ids=None,
+            seq_aux_loss_num_samples=None,
+            seq_aux_loss_max_samples=None,
+        ):
+            route_calls.append(
+                (
+                    seq_aux_loss_sample_ids,
+                    seq_aux_loss_num_samples,
+                    seq_aux_loss_max_samples,
+                )
+            )
+            return original_route(
+                hidden_states,
+                padding_mask,
+                seq_aux_loss_sample_ids=seq_aux_loss_sample_ids,
+                seq_aux_loss_num_samples=seq_aux_loss_num_samples,
+                seq_aux_loss_max_samples=seq_aux_loss_max_samples,
+            )
+
+        monkeypatch.setattr(moe_layer, "route", record_route)
+        hidden_states = torch.randn(
+            (8, 1, container.config.hidden_size), device="cuda", requires_grad=True
+        )
+        padding_mask = torch.zeros((1, 8), dtype=torch.bool, device="cuda")
+        clear_aux_losses_tracker()
+
+        output, _ = moe_layer(
+            hidden_states,
+            padding_mask=padding_mask,
+            packed_seq_params=packed_seq_params,
+        )
+        output.backward(torch.zeros_like(output))
+
+        assert len(route_calls) == 2
+        for routed_ids, routed_count, routed_capacity in route_calls:
+            assert routed_ids is sample_ids
+            assert routed_count is num_samples
+            assert routed_capacity == 4
+        assert hidden_states.grad is not None
+        assert torch.isfinite(hidden_states.grad).all()
+        assert moe_layer.router.weight.grad is not None
+        assert torch.isfinite(moe_layer.router.weight.grad).all()
+
+    @pytest.mark.internal
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+    def test_fixed_capacity_seq_aux_inference_router_fallback_forwards_ownership(self):
+        """InferenceTopKRouter preserves ownership when it falls back to the training router."""
+        config = dataclasses.replace(
+            self.default_transformer_config,
+            num_moe_experts=4,
+            moe_router_load_balancing_type="seq_aux_loss",
+            moe_router_topk=2,
+            moe_aux_loss_coeff=1.0,
+            moe_router_dtype="fp32",
+            params_dtype=torch.float32,
+            bf16=False,
+        )
+        router = InferenceTopKRouter(
+            config=config, pg_collection=get_default_pg_collection()
+        ).cuda()
+        router.set_layer_number(0)
+        hidden_states = torch.randn((8, 1, config.hidden_size), device="cuda")
+        clear_aux_losses_tracker()
+
+        probs, _ = router(
+            hidden_states,
+            seq_aux_loss_sample_ids=torch.zeros(8, dtype=torch.long, device="cuda"),
+            seq_aux_loss_num_samples=torch.tensor(1, dtype=torch.long, device="cuda"),
+            seq_aux_loss_max_samples=3,
+        )
+        probs.backward(torch.zeros_like(probs))
+
+        aux_loss = get_moe_layer_wise_logging_tracker()["seq_load_balancing_loss"]["values"][0]
+        assert torch.isfinite(aux_loss)
+
+    @pytest.mark.internal
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+    def test_fixed_capacity_seq_aux_deprecated_combined_route_fails_explicitly(self):
+        """The deprecated combined route never silently drops variable packed ownership."""
+        container = AuxlossTestContainer(
+            tp_size=1,
+            ep_size=1,
+            pp_size=1,
+            num_moe_experts=4,
+            moe_router_topk=2,
+            moe_router_load_balancing_type="seq_aux_loss",
+            moe_aux_loss_coeff=1.0,
+        )
+        hidden_states = torch.randn((8, 1, container.config.hidden_size), device="cuda")
+
+        with pytest.raises(ValueError, match="router_and_preprocess.*variable packed"):
+            container.moe_layer.router_and_preprocess(
+                hidden_states,
+                seq_aux_loss_sample_ids=torch.zeros(8, dtype=torch.long, device="cuda"),
+                seq_aux_loss_num_samples=torch.tensor(1, dtype=torch.long, device="cuda"),
+                seq_aux_loss_max_samples=2,
+            )
+
+    @pytest.mark.internal
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+    def test_fixed_capacity_seq_aux_all_padding_has_exact_zero_loss_and_gradients(
+        self, monkeypatch
+    ):
+        """A scheduler-only all-padding pack remains finite with exactly zero aux gradients."""
+        router = self.new_router(
+            num_moe_experts=4,
+            moe_router_load_balancing_type="seq_aux_loss",
+            moe_router_topk=2,
+            moe_aux_loss_coeff=1.0,
+            moe_router_dtype="fp32",
+            params_dtype=torch.float32,
+            bf16=False,
+            calculate_per_token_loss=True,
+        ).cuda()
+        hidden_states = torch.randn(
+            (8, 1, router.config.hidden_size), dtype=torch.float32, device="cuda", requires_grad=True
+        )
+        padding_mask = torch.ones((8, 1), dtype=torch.bool, device="cuda")
+        clear_aux_losses_tracker()
+        valid_token_counts = []
+        original_attach = router.attach_and_log_load_balancing_loss
+
+        def capture_valid_token_count(*args, **kwargs):
+            if args[3] == "seq_load_balancing_loss":
+                valid_token_counts.append(kwargs["valid_token_count"])
+            return original_attach(*args, **kwargs)
+
+        monkeypatch.setattr(
+            router, "attach_and_log_load_balancing_loss", capture_valid_token_count
+        )
+
+        probs, _ = router(
+            hidden_states,
+            padding_mask=padding_mask,
+            seq_aux_loss_sample_ids=torch.zeros(8, dtype=torch.long, device="cuda"),
+            seq_aux_loss_num_samples=torch.tensor(1, dtype=torch.long, device="cuda"),
+            seq_aux_loss_max_samples=3,
+        )
+        probs.backward(torch.zeros_like(probs))
+        aux_loss = get_moe_layer_wise_logging_tracker()["seq_load_balancing_loss"]["values"][0]
+
+        assert torch.equal(aux_loss, torch.zeros_like(aux_loss))
+        assert torch.isfinite(aux_loss)
+        assert len(valid_token_counts) == 1
+        assert torch.equal(valid_token_counts[0], torch.zeros_like(valid_token_counts[0]))
+        assert hidden_states.grad is not None
+        assert torch.isfinite(hidden_states.grad).all()
+        assert torch.count_nonzero(hidden_states.grad) == 0
+        assert router.weight.grad is not None
+        assert torch.isfinite(router.weight.grad).all()
+        assert torch.count_nonzero(router.weight.grad) == 0
+
+
+class TestFixedCapacitySeqAuxLossValidation:
+    @pytest.mark.parametrize("sample_ids", ((-1, 0), (0, 2)), ids=("negative", "at_num_samples"))
+    def test_fixed_capacity_seq_aux_ids_use_async_device_validation(self, sample_ids):
+        """Dynamic ownership bounds fail through _assert_async without a host scalar read."""
+        router = _new_cpu_fixed_capacity_router()
+        logits = torch.randn((2, 1, router.config.num_moe_experts), requires_grad=True)
+
+        with _RejectTensorToHostScalarMode(), pytest.raises(
+            RuntimeError, match="seq_aux_loss_sample_ids"
+        ):
+            router.routing(
+                logits,
+                seq_aux_loss_sample_ids=torch.tensor(sample_ids, dtype=torch.long),
+                seq_aux_loss_num_samples=torch.tensor(2, dtype=torch.long),
+                seq_aux_loss_max_samples=2,
+            )
+
+    @pytest.mark.parametrize("num_samples", (0, 3), ids=("zero", "above_capacity"))
+    def test_fixed_capacity_seq_aux_num_samples_uses_async_device_validation(
+        self, num_samples
+    ):
+        """Dynamic sample-count bounds fail through _assert_async without a host scalar read."""
+        router = _new_cpu_fixed_capacity_router()
+        logits = torch.randn((2, 1, router.config.num_moe_experts), requires_grad=True)
+
+        with _RejectTensorToHostScalarMode(), pytest.raises(
+            RuntimeError, match="seq_aux_loss_num_samples"
+        ):
+            router.routing(
+                logits,
+                seq_aux_loss_sample_ids=torch.zeros(2, dtype=torch.long),
+                seq_aux_loss_num_samples=torch.tensor(num_samples, dtype=torch.long),
+                seq_aux_loss_max_samples=2,
+            )
+
+    @pytest.mark.parametrize("num_samples", (0, 3), ids=("zero", "above_capacity"))
+    def test_fixed_capacity_seq_aux_invalid_count_safe_denominator(
+        self, num_samples, monkeypatch
+    ):
+        """Invalid dynamic counts cannot create NaN/Inf if asynchronous assertion is deferred."""
+        router = _new_cpu_fixed_capacity_router()
+        logits = torch.randn((2, 1, router.config.num_moe_experts), requires_grad=True)
+        assertions = []
+
+        def record_assertion(condition, message):
+            assertions.append((condition.detach().clone(), message))
+
+        monkeypatch.setattr(torch, "_assert_async", record_assertion)
+        clear_aux_losses_tracker()
+        with _RejectTensorToHostScalarMode():
+            probs, _ = router.routing(
+                logits,
+                seq_aux_loss_sample_ids=torch.zeros(2, dtype=torch.long),
+                seq_aux_loss_num_samples=torch.tensor(num_samples, dtype=torch.long),
+                seq_aux_loss_max_samples=2,
+            )
+            probs.backward(torch.zeros_like(probs))
+        aux_loss = get_moe_layer_wise_logging_tracker()["seq_load_balancing_loss"]["values"][0]
+
+        assert assertions
+        assert torch.equal(assertions[0][0], torch.tensor(False))
+        assert "seq_aux_loss_num_samples" in assertions[0][1]
+        assert torch.equal(aux_loss, torch.zeros_like(aux_loss))
+        assert torch.isfinite(aux_loss)
+        assert logits.grad is not None
+        assert torch.isfinite(logits.grad).all()
+        assert torch.count_nonzero(logits.grad) == 0
+
+    def test_fixed_capacity_seq_aux_invalid_ids_are_clamped_before_scatter(
+        self, monkeypatch
+    ):
+        """Deferred ownership assertion cannot expose scatter_add_ to out-of-range IDs."""
+        router = _new_cpu_fixed_capacity_router()
+        logits = torch.randn((2, 1, router.config.num_moe_experts), requires_grad=True)
+        assertions = []
+
+        def record_assertion(condition, message):
+            assertions.append((condition.detach().clone(), message))
+
+        monkeypatch.setattr(torch, "_assert_async", record_assertion)
+        clear_aux_losses_tracker()
+        with _RejectTensorToHostScalarMode():
+            probs, _ = router.routing(
+                logits,
+                seq_aux_loss_sample_ids=torch.tensor((-5, 100), dtype=torch.long),
+                seq_aux_loss_num_samples=torch.tensor(2, dtype=torch.long),
+                seq_aux_loss_max_samples=2,
+            )
+
+        assert len(assertions) == 2
+        assert torch.equal(assertions[0][0], torch.tensor(True))
+        assert torch.equal(assertions[1][0], torch.tensor(False))
+        assert "seq_aux_loss_sample_ids" in assertions[1][1]
+        assert torch.isfinite(probs).all()
 
 
 class TestPaddingMaskAuxLoss:
