@@ -21,6 +21,7 @@ from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.pipeline_parallel.utils import is_vp_last_stage
 from megatron.core.process_groups_config import ProcessGroupCollection
 from megatron.core.tensor_parallel import (
+    gather_from_sequence_parallel_region,
     gather_from_tensor_model_parallel_region,
     scatter_to_sequence_parallel_region,
 )
@@ -1093,6 +1094,12 @@ class MultiTokenPredictionLayer(MegatronModule):
             packed_seq_params=packed_seq_params,
         )
         if padding_mask is not None:
+            if self.sequence_parallel:
+                padding_mask = gather_from_sequence_parallel_region(
+                    padding_mask.transpose(0, 1).contiguous(),
+                    tensor_parallel_output_grad=False,
+                    group=self.tp_group,
+                ).transpose(0, 1).contiguous()
             valid_token_mask, _ = roll_tensor(
                 ~padding_mask,
                 shifts=-1,
@@ -1101,6 +1108,11 @@ class MultiTokenPredictionLayer(MegatronModule):
                 packed_seq_params=packed_seq_params,
             )
             padding_mask = ~valid_token_mask
+            if self.sequence_parallel:
+                padding_mask = scatter_to_sequence_parallel_region(
+                    padding_mask.transpose(0, 1).contiguous(),
+                    group=self.tp_group,
+                ).transpose(0, 1).contiguous()
         # embedding
         decoder_input = embedding(input_ids=input_ids, position_ids=position_ids)
 
