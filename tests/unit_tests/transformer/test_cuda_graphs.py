@@ -1911,6 +1911,60 @@ class _SimpleNonModule:
         return x @ self.weight
 
 
+def test_moe_replay_state_is_paired_with_exact_graph_index() -> None:
+    from types import SimpleNamespace
+
+    from megatron.core.transformer.moe.token_dispatcher import MoEAlltoAllTokenDispatcher
+    from megatron.core.transformer.transformer_layer import MoETransformerLayer
+
+    dispatcher = MoEAlltoAllTokenDispatcher.__new__(MoEAlltoAllTokenDispatcher)
+    dispatcher.config = SimpleNamespace(
+        moe_expert_capacity_factor=None,
+        moe_expert_rank_capacity_factor=None,
+        moe_hybridep_pad_uneven_dispatch_inputs=False,
+    )
+    dispatcher.tp_size = 1
+    dispatcher.ep_size = 1
+    dispatcher.router_topk = 2
+    dispatcher.num_experts = 4
+    dispatcher.num_local_experts = 4
+    dispatcher.drop_and_pad = False
+
+    layer = MoETransformerLayer.__new__(MoETransformerLayer)
+    torch.nn.Module.__init__(layer)
+    layer.mlp = SimpleNamespace(token_dispatcher=dispatcher)
+    layer._te_cuda_graph_dispatcher_replay_states = ()
+
+    graph_input_0 = torch.empty((2, 1, 4))
+    dispatcher.hidden_shape = graph_input_0.shape
+    dispatcher.hidden_shape_before_permute = torch.Size((2, 4))
+    dispatcher.capacity = None
+    dispatcher.num_out_tokens = 4
+    layer._record_te_cuda_graph_dispatcher_replay_state(0, graph_input_0, torch.empty((4, 4)))
+
+    graph_input_1 = torch.empty((3, 1, 4))
+    dispatcher.hidden_shape = graph_input_1.shape
+    dispatcher.hidden_shape_before_permute = torch.Size((3, 4))
+    dispatcher.capacity = None
+    dispatcher.num_out_tokens = 6
+    layer._record_te_cuda_graph_dispatcher_replay_state(1, graph_input_1, torch.empty((6, 4)))
+
+    state_0 = layer._restore_te_cuda_graph_dispatcher_replay_state(
+        0, graph_input_0, torch.empty((4, 4))
+    )
+    assert dispatcher.hidden_shape == graph_input_0.shape
+    assert dispatcher.num_out_tokens == 4
+    assert state_0 is layer._te_cuda_graph_dispatcher_replay_states[0]
+
+    state_1 = layer._restore_te_cuda_graph_dispatcher_replay_state(
+        1, graph_input_1, torch.empty((6, 4))
+    )
+    assert dispatcher.hidden_shape == graph_input_1.shape
+    assert dispatcher.num_out_tokens == 6
+    assert state_1 is layer._te_cuda_graph_dispatcher_replay_states[1]
+    assert len(layer._te_cuda_graph_dispatcher_replay_states) == 2
+
+
 def _make_simple_module(config):
     return _SimpleModule(config).cuda().eval()
 

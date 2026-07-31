@@ -1,6 +1,7 @@
 # Copyright (c) 2023, NVIDIA CORPORATION. All rights reserved.
 
 import dataclasses
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -10,7 +11,11 @@ from megatron.core.models.gpt.gpt_layer_specs import get_gpt_layer_local_submodu
 from megatron.core.transformer.moe.fused_a2a import HYBRIDEP_TOKEN_ALIGNMENT, reset_hybrid_ep_buffer
 from megatron.core.transformer.moe.moe_layer import MoELayer, MoESubmodules
 from megatron.core.transformer.moe.moe_utils import get_capacity
-from megatron.core.transformer.moe.token_dispatcher import _HybridEPManager
+from megatron.core.transformer.moe.token_dispatcher import (
+    MoEAllGatherTokenDispatcher,
+    MoEFlexTokenDispatcher,
+    _HybridEPManager,
+)
 from megatron.core.transformer.spec_utils import get_submodules
 from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.typed_torch import apply_module
@@ -461,6 +466,104 @@ def test_hybridep_pad_uneven_dispatch_inputs_metadata(monkeypatch):
     torch.testing.assert_close(manager.token_probs[:local_num_tokens], probs)
     assert not manager.routing_map[local_num_tokens:].any()
     assert not manager.token_probs[local_num_tokens:].any()
+
+
+def _make_hybridep_replay_state_dispatcher(
+    *, drop_and_pad: bool = True, rank_capacity: float | None = None
+) -> MoEFlexTokenDispatcher:
+    dispatcher = MoEFlexTokenDispatcher.__new__(MoEFlexTokenDispatcher)
+    dispatcher.config = SimpleNamespace(
+        moe_flex_dispatcher_backend="hybridep",
+        moe_expert_capacity_factor=1.0 if drop_and_pad else None,
+        moe_expert_rank_capacity_factor=rank_capacity,
+        moe_hybridep_pad_uneven_dispatch_inputs=True,
+    )
+    dispatcher.tp_size = 2
+    dispatcher.ep_size = 4
+    dispatcher.num_local_experts = 2
+    dispatcher.hidden_shape = torch.Size((2, 3, 4))
+
+    manager = _HybridEPManager.__new__(_HybridEPManager)
+    manager.drop_and_pad = drop_and_pad
+    manager._original_num_tokens = 6
+    manager._padded_num_tokens = 8
+    manager.capacity = 5 if drop_and_pad else None
+    manager.num_permuted_tokens = 40
+    manager.tokens_per_expert = torch.tensor([20, 20], dtype=torch.long)
+    manager.handle = object()
+    manager.pad_multiple = 16
+    dispatcher._comm_manager = manager
+    return dispatcher
+
+
+def test_hybridep_cudagraph_replay_state_restores_fixed_capacity_metadata() -> None:
+    dispatcher = _make_hybridep_replay_state_dispatcher()
+    graph_input = torch.empty((2, 3, 4), dtype=torch.bfloat16)
+    preprocessed = torch.empty((6, 4), dtype=torch.bfloat16)
+
+    state = dispatcher.snapshot_cudagraph_replay_state(graph_input, preprocessed)
+    manager = dispatcher._comm_manager
+    manager._original_num_tokens = 3
+    manager._padded_num_tokens = 4
+    manager.capacity = 99
+    manager.num_permuted_tokens = 7
+    manager.tokens_per_expert = torch.tensor([3, 4])
+
+    dispatcher.restore_cudagraph_replay_state(state, graph_input, preprocessed)
+
+    assert manager._original_num_tokens == 6
+    assert manager._padded_num_tokens == 8
+    assert manager.capacity == 5
+    assert manager.num_permuted_tokens == 40
+    assert tuple(manager.tokens_per_expert.tolist()) == (20, 20)
+    assert manager.tokens_per_expert.device.type == "cpu"
+    assert state.backend_state.tokens_per_expert == (20, 20)
+    assert manager.handle is not None
+    assert manager.pad_multiple == 16
+
+
+def test_hybridep_cudagraph_continuation_requires_restored_physical_rows() -> None:
+    dispatcher = _make_hybridep_replay_state_dispatcher()
+    graph_input = torch.empty((2, 3, 4), dtype=torch.bfloat16)
+    preprocessed = torch.empty((6, 4), dtype=torch.bfloat16)
+    state = dispatcher.snapshot_cudagraph_replay_state(graph_input, preprocessed)
+
+    with pytest.raises(RuntimeError, match="original_num_tokens"):
+        dispatcher.validate_cudagraph_continuation(
+            dataclasses.replace(
+                state, backend_state=dataclasses.replace(state.backend_state, original_num_tokens=5)
+            ),
+            graph_input,
+        )
+
+
+@pytest.mark.parametrize("backend", ["deepep", "ncclep"])
+@pytest.mark.parametrize("static_shape", [False, True])
+def test_flex_cudagraph_replay_state_rejects_unsupported_backends_before_capture(
+    backend: str, static_shape: bool
+) -> None:
+    dispatcher = MoEFlexTokenDispatcher.__new__(MoEFlexTokenDispatcher)
+    dispatcher.config = SimpleNamespace(
+        moe_flex_dispatcher_backend=backend, moe_ncclep_static_shape=static_shape
+    )
+
+    with pytest.raises(RuntimeError, match="CUDA graph capture"):
+        dispatcher.validate_cudagraph_replay_capability()
+
+
+def test_hybridep_cudagraph_replay_state_requires_fixed_capacity() -> None:
+    dispatcher = _make_hybridep_replay_state_dispatcher(drop_and_pad=False, rank_capacity=None)
+
+    with pytest.raises(RuntimeError, match="fixed capacity"):
+        dispatcher.validate_cudagraph_replay_capability()
+
+
+def test_allgather_cudagraph_replay_state_rejects_packed_sparse_routes() -> None:
+    dispatcher = MoEAllGatherTokenDispatcher.__new__(MoEAllGatherTokenDispatcher)
+    dispatcher.config = SimpleNamespace(thd_max_packed_sequences=8)
+
+    with pytest.raises(RuntimeError, match="AllGather"):
+        dispatcher.validate_cudagraph_replay_capability()
 
 
 @pytest.mark.skipif(
