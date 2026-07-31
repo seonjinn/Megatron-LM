@@ -7,7 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Callable, Iterable, Sequence
-from weakref import WeakSet
+from weakref import WeakSet, ref
 
 import torch
 
@@ -26,6 +26,7 @@ _PACKED_REPLAY_ATTRIBUTES = (
 )
 _PADDING_MASK_SIGNATURE_ATTRIBUTE = "_te_cuda_graph_padding_mask_signature"
 _DISPATCHER_STATES_ATTRIBUTE = "_te_cuda_graph_dispatcher_replay_states"
+_EXECUTION_COUNTER_ATTRIBUTE = "_te_cuda_graph_execution_counter"
 
 
 def _freeze_signature(value: object) -> object:
@@ -75,6 +76,33 @@ class TECudaGraphBankFingerprint:
 
 
 @dataclass(frozen=True)
+class TECudaGraphExecutionCounterSnapshot:
+    """Immutable execution-counter values owned by one graph-bank manager."""
+
+    eligible_calls: int
+    graph_calls: int
+    _owner: object = field(repr=False)
+
+
+class _TECudaGraphExecutionCounter:
+    def __init__(self, owner: TECudaGraphBankManager) -> None:
+        self._owner_ref = ref(owner)
+        self.eligible_calls = 0
+        self.graph_calls = 0
+
+    def record_eligible_call(self) -> None:
+        self.eligible_calls += 1
+
+    def record_graph_call(self) -> None:
+        self.graph_calls += 1
+
+    def snapshot(self) -> TECudaGraphExecutionCounterSnapshot:
+        return TECudaGraphExecutionCounterSnapshot(
+            eligible_calls=self.eligible_calls, graph_calls=self.graph_calls, _owner=self
+        )
+
+
+@dataclass(frozen=True)
 class _LayerReplayContract:
     manual_hooks: object
     packed_attributes: tuple[tuple[str, bool, object], ...]
@@ -120,6 +148,19 @@ class _BankReplayGuard:
     ) -> int:
         return self._manager._assert_replay_ready(
             self._bank, layer, installed_graph_list, microbatch_index
+        )
+
+    def record_graph_call(
+        self,
+        layer: object,
+        installed_graph_list: list[object],
+        selected_index: int,
+        counter: object,
+    ) -> None:
+        """Record one launch after revalidating this guard's selected callable."""
+
+        self._manager._record_graph_call(
+            self._bank, self, layer, installed_graph_list, selected_index, counter
         )
 
 
@@ -173,12 +214,61 @@ class TECudaGraphBankManager:
         self._registrations: dict[int, _BankRegistration] = {}
         self._terminal_banks: WeakSet[TECudaGraphBank] = WeakSet()
         self.active_bank: TECudaGraphBank | None = None
+        self._execution_counter = _TECudaGraphExecutionCounter(self)
+        self._execution_counter_closed = False
+        self._attach_execution_counter()
 
     @property
     def registered_bank_count(self) -> int:
         """Return the number of live bank registrations."""
 
         return len(self._registrations)
+
+    def snapshot_execution_counters(self) -> TECudaGraphExecutionCounterSnapshot:
+        """Return the current monotonic execution counters."""
+
+        self._assert_execution_counter_open()
+        return self._execution_counter.snapshot()
+
+    def execution_counter_delta(
+        self,
+        start: TECudaGraphExecutionCounterSnapshot,
+        end: TECudaGraphExecutionCounterSnapshot | None = None,
+    ) -> TECudaGraphExecutionCounterSnapshot:
+        """Return the non-negative counter delta between two owned snapshots."""
+
+        self._assert_execution_counter_open()
+        self._validate_execution_counter_snapshot(start)
+        if end is None:
+            end = self._execution_counter.snapshot()
+        else:
+            self._validate_execution_counter_snapshot(end)
+        eligible_calls = end.eligible_calls - start.eligible_calls
+        graph_calls = end.graph_calls - start.graph_calls
+        if eligible_calls < 0 or graph_calls < 0:
+            raise ValueError("TE CUDA graph execution counters must be monotonic")
+        return TECudaGraphExecutionCounterSnapshot(
+            eligible_calls=eligible_calls, graph_calls=graph_calls, _owner=self._execution_counter
+        )
+
+    def close(self) -> None:
+        """Detach this manager's execution tracker after every bank is released."""
+
+        if self._execution_counter_closed:
+            return
+        if self.active_bank is not None or self._registrations:
+            raise RuntimeError(
+                "Cannot close execution counters while registered TE CUDA graph banks remain"
+            )
+        layers = self._unique_layers()
+        if any(
+            getattr(layer, _EXECUTION_COUNTER_ATTRIBUTE, None) is not self._execution_counter
+            for layer in layers
+        ):
+            raise ValueError("TE CUDA graph execution counter ownership changed before close")
+        for layer in layers:
+            delattr(layer, _EXECUTION_COUNTER_ATTRIBUTE)
+        self._execution_counter_closed = True
 
     @classmethod
     def from_helper(
@@ -206,6 +296,7 @@ class TECudaGraphBankManager:
     def capture(self, helper: object, *, num_microbatches: int) -> TECudaGraphBank:
         """Consume one helper and register a bank without disturbing the active bank."""
 
+        self._assert_execution_counter_open()
         self._assert_model_drained()
         self._validate_helper(helper)
         if num_microbatches <= 0:
@@ -469,6 +560,83 @@ class TECudaGraphBankManager:
                 "selected CUDA graph callable does not match its canonical registration"
             )
         return selected_index
+
+    def _record_graph_call(
+        self,
+        bank: TECudaGraphBank,
+        replay_guard: _BankReplayGuard,
+        layer: object,
+        installed_graph_list: list[object],
+        selected_index: int,
+        counter: object,
+    ) -> None:
+        if (
+            counter is not self._execution_counter
+            or getattr(layer, _EXECUTION_COUNTER_ATTRIBUTE, None) is not self._execution_counter
+        ):
+            raise RuntimeError("TE CUDA graph execution counter owner does not match the layer")
+        registration = self._registrations.get(id(bank))
+        if (
+            bank is not self.active_bank
+            or registration is None
+            or registration.replay_guard is not replay_guard
+            or getattr(layer, "_te_cuda_graph_bank_replay_guard", None) is not replay_guard
+        ):
+            raise RuntimeError("TE CUDA graph replay guard owner changed before launch")
+        layer_index = registration.layer_index_by_id.get(id(layer))
+        if (
+            layer_index is None
+            or layer_index >= len(self.layers)
+            or self.layers[layer_index] is not layer
+        ):
+            raise RuntimeError("TE CUDA graph layer owner changed before launch")
+        canonical_list = registration.owned_graph_lists[layer_index]
+        if installed_graph_list is not canonical_list:
+            raise RuntimeError("TE CUDA graph list owner changed before launch")
+        if not 0 <= selected_index < len(canonical_list) or (
+            canonical_list[selected_index]
+            is not registration.graph_tuples[layer_index][selected_index]
+        ):
+            raise RuntimeError("TE CUDA graph selected callable changed before launch")
+        self._execution_counter.record_graph_call()
+
+    def _attach_execution_counter(self) -> None:
+        layers = self._unique_layers()
+        for layer in layers:
+            existing = getattr(layer, _EXECUTION_COUNTER_ATTRIBUTE, None)
+            if existing is None:
+                continue
+            owner_ref = getattr(existing, "_owner_ref", None)
+            if not callable(owner_ref) or owner_ref() is not None:
+                raise ValueError(
+                    "TE CUDA graph execution counter is already owned by another manager"
+                )
+        for layer in layers:
+            setattr(layer, _EXECUTION_COUNTER_ATTRIBUTE, self._execution_counter)
+
+    def _assert_execution_counter_open(self) -> None:
+        if self._execution_counter_closed:
+            raise RuntimeError("TE CUDA graph execution counter manager is closed")
+
+    def _validate_execution_counter_snapshot(
+        self, snapshot: TECudaGraphExecutionCounterSnapshot
+    ) -> None:
+        if not isinstance(snapshot, TECudaGraphExecutionCounterSnapshot):
+            raise TypeError("execution counter snapshot has an invalid type")
+        if snapshot._owner is not self._execution_counter:
+            raise ValueError(
+                "execution counter snapshot belongs to a different TECudaGraphBankManager"
+            )
+
+    def _unique_layers(self) -> tuple[object, ...]:
+        seen: set[int] = set()
+        unique_layers = []
+        for layer in self.layers:
+            layer_id = id(layer)
+            if layer_id not in seen:
+                seen.add(layer_id)
+                unique_layers.append(layer)
+        return tuple(unique_layers)
 
     def _assert_model_drained(self) -> None:
         if self._assert_model_drained_callback() is False:

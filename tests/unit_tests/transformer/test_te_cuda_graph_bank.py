@@ -56,6 +56,9 @@ def _load_enums_module() -> ModuleType:
 
 
 def _load_bank_module() -> ModuleType:
+    cache_name = "_test_te_cuda_graph_bank"
+    if cache_name in sys.modules:
+        return sys.modules[cache_name]
     try:
         spec = importlib.util.find_spec("megatron.core.transformer.te_cuda_graph_bank")
     except ModuleNotFoundError:
@@ -76,8 +79,11 @@ def _load_bank_module() -> ModuleType:
         sys.modules[spec.name] = module
         assert spec.loader is not None
         spec.loader.exec_module(module)
+        sys.modules[cache_name] = module
         return module
-    return importlib.import_module(spec.name)
+    module = importlib.import_module(spec.name)
+    sys.modules[cache_name] = module
+    return module
 
 
 class _FakeGraph:
@@ -703,3 +709,112 @@ def test_moe_schema_is_ordered_and_requires_tensor_leaves() -> None:
             ),
             num_microbatches=2,
         )
+
+
+def test_execution_counter_snapshot_delta_and_owner_validation() -> None:
+    layer = _FakeLayer("layer")
+    manager = _make_manager([layer])
+    initial = manager.snapshot_execution_counters()
+    tracker = layer._te_cuda_graph_execution_counter
+
+    tracker.record_eligible_call()
+    tracker.record_eligible_call()
+    tracker.record_graph_call()
+    current = manager.snapshot_execution_counters()
+
+    assert (initial.eligible_calls, initial.graph_calls) == (0, 0)
+    assert (current.eligible_calls, current.graph_calls) == (2, 1)
+    delta = manager.execution_counter_delta(initial)
+    assert (delta.eligible_calls, delta.graph_calls) == (2, 1)
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        initial.eligible_calls = 1
+
+    other_layer = _FakeLayer("other")
+    other_manager = _make_manager([other_layer])
+    assert other_manager.snapshot_execution_counters() != initial
+    with pytest.raises(TypeError, match="invalid type"):
+        manager.execution_counter_delta(object())
+    with pytest.raises(ValueError, match="different TECudaGraphBankManager"):
+        other_manager.execution_counter_delta(initial)
+    with pytest.raises(ValueError, match="monotonic"):
+        manager.execution_counter_delta(current, initial)
+
+    other_manager.close()
+    manager.close()
+
+
+def test_execution_counter_owner_collision_and_identity_safe_close() -> None:
+    layer = _FakeLayer("layer")
+    manager = _make_manager([layer])
+    tracker = layer._te_cuda_graph_execution_counter
+
+    with pytest.raises(ValueError, match="already owned"):
+        _make_manager([layer])
+    assert layer._te_cuda_graph_execution_counter is tracker
+
+    foreign_tracker = object()
+    layer._te_cuda_graph_execution_counter = foreign_tracker
+    with pytest.raises(ValueError, match="ownership changed"):
+        manager.close()
+    assert layer._te_cuda_graph_execution_counter is foreign_tracker
+
+    layer._te_cuda_graph_execution_counter = tracker
+    manager.close()
+    assert not hasattr(layer, "_te_cuda_graph_execution_counter")
+
+    replacement = _make_manager([layer])
+    replacement_tracker = layer._te_cuda_graph_execution_counter
+    manager.close()
+    assert layer._te_cuda_graph_execution_counter is replacement_tracker
+    replacement.close()
+
+
+def test_execution_counter_dead_owner_does_not_block_a_new_manager() -> None:
+    layer = _FakeLayer("layer")
+    manager = _make_manager([layer])
+    manager_reference = weakref.ref(manager)
+    stale_tracker = layer._te_cuda_graph_execution_counter
+
+    del manager
+    gc.collect()
+    assert manager_reference() is None
+
+    replacement = _make_manager([layer])
+    assert layer._te_cuda_graph_execution_counter is not stale_tracker
+    replacement.close()
+
+
+def test_execution_counters_survive_uninstall_reset_and_eviction() -> None:
+    layer = _FakeLayer("layer")
+    manager = _make_manager([layer])
+    tracker = layer._te_cuda_graph_execution_counter
+    tracker.record_eligible_call()
+    tracker.record_graph_call()
+    before_transitions = manager.snapshot_execution_counters()
+
+    first = manager.capture(_FakeHelper([layer], _graphs("first", 2)), num_microbatches=2)
+    second = manager.capture(_FakeHelper([layer], _graphs("second", 2)), num_microbatches=2)
+    first.activate()
+    manager.uninstall(first)
+    second.activate()
+    first.reset()  # An outer LRU eviction resets an inactive bank.
+    manager.uninstall(second)
+    second.reset()
+
+    after_transitions = manager.snapshot_execution_counters()
+    assert after_transitions == before_transitions
+    tracker.record_eligible_call()
+    assert manager.execution_counter_delta(before_transitions).eligible_calls == 1
+    manager.close()
+
+
+def test_execution_counter_close_rejects_live_banks() -> None:
+    layer = _FakeLayer("layer")
+    manager = _make_manager([layer])
+    bank = manager.capture(_FakeHelper([layer], _graphs("bank", 2)), num_microbatches=2)
+
+    with pytest.raises(RuntimeError, match="registered TE CUDA graph banks"):
+        manager.close()
+
+    bank.reset()
+    manager.close()

@@ -1772,6 +1772,220 @@ def test_te_graph_bank_guard_index_is_used_for_forward_and_backward() -> None:
     assert selections == ["forward-one", "backward-one"]
 
 
+class _Task9ReplayGraph:
+    def __init__(self, *, tuple_output: bool) -> None:
+        self.tuple_output = tuple_output
+        self.fail_launch = False
+        self.calls = 0
+
+    def __call__(self, *args, **kwargs):
+        self.calls += 1
+        if self.fail_launch:
+            raise RuntimeError("graph launch failed")
+        output = args[0]
+        return (output,) if self.tuple_output else output
+
+
+def _make_task9_active_bank(layer, graph):
+    from types import SimpleNamespace
+
+    from megatron.core.transformer.te_cuda_graph_bank import TECudaGraphBankManager
+
+    runtime = {"count": 1}
+    manager = TECudaGraphBankManager(
+        [layer],
+        graph_reset_supported=False,
+        synchronize=lambda: None,
+        runtime_num_microbatches=lambda: runtime["count"],
+    )
+    helper = SimpleNamespace(
+        flattened_callables=[layer],
+        config=SimpleNamespace(cuda_graph_modules=()),
+        num_microbatches=None,
+        _capture_attempted=False,
+        _capture_finished=False,
+        _graphs_created=False,
+    )
+
+    def capture(*, num_microbatches):
+        assert num_microbatches == 1
+        layer.cuda_graphs.append(graph)
+        helper.num_microbatches = num_microbatches
+        helper._capture_finished = True
+        helper._graphs_created = True
+        return ((layer, tuple(layer.cuda_graphs)),)
+
+    helper._capture_cuda_graph_lists = capture
+    layer.assert_te_cuda_graph_bank_drained = lambda: None
+    layer.snapshot_te_cuda_graph_bank_references = lambda: None
+    layer.restore_te_cuda_graph_bank_references = lambda _snapshot: None
+    layer.clear_te_cuda_graph_bank_references = lambda: None
+    layer.te_cuda_graph_bank_schema = lambda: ()
+    bank = manager.capture(helper, num_microbatches=1)
+    bank.activate()
+    return manager, bank, runtime
+
+
+def test_execution_counter_counts_three_eager_warmups_and_checkpoint_recompute(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from torch.utils.checkpoint import checkpoint
+
+    import megatron.core.transformer.cuda_graphs as cuda_graphs
+    from megatron.core.transformer.module import GraphableMegatronModule
+    from megatron.core.transformer.te_cuda_graph_bank import TECudaGraphBankManager
+
+    state = {"capturing": False, "warmup": False}
+    monkeypatch.setattr(cuda_graphs, "is_graph_capturing", lambda: state["capturing"])
+    monkeypatch.setattr(cuda_graphs, "is_graph_warmup", lambda: state["warmup"])
+    layer = _make_task7_transformer_leaf(moe=False)
+    layer.config = SimpleNamespace(cuda_graph_impl="transformer_engine")
+    layer.training = True
+    layer.forward = lambda hidden_states: hidden_states
+    layer._te_cuda_graph_capture = lambda hidden_states: hidden_states
+    manager = TECudaGraphBankManager(
+        [layer],
+        graph_reset_supported=False,
+        synchronize=lambda: None,
+        runtime_num_microbatches=lambda: 1,
+    )
+    hidden_states = torch.ones(1)
+
+    for _ in range(3):
+        GraphableMegatronModule.__call__(layer, hidden_states)
+    state["warmup"] = True
+    GraphableMegatronModule.__call__(layer, hidden_states)
+    state["warmup"] = False
+    state["capturing"] = True
+    GraphableMegatronModule.__call__(layer, hidden_states)
+    state["capturing"] = False
+    layer.training = False
+    GraphableMegatronModule.__call__(layer, hidden_states)
+    layer.training = True
+    checkpointed_input = torch.ones(1, requires_grad=True)
+    checkpoint(
+        lambda value: GraphableMegatronModule.__call__(layer, value),
+        checkpointed_input,
+        use_reentrant=True,
+    ).sum().backward()
+
+    snapshot = manager.snapshot_execution_counters()
+    assert (snapshot.eligible_calls, snapshot.graph_calls) == (5, 0)
+    manager.close()
+
+
+def test_transformer_execution_counter_counts_once_after_double_guard_and_preparation(
+    monkeypatch,
+) -> None:
+    from types import SimpleNamespace
+
+    import megatron.core.transformer.cuda_graphs as cuda_graphs
+
+    state = {"capturing": False, "warmup": False}
+    monkeypatch.setattr(cuda_graphs, "is_graph_capturing", lambda: state["capturing"])
+    monkeypatch.setattr(cuda_graphs, "is_graph_warmup", lambda: state["warmup"])
+    layer = _make_task7_transformer_leaf(moe=False)
+    layer.config = SimpleNamespace(
+        cuda_graph_impl="transformer_engine",
+        cuda_graph_modules=[],
+        delay_offload_until_cuda_graph=False,
+        overlap_moe_expert_parallel_comm=False,
+        fine_grained_activation_offloading=False,
+    )
+    layer.training = True
+    layer.current_microbatch = 0
+    layer._flatten_te_cuda_graph_packed_seq_params = lambda _kwargs: None
+    layer._rebuild_te_cuda_graph_packed_seq_params = lambda _kwargs: None
+    layer._get_te_cuda_graph_replay_args = lambda *args, **kwargs: (args, kwargs)
+    graph = _Task9ReplayGraph(tuple_output=True)
+    manager, bank, runtime = _make_task9_active_bank(layer, graph)
+    guard_calls = 0
+    assert_replay_ready = manager._assert_replay_ready
+
+    def count_guard_calls(*args, **kwargs):
+        nonlocal guard_calls
+        guard_calls += 1
+        return assert_replay_ready(*args, **kwargs)
+
+    monkeypatch.setattr(manager, "_assert_replay_ready", count_guard_calls)
+    hidden_states = torch.ones(1)
+
+    output, context = layer(hidden_states)
+    assert output is hidden_states and context is None
+    assert guard_calls == 2
+    assert manager.snapshot_execution_counters().graph_calls == 1
+
+    state["warmup"] = True
+    output, context = layer(hidden_states)
+    assert output is hidden_states and context is None
+    state["warmup"] = False
+    state["capturing"] = True
+    output, context = layer(hidden_states)
+    assert output is hidden_states and context is None
+    state["capturing"] = False
+    assert manager.snapshot_execution_counters().graph_calls == 1
+
+    layer._get_te_cuda_graph_replay_args = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        RuntimeError("replay preparation failed")
+    )
+    with pytest.raises(RuntimeError, match="replay preparation failed"):
+        layer(hidden_states)
+    assert manager.snapshot_execution_counters().graph_calls == 1
+    layer._get_te_cuda_graph_replay_args = lambda *args, **kwargs: (args, kwargs)
+
+    runtime["count"] = 2
+    with pytest.raises(ValueError, match="runtime num_microbatches"):
+        layer(hidden_states)
+    assert manager.snapshot_execution_counters().graph_calls == 1
+    runtime["count"] = 1
+
+    layer.cuda_graph_manual_hooks.append(
+        (lambda: (_ for _ in ()).throw(RuntimeError("manual hook failed")), ())
+    )
+    with pytest.raises(RuntimeError, match="manual hook failed"):
+        layer(hidden_states)
+    assert manager.snapshot_execution_counters().graph_calls == 1
+    layer.cuda_graph_manual_hooks.clear()
+
+    graph.fail_launch = True
+    with pytest.raises(RuntimeError, match="graph launch failed"):
+        layer(hidden_states)
+    snapshot = manager.snapshot_execution_counters()
+    assert (snapshot.eligible_calls, snapshot.graph_calls) == (5, 2)
+
+    graph.fail_launch = False
+    bank.reset()
+    manager.close()
+
+
+def test_mamba_execution_counter_uses_common_replay_boundary(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    import megatron.core.transformer.cuda_graphs as cuda_graphs
+
+    monkeypatch.setattr(cuda_graphs, "is_graph_capturing", lambda: False)
+    monkeypatch.setattr(cuda_graphs, "is_graph_warmup", lambda: False)
+    layer = _make_task7_mamba_leaf()
+    layer.config = SimpleNamespace(
+        cuda_graph_impl="transformer_engine",
+        cuda_graph_modules=[],
+        fine_grained_activation_offloading=False,
+    )
+    layer.training = True
+    layer.current_microbatch = 0
+    layer._flatten_te_cuda_graph_mamba_packed_seq_params = lambda _kwargs: None
+    graph = _Task9ReplayGraph(tuple_output=False)
+    manager, bank, _ = _make_task9_active_bank(layer, graph)
+    hidden_states = torch.ones(1)
+
+    assert layer(hidden_states) is hidden_states
+    snapshot = manager.snapshot_execution_counters()
+    assert (snapshot.eligible_calls, snapshot.graph_calls) == (1, 1)
+
+    bank.reset()
+    manager.close()
+
+
 @pytest.mark.parametrize("cuda_graph_modules", [[], [CudaGraphModule.mamba]])
 def test_real_mamba_helper_and_replay_route_flattened_packed_inputs(cuda_graph_modules) -> None:
     from types import SimpleNamespace
@@ -2354,6 +2568,35 @@ def test_te_discovery_preserves_ordered_hybrid_mtp_leaf_descriptors(monkeypatch)
             overlap_moe_expert_parallel_comm=overlap,
         )
         assert owned_graph_lists == expected
+
+
+def test_execution_counter_attaches_to_every_ordered_hybrid_mtp_leaf(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    import megatron.core.transformer.cuda_graphs as cuda_graphs
+    from megatron.core.transformer.module import GraphableMegatronModule
+    from megatron.core.transformer.te_cuda_graph_bank import TECudaGraphBankManager
+
+    helper, _, _, leaves = _make_task7_te_helper(monkeypatch)
+    helper.pp_group = SimpleNamespace(size=lambda: 1)
+    helper.config.overlap_moe_expert_parallel_comm = False
+    monkeypatch.setattr("megatron.core.utils.is_te_min_version", lambda _version: False)
+    monkeypatch.setattr(cuda_graphs, "is_graph_capturing", lambda: False)
+    monkeypatch.setattr(cuda_graphs, "is_graph_warmup", lambda: False)
+    manager = TECudaGraphBankManager.from_helper(helper)
+    trackers = [leaf._te_cuda_graph_execution_counter for leaf in leaves]
+
+    assert all(tracker is trackers[0] for tracker in trackers)
+    for leaf in leaves:
+        leaf.config = SimpleNamespace(cuda_graph_impl="transformer_engine")
+        leaf.training = True
+        leaf._should_call_local_cudagraph = lambda *_args, **_kwargs: False
+        leaf.forward = lambda hidden_states: hidden_states
+        GraphableMegatronModule.__call__(leaf, torch.ones(1))
+
+    snapshot = manager.snapshot_execution_counters()
+    assert (snapshot.eligible_calls, snapshot.graph_calls) == (4, 0)
+    manager.close()
 
 
 def test_te_overlap_input_preparation_preserves_canonical_hybrid_topology(monkeypatch) -> None:
