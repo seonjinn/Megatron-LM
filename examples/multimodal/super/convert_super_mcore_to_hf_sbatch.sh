@@ -244,20 +244,21 @@ sbatch \
     -A "$ACCOUNT" \
     -p "$PARTITION" \
     -N 1 \
-    --gpus-per-node="$GPUS_PER_NODE" \
+    --gres="gpu:${GPUS_PER_NODE}" \
     --ntasks-per-node=1 \
     --mem=0 \
     --exclusive \
     -t "$TIME_LIMIT" \
     --job-name="$JOB_NAME" \
     --output="${LOG_DIR}/convert_%j.log" \
-    --export=ALL,REPO="$REPO",MCORE_PATH="$MCORE_PATH",CKPT_STEP="$CKPT_STEP_DEC",HF_PATH="$SAVE_DIR",HF_CONFIG_SRC="$HF_CONFIG_SRC",TOKENIZER_SRC="$TOKENIZER_SRC",RADIO_HF_SRC="$RADIO_HF_SRC",CONTAINER_IMAGE="$CONTAINER_IMAGE",MAX_QUEUE_SIZE="$MAX_QUEUE_SIZE" <<'SBATCH'
+    --export=REPO="$REPO",MCORE_PATH="$MCORE_PATH",CKPT_STEP="$CKPT_STEP_DEC",HF_PATH="$SAVE_DIR",HF_CONFIG_SRC="$HF_CONFIG_SRC",TOKENIZER_SRC="$TOKENIZER_SRC",RADIO_HF_SRC="$RADIO_HF_SRC",CONTAINER_IMAGE="$CONTAINER_IMAGE",MAX_QUEUE_SIZE="$MAX_QUEUE_SIZE" <<'SBATCH'
 #!/bin/bash
 set -euo pipefail
 
 srun \
     --container-image "$CONTAINER_IMAGE" \
-    --container-mounts /scratch,/lustre,/home \
+    --container-mounts /scratch,/lustre \
+    --no-container-entrypoint \
     bash -lc '
 set -euo pipefail
 

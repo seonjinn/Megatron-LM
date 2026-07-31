@@ -49,17 +49,30 @@ if [[ ! -f "$HF_PATH/tokenizer.json" ]]; then
 fi
 
 # Step 4: Overwrite a few model-specific params using create_yaml_inference_config.py --update_hf_config
-python examples/multimodal/tools/create_yaml_inference_config.py \
---model_name $MODEL_NAME \
---update_hf_config $HF_PATH \
---tensor-model-parallel-size $TP \
---expert-tensor-parallel-size $ETP
+USER_NAME=${SLURM_JOB_USER:-${USER:-}}
+MODEL_BASE_PATH=/lustre/fsw/portfolios/llmservice/users/${USER_NAME}/workspace/output/${MODEL_NAME}
+if [ -f "$MODEL_BASE_PATH/checkpoints/latest_checkpointed_iteration.txt" ]; then
+    python examples/multimodal/tools/create_yaml_inference_config.py \
+    --model_name $MODEL_NAME \
+    --update_hf_config $HF_PATH
+    CONFIG_YAML_PATH=$MODEL_BASE_PATH/config.yaml
+else
+    ITER_NAME=$(printf "iter_%07d" "$((10#${CKPT_STEP}))")
+    RANK0_CKPT="${MCORE_PATH}/${ITER_NAME}/mp_rank_00/model_optim_rng.pt"
+    if [[ ! -f "$RANK0_CKPT" ]]; then
+        RANK0_CKPT="${MCORE_PATH}/${ITER_NAME}/mp_rank_00_000/model_optim_rng.pt"
+    fi
+
+    python examples/multimodal/tools/create_yaml_inference_config.py \
+    --ckpt_path "$RANK0_CKPT" \
+    --output_config "$HF_PATH/config.yaml" \
+    --update_hf_config "$HF_PATH"
+    CONFIG_YAML_PATH=$HF_PATH/config.yaml
+fi
 
 # Step 5: Verify both config.yaml and config.json exist
-# NOTE: MCORE_PATH is `<user_lustre>/workspace/output/<model_name>/checkpoints`
-#   and create_yaml_inference_config.py stores config.yaml in parent `<model_name>/` dir
-if [ ! -f "$MCORE_PATH/../config.yaml" ]; then
-    echo "Error: config.yaml does not exist in $MCORE_PATH/../"
+if [ ! -f "$CONFIG_YAML_PATH" ]; then
+    echo "Error: config.yaml does not exist at $CONFIG_YAML_PATH"
     exit 1
 fi
 if [ ! -f "$HF_PATH/config.json" ]; then

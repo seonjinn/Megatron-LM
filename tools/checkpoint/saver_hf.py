@@ -75,6 +75,23 @@ class HFCheckpointSaver:
         nh = nh_total // tp
         ng = ng_total // tp
 
+        if ng_total < tp:
+            # MCore shards a single KV group across several TP ranks in this case.
+            # The loader has already concatenated those shards back into the global qkv tensor.
+            qkv = qkv_weight.reshape(
+                ng_total,
+                dim_src * (nh_total // ng_total) + 2 * dim_src,
+                -1,
+            )
+            q = qkv[:, : dim_tgt * (nh_total // ng_total), :].reshape(
+                dim_tgt * nh_total, -1
+            )
+            k_start = dim_src * (nh_total // ng_total)
+            k = qkv[:, k_start : k_start + dim_tgt, :].reshape(dim_tgt * ng_total, -1)
+            v_start = k_start + dim_src
+            v = qkv[:, v_start : v_start + dim_tgt, :].reshape(dim_tgt * ng_total, -1)
+            return q, k, v
+
         params_per_tp = torch.chunk(qkv_weight, tp, dim=0)
 
         # Use lists to collect tensors, then concatenate once at the end
@@ -136,6 +153,18 @@ class HFCheckpointSaver:
 
         nh = nh_total // tp
         ng = ng_total // tp
+
+        if ng_total < tp:
+            qkvb = qkv_bias.reshape(
+                ng_total,
+                dim_src * (nh_total // ng_total) + 2 * dim_src,
+            )
+            qb = qkvb[:, : dim_tgt * (nh_total // ng_total)].reshape(-1)
+            k_start = dim_src * (nh_total // ng_total)
+            kb = qkvb[:, k_start : k_start + dim_tgt].reshape(-1)
+            v_start = k_start + dim_src
+            vb = qkvb[:, v_start : v_start + dim_tgt].reshape(-1)
+            return qb, kb, vb
 
         bias_per_tp = torch.chunk(qkv_bias, tp, dim=0)
 
