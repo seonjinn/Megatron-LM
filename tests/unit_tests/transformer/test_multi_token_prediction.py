@@ -3,6 +3,7 @@
 import os
 import sys
 import types
+from collections.abc import Callable
 
 import pytest
 import torch
@@ -762,10 +763,8 @@ class TestMultiTokenPredictionLayer:
     ) -> None:
         """Real TP/CP collectives preserve packed MTP boundaries for two depths."""
 
-        if not torch.distributed.is_initialized():
-            pytest.skip("requires an initialized torch.distributed process group")
         required_world_size = 2 * cp_size
-        world_size = torch.distributed.get_world_size()
+        world_size = Utils.world_size
         if world_size < required_world_size or world_size % required_world_size:
             pytest.skip(
                 f"requires a world size divisible by TP*CP={required_world_size}, got {world_size}"
@@ -775,6 +774,7 @@ class TestMultiTokenPredictionLayer:
             tensor_model_parallel_size=2,
             context_parallel_size=cp_size,
         )
+        world_size = torch.distributed.get_world_size()
         pg_collection = ProcessGroupCollection.use_mpu_process_groups()
         tp_rank = torch.distributed.get_rank(group=pg_collection.tp)
         cp_rank = torch.distributed.get_rank(group=pg_collection.cp)
@@ -941,6 +941,12 @@ class TestMultiTokenPredictionLayer:
         ) -> torch.Tensor:
             return torch.zeros_like(hidden_states)
 
+        actual_depth_outputs: list[
+            tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+        ] = []
+        expected_depth_outputs: list[
+            tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+        ] = []
         for depth in range(2):
             input_ids, position_ids, padding_mask, _, hidden_states = (
                 MultiTokenPredictionLayer._get_embeddings(
@@ -964,19 +970,106 @@ class TestMultiTokenPredictionLayer:
                 .index_select(1, cp_indices_tensor)
                 .narrow(1, sp_start, sp_sequence_length)
             )
-            torch.testing.assert_close(input_ids, expected_input_ids)
-            torch.testing.assert_close(position_ids, expected_position_ids)
-            torch.testing.assert_close(padding_mask, expected_padding_mask)
+            actual_depth_outputs.append((input_ids, position_ids, padding_mask))
+            expected_depth_outputs.append(
+                (expected_input_ids, expected_position_ids, expected_padding_mask)
+            )
 
-        assert global_padding_masks[1][0, [3, 11, 15]].all()
-        assert global_padding_masks[2][0, [3, 11, 15]].all()
-        assert global_padding_masks[1][0, 12:].all()
-        assert global_padding_masks[2][0, 12:].all()
-        assert packed_seq_params.seq_aux_loss_sample_ids is sample_ids
-        assert packed_seq_params.seq_aux_loss_num_samples is num_samples
-        assert packed_seq_params.seq_aux_loss_max_samples == 3
-        assert torch.equal(sample_ids, original_sample_ids)
-        assert torch.equal(num_samples, original_num_samples)
+        local_failures: list[str] = []
+
+        def record_close(
+            name: str, actual: torch.Tensor, expected: torch.Tensor
+        ) -> None:
+            try:
+                torch.testing.assert_close(actual, expected)
+            except Exception as error:
+                local_failures.append(f"{name}: {error}")
+
+        def record_predicate(
+            name: str, predicate: Callable[[], bool | torch.Tensor]
+        ) -> None:
+            try:
+                result = predicate()
+                passed = bool(result.item()) if isinstance(result, torch.Tensor) else result
+                if not passed:
+                    local_failures.append(name)
+            except Exception as error:
+                local_failures.append(f"{name}: {error}")
+
+        local_global_indices = cp_indices_tensor.narrow(
+            0, sp_start, sp_sequence_length
+        )
+        segment_end_indices = torch.tensor([3, 11, 15], dtype=torch.int64, device=device)
+        segment_end_mask = torch.any(
+            local_global_indices.unsqueeze(-1) == segment_end_indices, dim=-1
+        )
+        capacity_tail_mask = local_global_indices >= 12
+        for depth, (actual_output, expected_output) in enumerate(
+            zip(actual_depth_outputs, expected_depth_outputs), start=1
+        ):
+            actual_input_ids, actual_position_ids, actual_padding_mask = actual_output
+            expected_input_ids, expected_position_ids, expected_padding_mask = expected_output
+            record_close(f"depth {depth} input ids", actual_input_ids, expected_input_ids)
+            record_close(
+                f"depth {depth} position ids", actual_position_ids, expected_position_ids
+            )
+            record_close(
+                f"depth {depth} padding mask", actual_padding_mask, expected_padding_mask
+            )
+            record_predicate(
+                f"depth {depth} physical segment end is not padded",
+                lambda mask=actual_padding_mask: mask[0, segment_end_mask].all(),
+            )
+            record_predicate(
+                f"depth {depth} capacity tail is not padded",
+                lambda mask=actual_padding_mask: mask[0, capacity_tail_mask].all(),
+            )
+
+        for depth, global_padding_mask in enumerate(global_padding_masks[1:], start=1):
+            record_predicate(
+                f"depth {depth} literal oracle segment end is not padded",
+                lambda mask=global_padding_mask: mask[0, [3, 11, 15]].all(),
+            )
+            record_predicate(
+                f"depth {depth} literal oracle capacity tail is not padded",
+                lambda mask=global_padding_mask: mask[0, 12:].all(),
+            )
+        record_predicate(
+            "packed sample ids object identity changed",
+            lambda: packed_seq_params.seq_aux_loss_sample_ids is sample_ids,
+        )
+        record_predicate(
+            "packed num samples object identity changed",
+            lambda: packed_seq_params.seq_aux_loss_num_samples is num_samples,
+        )
+        record_predicate(
+            "packed max samples changed",
+            lambda: packed_seq_params.seq_aux_loss_max_samples == 3,
+        )
+        record_predicate(
+            "packed sample ids values changed",
+            lambda: torch.equal(sample_ids, original_sample_ids),
+        )
+        record_predicate(
+            "packed num samples value changed",
+            lambda: torch.equal(num_samples, original_num_samples),
+        )
+
+        failure_flag = torch.tensor(
+            1 if local_failures else 0, dtype=torch.int32, device=device
+        )
+        torch.distributed.all_reduce(failure_flag, op=torch.distributed.ReduceOp.MAX)
+        if failure_flag.item():
+            rank = torch.distributed.get_rank()
+            details = (
+                "; ".join(local_failures)
+                if local_failures
+                else "local invariants passed; another rank reported a mismatch"
+            )
+            pytest.fail(
+                f"distributed MTP mask parity failed on rank {rank}/{world_size}: {details}",
+                pytrace=False,
+            )
 
     def test_get_embeddings_detaches_decoder_input(self):
         """With mtp_detach_heads=True, _get_embeddings detaches decoder_input (severing
