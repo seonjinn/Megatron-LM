@@ -163,22 +163,19 @@
         {%- endif %}
     {%- elif message.role == "user" or message.role == "system" %}
         {{- '<|im_start|>' + message.role + '\n' }}
-        {#- Build VLM multimodal content when content is a sequence -#}
+        {#- Render structured image/video content in its original order. -#}
         {%- if message.content is string -%}
             {%- set content = (message.content | string) %}
         {%- else -%}
             {%- set text_ns = namespace(val='') -%}
-            {%- set mm_content = '' -%}
-            {%- set counters = namespace(images=0, videos=0, audios=0) -%}
+            {%- set counters = namespace(images=0, videos=0) -%}
             {%- for part in message['content'] -%}
-                {%- if part['type'] == 'image' or part['type'] == 'image_url' -%}
+                {%- if part['type'] == 'image' or part['type'] == 'image_url' or part['type'] == 'input_image' -%}
                     {%- set counters.images = counters.images + 1 -%}
-                {%- elif part['type'] == 'video' or part['type'] == 'video_url' -%}
+                {%- elif part['type'] == 'video' or part['type'] == 'video_url' or part['type'] == 'input_video' -%}
                     {%- set counters.videos = counters.videos + 1 -%}
-                {%- elif part['type'] == 'audio' or part['type'] == 'audio_url' -%}
-                    {%- set counters.audios = counters.audios + 1 -%}
-                {%- elif part['type'] == 'text' -%}
-                    {%- set text_ns.val = text_ns.val + part['text'] -%}
+                {%- elif part['type'] == 'text' or part['type'] == 'input_text' -%}
+                    {%- set text_ns.val = text_ns.val + (part['text'] | default('', true)) -%}
                 {%- endif -%}
             {%- endfor -%}
             {%- if '<image>' in text_ns.val -%}
@@ -187,21 +184,28 @@
             {%- if '<video>' in text_ns.val -%}
                 {%- set counters.videos = 0 -%}
             {%- endif -%}
-            {%- if '<so_embedding>' in text_ns.val -%}
-                {%- set counters.audios = 0 -%}
-            {%- endif -%}
-            {%- if counters.images > 1 -%}
-                {%- set image_tags = namespace(tags=[]) -%}
-                {%- for i in range(counters.images) -%}
-                    {%- set image_tags.tags = image_tags.tags + ['<image ' + (i + 1)|string + '><image>'] -%}
-                {%- endfor -%}
-                {%- set mm_content = ' '.join(image_tags.tags) + '\n' -%}
-            {%- elif counters.images == 1 -%}
-                {%- set mm_content = '<image>\n' -%}
-            {%- endif -%}
-            {%- set mm_content = mm_content + '<video>\n' * counters.videos -%}
-            {%- set mm_content = mm_content + '<so_embedding>\n' * counters.audios -%}
-            {%- set content = mm_content + text_ns.val.lstrip('\n') -%}
+            {%- set content_ns = namespace(val='') -%}
+            {%- set render_ns = namespace(image_index=0) -%}
+            {%- for part in message.content -%}
+                {%- if part['type'] == 'image' or part['type'] == 'image_url' or part['type'] == 'input_image' -%}
+                    {%- set render_ns.image_index = render_ns.image_index + 1 -%}
+                    {%- if counters.images > 0 -%}
+                        {%- if counters.images > 1 -%}
+                            {%- set content_ns.val = content_ns.val
+                                + '<image ' + render_ns.image_index|string + '><image>' -%}
+                        {%- else -%}
+                            {%- set content_ns.val = content_ns.val + '<image>' -%}
+                        {%- endif -%}
+                    {%- endif -%}
+                {%- elif part['type'] == 'video' or part['type'] == 'video_url' or part['type'] == 'input_video' -%}
+                    {%- if counters.videos > 0 -%}
+                        {%- set content_ns.val = content_ns.val + '<video>' -%}
+                    {%- endif -%}
+                {%- elif part['type'] == 'text' or part['type'] == 'input_text' -%}
+                    {%- set content_ns.val = content_ns.val + (part['text'] | default('', true)) -%}
+                {%- endif -%}
+            {%- endfor -%}
+            {%- set content = content_ns.val -%}
         {%- endif -%}
         {{- content }}
         {{- '<|im_end|>\n' }}
