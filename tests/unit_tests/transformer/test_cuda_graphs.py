@@ -1873,6 +1873,7 @@ def test_te_helper_abort_restores_capture_globals_and_partial_graphs(monkeypatch
     te_capture_end_calls = []
     offload_reset_calls = []
     gc_unfreeze_calls = []
+    capture_state_cleanup_calls = []
 
     def start_capture():
         cuda_graphs._set_capture_start()
@@ -1898,6 +1899,12 @@ def test_te_helper_abort_restores_capture_globals_and_partial_graphs(monkeypatch
     )
     monkeypatch.setattr(helper, "_start_capturing", start_capture)
     monkeypatch.setattr(helper, "_get_cuda_graph_input_data", fail_inputs)
+
+    def fail_capture_state_cleanup():
+        capture_state_cleanup_calls.append(None)
+        raise RuntimeError("capture-state cleanup failed")
+
+    monkeypatch.setattr(helper, "_reset_after_capture", fail_capture_state_cleanup)
     monkeypatch.setattr(
         cuda_graphs, "te_set_capture_end", lambda: te_capture_end_calls.append(None)
     )
@@ -1915,6 +1922,7 @@ def test_te_helper_abort_restores_capture_globals_and_partial_graphs(monkeypatch
     assert te_capture_end_calls == [None]
     assert offload_reset_calls == [None]
     assert gc_unfreeze_calls == [None]
+    assert capture_state_cleanup_calls == [None]
     assert graph.reset_calls == 1
     assert layer.cuda_graphs == []
     assert helper._capture_gc_frozen is False
@@ -1943,6 +1951,46 @@ def test_te_helper_manual_hook_setup_refreshes_owning_bank() -> None:
 
     assert layer.cuda_graph_manual_hooks is hook_list
     assert refresh_calls == [bank]
+
+
+def test_transformer_layer_restores_exact_moe_references_after_detach_rollback() -> None:
+    from types import SimpleNamespace
+
+    from megatron.core.transformer.transformer_layer import TransformerLayer
+
+    class _TensorStore:
+        hidden_states = None
+        probs = None
+        routing_map = None
+        shared_expert_output = None
+
+        def clear(self):
+            self.hidden_states = None
+            self.probs = None
+            self.routing_map = None
+            self.shared_expert_output = None
+
+    first = torch.empty(1)
+    second = torch.empty(2)
+    dispatcher = SimpleNamespace(
+        valid_cudagraph_attrs=["first", "nested.second"],
+        first=first,
+        nested=SimpleNamespace(second=second),
+    )
+    layer = TransformerLayer.__new__(TransformerLayer)
+    torch.nn.Module.__init__(layer)
+    layer.is_moe_layer = True
+    layer.mlp = SimpleNamespace(token_dispatcher=dispatcher, cudagraph_tensor_store=_TensorStore())
+
+    snapshot = layer.snapshot_te_cuda_graph_bank_references()
+    layer.clear_te_cuda_graph_bank_references()
+    assert dispatcher.first is None
+    assert dispatcher.nested.second is None
+
+    layer.restore_te_cuda_graph_bank_references(snapshot)
+
+    assert dispatcher.first is first
+    assert dispatcher.nested.second is second
 
 
 def test_vision_te_helper_preserves_manager_owned_graph_list(monkeypatch) -> None:
@@ -2012,7 +2060,7 @@ def test_partial_moe_capture_routes_only_stream_captures_to_exact_runner_index(m
     assert calls == [(0, residuals[2], preprocessed[2]), (1, residuals[4], preprocessed[4])]
 
 
-def test_partial_moe_capture_rejects_cuda_scalar_snapshot_before_capture() -> None:
+def test_dropless_alltoall_partial_capture_accepts_static_output_geometry() -> None:
     from types import SimpleNamespace
 
     from megatron.core.transformer.moe.token_dispatcher import MoEAlltoAllTokenDispatcher
@@ -2020,8 +2068,31 @@ def test_partial_moe_capture_rejects_cuda_scalar_snapshot_before_capture() -> No
 
     dispatcher = MoEAlltoAllTokenDispatcher.__new__(MoEAlltoAllTokenDispatcher)
     dispatcher.drop_and_pad = False
-    dispatcher.moe_expert_capacity_factor = 1.0
-    dispatcher.config = SimpleNamespace(moe_router_padding_for_quantization=False)
+    dispatcher.config = SimpleNamespace(
+        moe_expert_capacity_factor=None, moe_router_padding_for_quantization=False
+    )
+    layer = MoETransformerLayer.__new__(MoETransformerLayer)
+    layer.mlp = SimpleNamespace(token_dispatcher=dispatcher)
+    layer.config = SimpleNamespace(overlap_moe_expert_parallel_comm=False)
+
+    layer._validate_te_cuda_graph_dispatcher_replay_capability()
+
+
+@pytest.mark.parametrize(("capacity_factor", "router_padding"), [(1.0, False), (None, True)])
+def test_partial_moe_capture_rejects_cuda_scalar_snapshot_before_capture(
+    capacity_factor, router_padding
+) -> None:
+    from types import SimpleNamespace
+
+    from megatron.core.transformer.moe.token_dispatcher import MoEAlltoAllTokenDispatcher
+    from megatron.core.transformer.transformer_layer import MoETransformerLayer
+
+    dispatcher = MoEAlltoAllTokenDispatcher.__new__(MoEAlltoAllTokenDispatcher)
+    dispatcher.drop_and_pad = False
+    dispatcher.config = SimpleNamespace(
+        moe_expert_capacity_factor=capacity_factor,
+        moe_router_padding_for_quantization=router_padding,
+    )
     layer = MoETransformerLayer.__new__(MoETransformerLayer)
     layer.mlp = SimpleNamespace(token_dispatcher=dispatcher)
     layer.config = SimpleNamespace(overlap_moe_expert_parallel_comm=False)
@@ -2066,6 +2137,89 @@ def test_moe_partial_te_replay_rejects_overlap_before_capture() -> None:
 
     with pytest.raises(RuntimeError, match="overlap_moe_expert_parallel_comm"):
         layer._validate_te_cuda_graph_dispatcher_replay_capability()
+
+
+def test_transformer_layer_drain_check_rejects_pending_backward_dw_and_allows_idle() -> None:
+    import queue
+    from types import SimpleNamespace
+
+    from megatron.core.models.common.utils import _BackwardDWWrapper
+    from megatron.core.transformer.transformer_layer import TransformerLayer
+
+    class _DelayedAttention(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.wgrad_store = SimpleNamespace(context=queue.Queue())
+
+        def backward_dw(self) -> None:
+            self.wgrad_store.context.get_nowait()
+
+        def need_backward_dw(self) -> bool:
+            # Pinned TE reports whether delayed-wgrad mode is enabled, not queue occupancy.
+            return True
+
+    layer = TransformerLayer.__new__(TransformerLayer)
+    torch.nn.Module.__init__(layer)
+    layer.config = SimpleNamespace(
+        cuda_graph_modules=[CudaGraphModule.attn], moe_shared_expert_overlap=False
+    )
+    layer.is_moe_layer = False
+    layer.self_attention = _DelayedAttention()
+    layer.cuda_graphs = [object()]
+    layer.backward_dw_wrapper = _BackwardDWWrapper(layer)
+
+    layer.assert_te_cuda_graph_bank_drained()
+
+    graph_calls = []
+    layer.backward_dw_wrapper.set_graphed_backward_dw_callable(
+        lambda: graph_calls.append("current")
+    )
+    with pytest.raises(RuntimeError, match="_BackwardDWWrapper"):
+        layer.assert_te_cuda_graph_bank_drained()
+    layer.backward_dw_wrapper.backward_dw()
+    assert graph_calls == ["current"]
+    layer.assert_te_cuda_graph_bank_drained()
+
+    layer.init_backward_dw_wrapper()
+    older_wrapper = layer.backward_dw_wrapper
+    older_wrapper.set_graphed_backward_dw_callable(lambda: graph_calls.append("older"))
+    layer.init_backward_dw_wrapper()
+    with pytest.raises(RuntimeError, match="_BackwardDWWrapper"):
+        layer.assert_te_cuda_graph_bank_drained()
+    older_wrapper.backward_dw()
+    assert graph_calls == ["current", "older"]
+    layer.assert_te_cuda_graph_bank_drained()
+
+    layer.cuda_graphs = []
+    layer.self_attention.wgrad_store.context.put(object())
+    with pytest.raises(RuntimeError, match="delayed weight-gradient"):
+        layer.assert_te_cuda_graph_bank_drained()
+
+    layer.backward_dw_wrapper.backward_dw()
+    layer.assert_te_cuda_graph_bank_drained()
+
+    layer.backward_dw_wrapper = None
+    layer.self_attention.wgrad_store.context.put(object())
+    with pytest.raises(RuntimeError, match="delayed weight-gradient"):
+        layer.assert_te_cuda_graph_bank_drained()
+    layer.self_attention.wgrad_store.context.get_nowait()
+
+    fused_owner = torch.nn.Module()
+    layer.fused_owner = fused_owner
+    for attribute in ("_fused_ops", "_fused_grouped_swiglu_ops"):
+        fused_linear = _DelayedAttention()
+        setattr(fused_owner, attribute, (torch.nn.Sequential(fused_linear),))
+        fused_linear.wgrad_store.context.put(object())
+        with pytest.raises(RuntimeError, match="delayed weight-gradient"):
+            layer.assert_te_cuda_graph_bank_drained()
+        fused_linear.wgrad_store.context.get_nowait()
+        delattr(fused_owner, attribute)
+
+    unverifiable = _DelayedAttention()
+    unverifiable.wgrad_store.context = object()
+    layer.unverifiable = unverifiable
+    with pytest.raises(RuntimeError, match="Cannot verify.*queue drainage"):
+        layer.assert_te_cuda_graph_bank_drained()
 
 
 def _make_simple_module(config):

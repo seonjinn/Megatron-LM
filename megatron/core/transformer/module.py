@@ -2,7 +2,8 @@
 
 """Megatron Module."""
 from functools import partial
-from typing import Optional, Tuple
+from typing import Iterator, Optional, Tuple
+from weakref import WeakSet
 
 import torch
 from torch.autograd import Variable
@@ -195,6 +196,7 @@ class GraphableMegatronModule(MegatronModule):
             # calls wgrad computation in attention module (contains attn and shared expert)
             # according to CUDA graph scope.
             self.cuda_graph_backward_dw_wrapper = None
+            self._te_cuda_graph_backward_dw_wrappers: WeakSet[object] = WeakSet()
 
     def init_backward_dw_wrapper(self):
         """Initialize ``self.backward_dw_wrapper`` for delayed-wgrad scheduling.
@@ -215,6 +217,11 @@ class GraphableMegatronModule(MegatronModule):
             "`init_backward_dw_wrapper`."
         )
         self.backward_dw_wrapper = _BackwardDWWrapper(self)
+        wrappers = getattr(self, "_te_cuda_graph_backward_dw_wrappers", None)
+        if wrappers is None:
+            wrappers = WeakSet()
+            self._te_cuda_graph_backward_dw_wrappers = wrappers
+        wrappers.add(self.backward_dw_wrapper)
 
     def set_te_cuda_graph_backward_dw_wrapper(self):
         """Replace the backward_dw callable with dw cuda graph."""
@@ -241,6 +248,72 @@ class GraphableMegatronModule(MegatronModule):
         if replay_guard is not None:
             return replay_guard(self, self.cuda_graphs, microbatch_idx)
         return microbatch_idx % len(self.cuda_graphs)
+
+    def assert_te_cuda_graph_bank_drained(self) -> None:
+        """Reject bank transitions while a TE delayed-wgrad queue owns work.
+
+        At the pinned Transformer Engine revision, ``need_backward_dw()`` means
+        delayed-wgrad mode is enabled; it remains true at legal idle boundaries.
+        Eager pending work is represented by entries in ``wgrad_store.context``.
+        Graphed wgrad does not use that Python queue: an ``_BackwardDWWrapper``
+        becomes pending when its graph callable is armed and becomes consumed
+        when ``wrapper.layer`` is cleared. The explicit manager callback remains
+        responsible for schedule-level work that is not visible through either
+        module-local ownership surface.
+        """
+
+        wrappers = list(getattr(self, "_te_cuda_graph_backward_dw_wrappers", ()))
+        current_wrapper = getattr(self, "backward_dw_wrapper", None)
+        if current_wrapper is not None and all(
+            wrapper is not current_wrapper for wrapper in wrappers
+        ):
+            wrappers.append(current_wrapper)
+        for wrapper in wrappers:
+            if getattr(wrapper, "layer", None) is not self:
+                continue
+            if getattr(wrapper, "graphed_backward_dw_callable", None) is not None:
+                raise RuntimeError(
+                    "Transformer Engine delayed weight-gradient work is still pending in "
+                    "an armed _BackwardDWWrapper"
+                )
+        for module in self._iter_te_cuda_graph_delayed_wgrad_modules():
+            wgrad_store = getattr(module, "wgrad_store", None)
+            context = getattr(wgrad_store, "context", None)
+            if context is None:
+                continue
+            is_empty = getattr(context, "empty", None)
+            if not callable(is_empty):
+                raise RuntimeError(
+                    "Cannot verify Transformer Engine delayed weight-gradient queue drainage"
+                )
+            if not is_empty():
+                raise RuntimeError(
+                    "Transformer Engine delayed weight-gradient work is still pending in "
+                    f"{type(module).__name__}"
+                )
+
+    def _iter_te_cuda_graph_delayed_wgrad_modules(self) -> Iterator[torch.nn.Module]:
+        """Yield registered modules and MCore's explicitly unregistered fused TE ops."""
+
+        pending: list[object] = list(self.modules())
+        seen: set[int] = set()
+        while pending:
+            candidate = pending.pop()
+            candidate_id = id(candidate)
+            if candidate_id in seen:
+                continue
+            seen.add(candidate_id)
+            if isinstance(candidate, (tuple, list)):
+                pending.extend(candidate)
+                continue
+            if not isinstance(candidate, torch.nn.Module):
+                continue
+            yield candidate
+            pending.extend(candidate.children())
+            for attribute in ("_fused_ops", "_fused_grouped_swiglu_ops"):
+                fused_ops = getattr(candidate, attribute, None)
+                if fused_ops is not None:
+                    pending.append(fused_ops)
 
     def get_layer_static_inputs(self, seq_length, micro_batch_size):
         """

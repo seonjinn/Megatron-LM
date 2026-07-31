@@ -40,6 +40,21 @@ MoECudaGraphReplayState = _REPLAY.MoECudaGraphReplayState
 TensorReplaySignature = _REPLAY.TensorReplaySignature
 
 
+def _load_enums_module() -> ModuleType:
+    module_name = "_standalone_transformer_enums"
+    if module_name in sys.modules:
+        return sys.modules[module_name]
+    module_path = (
+        Path(__file__).resolve().parents[3] / "megatron" / "core" / "transformer" / "enums.py"
+    )
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def _load_bank_module() -> ModuleType:
     try:
         spec = importlib.util.find_spec("megatron.core.transformer.te_cuda_graph_bank")
@@ -82,6 +97,24 @@ class _FakeLayer:
         self.name = name
         self.cuda_graphs: list[_FakeGraph] = []
         self.cuda_graph_manual_hooks: list[object] = []
+
+
+class _TransactionalClearLayer(_FakeLayer):
+    def __init__(self, name: str) -> None:
+        super().__init__(name)
+        self.bank_reference = object()
+        self.fail_clear = False
+
+    def snapshot_te_cuda_graph_bank_references(self) -> object:
+        return self.bank_reference
+
+    def restore_te_cuda_graph_bank_references(self, reference: object) -> None:
+        self.bank_reference = reference
+
+    def clear_te_cuda_graph_bank_references(self) -> None:
+        self.bank_reference = None
+        if self.fail_clear:
+            raise RuntimeError(f"{self.name} detach failed")
 
 
 class _FakeTensorStore:
@@ -156,7 +189,7 @@ class _FakeHelper:
         layers: list[_FakeLayer],
         graphs_by_layer: list[list[_FakeGraph]],
         *,
-        modules: tuple[str, ...] = ("attn",),
+        modules: tuple[object, ...] = ("attn",),
         normalized_count: int | None = None,
         fail_capture: bool = False,
         setup: object | None = None,
@@ -202,7 +235,7 @@ class _FakeHelper:
 def _make_manager(
     layers: list[_FakeLayer],
     *,
-    modules: tuple[str, ...] = ("attn",),
+    modules: tuple[object, ...] = ("attn",),
     drained=lambda: True,
     synchronize=lambda: None,
     runtime_num_microbatches=lambda: 2,
@@ -312,6 +345,33 @@ def test_graph_bank_activation_restores_dispatcher_states() -> None:
     runtime["count"] = 5
     first.activate()
     assert layer._te_cuda_graph_dispatcher_replay_states is first_states
+
+
+def test_real_enum_scope_preserves_exact_dispatcher_state_identities() -> None:
+    CudaGraphModule = _load_enums_module().CudaGraphModule
+
+    layer = _FakeMoELayer("moe")
+    modules = (CudaGraphModule.moe_router, CudaGraphModule.moe_preprocess)
+    states = tuple(_make_alltoall_state(16 + index) for index in range(2))
+    manager = _make_manager([layer], modules=modules)
+    bank = manager.capture(
+        _FakeHelper(
+            [layer],
+            _graphs("enum", 2),
+            modules=modules,
+            setup=lambda: setattr(layer, "_te_cuda_graph_dispatcher_replay_states", states),
+        ),
+        num_microbatches=2,
+    )
+
+    bank.activate()
+
+    assert bank.fingerprint.cuda_graph_modules == ("moe_preprocess", "moe_router")
+    assert layer._te_cuda_graph_dispatcher_replay_states is states
+    assert all(
+        actual is expected
+        for actual, expected in zip(layer._te_cuda_graph_dispatcher_replay_states, states)
+    )
 
 
 def test_activation_rejects_runtime_count_before_mutating_active_bank() -> None:
@@ -454,6 +514,60 @@ def test_reset_is_inactive_safe_idempotent_unique_and_releases_references() -> N
     assert shared.reset_calls == 0
     assert reference() is None
     assert inactive.graphs_by_layer == ()
+
+
+@pytest.mark.parametrize("operation", ["uninstall", "reset"])
+def test_active_detach_failure_rolls_back_exact_installation_and_allows_retry(
+    operation: str,
+) -> None:
+    first = _TransactionalClearLayer("first")
+    second = _TransactionalClearLayer("second")
+    manager = _make_manager([first, second])
+    graph_lists = _graphs("bank", 2, layers=2)
+    bank = manager.capture(_FakeHelper([first, second], graph_lists), num_microbatches=2)
+    bank.activate()
+    installations = tuple(
+        (
+            layer.cuda_graphs,
+            layer.cuda_graph_manual_hooks,
+            layer._te_cuda_graph_bank_replay_guard,
+            layer.bank_reference,
+        )
+        for layer in (first, second)
+    )
+    second.fail_clear = True
+
+    with pytest.raises(RuntimeError, match="second detach failed"):
+        bank.reset() if operation == "reset" else manager.uninstall(bank)
+
+    assert manager.active_bank is bank
+    assert manager.registered_bank_count == 1
+    assert (
+        tuple(
+            (
+                layer.cuda_graphs,
+                layer.cuda_graph_manual_hooks,
+                layer._te_cuda_graph_bank_replay_guard,
+                layer.bank_reference,
+            )
+            for layer in (first, second)
+        )
+        == installations
+    )
+
+    second.fail_clear = False
+    if operation == "reset":
+        bank.reset()
+        assert manager.active_bank is None
+        assert manager.registered_bank_count == 0
+        assert bank.graphs_by_layer == ()
+        assert all(graph.reset_calls == 1 for graphs in graph_lists for graph in graphs)
+    else:
+        manager.uninstall(bank)
+        assert manager.active_bank is None
+        assert manager.registered_bank_count == 1
+        bank.activate()
+        assert manager.active_bank is bank
 
 
 @pytest.mark.parametrize("operation", ["capture", "activate", "reset", "uninstall"])

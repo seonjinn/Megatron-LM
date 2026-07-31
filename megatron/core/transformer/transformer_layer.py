@@ -50,6 +50,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_TECudaGraphBankReferences = tuple[
+    tuple[tuple[str, bool, object], ...], tuple[tuple[str, bool, object], ...]
+]
+
 
 def _is_te_cuda_graph_stream_capturing() -> bool:
     """Return whether this forward is the committed TE stream capture, not warmup."""
@@ -1175,9 +1179,45 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             owner = getattr(owner, component)
         return owner, leaf_name or attr_name
 
+    def snapshot_te_cuda_graph_bank_references(self) -> _TECudaGraphBankReferences:
+        """Snapshot references cleared by bank detachment for transactional rollback."""
+
+        if not self.is_moe_layer:
+            return ((), ())
+        dispatcher_references = []
+        for attr_name in self.te_cuda_graph_bank_schema():
+            owner, leaf_name = self._resolve_te_cuda_graph_dispatcher_attr(attr_name)
+            dispatcher_references.append(
+                (attr_name, hasattr(owner, leaf_name), getattr(owner, leaf_name, None))
+            )
+        tensor_store = self.mlp.cudagraph_tensor_store
+        tensor_store_references = tuple(
+            (field_name, hasattr(tensor_store, field_name), getattr(tensor_store, field_name, None))
+            for field_name in ("hidden_states", "probs", "routing_map", "shared_expert_output")
+        )
+        return (tuple(dispatcher_references), tensor_store_references)
+
+    def restore_te_cuda_graph_bank_references(self, snapshot: _TECudaGraphBankReferences) -> None:
+        """Restore the exact pre-detach references after a failed bank transaction."""
+
+        dispatcher_references, tensor_store_references = snapshot
+        for attr_name, present, value in dispatcher_references:
+            owner, leaf_name = self._resolve_te_cuda_graph_dispatcher_attr(attr_name)
+            if present:
+                setattr(owner, leaf_name, value)
+            elif hasattr(owner, leaf_name):
+                delattr(owner, leaf_name)
+        tensor_store = self.mlp.cudagraph_tensor_store if self.is_moe_layer else None
+        for field_name, present, value in tensor_store_references:
+            if present:
+                setattr(tensor_store, field_name, value)
+            elif hasattr(tensor_store, field_name):
+                delattr(tensor_store, field_name)
+
     def assert_te_cuda_graph_bank_drained(self) -> None:
         """Reject graph-bank transitions while per-forward MoE work remains live."""
 
+        super().assert_te_cuda_graph_bank_drained()
         if not self.is_moe_layer:
             return
         tensor_store = self.mlp.cudagraph_tensor_store
@@ -1823,7 +1863,7 @@ class MoETransformerLayer(TransformerLayer):
             isinstance(dispatcher, MoEAlltoAllTokenDispatcher)
             and not dispatcher.drop_and_pad
             and (
-                dispatcher.moe_expert_capacity_factor is not None
+                getattr(dispatcher.config, "moe_expert_capacity_factor", None) is not None
                 or getattr(dispatcher.config, "moe_router_padding_for_quantization", False)
             )
         ):

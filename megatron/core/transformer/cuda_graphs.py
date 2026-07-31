@@ -2871,6 +2871,10 @@ class TECudaGraphHelper:
         except Exception as error:
             cleanup_errors.append(error)
         try:
+            self._reset_after_capture()
+        except Exception as error:
+            cleanup_errors.append(error)
+        try:
             if self._capture_gc_frozen:
                 gc.unfreeze()
         except Exception as error:

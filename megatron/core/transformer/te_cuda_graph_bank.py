@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import TYPE_CHECKING, Callable, Iterable, Sequence
 from weakref import WeakSet
 
@@ -45,7 +46,9 @@ def _freeze_signature(value: object) -> object:
 
 
 def _normalize_cuda_graph_modules(modules: Iterable[object]) -> tuple[str, ...]:
-    return tuple(sorted(str(getattr(module, "value", module)) for module in modules))
+    return tuple(
+        sorted(module.name if isinstance(module, Enum) else str(module) for module in modules)
+    )
 
 
 def tensor_signature(tensor: torch.Tensor) -> TensorReplaySignature:
@@ -90,6 +93,8 @@ class _LayerInstallation:
     dispatcher_states: object
     replay_guard_present: bool
     replay_guard: object
+    bank_references_supported: bool
+    bank_references: object
 
 
 @dataclass(frozen=True)
@@ -341,7 +346,12 @@ class TECudaGraphBankManager:
         self._validate_bank(target)
         if target is not self.active_bank:
             raise ValueError("Only the active TE CUDA graph bank can be uninstalled")
-        self._clear_installed_bank(target)
+        previous_installations = self._snapshot_installations()
+        try:
+            self._clear_installed_bank(target)
+        except BaseException:
+            self._restore_installations(previous_installations)
+            raise
         self.active_bank = None
 
     def reset(self, bank: TECudaGraphBank) -> None:
@@ -353,7 +363,12 @@ class TECudaGraphBankManager:
         self._validate_bank(bank)
         registration = self._registrations[id(bank)]
         if self.active_bank is bank:
-            self._clear_installed_bank(bank)
+            previous_installations = self._snapshot_installations()
+            try:
+                self._clear_installed_bank(bank)
+            except BaseException:
+                self._restore_installations(previous_installations)
+                raise
             self.active_bank = None
         try:
             self._synchronize()
@@ -600,20 +615,28 @@ class TECudaGraphBankManager:
                 raise ValueError("TE CUDA graph bank registration contents were mutated")
 
     def _snapshot_installations(self) -> tuple[_LayerInstallation, ...]:
-        return tuple(
-            _LayerInstallation(
-                graph_list=getattr(layer, "cuda_graphs", None),
-                manual_hooks=getattr(layer, "cuda_graph_manual_hooks", None),
-                packed_attributes=self._snapshot_packed_attributes(layer),
-                padding_mask_signature_present=hasattr(layer, _PADDING_MASK_SIGNATURE_ATTRIBUTE),
-                padding_mask_signature=getattr(layer, _PADDING_MASK_SIGNATURE_ATTRIBUTE, None),
-                dispatcher_states_present=hasattr(layer, _DISPATCHER_STATES_ATTRIBUTE),
-                dispatcher_states=getattr(layer, _DISPATCHER_STATES_ATTRIBUTE, None),
-                replay_guard_present=hasattr(layer, "_te_cuda_graph_bank_replay_guard"),
-                replay_guard=getattr(layer, "_te_cuda_graph_bank_replay_guard", None),
+        installations = []
+        for layer in self.layers:
+            snapshot_references = getattr(layer, "snapshot_te_cuda_graph_bank_references", None)
+            references_supported = callable(snapshot_references)
+            installations.append(
+                _LayerInstallation(
+                    graph_list=getattr(layer, "cuda_graphs", None),
+                    manual_hooks=getattr(layer, "cuda_graph_manual_hooks", None),
+                    packed_attributes=self._snapshot_packed_attributes(layer),
+                    padding_mask_signature_present=hasattr(
+                        layer, _PADDING_MASK_SIGNATURE_ATTRIBUTE
+                    ),
+                    padding_mask_signature=getattr(layer, _PADDING_MASK_SIGNATURE_ATTRIBUTE, None),
+                    dispatcher_states_present=hasattr(layer, _DISPATCHER_STATES_ATTRIBUTE),
+                    dispatcher_states=getattr(layer, _DISPATCHER_STATES_ATTRIBUTE, None),
+                    replay_guard_present=hasattr(layer, "_te_cuda_graph_bank_replay_guard"),
+                    replay_guard=getattr(layer, "_te_cuda_graph_bank_replay_guard", None),
+                    bank_references_supported=references_supported,
+                    bank_references=snapshot_references() if references_supported else None,
+                )
             )
-            for layer in self.layers
-        )
+        return tuple(installations)
 
     def _restore_installations(self, installations: tuple[_LayerInstallation, ...]) -> None:
         for layer, installation in zip(self.layers, installations):
@@ -638,6 +661,13 @@ class TECudaGraphBankManager:
                 installation.replay_guard_present,
                 installation.replay_guard,
             )
+            if installation.bank_references_supported:
+                restore_references = getattr(layer, "restore_te_cuda_graph_bank_references", None)
+                if not callable(restore_references):
+                    raise RuntimeError(
+                        "Layer can snapshot TE CUDA graph references but cannot restore them"
+                    )
+                restore_references(installation.bank_references)
 
     def _snapshot_contract(
         self, layer: object, graph_count: int, *, manual_hooks: object
