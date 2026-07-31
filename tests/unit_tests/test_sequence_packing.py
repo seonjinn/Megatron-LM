@@ -1,5 +1,6 @@
 # Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
 
+from inspect import signature
 from types import SimpleNamespace
 
 import pytest
@@ -14,6 +15,48 @@ from megatron.core.packed_seq_params import (
     split_moe_packed_seq_params_for_cuda_graph,
     split_packed_seq_params_for_cuda_graph,
 )
+
+
+def test_packed_seq_params_preserves_legacy_positional_slots() -> None:
+    assert list(signature(PackedSeqParams).parameters) == [
+        "qkv_format",
+        "cu_seqlens_q",
+        "cu_seqlens_kv",
+        "cu_seqlens_q_padded",
+        "cu_seqlens_kv_padded",
+        "max_seqlen_q",
+        "max_seqlen_kv",
+        "local_cp_size",
+        "cp_group",
+        "total_tokens",
+        "seq_idx",
+        "tokens_per_sample",
+        "pad_between_seqs",
+        "seq_aux_loss_sample_ids",
+        "seq_aux_loss_num_samples",
+        "seq_aux_loss_max_samples",
+    ]
+
+    params = PackedSeqParams(
+        "thd",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        True,
+    )
+
+    assert params.pad_between_seqs is True
+    assert params.seq_aux_loss_sample_ids is None
+    assert params.seq_aux_loss_num_samples is None
+    assert params.seq_aux_loss_max_samples is None
 
 
 def test_moe_packed_seq_params_cuda_graph_has_independent_namespace() -> None:
