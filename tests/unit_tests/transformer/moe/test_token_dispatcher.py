@@ -651,6 +651,17 @@ def test_hybridep_cudagraph_replay_state_requires_fixed_capacity() -> None:
         dispatcher.validate_cudagraph_replay_capability()
 
 
+def test_hybridep_cudagraph_replay_state_rejects_backend_mutation() -> None:
+    dispatcher = _make_hybridep_replay_state_dispatcher()
+    graph_input = torch.empty((2, 3, 4), dtype=torch.bfloat16)
+    preprocessed = torch.empty((6, 4), dtype=torch.bfloat16)
+    state = dispatcher.snapshot_cudagraph_replay_state(graph_input, preprocessed)
+    dispatcher.config.moe_flex_dispatcher_backend = "deepep"
+
+    with pytest.raises(RuntimeError, match="topology fingerprint"):
+        dispatcher.restore_cudagraph_replay_state(state, graph_input, preprocessed)
+
+
 def test_allgather_cudagraph_replay_state_rejects_packed_sparse_routes() -> None:
     dispatcher = MoEAllGatherTokenDispatcher.__new__(MoEAllGatherTokenDispatcher)
     dispatcher.config = SimpleNamespace(thd_max_packed_sequences=8)

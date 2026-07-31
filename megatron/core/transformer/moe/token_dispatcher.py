@@ -277,8 +277,11 @@ class MoETokenDispatcher:
     ) -> tuple[tuple[str, object], ...]:
         """Return immutable configuration that must not change between capture and replay."""
 
+        backend_identity = dispatcher_kind
+        if dispatcher_kind == "flex-hybridep":
+            backend_identity = f"flex-{self.config.moe_flex_dispatcher_backend}"
         return (
-            ("backend", dispatcher_kind),
+            ("backend", backend_identity),
             ("tp_size", self.tp_size),
             ("ep_size", self.ep_size),
             (
@@ -628,6 +631,10 @@ class MoEAlltoAllTokenDispatcher(MoETokenDispatcher):
                 f"{self.hidden_shape_before_permute} != {flattened_input_shape}."
             )
         num_out_tokens = to_optional_int(self.num_out_tokens, field_name="num_out_tokens")
+        if num_out_tokens is None:
+            raise RuntimeError(
+                "AlltoAll CUDA graph replay state requires num_out_tokens after preprocessing."
+            )
         expected_preprocessed_shape = torch.Size((num_out_tokens, flattened_input_shape[-1]))
         if preprocessed_hidden_states.shape != expected_preprocessed_shape:
             raise RuntimeError(
@@ -663,6 +670,10 @@ class MoEAlltoAllTokenDispatcher(MoETokenDispatcher):
         )
         if not isinstance(state.backend_state, AlltoAllCudaGraphState):
             raise RuntimeError("MoE CUDA graph AlltoAll state has the wrong backend payload.")
+        if state.backend_state.num_out_tokens is None:
+            raise RuntimeError(
+                "AlltoAll CUDA graph replay state is missing required num_out_tokens."
+            )
         expected_preprocessed_shape = torch.Size(
             (state.backend_state.num_out_tokens, state.flattened_input_shape[-1])
         )

@@ -1,5 +1,6 @@
 # Copyright (c) 2023, NVIDIA CORPORATION. All rights reserved.
 
+import dataclasses
 from types import SimpleNamespace
 
 import pytest
@@ -115,6 +116,27 @@ def test_alltoall_cudagraph_replay_state_rejects_topology_change() -> None:
     dispatcher.router_topk = 4
 
     with pytest.raises(RuntimeError, match="topology fingerprint"):
+        dispatcher.restore_cudagraph_replay_state(state, graph_input, preprocessed)
+
+
+def test_alltoall_cudagraph_replay_state_requires_output_geometry_at_snapshot() -> None:
+    dispatcher = _make_replay_state_dispatcher()
+    dispatcher.num_out_tokens = None
+
+    with pytest.raises(RuntimeError, match="num_out_tokens"):
+        dispatcher.snapshot_cudagraph_replay_state(torch.empty((2, 3, 4)), torch.empty((40, 4)))
+
+
+def test_alltoall_cudagraph_replay_state_requires_output_geometry_at_restore() -> None:
+    dispatcher = _make_replay_state_dispatcher()
+    graph_input = torch.empty((2, 3, 4))
+    preprocessed = torch.empty((40, 4))
+    state = dispatcher.snapshot_cudagraph_replay_state(graph_input, preprocessed)
+    state = dataclasses.replace(
+        state, backend_state=dataclasses.replace(state.backend_state, num_out_tokens=None)
+    )
+
+    with pytest.raises(RuntimeError, match="num_out_tokens"):
         dispatcher.restore_cudagraph_replay_state(state, graph_input, preprocessed)
 
 

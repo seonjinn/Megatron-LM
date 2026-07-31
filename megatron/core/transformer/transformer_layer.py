@@ -1702,7 +1702,18 @@ class MoETransformerLayer(TransformerLayer):
             self.config.cuda_graph_impl == "transformer_engine"
             and CudaGraphModule.moe_preprocess in self.config.cuda_graph_modules
         ):
-            self.mlp.token_dispatcher.validate_cudagraph_replay_capability()
+            self._validate_te_cuda_graph_dispatcher_replay_capability()
+
+    def _validate_te_cuda_graph_dispatcher_replay_capability(self) -> None:
+        """Fail before capture when Task 5 cannot validate the eager continuation."""
+
+        self.mlp.token_dispatcher.validate_cudagraph_replay_capability()
+        if self.config.overlap_moe_expert_parallel_comm:
+            raise RuntimeError(
+                "overlap_moe_expert_parallel_comm is unsupported with partial TE MoE preprocess "
+                "CUDA graphs until the fine-grained schedule carries exact-index dispatcher "
+                "state through combine and validates the continuation there."
+            )
 
     def _record_te_cuda_graph_dispatcher_replay_state(
         self, graph_index: int, graph_input: torch.Tensor, preprocessed_hidden_states: torch.Tensor
