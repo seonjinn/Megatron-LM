@@ -195,7 +195,7 @@ def test_recomputed_moe_mlp_receives_original_sample_ownership(monkeypatch) -> N
     assert observed["padding_mask"] is padding_mask
 
 
-def test_dense_mlp_does_not_receive_moe_packed_seq_params(monkeypatch) -> None:
+def test_dense_mlp_still_chunks_without_receiving_moe_packed_seq_params(monkeypatch) -> None:
     calls = []
 
     class _DenseObserver(torch.nn.Module):
@@ -204,7 +204,6 @@ def test_dense_mlp_does_not_receive_moe_packed_seq_params(monkeypatch) -> None:
             return hidden_states, None
 
     layer = _make_mlp_propagation_layer(_DenseObserver(), is_moe=False)
-    layer.config.mlp_chunks_for_training = 1
     hidden_states = torch.zeros((8, 1, 4))
     padding_mask = torch.ones((1, 8), dtype=torch.bool)
     monkeypatch.setattr(
@@ -220,9 +219,9 @@ def test_dense_mlp_does_not_receive_moe_packed_seq_params(monkeypatch) -> None:
         packed_seq_params=_make_seq_aux_loss_packed_seq_params(),
     )
 
-    assert len(calls) == 1
-    assert calls[0][0] is hidden_states
-    assert calls[0][1] is padding_mask
+    assert len(calls) == 4
+    assert all(call_hidden.shape == (2, 1, 4) for call_hidden, _ in calls)
+    assert all(call_padding_mask is None for _, call_padding_mask in calls)
 
 
 def test_te_attention_does_not_forward_seq_aux_loss_packed_fields(monkeypatch) -> None:
@@ -418,6 +417,87 @@ def test_non_attention_moe_replay_preserves_padding_and_graph_owned_sample_input
     assert "packed_seq_params" not in graph_kwargs
     assert layer.graph_calls == 1
     assert layer.fallback_calls == 0
+
+
+@pytest.mark.parametrize(
+    "ownership", ["complete", "sample_ids_only", "num_samples_only", "capacity_only"]
+)
+def test_moe_owning_replay_rejects_ownership_without_captured_contract_before_execution(
+    ownership: str,
+) -> None:
+    class _RejectingReplayLayer(_TransformerLayerCudaGraphStub):
+        def __init__(self) -> None:
+            self.config = SimpleNamespace(
+                cuda_graph_modules=[CudaGraphModule.moe_router],
+                delay_offload_until_cuda_graph=False,
+            )
+            self.is_moe_layer = True
+            self.attention_calls = 0
+            self.graph_calls = 0
+
+        def _forward_attention(self, hidden_states, **_kwargs):
+            self.attention_calls += 1
+            return hidden_states, None
+
+        def _te_cuda_graph_replay_impl(
+            self, args, kwargs, context, *, eager_packed_seq_params=None
+        ):
+            self.graph_calls += 1
+            return args[0]
+
+    layer = _RejectingReplayLayer()
+    if ownership == "complete":
+        replay = _make_seq_aux_loss_packed_seq_params()
+    elif ownership == "sample_ids_only":
+        replay = PackedSeqParams(seq_aux_loss_sample_ids=torch.zeros(8, dtype=torch.int64))
+    elif ownership == "num_samples_only":
+        replay = PackedSeqParams(seq_aux_loss_num_samples=torch.tensor(1, dtype=torch.int64))
+    else:
+        replay = PackedSeqParams(seq_aux_loss_max_samples=4)
+
+    with pytest.raises(ValueError, match="captured without MoE.*ownership"):
+        layer._te_cuda_graph_replay(
+            torch.zeros((8, 1, 4)),
+            packed_seq_params=replay,
+            padding_mask=torch.ones((1, 8), dtype=torch.bool),
+        )
+
+    assert layer.attention_calls == 0
+    assert layer.graph_calls == 0
+
+
+def test_moe_owning_replay_without_contract_accepts_absent_ownership() -> None:
+    class _OrdinaryReplayLayer(_TransformerLayerCudaGraphStub):
+        def __init__(self) -> None:
+            self.config = SimpleNamespace(
+                cuda_graph_modules=[CudaGraphModule.moe_router],
+                delay_offload_until_cuda_graph=False,
+            )
+            self.is_moe_layer = True
+            self.attention_calls = 0
+            self.graph_calls = 0
+
+        def _forward_attention(self, hidden_states, **_kwargs):
+            self.attention_calls += 1
+            return hidden_states, None
+
+        def _te_cuda_graph_replay_impl(
+            self, args, kwargs, context, *, eager_packed_seq_params=None
+        ):
+            self.graph_calls += 1
+            return args[0]
+
+    layer = _OrdinaryReplayLayer()
+    hidden_states = torch.zeros((8, 1, 4))
+
+    output = layer._te_cuda_graph_replay(
+        hidden_states,
+        packed_seq_params=PackedSeqParams(),
+    )
+
+    assert output is hidden_states
+    assert layer.attention_calls == 1
+    assert layer.graph_calls == 1
 
 
 @pytest.mark.parametrize(

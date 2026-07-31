@@ -881,12 +881,16 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             and not isinstance(self.mlp, IdentityOp)
             and not self.config.transformer_impl == "inference_optimized"
         )
-        has_explicit_moe_sample_ownership = packed_seq_params is not None and any(
-            getattr(packed_seq_params, field_name, None) is not None
-            for field_name in (
-                "seq_aux_loss_sample_ids",
-                "seq_aux_loss_num_samples",
-                "seq_aux_loss_max_samples",
+        has_explicit_moe_sample_ownership = (
+            self.is_moe_layer
+            and packed_seq_params is not None
+            and any(
+                getattr(packed_seq_params, field_name, None) is not None
+                for field_name in (
+                    "seq_aux_loss_sample_ids",
+                    "seq_aux_loss_num_samples",
+                    "seq_aux_loss_max_samples",
+                )
             )
         )
         should_chunk_mlp_for_training = (
@@ -1601,6 +1605,22 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             self._get_te_cuda_graph_moe_packed_seq_params_static_metadata()
         )
         if expected_static_metadata is None:
+            if (
+                self._te_cuda_graph_owns_moe_packed_seq_params()
+                and packed_seq_params is not None
+                and any(
+                    getattr(packed_seq_params, field_name, None) is not None
+                    for field_name in (
+                        "seq_aux_loss_sample_ids",
+                        "seq_aux_loss_num_samples",
+                        "seq_aux_loss_max_samples",
+                    )
+                )
+            ):
+                raise ValueError(
+                    "TE CUDA graph scope was captured without MoE packed-sequence ownership, "
+                    "but replay provided populated ownership fields"
+                )
             return
         if packed_seq_params is None:
             packed_seq_params = kwargs.get("packed_seq_params")

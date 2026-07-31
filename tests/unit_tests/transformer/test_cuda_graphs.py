@@ -1794,7 +1794,7 @@ class _Task9ReplayGraph:
         self.backward_dw_calls += 1
 
 
-def _make_task9_active_bank(layer, graph):
+def _make_task9_active_bank(layer, graph, *, cuda_graph_modules=(), setup=None):
     from types import SimpleNamespace
 
     from megatron.core.transformer.te_cuda_graph_bank import TECudaGraphBankManager
@@ -1803,13 +1803,14 @@ def _make_task9_active_bank(layer, graph):
     runtime = {"count": len(graphs)}
     manager = TECudaGraphBankManager(
         [layer],
+        cuda_graph_modules=cuda_graph_modules,
         graph_reset_supported=False,
         synchronize=lambda: None,
         runtime_num_microbatches=lambda: runtime["count"],
     )
     helper = SimpleNamespace(
         flattened_callables=[layer],
-        config=SimpleNamespace(cuda_graph_modules=()),
+        config=SimpleNamespace(cuda_graph_modules=cuda_graph_modules),
         num_microbatches=None,
         _capture_attempted=False,
         _capture_finished=False,
@@ -1818,6 +1819,8 @@ def _make_task9_active_bank(layer, graph):
 
     def capture(*, num_microbatches):
         assert num_microbatches == len(graphs)
+        if setup is not None:
+            setup()
         layer.cuda_graphs.extend(graphs)
         helper.num_microbatches = num_microbatches
         helper._capture_finished = True
@@ -2007,6 +2010,121 @@ def test_transformer_execution_counter_counts_once_after_double_guard_and_prepar
     assert (snapshot.eligible_calls, snapshot.graph_calls) == (5, 2)
 
     graph.fail_launch = False
+    bank.reset()
+    manager.close()
+
+
+def test_active_moe_bank_launches_all_padding_ownership_once_without_fallback(monkeypatch) -> None:
+    from types import MethodType, SimpleNamespace
+
+    import megatron.core.transformer.cuda_graphs as cuda_graphs
+    from megatron.core.packed_seq_params import (
+        MOE_CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX,
+        split_moe_packed_seq_params_for_cuda_graph,
+    )
+    from megatron.core.transformer.module import GraphableMegatronModule
+
+    monkeypatch.setattr(cuda_graphs, "is_graph_capturing", lambda: False)
+    monkeypatch.setattr(cuda_graphs, "is_graph_warmup", lambda: False)
+    layer = _make_task7_transformer_leaf(moe=True)
+    layer.config = SimpleNamespace(
+        cuda_graph_impl="transformer_engine",
+        cuda_graph_modules=[CudaGraphModule.moe],
+        delay_offload_until_cuda_graph=False,
+        overlap_moe_expert_parallel_comm=False,
+        fine_grained_activation_offloading=False,
+    )
+    layer.is_moe_layer = True
+    layer.training = True
+    layer.current_microbatch = 0
+    layer._forward_attention = lambda hidden_states, **_kwargs: (hidden_states, None)
+    fallback_calls = 0
+
+    def reject_fallback(*_args, **_kwargs):
+        nonlocal fallback_calls
+        fallback_calls += 1
+        raise AssertionError("eager MLP fallback must not run")
+
+    layer._forward_mlp = reject_fallback
+    layer._get_te_cuda_graph_replay_args = MethodType(
+        GraphableMegatronModule._get_te_cuda_graph_replay_args, layer
+    )
+
+    class _RecordingGraph:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def __call__(self, *args, **kwargs):
+            self.calls.append((args, kwargs))
+            return (args[0],)
+
+    graph = _RecordingGraph()
+    captured = PackedSeqParams(
+        seq_aux_loss_sample_ids=torch.arange(8, dtype=torch.int64).remainder(2),
+        seq_aux_loss_num_samples=torch.tensor(2, dtype=torch.int64),
+        seq_aux_loss_max_samples=4,
+    )
+
+    def install_contract() -> None:
+        tensor_kwargs, static_metadata = split_moe_packed_seq_params_for_cuda_graph(captured)
+        layer._set_te_cuda_graph_moe_packed_seq_params_static_metadata(
+            static_metadata, tensor_kwargs
+        )
+
+    manager, bank, _ = _make_task9_active_bank(
+        layer,
+        graph,
+        cuda_graph_modules=[CudaGraphModule.moe],
+        setup=install_contract,
+    )
+    replay = PackedSeqParams(
+        seq_aux_loss_sample_ids=torch.zeros(8, dtype=torch.int64),
+        seq_aux_loss_num_samples=torch.tensor(1, dtype=torch.int64),
+        seq_aux_loss_max_samples=4,
+    )
+    hidden_states = torch.zeros((8, 1, 4))
+    padding_mask = torch.ones((1, 8), dtype=torch.bool)
+
+    output, context = layer(
+        hidden_states,
+        packed_seq_params=replay,
+        padding_mask=padding_mask,
+    )
+
+    assert output is hidden_states
+    assert context is None
+    assert fallback_calls == 0
+    assert len(graph.calls) == 1
+    graph_args, graph_kwargs = graph.calls[0]
+    assert len(graph_args) == 1
+    assert graph_args[0] is hidden_states
+    assert graph_kwargs["padding_mask"] is padding_mask
+    assert graph_kwargs[
+        f"{MOE_CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX}seq_aux_loss_sample_ids"
+    ] is replay.seq_aux_loss_sample_ids
+    assert graph_kwargs[
+        f"{MOE_CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX}seq_aux_loss_num_samples"
+    ] is replay.seq_aux_loss_num_samples
+    assert not graph_kwargs[
+        f"{MOE_CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX}seq_aux_loss_sample_ids"
+    ].any()
+    assert graph_kwargs[
+        f"{MOE_CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX}seq_aux_loss_num_samples"
+    ].item() == 1
+    assert graph_kwargs["padding_mask"].all()
+    snapshot = manager.snapshot_execution_counters()
+    assert (snapshot.eligible_calls, snapshot.graph_calls) == (1, 1)
+
+    with pytest.raises(ValueError, match="unexpected"):
+        layer._te_cuda_graph_replay(
+            hidden_states,
+            packed_seq_params=replay,
+            padding_mask=padding_mask,
+            _moe_packed_seq_params_unexpected=torch.zeros((), dtype=torch.int64),
+        )
+
+    assert len(graph.calls) == 1
+    assert manager.snapshot_execution_counters() == snapshot
     bank.reset()
     manager.close()
 
