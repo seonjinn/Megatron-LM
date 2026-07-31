@@ -1100,6 +1100,19 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
         """
         static_inputs = super().get_layer_static_inputs(seq_length, micro_batch_size)
 
+        if getattr(self.config, "thd_max_packed_sequences", None) is not None:
+            slen_per_cp = seq_length // self.config.context_parallel_size
+            slen_per_cptp = (
+                slen_per_cp // self.config.tensor_model_parallel_size
+                if self.config.sequence_parallel
+                else slen_per_cp
+            )
+            static_inputs["padding_mask"] = torch.zeros(
+                (micro_batch_size, slen_per_cptp),
+                dtype=torch.bool,
+                device=torch.cuda.current_device(),
+            )
+
         if not isinstance(self.self_attention, IdentityOp) and (
             not self.config.cuda_graph_modules
             or CudaGraphModule.attn in self.config.cuda_graph_modules
@@ -1345,6 +1358,10 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
 
     def _te_cuda_graph_replay_impl(self, args, kwargs, context):
         """Implementation of _te_cuda_graph_replay, separated for replay mode cleanup."""
+        eager_mlp_kwargs = dict(kwargs)
+        self._rebuild_te_cuda_graph_packed_seq_params(eager_mlp_kwargs)
+        padding_mask = eager_mlp_kwargs.get("padding_mask")
+        packed_seq_params = eager_mlp_kwargs.get("packed_seq_params")
         cuda_graph_output = list(super()._te_cuda_graph_replay(*args, **kwargs))
 
         # Flush delayed offload groups from previous layers after graph replay.
@@ -1452,7 +1469,9 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                 return residual, hidden_states, probs, shared_expert_output
 
             # CUDA Graph does not capture the MLP/MoE part at all.
-            output = self._forward_mlp(*cuda_graph_output)
+            output = self._forward_mlp(
+                *cuda_graph_output, padding_mask=padding_mask, packed_seq_params=packed_seq_params
+            )
         return output, context
 
     def _get_te_cuda_graph_replay_args(self, *args, **kwargs):

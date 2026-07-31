@@ -412,6 +412,40 @@ class HybridModel(LanguageModule, GraphableMegatronModule):
 
             self.cudagraph_manager = CudaGraphManager(config)
 
+    def _scatter_padding_mask_to_sequence_parallel(self, padding_mask: Tensor) -> Tensor:
+        return (
+            tensor_parallel.scatter_to_sequence_parallel_region(
+                padding_mask.transpose(0, 1).contiguous(), group=self.pg_collection.tp
+            )
+            .transpose(0, 1)
+            .contiguous()
+        )
+
+    def _forward_mtp(
+        self,
+        *,
+        input_ids,
+        position_ids,
+        hidden_states,
+        attention_mask,
+        inference_params,
+        rotary_pos_emb,
+        packed_seq_params,
+        padding_mask,
+        embedding,
+    ):
+        return self.mtp(
+            input_ids=input_ids,
+            position_ids=position_ids,
+            hidden_states=hidden_states,
+            attention_mask=attention_mask,
+            inference_params=inference_params,
+            rotary_pos_emb=rotary_pos_emb,
+            packed_seq_params=packed_seq_params,
+            padding_mask=padding_mask,
+            embedding=embedding,
+        )
+
     def forward(
         self,
         input_ids: Tensor,
@@ -476,6 +510,14 @@ class HybridModel(LanguageModule, GraphableMegatronModule):
             # decoder will get hidden_states from encoder.input_tensor
             decoder_input = None
 
+        if padding_mask is not None and input_ids is not None:
+            assert padding_mask.shape == input_ids.shape, (
+                f"padding_mask shape {padding_mask.shape} does not match "
+                f"input_ids shape {input_ids.shape}"
+            )
+            if self.config.sequence_parallel:
+                padding_mask = self._scatter_padding_mask_to_sequence_parallel(padding_mask)
+
         rotary_pos_emb = None
         if self.position_embedding_type == 'rope' and not self.config.multi_latent_attention:
             rotary_seq_len = self.rotary_pos_emb.get_rotary_seq_len(
@@ -537,7 +579,7 @@ class HybridModel(LanguageModule, GraphableMegatronModule):
 
         mtp_forward_ran = self.mtp_process and not (in_inference_mode or is_spec_decode)
         if mtp_forward_ran:
-            hidden_states = self.mtp(
+            hidden_states = self._forward_mtp(
                 input_ids=input_ids,
                 position_ids=position_ids,
                 hidden_states=hidden_states,
@@ -545,6 +587,7 @@ class HybridModel(LanguageModule, GraphableMegatronModule):
                 inference_params=inference_params,
                 rotary_pos_emb=rotary_pos_emb,
                 packed_seq_params=packed_seq_params,
+                padding_mask=padding_mask,
                 embedding=self.embedding,
             )
 

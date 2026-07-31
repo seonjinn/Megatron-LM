@@ -197,7 +197,7 @@ class TestTop2Router:
             ("allgather", "deepep", None, None),
             ("alltoall", "deepep", None, None),
             ("flex", "deepep", None, None),
-            ("flex", "deepepv2", None, None),
+            ("flex", "ncclep", None, None),
             ("flex", "hybridep", 1.0, None),
             ("flex", "hybridep", None, 1.0),
         ],
@@ -483,6 +483,23 @@ class TestAuxLossFreeTop2Router:
 
     def teardown_method(self, method):
         Utils.destroy_model_parallel()
+
+    def test_expert_bias_padding_mask_excludes_padding_rows(self):
+        routing_map = torch.tensor(
+            [
+                [True, True, False, False, False, False, False, False],
+                [False, True, False, False, False, False, False, False],
+                [True, False, False, False, False, False, False, False],
+                [False, False, True, False, False, False, False, False],
+            ]
+        )
+        padding_mask = torch.tensor([[False, True], [False, True]])
+        self.router.local_tokens_per_expert.zero_()
+
+        self.router._apply_expert_bias(routing_map, padding_mask=padding_mask)
+
+        expected = torch.tensor([2, 1, 0, 0, 0, 0, 0, 0], dtype=torch.float32)
+        assert torch.equal(self.router.local_tokens_per_expert, expected)
 
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
     def test_router_forward_aux_free(self):

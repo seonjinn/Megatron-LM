@@ -1,5 +1,7 @@
 # Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
 
+from types import MethodType, SimpleNamespace
+
 import pytest
 import torch
 
@@ -15,6 +17,9 @@ from megatron.core.packed_seq_params import (
 from megatron.core.transformer.cuda_graphs import (
     _add_packed_seq_params_to_te_cuda_graph_sample_kwargs,
 )
+from megatron.core.transformer.enums import CudaGraphModule
+from megatron.core.transformer.identity_op import IdentityOp
+from megatron.core.transformer.module import GraphableMegatronModule
 from megatron.core.transformer.transformer_layer import TransformerLayer
 
 
@@ -41,6 +46,75 @@ class _TransformerLayerCudaGraphStub:
         TransformerLayer._flatten_te_cuda_graph_packed_seq_params
     )
     _te_cuda_graph_capture = TransformerLayer._te_cuda_graph_capture
+
+
+def test_transformer_layer_thd_static_inputs_include_local_padding_mask(monkeypatch) -> None:
+    monkeypatch.setattr(torch.cuda, "current_device", lambda: "cpu")
+    layer = TransformerLayer.__new__(TransformerLayer)
+    torch.nn.Module.__init__(layer)
+    layer.config = SimpleNamespace(
+        context_parallel_size=2,
+        sequence_parallel=True,
+        tensor_model_parallel_size=2,
+        hidden_size=8,
+        cuda_graph_modules=[],
+        thd_max_packed_sequences=7,
+    )
+    layer.self_attention = IdentityOp()
+
+    static_inputs = layer.get_layer_static_inputs(seq_length=16, micro_batch_size=3)
+
+    padding_mask = static_inputs["padding_mask"]
+    assert padding_mask.shape == (3, 4)
+    assert padding_mask.dtype == torch.bool
+    assert not padding_mask.any()
+
+
+def test_attention_only_replay_passes_packed_metadata_and_padding_mask_to_mlp(monkeypatch) -> None:
+    layer = TransformerLayer.__new__(TransformerLayer)
+    torch.nn.Module.__init__(layer)
+    layer.config = SimpleNamespace(
+        cuda_graph_modules=[CudaGraphModule.attn],
+        delay_offload_until_cuda_graph=False,
+        overlap_moe_expert_parallel_comm=False,
+    )
+    layer.is_moe_layer = True
+    packed_seq_params = PackedSeqParams(
+        qkv_format="thd",
+        cu_seqlens_q=torch.IntTensor([0, 4, 8]),
+        cu_seqlens_kv=torch.IntTensor([0, 4, 8]),
+        max_seqlen_q=4,
+        max_seqlen_kv=4,
+        tokens_per_sample=4,
+        pad_between_seqs=True,
+    )
+    tensor_kwargs, static_metadata = split_packed_seq_params_for_cuda_graph(packed_seq_params)
+    layer._set_te_cuda_graph_packed_seq_params_static_metadata(static_metadata, tensor_kwargs)
+    padding_mask = torch.tensor([[False, False, False, True, False, False, True, True]])
+    hidden_states = torch.ones(8, 1, 4)
+    observed = {}
+
+    def forward_mlp(self, hidden_states, padding_mask=None, packed_seq_params=None):
+        observed["hidden_states"] = hidden_states
+        observed["padding_mask"] = padding_mask
+        observed["packed_seq_params"] = packed_seq_params
+        return hidden_states
+
+    layer._forward_mlp = MethodType(forward_mlp, layer)
+    monkeypatch.setattr(
+        GraphableMegatronModule,
+        "_te_cuda_graph_replay",
+        lambda self, *args, **kwargs: (hidden_states,),
+    )
+
+    layer._te_cuda_graph_replay_impl((), {"padding_mask": padding_mask, **tensor_kwargs}, None)
+
+    assert observed["hidden_states"] is hidden_states
+    assert observed["padding_mask"] is padding_mask
+    rebuilt = observed["packed_seq_params"]
+    assert rebuilt.tokens_per_sample == 4
+    assert rebuilt.pad_between_seqs is True
+    assert torch.equal(rebuilt.cu_seqlens_q, packed_seq_params.cu_seqlens_q)
 
 
 def test_packed_graph_static_metadata_keeps_pad_between_seqs() -> None:
@@ -364,8 +438,6 @@ def test_te_cuda_graph_sample_kwargs_reject_overlapping_flattened_keys():
 
 
 def test_te_cuda_graph_partial_attn_only_flow():
-    from megatron.core.transformer.enums import CudaGraphModule
-
     class _ConfigStub:
         def __init__(self, cuda_graph_modules):
             self.cuda_graph_modules = cuda_graph_modules

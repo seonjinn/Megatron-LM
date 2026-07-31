@@ -5,7 +5,9 @@ import inspect
 import json
 import os
 import sys
+from types import SimpleNamespace
 from typing import Any, Dict, Mapping, Tuple
+from unittest.mock import Mock
 
 import pytest  # type: ignore[import]
 import torch
@@ -13,6 +15,7 @@ import torch
 from megatron.core.models.hybrid.hybrid_layer_specs import hybrid_stack_spec
 from megatron.core.models.hybrid.hybrid_model import HybridModel
 from megatron.core.num_microbatches_calculator import destroy_num_microbatches_calculator
+from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.tensor_parallel.random import model_parallel_cuda_manual_seed
 from megatron.core.transformer import TransformerConfig
 from megatron.core.transformer.enums import AttnBackend
@@ -25,6 +28,94 @@ from megatron.training.global_vars import (
     set_global_variables,
 )
 from tests.unit_tests.test_utilities import Utils
+
+
+def test_hybrid_model_scatter_padding_mask_matches_hidden_states(monkeypatch) -> None:
+    model = HybridModel.__new__(HybridModel)
+    model.config = SimpleNamespace(sequence_parallel=True)
+    model.pg_collection = SimpleNamespace(tp=object())
+    mask = torch.tensor([[False, True, False, True], [True, False, True, False]])
+    scatter_inputs = []
+
+    def scatter_to_sequence_parallel_region(tensor, group):
+        scatter_inputs.append((tensor, group))
+        return tensor[:2]
+
+    monkeypatch.setattr(
+        "megatron.core.models.hybrid.hybrid_model."
+        "tensor_parallel.scatter_to_sequence_parallel_region",
+        scatter_to_sequence_parallel_region,
+    )
+
+    observed = model._scatter_padding_mask_to_sequence_parallel(mask)
+
+    expected = torch.tensor([[False, True], [True, False]])
+    assert torch.equal(scatter_inputs[0][0], mask.transpose(0, 1))
+    assert scatter_inputs[0][0].is_contiguous()
+    assert scatter_inputs[0][1] is model.pg_collection.tp
+    assert observed.shape == expected.shape
+    assert observed.is_contiguous()
+    assert torch.equal(observed, expected)
+
+
+def test_hybrid_model_decoder_receives_sequence_parallel_padding_mask(monkeypatch) -> None:
+    model = HybridModel.__new__(HybridModel)
+    model.config = SimpleNamespace(
+        fine_grained_activation_offloading=False, moe_paged_stash=False, sequence_parallel=True
+    )
+    model.pg_collection = SimpleNamespace(tp=object())
+    model.pre_process = True
+    model.post_process = False
+    model.mtp_process = False
+    model.position_embedding_type = "none"
+    model.embedding = Mock(scatter_to_sequence_parallel=True)
+    hidden_states = torch.ones(2, 2, 4)
+    model.embedding.return_value = hidden_states
+    model.decoder = Mock(return_value=hidden_states)
+    model.share_embeddings_and_output_weights = False
+    mask = torch.tensor([[False, True, False, True], [True, False, True, False]])
+
+    monkeypatch.setattr(
+        "megatron.core.models.hybrid.hybrid_model."
+        "tensor_parallel.scatter_to_sequence_parallel_region",
+        lambda tensor, group: tensor[:2],
+    )
+
+    model.forward(
+        input_ids=torch.ones(2, 4, dtype=torch.long),
+        position_ids=torch.arange(4).repeat(2, 1),
+        attention_mask=None,
+        padding_mask=mask,
+    )
+
+    expected = torch.tensor([[False, True], [True, False]])
+    observed = model.decoder.call_args.kwargs["padding_mask"]
+    assert observed.shape[:2] == hidden_states.shape[1::-1]
+    assert torch.equal(observed, expected)
+
+
+def test_hybrid_mtp_receives_padding_mask() -> None:
+    hidden_states = torch.randn(4, 1, 8)
+    model = SimpleNamespace(mtp=Mock(return_value=hidden_states))
+    mask = torch.tensor([[False, False, True, True]])
+    packed_seq_params = PackedSeqParams(qkv_format="thd")
+
+    HybridModel._forward_mtp(
+        model,
+        input_ids=torch.ones(1, 4, dtype=torch.long),
+        position_ids=torch.arange(4).unsqueeze(0),
+        hidden_states=hidden_states,
+        attention_mask=None,
+        inference_params=None,
+        rotary_pos_emb=None,
+        packed_seq_params=packed_seq_params,
+        padding_mask=mask,
+        embedding=Mock(),
+    )
+
+    assert model.mtp.call_args.kwargs["padding_mask"] is mask
+    assert model.mtp.call_args.kwargs["packed_seq_params"] is packed_seq_params
+
 
 GOLDEN_CONFIG: Dict[str, Any] = {
     "_cpu_offloading_context": None,
