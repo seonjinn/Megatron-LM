@@ -1670,7 +1670,7 @@ class TestPartialCudaGraph:
     def test_batch_invariant_alltoall_partial_te_graph_restores_inverse_map(
         self, monkeypatch
     ):
-        """Exercise the single-rank production TE boundary; Task 12 covers multi-rank A2A."""
+        """Exercise the single-rank TE boundary; Task 12 covers multi-rank routing freshness."""
         import dataclasses
 
         from megatron.core.transformer.attention import HAVE_FA3, HAVE_FA4
@@ -1716,6 +1716,8 @@ class TestPartialCudaGraph:
             "batch_invariant_mode": True,
             "flash_attention_version": fa_version,
             "fp8": None,
+            "fp8_recipe": "delayed",
+            "first_last_layers_bf16": False,
             "hidden_size": 128,
             "max_position_embeddings": self.seq_length,
             "moe_aux_loss_coeff": 0.0,
@@ -1733,10 +1735,12 @@ class TestPartialCudaGraph:
             "mtp_num_layers": 0,
             "normalization": "RMSNorm",
             "num_attention_heads": 4,
+            "num_layers_at_end_in_bf16": 0,
+            "num_layers_at_start_in_bf16": 0,
             "num_layers": 1,
         }
         eager_steps = []
-        replay_state = {"restores": 0}
+        replay_state = {"restore_method_calls": 0, "restores": 0}
 
         def record_eager_step(iteration, loss, grads, parameters):
             eager_steps.append(
@@ -1785,6 +1789,42 @@ class TestPartialCudaGraph:
             assert dispatcher.valid_cudagraph_attrs[-1] == (
                 "batch_invariant_inverse_permutation_mapping"
             )
+            assert dispatcher.config.fp8 is None
+            assert dispatcher.config.fp8_recipe == "delayed"
+            assert not dispatcher.config.first_last_layers_bf16
+            assert dispatcher.config.num_layers_at_start_in_bf16 == 0
+            assert dispatcher.config.num_layers_at_end_in_bf16 == 0
+
+            helper = self.cuda_graph_helper
+            assert helper is not None
+            assert helper.graphs_created()
+            manager = helper._compatibility_bank_manager
+            assert manager is not None
+            counter_start = manager.snapshot_execution_counters()
+            replay_state["manager"] = manager
+            replay_state["counter_start"] = counter_start
+
+            layers = [
+                module
+                for module in model.modules()
+                if getattr(getattr(module, "mlp", None), "token_dispatcher", None)
+                is dispatcher
+            ]
+            assert len(layers) == 1
+            layer = layers[0]
+            restore_dispatcher_state = (
+                layer._restore_te_cuda_graph_dispatcher_replay_state
+            )
+
+            def count_restore_dispatcher_state(*args, **kwargs):
+                replay_state["restore_method_calls"] += 1
+                return restore_dispatcher_state(*args, **kwargs)
+
+            monkeypatch.setattr(
+                layer,
+                "_restore_te_cuda_graph_dispatcher_replay_state",
+                count_restore_dispatcher_state,
+            )
 
             inverse_map = dispatcher.batch_invariant_inverse_permutation_mapping
             assert torch.is_tensor(inverse_map)
@@ -1814,19 +1854,32 @@ class TestPartialCudaGraph:
             assert restored is not poison
             assert not torch.equal(restored, poison)
             replay_state["restores"] += 1
+            expected_replays = iteration - warmup_steps + 1
+            assert replay_state["restore_method_calls"] == expected_replays
+            counter_delta = replay_state["manager"].execution_counter_delta(
+                replay_state["counter_start"]
+            )
+            assert (counter_delta.eligible_calls, counter_delta.graph_calls) == (
+                expected_replays,
+                expected_replays,
+            )
+            replay_state["counter_delta"] = (
+                counter_delta.eligible_calls,
+                counter_delta.graph_calls,
+            )
             if iteration + 1 < num_iterations:
                 replay_state["poison"] = torch.full_like(restored, -(iteration + 2))
                 dispatcher.batch_invariant_inverse_permutation_mapping = replay_state["poison"]
 
-        initialize_rng_tracker(use_te_rng_tracker=True, force_reset=True)
-        Utils.initialize_model_parallel(
-            tensor_model_parallel_size=1,
-            context_parallel_size=1,
-            pipeline_model_parallel_size=1,
-            expert_tensor_parallel_size=1,
-            expert_model_parallel_size=1,
-        )
         try:
+            initialize_rng_tracker(use_te_rng_tracker=True, force_reset=True)
+            Utils.initialize_model_parallel(
+                tensor_model_parallel_size=1,
+                context_parallel_size=1,
+                pipeline_model_parallel_size=1,
+                expert_tensor_parallel_size=1,
+                expert_model_parallel_size=1,
+            )
             with set_batch_invariant_mode(True, backend="deepgemm"):
                 eager_losses = self._run_test_helper(
                     1,
@@ -1859,6 +1912,8 @@ class TestPartialCudaGraph:
                 Utils.destroy_model_parallel()
 
         assert replay_state["restores"] == num_iterations - warmup_steps
+        assert replay_state["restore_method_calls"] == num_iterations - warmup_steps
+        assert replay_state["counter_delta"] == (2, 2)
         assert torch.equal(graph_losses, eager_losses)
         assert len(eager_steps) == num_iterations
 

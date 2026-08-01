@@ -57,18 +57,30 @@ try:
 except (ImportError, AttributeError):
     _TE_GROUPED_LINEAR_SUPPORTS_SINGLE_PARAM = False
 
-pytestmark = [
-    pytest.mark.internal,
-    pytest.mark.launch_on_gb200,
-    pytest.mark.skipif(
-        not is_te_min_version("2.14.0"),
-        reason="moe_single_grouped_weight requires Transformer Engine >= 2.14.0",
-    ),
-    pytest.mark.skipif(
-        not _TE_GROUPED_LINEAR_SUPPORTS_SINGLE_PARAM,
-        reason="Installed TE GroupedLinear does not expose single_grouped_weight",
-    ),
-]
+
+@pytest.mark.internal
+def test_nvfp4_single_grouped_weight_requires_fp4_param(monkeypatch) -> None:
+    """Reject the deprecated split-quantize fallback before model construction."""
+    import megatron.core.transformer.transformer_config as transformer_config
+
+    monkeypatch.setattr(transformer_config, "is_te_min_version", lambda _version: True)
+
+    with pytest.raises(
+        ValueError,
+        match="moe_single_grouped_weight with FP4 compute requires fp4_param=True",
+    ):
+        transformer_config.TransformerConfig(
+            num_layers=1,
+            hidden_size=128,
+            num_attention_heads=4,
+            num_moe_experts=2,
+            moe_grouped_gemm=True,
+            moe_single_grouped_weight=True,
+            fp4="e2m1",
+            fp4_recipe="nvfp4",
+            fp4_param=False,
+            use_transformer_engine_op_fuser=True,
+        )
 
 
 def _skip_if_unsupported(precision: str) -> None:
@@ -83,6 +95,16 @@ def _skip_if_unsupported(precision: str) -> None:
         pytest.skip(_NO_NVFP4_REASON)
 
 
+@pytest.mark.internal
+@pytest.mark.launch_on_gb200
+@pytest.mark.skipif(
+    not is_te_min_version("2.14.0"),
+    reason="moe_single_grouped_weight requires Transformer Engine >= 2.14.0",
+)
+@pytest.mark.skipif(
+    not _TE_GROUPED_LINEAR_SUPPORTS_SINGLE_PARAM,
+    reason="Installed TE GroupedLinear does not expose single_grouped_weight",
+)
 class TestMoESingleGroupedWeightNumerics:
     """Numerical parity tests for MoE single grouped weights under DistOpt."""
 
