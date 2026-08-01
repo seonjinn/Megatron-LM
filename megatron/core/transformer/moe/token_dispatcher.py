@@ -2027,7 +2027,7 @@ class MoEFlexTokenDispatcher(MoETokenDispatcher):
         return _detached("_zc_fwd_token_buf"), dispatch_grad_input
 
     def validate_cudagraph_replay_capability(self) -> None:
-        """Allow only fixed-capacity HybridEP for partial CUDA graph replay."""
+        """Allow HybridEP preprocessing metadata in partial CUDA graph replay."""
 
         backend = self.config.moe_flex_dispatcher_backend
         if backend == "deepep":
@@ -2042,18 +2042,11 @@ class MoEFlexTokenDispatcher(MoETokenDispatcher):
             )
         if backend != "hybridep":
             raise RuntimeError(f"Unknown Flex dispatcher backend {backend!r}.")
-        if not (
-            self._comm_manager.drop_and_pad
-            or getattr(self.config, "moe_expert_rank_capacity_factor", None) is not None
-        ):
-            raise RuntimeError(
-                "Flex/HybridEP partial CUDA graph replay requires a strictly fixed capacity."
-            )
 
     def snapshot_cudagraph_replay_state(
         self, graph_input: torch.Tensor, preprocessed_hidden_states: torch.Tensor
     ) -> MoECudaGraphReplayState:
-        """Snapshot fixed-capacity HybridEP structural metadata."""
+        """Snapshot HybridEP metadata owned by dispatch preprocessing."""
 
         self.validate_cudagraph_replay_capability()
         manager = self._comm_manager
@@ -2062,8 +2055,6 @@ class MoEFlexTokenDispatcher(MoETokenDispatcher):
         num_permuted_tokens = to_optional_int(
             manager.num_permuted_tokens, field_name="num_permuted_tokens"
         )
-        if num_permuted_tokens is None:
-            raise RuntimeError("HybridEP CUDA graph replay requires fixed num_permuted_tokens.")
         tokens_per_expert = None
         if manager.drop_and_pad:
             tokens_per_expert = tuple(int(value) for value in manager.tokens_per_expert.tolist())
@@ -2093,7 +2084,7 @@ class MoEFlexTokenDispatcher(MoETokenDispatcher):
         graph_input: torch.Tensor,
         preprocessed_hidden_states: torch.Tensor,
     ) -> None:
-        """Restore fixed-capacity HybridEP metadata for one exact graph entry."""
+        """Restore pre-dispatch HybridEP metadata for one exact graph entry."""
 
         self._validate_cudagraph_replay_state(
             state,

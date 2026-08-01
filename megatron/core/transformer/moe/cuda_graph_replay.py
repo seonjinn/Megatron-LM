@@ -31,12 +31,12 @@ class AlltoAllCudaGraphState:
 
 @dataclass(frozen=True)
 class HybridEPCudaGraphState:
-    """Structural fixed-capacity HybridEP metadata produced before dispatch."""
+    """HybridEP metadata where ``num_permuted_tokens=None`` delegates sizing to eager dispatch."""
 
     original_num_tokens: int
     padded_num_tokens: int
     capacity: int | None
-    num_permuted_tokens: int
+    num_permuted_tokens: int | None
     tokens_per_expert: tuple[int, ...] | None
 
 

@@ -2786,6 +2786,37 @@ def test_partial_moe_capture_routes_only_stream_captures_to_exact_runner_index(m
     assert calls == [(0, residuals[2], preprocessed[2]), (1, residuals[4], preprocessed[4])]
 
 
+def test_hybridep_router_only_cudagraph_bypasses_dispatcher_replay_state(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    import megatron.core.transformer.transformer_layer as transformer_layer_module
+    from megatron.core.transformer.transformer_layer import TransformerLayer
+
+    residual = torch.empty(1)
+    layer = SimpleNamespace(
+        config=SimpleNamespace(cuda_graph_modules=[CudaGraphModule.moe_router]),
+        offload_module_in_cuda_graph=False,
+        is_moe_layer=True,
+        _te_cuda_graph_capture_num_microbatches=1,
+        _te_cuda_graph_capture_cursor=0,
+        _rebuild_te_cuda_graph_packed_seq_params=lambda kwargs: None,
+        _rebuild_te_cuda_graph_moe_packed_seq_params=lambda kwargs: None,
+        _validate_te_cuda_graph_moe_packed_seq_params_kwargs=lambda kwargs: None,
+        _forward_attention=lambda *args, **kwargs: (args[0], None),
+        _forward_mlp=lambda hidden_states, **kwargs: [torch.empty(1), residual],
+        _record_te_cuda_graph_dispatcher_replay_state=lambda *args: pytest.fail(
+            "router-only capture claimed dispatcher replay-state ownership"
+        ),
+    )
+    monkeypatch.setattr(
+        transformer_layer_module, "_is_te_cuda_graph_stream_capturing", lambda: True
+    )
+
+    outputs = TransformerLayer._te_cuda_graph_capture(layer, residual)
+
+    assert outputs[-1] is residual
+
+
 def test_dropless_alltoall_partial_capture_accepts_static_output_geometry() -> None:
     from types import SimpleNamespace
 
@@ -2827,7 +2858,7 @@ def test_partial_moe_capture_rejects_cuda_scalar_snapshot_before_capture(
         layer._validate_te_cuda_graph_dispatcher_replay_capability()
 
 
-def test_partial_hybridep_capture_rejects_uneven_input_gpu_sync_before_capture() -> None:
+def test_partial_hybridep_cudagraph_rejects_uneven_input_gpu_sync_before_capture() -> None:
     from types import SimpleNamespace
 
     from megatron.core.transformer.moe.token_dispatcher import MoEFlexTokenDispatcher
