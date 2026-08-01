@@ -27,8 +27,14 @@ from megatron.core import mpu
 from megatron.core.datasets.blended_megatron_dataset_builder import BlendedMegatronDatasetBuilder
 from megatron.core.datasets.gpt_dataset import GPTDataset, GPTDatasetConfig, MockGPTDataset
 from megatron.core.enums import ModelType
+from megatron.core.model_parallel_config import ModelParallelConfig
 from megatron.core.models.hybrid.hybrid_model import HybridModel
-from megatron.core.packed_seq_params import PackedSeqParams
+from megatron.core.packed_seq_params import (
+    PackedSeqParams,
+    get_thd_padding_kwargs,
+    pad_sequence_for_thd,
+    resolve_thd_tail_padding_policy,
+)
 from megatron.core.parallel_state import (
     get_context_parallel_group,
     get_hybrid_data_context_parallel_groups,
@@ -47,6 +53,7 @@ from megatron.core.utils import (
 from megatron.training import (
     get_args,
     get_timers,
+    get_tokenizer,
     inprocess_restart,
     pretrain,
     print_rank_0,
@@ -57,7 +64,7 @@ from megatron.training.argument_utils import (
     pretrain_cfg_container_from_args,
 )
 from megatron.training.arguments import core_transformer_config_from_args, parse_and_validate_args
-from megatron.training.datasets.sft_dataset import SFTDataset
+from megatron.training.datasets.sft_dataset import IGNORE_INDEX, SFTDataset
 from megatron.training.training import (
     update_packed_sequence_stats,
     update_seqlen_stats_from_cu_seqlens,
@@ -74,6 +81,15 @@ except ImportError:
 
 stimer = StragglerDetector()
 
+_PreparedPackedTHDBatch = Tuple[
+    Optional[torch.Tensor],
+    Optional[torch.Tensor],
+    Optional[torch.Tensor],
+    Optional[torch.Tensor],
+    PackedSeqParams,
+    Optional[torch.Tensor],
+]
+
 
 def _sample_lengths_for_packed_stats(batch: dict[str, torch.Tensor | None]) -> torch.Tensor | None:
     sample_lengths = batch.get("sample_lengths")
@@ -86,6 +102,95 @@ def _sample_lengths_for_packed_stats(batch: dict[str, torch.Tensor | None]) -> t
     if cu_seqlens.dim() == 1:
         return cu_seqlens[1:] - cu_seqlens[:-1]
     return cu_seqlens[:, 1:] - cu_seqlens[:, :-1]
+
+
+def _prepare_packed_thd_batch(
+    tokens: Optional[torch.Tensor],
+    labels: Optional[torch.Tensor],
+    loss_mask: Optional[torch.Tensor],
+    position_ids: Optional[torch.Tensor],
+    cu_seqlens: torch.Tensor,
+    cu_seqlens_padded: Optional[torch.Tensor],
+    max_seqlen: torch.Tensor,
+    local_cp_size: Optional[torch.Tensor],
+    hybrid_cp_group: Optional[torch.distributed.ProcessGroup],
+    config: ModelParallelConfig,
+    pad_token_id: int,
+    context_parallel_size: int,
+) -> _PreparedPackedTHDBatch:
+    """Build and optionally pad the external packed-THD batch boundary."""
+    if context_parallel_size != 1:
+        raise ValueError(
+            "External packed-THD padding with context parallelism requires DynamicCP "
+            "integration, which is a separate follow-up."
+        )
+
+    physical_cu_seqlens = cu_seqlens_padded if cu_seqlens_padded is not None else cu_seqlens
+    token_like_tensors = (tokens, labels, loss_mask, position_ids)
+    total_tokens = next(
+        (int(tensor.shape[-1]) for tensor in token_like_tensors if tensor is not None),
+        int(physical_cu_seqlens[-1].item()),
+    )
+    packed_seq_params = PackedSeqParams(
+        qkv_format="thd",
+        cu_seqlens_q=cu_seqlens,
+        cu_seqlens_kv=cu_seqlens,
+        cu_seqlens_q_padded=cu_seqlens_padded,
+        cu_seqlens_kv_padded=cu_seqlens_padded,
+        max_seqlen_q=int(max_seqlen.item()),
+        max_seqlen_kv=int(max_seqlen.item()),
+        local_cp_size=int(local_cp_size.item()) if local_cp_size is not None else None,
+        cp_group=hybrid_cp_group,
+        total_tokens=total_tokens,
+        tokens_per_sample=total_tokens,
+    )
+
+    pad_packed_seq_alignment = config.pad_packed_seq_alignment
+    if pad_packed_seq_alignment is None:
+        return (tokens, labels, loss_mask, position_ids, packed_seq_params, None)
+
+    alignment, target_len, max_num_seqs = get_thd_padding_kwargs(
+        pad_packed_seq_alignment,
+        config.max_seqlen_per_dp_cp_rank,
+        getattr(config, "thd_max_packed_sequences", None),
+        getattr(config, "cuda_graph_impl", "none") != "none",
+    )
+    (
+        padded_tokens,
+        padded_labels,
+        padded_loss_mask,
+        padded_position_ids,
+        padded_seq_params,
+        padding_mask,
+    ) = pad_sequence_for_thd(
+        tokens,
+        labels,
+        loss_mask,
+        position_ids,
+        packed_seq_params,
+        alignment=alignment,
+        target_len=target_len,
+        max_num_seqs=max_num_seqs,
+        tail_padding_policy=resolve_thd_tail_padding_policy(config),
+        cp_size=context_parallel_size,
+    )
+
+    if padded_tokens is not None:
+        padded_tokens = padded_tokens.masked_fill(padding_mask, pad_token_id)
+    if padded_labels is not None:
+        padded_labels = padded_labels.masked_fill(padding_mask, IGNORE_INDEX)
+    if padded_loss_mask is not None:
+        padded_loss_mask = padded_loss_mask.masked_fill(padding_mask, 0)
+    padded_seq_params.tokens_per_sample = padded_seq_params.total_tokens
+
+    return (
+        padded_tokens,
+        padded_labels,
+        padded_loss_mask,
+        padded_position_ids,
+        padded_seq_params,
+        padding_mask,
+    )
 
 
 def get_batch(data_iterator, vp_stage=None):
@@ -227,6 +332,7 @@ def forward_step(data_iterator, model: HybridModel):
         ) = get_batch(data_iterator, vp_stage)
 
     packed_seq_params = None
+    padding_mask = None
     if cu_seqlens is not None:
         # cu_seqlens / cu_seqlens_padded carry the dataloader's batch dim (1, n).
         # PackedSeqParams (and TE attention) expect 1-D, so squeeze before use.
@@ -236,18 +342,23 @@ def forward_step(data_iterator, model: HybridModel):
         # Use real (unpadded) cu_seqlens to feed the FLOPs accounting: varlen
         # attention only computes work for real tokens within each chunk.
         update_seqlen_stats_from_cu_seqlens(cu_seqlens)
-        cu_seqlens_for_params = cu_seqlens_padded if cu_seqlens_padded is not None else cu_seqlens
-        packed_seq_params = PackedSeqParams(
-            qkv_format="thd",
-            cu_seqlens_q=cu_seqlens_for_params,
-            cu_seqlens_kv=cu_seqlens_for_params,
-            cu_seqlens_q_padded=cu_seqlens_padded,
-            cu_seqlens_kv_padded=cu_seqlens_padded,
-            max_seqlen_q=int(max_seqlen.item()),
-            max_seqlen_kv=int(max_seqlen.item()),
-            local_cp_size=int(local_cp_size.item()) if local_cp_size is not None else None,
-            cp_group=hybrid_cp_group,
-            total_tokens=int(cu_seqlens_for_params[-1].item()),
+        args = get_args()
+        config = core_transformer_config_from_args(args)
+        (tokens, labels, loss_mask, position_ids, packed_seq_params, padding_mask) = (
+            _prepare_packed_thd_batch(
+                tokens=tokens,
+                labels=labels,
+                loss_mask=loss_mask,
+                position_ids=position_ids,
+                cu_seqlens=cu_seqlens,
+                cu_seqlens_padded=cu_seqlens_padded,
+                max_seqlen=max_seqlen,
+                local_cp_size=local_cp_size,
+                hybrid_cp_group=hybrid_cp_group,
+                config=config,
+                pad_token_id=int(get_tokenizer().pad),
+                context_parallel_size=args.context_parallel_size,
+            )
         )
 
     timers('batch-generator').stop()
@@ -259,7 +370,8 @@ def forward_step(data_iterator, model: HybridModel):
             attention_mask,
             labels=labels,
             packed_seq_params=packed_seq_params,
-            loss_mask=loss_mask
+            loss_mask=loss_mask,
+            padding_mask=padding_mask,
         )
 
     # [ModelOpt]: model is needed to access ModelOpt distillation losses
