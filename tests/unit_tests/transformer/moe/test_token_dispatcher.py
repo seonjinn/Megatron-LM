@@ -579,7 +579,7 @@ def _make_hybridep_replay_state_dispatcher(
     manager = _HybridEPManager.__new__(_HybridEPManager)
     manager.drop_and_pad = drop_and_pad
     manager._original_num_tokens = 6
-    manager._padded_num_tokens = 8
+    manager._padded_num_tokens = 6
     manager.capacity = 5 if drop_and_pad else None
     manager.num_permuted_tokens = 40
     manager.tokens_per_expert = torch.tensor([20, 20], dtype=torch.long)
@@ -605,7 +605,7 @@ def test_hybridep_cudagraph_replay_state_restores_fixed_capacity_metadata() -> N
     dispatcher.restore_cudagraph_replay_state(state, graph_input, preprocessed)
 
     assert manager._original_num_tokens == 6
-    assert manager._padded_num_tokens == 8
+    assert manager._padded_num_tokens == 6
     assert manager.capacity == 5
     assert manager.num_permuted_tokens == 40
     assert tuple(manager.tokens_per_expert.tolist()) == (20, 20)
@@ -680,30 +680,79 @@ def test_hybridep_cudagraph_dropless_replay_preserves_eager_dispatch_ownership(
             [True, True],
         ]
     )
-    replay_routing_map = torch.tensor(
-        [
-            [True, False],
-            [False, True],
-            [True, False],
-            [False, True],
-            [True, False],
-            [False, True],
-        ]
-    )
-    observed_dispatch_bound = []
-    observed_combine_bound = []
+    replay_cases = [
+        (
+            torch.tensor(
+                [
+                    [True, False],
+                    [False, True],
+                    [True, False],
+                    [False, True],
+                    [True, False],
+                    [False, True],
+                ]
+            ),
+            ((0, 0), (1, 1), (2, 0), (3, 1), (4, 0), (5, 1)),
+            (3, 3),
+        ),
+        (
+            capture_routing_map,
+            (
+                (0, 0),
+                (1, 0),
+                (1, 1),
+                (2, 1),
+                (3, 0),
+                (4, 1),
+                (5, 0),
+                (5, 1),
+            ),
+            (4, 4),
+        ),
+    ]
+    observed_dispatches = []
+    observed_combines = []
 
     def fake_hybrid_ep_dispatch(**kwargs):
-        observed_dispatch_bound.append(kwargs["num_permuted_tokens"])
-        tokens_per_expert = kwargs["routing_map"].sum(dim=(0, 1), dtype=torch.int64)
-        num_dispatched_tokens = int(tokens_per_expert.sum().item())
-        dispatched_hidden = kwargs["x"].new_zeros((num_dispatched_tokens, kwargs["x"].shape[-1]))
-        dispatched_probs = kwargs["probs"].new_ones((num_dispatched_tokens,))
-        return dispatched_hidden, dispatched_probs, None, tokens_per_expert, object()
+        selected_route_tensor = kwargs["routing_map"].nonzero(as_tuple=False)
+        selected_routes = tuple(tuple(int(value) for value in row) for row in selected_route_tensor)
+        token_indices = selected_route_tensor[:, 0]
+        expert_indices = selected_route_tensor[:, 1]
+        tokens_per_expert = torch.bincount(expert_indices, minlength=manager.num_local_experts)
+        handle = SimpleNamespace(
+            replay_index=len(observed_dispatches),
+            token_indices=token_indices,
+            num_permuted_tokens=len(selected_routes),
+        )
+        observed_dispatches.append(
+            {
+                "bound": kwargs["num_permuted_tokens"],
+                "handle": handle,
+                "routes": selected_routes,
+                "tokens_per_expert": tuple(int(value) for value in tokens_per_expert),
+            }
+        )
+        dispatched_hidden = kwargs["x"].index_select(0, token_indices)
+        dispatched_probs = kwargs["probs"][
+            selected_route_tensor[:, 0],
+            selected_route_tensor[:, 1],
+        ]
+        return dispatched_hidden, dispatched_probs, None, tokens_per_expert, handle
 
     def fake_hybrid_ep_combine(**kwargs):
-        observed_combine_bound.append(kwargs["num_permuted_tokens"])
-        return kwargs["x"].new_zeros((graph_input.numel() // graph_input.shape[-1], 4))
+        num_permuted_tokens = int(kwargs["num_permuted_tokens"].item())
+        observed_combines.append(
+            {
+                "handle": kwargs["handle"],
+                "num_permuted_tokens": num_permuted_tokens,
+                "input_rows": kwargs["x"].shape[0],
+            }
+        )
+        combined = kwargs["x"].new_zeros(
+            (graph_input.numel() // graph_input.shape[-1], graph_input.shape[-1])
+        )
+        combined.index_add_(0, kwargs["handle"].token_indices, kwargs["x"])
+        return combined
 
     monkeypatch.setattr(
         "megatron.core.transformer.moe.token_dispatcher.hybrid_ep_dispatch",
@@ -720,22 +769,57 @@ def test_hybridep_cudagraph_dropless_replay_preserves_eager_dispatch_ownership(
     state = dispatcher.snapshot_cudagraph_replay_state(graph_input, capture_preprocessed)
     assert state.backend_state.num_permuted_tokens is None
 
-    preprocessed, probs = dispatcher.dispatch_preprocess(
-        graph_input, replay_routing_map, replay_routing_map.to(dtype=torch.float32)
-    )
-    manager.num_permuted_tokens = 999
-    dispatcher.restore_cudagraph_replay_state(state, graph_input, preprocessed)
-    assert manager.num_permuted_tokens is None
+    for replay_index, (routing_map, expected_routes, expected_tokens_per_expert) in enumerate(
+        replay_cases
+    ):
+        if replay_index > 0:
+            assert manager._original_num_tokens is None
+            assert manager._padded_num_tokens is None
+            assert manager.num_permuted_tokens is None
+            assert manager.handle is None
 
-    dispatched_hidden, _ = dispatcher.token_dispatch(preprocessed, probs)
-    assert observed_dispatch_bound == [None]
-    assert manager.num_permuted_tokens.item() == 6
+        probs = routing_map.to(dtype=torch.float32) / routing_map.sum(dim=-1, keepdim=True)
+        preprocessed, probs = dispatcher.dispatch_preprocess(graph_input, routing_map, probs)
+        manager.num_permuted_tokens = 999
+        dispatcher.restore_cudagraph_replay_state(state, graph_input, preprocessed)
 
-    combined = dispatcher.token_combine(dispatched_hidden)
-    assert len(observed_combine_bound) == 1
-    assert observed_combine_bound[0].item() == 6
-    assert manager.num_permuted_tokens is None
-    dispatcher.validate_cudagraph_continuation(state, combined.view(graph_input.shape))
+        assert manager._original_num_tokens == 6
+        assert manager._padded_num_tokens == 6
+        assert manager.num_permuted_tokens is None
+        assert manager.handle is None
+
+        dispatched_hidden, dispatched_probs = dispatcher.token_dispatch(preprocessed, probs)
+        expert_input, tokens_per_expert, permuted_probs = dispatcher.dispatch_postprocess(
+            dispatched_hidden, dispatched_probs
+        )
+        assert expert_input is dispatched_hidden
+        assert tuple(int(value) for value in tokens_per_expert) == expected_tokens_per_expert
+        assert observed_dispatches[replay_index]["routes"] == expected_routes
+        assert observed_dispatches[replay_index]["tokens_per_expert"] == expected_tokens_per_expert
+        assert observed_dispatches[replay_index]["bound"] is None
+        assert manager.num_permuted_tokens.item() == len(expected_routes)
+        assert manager.handle is observed_dispatches[replay_index]["handle"]
+
+        expert_output = expert_input * permuted_probs.unsqueeze(-1)
+        combine_input = dispatcher.combine_preprocess(expert_output)
+        combined = dispatcher.token_combine(combine_input)
+        output = dispatcher.combine_postprocess(combined)
+
+        assert observed_combines[replay_index]["handle"] is observed_dispatches[replay_index][
+            "handle"
+        ]
+        assert observed_combines[replay_index]["num_permuted_tokens"] == len(expected_routes)
+        assert observed_combines[replay_index]["input_rows"] == len(expected_routes)
+        assert manager._original_num_tokens is None
+        assert manager._padded_num_tokens is None
+        assert manager.num_permuted_tokens is None
+        assert manager.handle is None
+        torch.testing.assert_close(output, graph_input)
+        dispatcher.validate_cudagraph_continuation(state, output)
+
+    assert [dispatch["bound"] for dispatch in observed_dispatches] == [None, None]
+    assert observed_dispatches[0]["handle"] is not observed_dispatches[1]["handle"]
+    assert [combine["num_permuted_tokens"] for combine in observed_combines] == [6, 8]
 
 
 def test_hybridep_cudagraph_continuation_requires_restored_physical_rows() -> None:
