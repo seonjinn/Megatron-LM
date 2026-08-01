@@ -151,20 +151,21 @@ def _get_thd_freqs_on_this_cp_rank(
            compatibility.
     """
     if cp_size > 1:
-        cp_seg = x.size(0) // 2
+        first_cp_seg = (x.size(0) + 1) // 2
+        second_cp_seg = x.size(0) // 2
         full_seqlen = cp_size * x.size(0)
         # Apply offset to both forward and backward segments for context parallelism
         # offset=0: traditional behavior, freqs[0:cp_seg] and freqs[...]
         # offset>0: exact mapping, freqs[offset+0:offset+cp_seg] and freqs[offset+...]
         return torch.cat(
             [
-                freqs[offset + cp_rank * cp_seg : offset + (cp_rank + 1) * cp_seg],
+                freqs[offset + cp_rank * first_cp_seg : offset + (cp_rank + 1) * first_cp_seg],
                 freqs[
                     offset
                     + full_seqlen
-                    - (cp_rank + 1) * cp_seg : offset
+                    - (cp_rank + 1) * second_cp_seg : offset
                     + full_seqlen
-                    - cp_rank * cp_seg
+                    - cp_rank * second_cp_seg
                 ],
             ]
         )
@@ -183,8 +184,9 @@ def _apply_rotary_pos_emb_thd(
     multi_latent_attention: bool = False,
     mscale: float = 1.0,
     cp_group: torch.distributed.ProcessGroup = None,
+    max_seqlen: Optional[int] = None,
 ) -> Tensor:
-    """A baseline implementation of applying RoPE for `thd` format.
+    """Apply THD RoPE with tensor-only position construction.
 
     Args:
         t (Tensor): Input tensor T is of shape [t, h, d]
@@ -201,50 +203,46 @@ def _apply_rotary_pos_emb_thd(
         raise ValueError("cp_group must be provided for THD format RoPE")
     cp_size = cp_group.size()
     cp_rank = cp_group.rank()
-    seqlens = ((cu_seqlens[1:] - cu_seqlens[:-1]) // cp_size).tolist()
+    token_pos = torch.arange(t.shape[0], device=t.device, dtype=torch.int64)
+    cu_seqlens_i64 = cu_seqlens.to(torch.int64)
+    global_seq_lens = cu_seqlens_i64[1:] - cu_seqlens_i64[:-1]
+    local_seq_lens = global_seq_lens // cp_size if cp_size > 1 else global_seq_lens
+    local_cu_seqlens = torch.zeros_like(cu_seqlens_i64)
+    local_cu_seqlens[1:] = torch.cumsum(local_seq_lens, dim=0)
 
-    # Handle two different frequency tensor formats:
-    # 1. If freqs.size(0) == cu_seqlens[-1]: freqs contains all positions across all sequences
-    #    -> Use offset-based mapping for exact positional correspondence
-    # 2. Otherwise: freqs contains only max sequence length positions
-    #    -> Use traditional mapping without offsets (map first :seqlen part)
-    if freqs.dim() >= 1 and freqs.size(0) == cu_seqlens[-1]:
-        # CASE 1: Exact mapping with offsets
-        # Build packed freqs in one pass, then apply once to the whole packed tensor
-        sequence_splits = torch.split(t, seqlens)
-        freq_slices = []
-        for i, x in enumerate(sequence_splits):
-            # cu_seqlens[i] is the starting offset of this sequence in the original batch
-            seq_start_offset = cu_seqlens[i].item()
-            freq_slices.append(
-                _get_thd_freqs_on_this_cp_rank(cp_rank, cp_size, x, freqs, seq_start_offset)
-            )
+    seq_idx = torch.searchsorted(local_cu_seqlens, token_pos, right=True) - 1
+    seq_idx = seq_idx.clamp(min=0, max=cu_seqlens.shape[0] - 2)
+    local_seq_start = local_cu_seqlens[seq_idx]
+    local_pos = token_pos - local_seq_start
+    local_seq_len = local_seq_lens[seq_idx]
+    global_seq_start = cu_seqlens_i64[seq_idx]
 
-        freqs_packed = torch.cat(freq_slices, dim=0)
-
-        return _apply_rotary_pos_emb_bshd(
-            t.unsqueeze(1),
-            freqs_packed,
-            rotary_interleaved=rotary_interleaved,
-            multi_latent_attention=multi_latent_attention,
-            mscale=mscale,
-        ).squeeze(1)
-    else:
-        # CASE 2: Traditional mapping without offsets
-        # Build packed freqs for all sequences using the standard mapping, then apply once
-        sequence_splits = torch.split(t, seqlens)
-        freqs_packed = torch.cat(
-            [_get_thd_freqs_on_this_cp_rank(cp_rank, cp_size, x, freqs) for x in sequence_splits],
-            dim=0,
+    if cp_size > 1:
+        first_cp_seg = (local_seq_len + 1) // 2
+        second_cp_seg = local_seq_len // 2
+        full_seqlen = local_seq_len * cp_size
+        is_first_half = local_pos < first_cp_seg
+        freq_pos = torch.where(
+            is_first_half,
+            cp_rank * first_cp_seg + local_pos,
+            full_seqlen - (cp_rank + 1) * second_cp_seg + (local_pos - first_cp_seg),
         )
+    else:
+        freq_pos = local_pos
 
-        return _apply_rotary_pos_emb_bshd(
-            t.unsqueeze(1),
-            freqs_packed,
-            rotary_interleaved=rotary_interleaved,
-            multi_latent_attention=multi_latent_attention,
-            mscale=mscale,
-        ).squeeze(1)
+    assert max_seqlen is not None, "max_seqlen must be provided for THD RoPE."
+    if freqs.dim() >= 1 and freqs.size(0) > max_seqlen:
+        freq_pos = freq_pos + global_seq_start
+
+    freq_pos = freq_pos.clamp(min=0, max=freqs.shape[0] - 1)
+    freqs_packed = freqs[freq_pos]
+    return _apply_rotary_pos_emb_bshd(
+        t.unsqueeze(1),
+        freqs_packed,
+        rotary_interleaved=rotary_interleaved,
+        multi_latent_attention=multi_latent_attention,
+        mscale=mscale,
+    ).squeeze(1)
 
 
 def apply_rotary_pos_emb(
@@ -254,7 +252,8 @@ def apply_rotary_pos_emb(
     cu_seqlens: Optional[Tensor] = None,
     mscale: float = 1.0,
     cp_group: torch.distributed.ProcessGroup = None,
-):
+    max_seqlen: Optional[int] = None,
+) -> Tensor:
     """
     Reroute to the appropriate apply_rotary_pos_emb function depending on
     fused/unfused kernels, or bshd (conventional) / thd (packed seq) format
@@ -313,6 +312,7 @@ def apply_rotary_pos_emb(
             multi_latent_attention=config.multi_latent_attention,
             mscale=mscale,
             cp_group=cp_group,
+            max_seqlen=max_seqlen,
         )
 
 
