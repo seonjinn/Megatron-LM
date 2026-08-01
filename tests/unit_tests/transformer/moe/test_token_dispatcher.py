@@ -476,7 +476,7 @@ def _make_hybridep_replay_state_dispatcher(
         moe_flex_dispatcher_backend="hybridep",
         moe_expert_capacity_factor=1.0 if drop_and_pad else None,
         moe_expert_rank_capacity_factor=rank_capacity,
-        moe_hybridep_pad_uneven_dispatch_inputs=True,
+        moe_hybridep_pad_uneven_dispatch_inputs=False,
     )
     dispatcher.tp_size = 2
     dispatcher.ep_size = 4
@@ -522,6 +522,129 @@ def test_hybridep_cudagraph_replay_state_restores_fixed_capacity_metadata() -> N
     assert manager.pad_multiple == 16
 
 
+def test_hybridep_cudagraph_replay_state_restores_fixed_rank_capacity_metadata() -> None:
+    dispatcher = _make_hybridep_replay_state_dispatcher(drop_and_pad=False, rank_capacity=1.0)
+    graph_input = torch.empty((2, 3, 4), dtype=torch.bfloat16)
+    preprocessed = torch.empty((6, 4), dtype=torch.bfloat16)
+
+    state = dispatcher.snapshot_cudagraph_replay_state(graph_input, preprocessed)
+    dispatcher._comm_manager.num_permuted_tokens = 7
+
+    dispatcher.restore_cudagraph_replay_state(state, graph_input, preprocessed)
+
+    assert dispatcher._comm_manager.num_permuted_tokens == 40
+    assert state.backend_state.tokens_per_expert is None
+
+
+def test_hybridep_cudagraph_dropless_replay_preserves_eager_dispatch_ownership(
+    monkeypatch,
+) -> None:
+    dispatcher = MoEFlexTokenDispatcher.__new__(MoEFlexTokenDispatcher)
+    dispatcher.config = SimpleNamespace(
+        moe_flex_dispatcher_backend="hybridep",
+        moe_expert_capacity_factor=None,
+        moe_expert_rank_capacity_factor=None,
+        moe_hybridep_pad_uneven_dispatch_inputs=False,
+        moe_router_topk=2,
+    )
+    dispatcher.tp_size = 1
+    dispatcher.ep_size = 1
+    dispatcher.num_local_experts = 2
+    dispatcher.num_experts = 2
+    dispatcher.shared_experts = None
+
+    manager = _HybridEPManager.__new__(_HybridEPManager)
+    manager.group = SimpleNamespace(size=lambda: 1)
+    manager.num_local_experts = 2
+    manager.num_experts = 2
+    manager.config = SimpleNamespace(
+        moe_hybridep_pad_uneven_dispatch_inputs=False,
+        moe_router_topk=2,
+        fp8=False,
+        fp4=False,
+        moe_flex_dispatcher_num_sms=20,
+        moe_hybridep_num_blocks_permute=4,
+        moe_hybridep_num_blocks_unpermute=4,
+        moe_permute_fusion_into_hybridep=False,
+        moe_hybridep_num_sms_preprocessing=4,
+    )
+    manager.moe_expert_rank_capacity_factor = None
+    manager.drop_and_pad = False
+    manager.capacity = None
+    manager.num_permuted_tokens = None
+    manager.handle = None
+    manager.pad_multiple = None
+    dispatcher._comm_manager = manager
+
+    graph_input = torch.arange(24, dtype=torch.float32).reshape(2, 3, 4)
+    capture_routing_map = torch.tensor(
+        [
+            [True, False],
+            [True, True],
+            [False, True],
+            [True, False],
+            [False, True],
+            [True, True],
+        ]
+    )
+    replay_routing_map = torch.tensor(
+        [
+            [True, False],
+            [False, True],
+            [True, False],
+            [False, True],
+            [True, False],
+            [False, True],
+        ]
+    )
+    observed_dispatch_bound = []
+    observed_combine_bound = []
+
+    def fake_hybrid_ep_dispatch(**kwargs):
+        observed_dispatch_bound.append(kwargs["num_permuted_tokens"])
+        tokens_per_expert = kwargs["routing_map"].sum(dim=(0, 1), dtype=torch.int64)
+        num_dispatched_tokens = int(tokens_per_expert.sum().item())
+        dispatched_hidden = kwargs["x"].new_zeros((num_dispatched_tokens, kwargs["x"].shape[-1]))
+        dispatched_probs = kwargs["probs"].new_ones((num_dispatched_tokens,))
+        return dispatched_hidden, dispatched_probs, None, tokens_per_expert, object()
+
+    def fake_hybrid_ep_combine(**kwargs):
+        observed_combine_bound.append(kwargs["num_permuted_tokens"])
+        return kwargs["x"].new_zeros((graph_input.numel() // graph_input.shape[-1], 4))
+
+    monkeypatch.setattr(
+        "megatron.core.transformer.moe.token_dispatcher.hybrid_ep_dispatch",
+        fake_hybrid_ep_dispatch,
+    )
+    monkeypatch.setattr(
+        "megatron.core.transformer.moe.token_dispatcher.hybrid_ep_combine",
+        fake_hybrid_ep_combine,
+    )
+
+    capture_preprocessed, _ = dispatcher.dispatch_preprocess(
+        graph_input, capture_routing_map, capture_routing_map.to(dtype=torch.float32)
+    )
+    state = dispatcher.snapshot_cudagraph_replay_state(graph_input, capture_preprocessed)
+    assert state.backend_state.num_permuted_tokens is None
+
+    preprocessed, probs = dispatcher.dispatch_preprocess(
+        graph_input, replay_routing_map, replay_routing_map.to(dtype=torch.float32)
+    )
+    manager.num_permuted_tokens = 999
+    dispatcher.restore_cudagraph_replay_state(state, graph_input, preprocessed)
+    assert manager.num_permuted_tokens is None
+
+    dispatched_hidden, _ = dispatcher.token_dispatch(preprocessed, probs)
+    assert observed_dispatch_bound == [None]
+    assert manager.num_permuted_tokens.item() == 6
+
+    combined = dispatcher.token_combine(dispatched_hidden)
+    assert len(observed_combine_bound) == 1
+    assert observed_combine_bound[0].item() == 6
+    assert manager.num_permuted_tokens is None
+    dispatcher.validate_cudagraph_continuation(state, combined.view(graph_input.shape))
+
+
 def test_hybridep_cudagraph_continuation_requires_restored_physical_rows() -> None:
     dispatcher = _make_hybridep_replay_state_dispatcher()
     graph_input = torch.empty((2, 3, 4), dtype=torch.bfloat16)
@@ -548,13 +671,6 @@ def test_flex_cudagraph_replay_state_rejects_unsupported_backends_before_capture
     )
 
     with pytest.raises(RuntimeError, match="CUDA graph capture"):
-        dispatcher.validate_cudagraph_replay_capability()
-
-
-def test_hybridep_cudagraph_replay_state_requires_fixed_capacity() -> None:
-    dispatcher = _make_hybridep_replay_state_dispatcher(drop_and_pad=False, rank_capacity=None)
-
-    with pytest.raises(RuntimeError, match="fixed capacity"):
         dispatcher.validate_cudagraph_replay_capability()
 
 
