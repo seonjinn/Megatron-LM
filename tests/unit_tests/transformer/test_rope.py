@@ -21,6 +21,79 @@ except ImportError:
 from tests.unit_tests.test_utilities import Utils
 
 
+class _SingleRankCPGroup:
+    """Minimal context-parallel group interface for THD RoPE tests."""
+
+    @staticmethod
+    def size() -> int:
+        return 1
+
+    @staticmethod
+    def rank() -> int:
+        return 0
+
+
+def _thd_rope_reference(
+    tensor: torch.Tensor, freqs: torch.Tensor, position_ids: torch.Tensor
+) -> torch.Tensor:
+    """Tensor-only reference with literal packed positions derived by the test."""
+    packed_freqs = freqs.index_select(0, position_ids).squeeze(1)
+    rotary_dim = packed_freqs.shape[-1]
+    rotary, passthrough = tensor[..., :rotary_dim], tensor[..., rotary_dim:]
+    first_half, second_half = torch.chunk(rotary, 2, dim=-1)
+    rotated = torch.cat((-second_half, first_half), dim=-1)
+    output = rotary * torch.cos(packed_freqs) + rotated * torch.sin(packed_freqs)
+    return torch.cat((output, passthrough), dim=-1)
+
+
+@pytest.mark.internal
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+def test_thd_rope_cuda_graph_accepts_max_seqlen_with_forward_and_gradient_parity():
+    """The public THD RoPE path must remain tensor-only during capture, including a padded tail."""
+    device = torch.device("cuda", torch.cuda.current_device())
+    config = TransformerConfig(
+        num_layers=1, hidden_size=16, num_attention_heads=2, apply_rope_fusion=False
+    )
+    cp_group = _SingleRankCPGroup()
+    cu_seqlens = torch.tensor([0, 4, 8], dtype=torch.int32, device=device)
+    position_ids = torch.tensor([0, 1, 2, 3, 0, 1, 2, 3, 4, 5], dtype=torch.long, device=device)
+    freqs = torch.linspace(-0.7, 0.9, 6 * 8, device=device).reshape(6, 1, 1, 8)
+    base = torch.linspace(-1.0, 1.0, 10 * 2 * 8, device=device).reshape(10, 2, 8)
+
+    def apply_thd_rope(tensor: torch.Tensor) -> torch.Tensor:
+        return apply_rotary_pos_emb(
+            tensor, freqs, config, cu_seqlens=cu_seqlens, cp_group=cp_group, max_seqlen=6
+        )
+
+    capture_input = base.clone()
+    warmup_stream = torch.cuda.Stream()
+    warmup_stream.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(warmup_stream):
+        apply_thd_rope(capture_input)
+    torch.cuda.current_stream().wait_stream(warmup_stream)
+
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph):
+        captured_output = apply_thd_rope(capture_input)
+    graph.replay()
+
+    expected_output = _thd_rope_reference(base, freqs, position_ids)
+    assert torch.allclose(captured_output, expected_output)
+
+    actual_input = base.clone().requires_grad_()
+    reference_input = base.clone().requires_grad_()
+    output_gradient = torch.linspace(-0.5, 0.5, base.numel(), device=device).reshape_as(base)
+    actual_gradient = torch.autograd.grad(
+        apply_thd_rope(actual_input), actual_input, grad_outputs=output_gradient
+    )[0]
+    reference_gradient = torch.autograd.grad(
+        _thd_rope_reference(reference_input, freqs, position_ids),
+        reference_input,
+        grad_outputs=output_gradient,
+    )[0]
+    assert torch.allclose(actual_gradient, reference_gradient)
+
+
 class TestMultimodalRotaryEmbedding:
     def setup_method(self):
         Utils.initialize_model_parallel(1, 1)

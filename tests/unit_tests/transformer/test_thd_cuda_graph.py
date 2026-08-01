@@ -3,6 +3,7 @@
 """Tests for the fixed-shape packed-THD CUDA Graph input contract."""
 
 from argparse import ArgumentParser
+from types import SimpleNamespace
 from typing import Literal, cast
 
 import pytest
@@ -10,6 +11,7 @@ import torch
 
 import megatron.core.packed_seq_params as packed_seq
 from megatron.core.transformer.transformer_config import TransformerConfig
+from megatron.core.transformer.transformer_layer import TransformerLayer
 from megatron.training.arguments import _add_network_size_args
 
 
@@ -43,6 +45,58 @@ def _make_transformer_config(**overrides: object) -> TransformerConfig:
     }
     values.update(overrides)
     return TransformerConfig(**values)
+
+
+@pytest.mark.internal
+def test_packed_seq_params_round_trip_through_tensor_graph_kwargs():
+    """Replay must preserve compact and physical THD metadata without passing a dataclass."""
+    original = _make_packed_seq_params()
+    tensor_fields = {"cu_seqlens_q", "cu_seqlens_kv", "cu_seqlens_q_padded", "cu_seqlens_kv_padded"}
+    kwargs = {"packed_seq_params": original}
+
+    TransformerLayer._decompose_packed_seq_params_to_kwargs(kwargs)
+
+    assert set(kwargs) == tensor_fields
+    assert all(value is None or isinstance(value, torch.Tensor) for value in kwargs.values())
+
+    config = _make_transformer_config()
+    config.cp_partition_mode = "contiguous"
+    layer = object.__new__(TransformerLayer)
+    layer.config = config
+    layer._reconstruct_packed_seq_params_from_kwargs(kwargs)
+
+    reconstructed = kwargs["packed_seq_params"]
+    assert reconstructed.qkv_format == "thd"
+    assert reconstructed.pad_between_seqs is True
+    assert reconstructed.cp_partition_mode == "contiguous"
+    assert reconstructed.max_seqlen_q == 128
+    assert reconstructed.max_seqlen_kv == 128
+    for field in tensor_fields:
+        assert torch.equal(getattr(reconstructed, field), getattr(original, field))
+
+
+@pytest.mark.internal
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+def test_static_thd_attention_inputs_use_explicit_bounds_without_scheduler():
+    """Explicit THD graph bounds must fix every attention input shape without a scheduler."""
+    config = _make_transformer_config(cuda_graph_modules=["attn"])
+    assert getattr(config, "sequence_packing_scheduler", None) is None
+    layer = object.__new__(TransformerLayer)
+    layer.config = config
+    layer.self_attention = SimpleNamespace()
+
+    static_inputs = layer.get_layer_static_inputs(seq_length=17, micro_batch_size=3)
+
+    assert static_inputs["hidden_states"].shape == (128, 1, 16)
+    for name in ("cu_seqlens_q", "cu_seqlens_kv", "cu_seqlens_q_padded", "cu_seqlens_kv_padded"):
+        cu_seqlens = static_inputs[name]
+        assert cu_seqlens.shape == (101,)
+        assert cu_seqlens.dtype == torch.int32
+        assert cu_seqlens[0] == 0
+        assert torch.all(cu_seqlens[1:] == 128)
+    assert static_inputs["padding_mask"].shape == (1, 128)
+    assert static_inputs["padding_mask"].dtype == torch.bool
+    assert not static_inputs["padding_mask"].any()
 
 
 @pytest.mark.internal
