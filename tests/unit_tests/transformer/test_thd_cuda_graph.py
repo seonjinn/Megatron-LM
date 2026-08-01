@@ -176,18 +176,9 @@ def test_complete_static_thd_graph_configuration_is_accepted():
 @pytest.mark.parametrize(
     "missing,overrides",
     [
-        (
-            "--max-seqlen-per-dp-cp-rank",
-            {"max_seqlen_per_dp_cp_rank": None},
-        ),
-        (
-            "--pad-packed-seq-alignment",
-            {"pad_packed_seq_alignment": None},
-        ),
-        (
-            "--thd-max-packed-sequences",
-            {"thd_max_packed_sequences": None},
-        ),
+        ("--max-seqlen-per-dp-cp-rank", {"max_seqlen_per_dp_cp_rank": None}),
+        ("--pad-packed-seq-alignment", {"pad_packed_seq_alignment": None}),
+        ("--thd-max-packed-sequences", {"thd_max_packed_sequences": None}),
     ],
 )
 def test_static_thd_graph_configuration_rejects_missing_fixed_bound(
@@ -202,10 +193,7 @@ def test_static_thd_graph_configuration_rejects_missing_fixed_bound(
 def test_non_thd_graph_configuration_does_not_require_static_thd_bounds():
     """Existing graph users without explicit THD fields remain unaffected."""
     config = TransformerConfig(
-        num_layers=1,
-        hidden_size=16,
-        num_attention_heads=4,
-        cuda_graph_impl="transformer_engine",
+        num_layers=1, hidden_size=16, num_attention_heads=4, cuda_graph_impl="transformer_engine"
     )
 
     assert config.cuda_graph_impl == "transformer_engine"
