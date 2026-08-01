@@ -131,6 +131,41 @@ def test_thd_rope_equal_length_freqs_use_declared_layout(
 
 @pytest.mark.internal
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+@pytest.mark.parametrize(
+    "freqs_are_packed,position_values",
+    [
+        pytest.param(True, [0, 1, 2, 3, 4, 5, 6, 7], id="explicit-packed"),
+        pytest.param(False, [0, 1, 2, 3, 0, 1, 2, 3], id="explicit-reset"),
+    ],
+)
+def test_fused_thd_rope_equal_length_freqs_use_declared_layout(
+    freqs_are_packed: bool, position_values: list[int]
+) -> None:
+    """The public fused configuration must honor an explicitly declared THD layout."""
+    device = torch.device("cuda", torch.cuda.current_device())
+    config = TransformerConfig(
+        num_layers=1, hidden_size=16, num_attention_heads=2, apply_rope_fusion=True
+    )
+    cu_seqlens = torch.tensor([0, 4, 8], dtype=torch.int32, device=device)
+    freqs = torch.linspace(-0.7, 0.9, 8 * 8, device=device).reshape(8, 1, 1, 8)
+    tensor = torch.linspace(-1.0, 1.0, 8 * 2 * 8, device=device).reshape(8, 2, 8)
+    expected_positions = torch.tensor(position_values, dtype=torch.long, device=device)
+
+    output = apply_rotary_pos_emb(
+        tensor,
+        freqs,
+        config,
+        cu_seqlens=cu_seqlens,
+        cp_group=_FakeCPGroup(),
+        max_seqlen=8,
+        freqs_are_packed=freqs_are_packed,
+    )
+
+    assert torch.allclose(output, _thd_rope_reference(tensor, freqs, expected_positions))
+
+
+@pytest.mark.internal
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
 def test_thd_rope_cuda_graph_replays_equal_length_packed_freqs() -> None:
     """An explicit packed layout remains static while a captured RoPE graph replays."""
     device = torch.device("cuda", torch.cuda.current_device())
