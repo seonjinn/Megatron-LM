@@ -185,6 +185,7 @@ def _apply_rotary_pos_emb_thd(
     mscale: float = 1.0,
     cp_group: torch.distributed.ProcessGroup = None,
     max_seqlen: Optional[int] = None,
+    freqs_are_packed: Optional[bool] = None,
 ) -> Tensor:
     """Apply THD RoPE with tensor-only position construction.
 
@@ -194,6 +195,7 @@ def _apply_rotary_pos_emb_thd(
         with shape [b + 1] and dtype torch.int32.
         freqs (Tensor): Rotary Positional embedding tensor freq is of shape [max_s, 1, 1, d]
         cp_group (torch.distributed.ProcessGroup): The context parallel group
+        freqs_are_packed (bool): Whether freqs contains positions for the whole packed batch.
 
     Returns:
         Tensor: Shape [t, h, d]. The input tensor after applying RoPE.
@@ -230,8 +232,10 @@ def _apply_rotary_pos_emb_thd(
     else:
         freq_pos = local_pos
 
-    assert max_seqlen is not None, "max_seqlen must be provided for THD RoPE."
-    if freqs.dim() >= 1 and freqs.size(0) > max_seqlen:
+    if freqs_are_packed is None:
+        assert max_seqlen is not None, "max_seqlen must be provided for THD RoPE."
+        freqs_are_packed = freqs.dim() >= 1 and freqs.size(0) > max_seqlen
+    if freqs_are_packed:
         freq_pos = freq_pos + global_seq_start
 
     freq_pos = freq_pos.clamp(min=0, max=freqs.shape[0] - 1)
@@ -253,6 +257,7 @@ def apply_rotary_pos_emb(
     mscale: float = 1.0,
     cp_group: torch.distributed.ProcessGroup = None,
     max_seqlen: Optional[int] = None,
+    freqs_are_packed: Optional[bool] = None,
 ) -> Tensor:
     """
     Reroute to the appropriate apply_rotary_pos_emb function depending on
@@ -263,6 +268,8 @@ def apply_rotary_pos_emb(
     # Keep for backward compatibility. Will deprecate in the future.
     if cp_group is None:
         cp_group = parallel_state.get_context_parallel_group()
+    if freqs_are_packed is None and config.mrope_section is not None:
+        freqs_are_packed = True
 
     if config.apply_rope_fusion:
         if cu_seqlens is None:
@@ -313,6 +320,7 @@ def apply_rotary_pos_emb(
             mscale=mscale,
             cp_group=cp_group,
             max_seqlen=max_seqlen,
+            freqs_are_packed=freqs_are_packed,
         )
 
 
