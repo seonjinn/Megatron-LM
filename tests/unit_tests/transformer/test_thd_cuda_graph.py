@@ -9,7 +9,7 @@ import torch
 
 import megatron.core.packed_seq_params as packed_seq
 from megatron.core.transformer.transformer_config import TransformerConfig
-from megatron.training.argument_utils import ArgumentGroupFactory
+from megatron.training.arguments import _add_network_size_args
 
 
 def _make_packed_seq_params() -> packed_seq.PackedSeqParams:
@@ -140,7 +140,7 @@ def test_static_padding_rejects_observed_sequence_count_above_configured_bound()
 def test_static_thd_arguments_parse_exact_profile_values():
     """The reusable profile's four THD graph options must be typed CLI arguments."""
     parser = ArgumentParser()
-    ArgumentGroupFactory(TransformerConfig).build_group(parser, title="Transformer")
+    _add_network_size_args(parser)
 
     args = parser.parse_args(
         [
