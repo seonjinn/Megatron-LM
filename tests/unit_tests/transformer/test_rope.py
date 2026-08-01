@@ -21,16 +21,18 @@ except ImportError:
 from tests.unit_tests.test_utilities import Utils
 
 
-class _SingleRankCPGroup:
+class _FakeCPGroup:
     """Minimal context-parallel group interface for THD RoPE tests."""
 
-    @staticmethod
-    def size() -> int:
-        return 1
+    def __init__(self, size: int = 1, rank: int = 0) -> None:
+        self._size = size
+        self._rank = rank
 
-    @staticmethod
-    def rank() -> int:
-        return 0
+    def size(self) -> int:
+        return self._size
+
+    def rank(self) -> int:
+        return self._rank
 
 
 def _thd_rope_reference(
@@ -48,21 +50,33 @@ def _thd_rope_reference(
 
 @pytest.mark.internal
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
-def test_thd_rope_cuda_graph_accepts_max_seqlen_with_forward_and_gradient_parity():
+@pytest.mark.parametrize(
+    "cu_values,position_values,alternate_position_values",
+    [
+        ([0, 4, 8], [0, 1, 2, 3, 0, 1, 2, 3, 4, 5], [0, 1, 2, 0, 1, 2, 3, 4, 5, 6]),
+        ([0, 3, 8], [0, 1, 2, 0, 1, 2, 3, 4, 5, 6], [0, 1, 2, 3, 0, 1, 2, 3, 4, 5]),
+    ],
+)
+def test_thd_rope_cuda_graph_accepts_max_seqlen_with_forward_and_gradient_parity(
+    cu_values: list[int], position_values: list[int], alternate_position_values: list[int]
+) -> None:
     """The public THD RoPE path must remain tensor-only during capture, including a padded tail."""
     device = torch.device("cuda", torch.cuda.current_device())
     config = TransformerConfig(
         num_layers=1, hidden_size=16, num_attention_heads=2, apply_rope_fusion=False
     )
-    cp_group = _SingleRankCPGroup()
-    cu_seqlens = torch.tensor([0, 4, 8], dtype=torch.int32, device=device)
-    position_ids = torch.tensor([0, 1, 2, 3, 0, 1, 2, 3, 4, 5], dtype=torch.long, device=device)
-    freqs = torch.linspace(-0.7, 0.9, 6 * 8, device=device).reshape(6, 1, 1, 8)
+    cp_group = _FakeCPGroup()
+    cu_seqlens = torch.tensor(cu_values, dtype=torch.int32, device=device)
+    position_ids = torch.tensor(position_values, dtype=torch.long, device=device)
+    alternate_position_ids = torch.tensor(
+        alternate_position_values, dtype=torch.long, device=device
+    )
+    freqs = torch.linspace(-0.7, 0.9, 7 * 8, device=device).reshape(7, 1, 1, 8)
     base = torch.linspace(-1.0, 1.0, 10 * 2 * 8, device=device).reshape(10, 2, 8)
 
     def apply_thd_rope(tensor: torch.Tensor) -> torch.Tensor:
         return apply_rotary_pos_emb(
-            tensor, freqs, config, cu_seqlens=cu_seqlens, cp_group=cp_group, max_seqlen=6
+            tensor, freqs, config, cu_seqlens=cu_seqlens, cp_group=cp_group, max_seqlen=7
         )
 
     capture_input = base.clone()
@@ -79,6 +93,9 @@ def test_thd_rope_cuda_graph_accepts_max_seqlen_with_forward_and_gradient_parity
 
     expected_output = _thd_rope_reference(base, freqs, position_ids)
     assert torch.allclose(captured_output, expected_output)
+    assert not torch.allclose(
+        captured_output, _thd_rope_reference(base, freqs, alternate_position_ids)
+    )
 
     actual_input = base.clone().requires_grad_()
     reference_input = base.clone().requires_grad_()
@@ -92,6 +109,29 @@ def test_thd_rope_cuda_graph_accepts_max_seqlen_with_forward_and_gradient_parity
         grad_outputs=output_gradient,
     )[0]
     assert torch.allclose(actual_gradient, reference_gradient)
+
+
+@pytest.mark.internal
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+def test_thd_rope_odd_local_cp_segment_uses_ceil_floor_partition() -> None:
+    """An odd CP-local sequence keeps the extra token in the forward segment."""
+    device = torch.device("cuda", torch.cuda.current_device())
+    config = TransformerConfig(
+        num_layers=1, hidden_size=16, num_attention_heads=2, apply_rope_fusion=False
+    )
+    cp_group = _FakeCPGroup(size=2, rank=0)
+    cu_seqlens = torch.tensor([0, 6], dtype=torch.int32, device=device)
+    expected_positions = torch.tensor([0, 1, 5], dtype=torch.long, device=device)
+    floor_only_positions = torch.tensor([0, 5, 5], dtype=torch.long, device=device)
+    freqs = torch.linspace(-0.7, 0.9, 6 * 8, device=device).reshape(6, 1, 1, 8)
+    tensor = torch.linspace(-1.0, 1.0, 3 * 2 * 8, device=device).reshape(3, 2, 8)
+
+    output = apply_rotary_pos_emb(
+        tensor, freqs, config, cu_seqlens=cu_seqlens, cp_group=cp_group, max_seqlen=6
+    )
+
+    assert torch.allclose(output, _thd_rope_reference(tensor, freqs, expected_positions))
+    assert not torch.allclose(output, _thd_rope_reference(tensor, freqs, floor_only_positions))
 
 
 class TestMultimodalRotaryEmbedding:
