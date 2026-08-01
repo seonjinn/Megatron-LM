@@ -975,7 +975,10 @@ class TransformerConfig(ModelParallelConfig):
     "full_iteration_inference" are also accepted and migrated to the new API in __post_init__."""
 
     thd_max_packed_sequences: Optional[int] = None
-    """Fixed maximum number of real THD sequences in a graph-replayed microbatch."""
+    """Fixed maximum number of real THD sequences in a graph-replayed microbatch.
+
+    The padding helper reserves a separate cumulative-length slot for an ordinary dummy tail.
+    """
 
     cuda_graph_memory_report: bool = False
     """Emit CUDA Graph memory lifecycle telemetry when reporting hooks are installed."""

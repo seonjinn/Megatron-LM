@@ -155,6 +155,37 @@ def _extend_last_boundary(cu_seqlens: Optional[Tensor], boundary: int) -> Option
     return extended
 
 
+def _resolve_thd_cp_size(
+    packed_seq_params: PackedSeqParams,
+    cp_group: Optional[dist.ProcessGroup],
+    cp_size: Optional[int],
+) -> int:
+    """Resolve the explicit, packed, or initialized context-parallel size."""
+    if cp_group is not None:
+        return int(dist.get_world_size(group=cp_group))
+    if cp_size is not None:
+        return int(cp_size)
+    if packed_seq_params.cp_group is not None:
+        return int(dist.get_world_size(group=packed_seq_params.cp_group))
+    if packed_seq_params.local_cp_size is not None:
+        return int(packed_seq_params.local_cp_size)
+
+    from megatron.core import parallel_state
+
+    return int(parallel_state.get_context_parallel_world_size()) or 1
+
+
+def _updated_max_seqlen(
+    cu_seqlens_padded: Optional[Tensor], current_max: Optional[int]
+) -> Optional[int]:
+    """Return a maximum that covers every resulting physical sequence."""
+    if cu_seqlens_padded is None or cu_seqlens_padded.numel() < 2:
+        return current_max
+    physical_lengths = cu_seqlens_padded[1:] - cu_seqlens_padded[:-1]
+    resulting_max = int(physical_lengths.max().item())
+    return max(current_max or 0, resulting_max)
+
+
 def _round_up_to_alignment(value: int, alignment: int) -> int:
     """Round ``value`` up to a positive alignment."""
     if alignment <= 0:
@@ -216,8 +247,7 @@ def pad_sequence_for_thd(
     if tail_padding_policy not in ("append_dummy_seq", "extend_last"):
         raise ValueError(f"Unsupported THD tail padding policy: {tail_padding_policy!r}.")
 
-    del cp_group, cp_rank
-    resolved_cp_size = cp_size or packed_seq_params.local_cp_size or 1
+    resolved_cp_size = _resolve_thd_cp_size(packed_seq_params, cp_group, cp_size)
     if resolved_cp_size != 1:
         raise ValueError(
             "Static THD padding with context parallelism must be applied before CP slicing."
@@ -266,26 +296,35 @@ def pad_sequence_for_thd(
         int(cu[-1].item()) for cu in (cu_seqlens_q_padded, cu_seqlens_kv_padded) if cu is not None
     )
     has_tail = physical_end < configured_tokens
+    physical_tail = configured_tokens - physical_end
+
+    if max_num_seqs is not None:
+        observed_real_sequences = max(
+            int(cu.shape[0]) - 1 for cu in (cu_seqlens_q, cu_seqlens_kv) if cu is not None
+        )
+        if observed_real_sequences > max_num_seqs:
+            raise ValueError(
+                f"Packed THD observed sequence count {observed_real_sequences} exceeds configured "
+                f"bound {max_num_seqs}; refusing to truncate."
+            )
 
     if tail_padding_policy == "extend_last":
         cu_seqlens_q_padded = _extend_last_boundary(cu_seqlens_q_padded, configured_tokens)
         cu_seqlens_kv_padded = _extend_last_boundary(cu_seqlens_kv_padded, configured_tokens)
     elif has_tail:
-        cu_seqlens_q = _append_boundary(cu_seqlens_q, configured_tokens)
-        cu_seqlens_kv = _append_boundary(cu_seqlens_kv, configured_tokens)
+        if cu_seqlens_q is not None:
+            cu_seqlens_q = _append_boundary(
+                cu_seqlens_q, int(cu_seqlens_q[-1].item()) + physical_tail
+            )
+        if cu_seqlens_kv is not None:
+            cu_seqlens_kv = _append_boundary(
+                cu_seqlens_kv, int(cu_seqlens_kv[-1].item()) + physical_tail
+            )
         cu_seqlens_q_padded = _append_boundary(cu_seqlens_q_padded, configured_tokens)
         cu_seqlens_kv_padded = _append_boundary(cu_seqlens_kv_padded, configured_tokens)
 
     if max_num_seqs is not None:
-        observed_sequences = max(
-            int(cu.shape[0]) - 1 for cu in (cu_seqlens_q, cu_seqlens_kv) if cu is not None
-        )
-        if observed_sequences > max_num_seqs:
-            raise ValueError(
-                f"Packed THD observed sequence count {observed_sequences} exceeds configured "
-                f"bound {max_num_seqs}; refusing to truncate."
-            )
-        target_entries = max_num_seqs + 1
+        target_entries = max_num_seqs + 1 + (1 if tail_padding_policy == "append_dummy_seq" else 0)
         cu_seqlens_q = _pad_cu_seqlens(cu_seqlens_q, target_entries)
         cu_seqlens_kv = _pad_cu_seqlens(cu_seqlens_kv, target_entries)
         cu_seqlens_q_padded = _pad_cu_seqlens(cu_seqlens_q_padded, target_entries)
@@ -308,6 +347,23 @@ def pad_sequence_for_thd(
         mask_actual = int(tokens.shape[-1]) if tokens is not None else physical_end
         padding_mask = torch.zeros((1, mask_actual), dtype=torch.bool, device=mask_device)
     padded_padding_mask = _pad_padding_mask(padding_mask, configured_tokens)
+    actual_tokens = int(tokens.shape[-1]) if tokens is not None else physical_end
+    tail_mask_shape = [1] * (padded_padding_mask.ndim - 1) + [configured_tokens]
+    explicit_tail_mask = (
+        torch.arange(configured_tokens, device=padded_padding_mask.device) >= actual_tokens
+    ).reshape(tail_mask_shape)
+    padded_padding_mask = padded_padding_mask | explicit_tail_mask
+
+    max_seqlen_q = (
+        configured_tokens
+        if max_num_seqs is not None
+        else _updated_max_seqlen(cu_seqlens_q_padded, packed_seq_params.max_seqlen_q)
+    )
+    max_seqlen_kv = (
+        configured_tokens
+        if max_num_seqs is not None
+        else _updated_max_seqlen(cu_seqlens_kv_padded, packed_seq_params.max_seqlen_kv)
+    )
 
     padded_params = replace(
         packed_seq_params,
@@ -315,12 +371,8 @@ def pad_sequence_for_thd(
         cu_seqlens_kv=cu_seqlens_kv,
         cu_seqlens_q_padded=cu_seqlens_q_padded,
         cu_seqlens_kv_padded=cu_seqlens_kv_padded,
-        max_seqlen_q=(
-            configured_tokens if max_num_seqs is not None else packed_seq_params.max_seqlen_q
-        ),
-        max_seqlen_kv=(
-            configured_tokens if max_num_seqs is not None else packed_seq_params.max_seqlen_kv
-        ),
+        max_seqlen_q=max_seqlen_q,
+        max_seqlen_kv=max_seqlen_kv,
         total_tokens=configured_tokens,
         seq_idx=None,
         pad_between_seqs=(
