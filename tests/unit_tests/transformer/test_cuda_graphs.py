@@ -1480,7 +1480,16 @@ class TestPartialCudaGraph:
         return input_ids, labels, position_ids, attention_mask, loss_mask
 
     def _run_test_helper(
-        self, ep_size, cuda_graph_impl, cuda_graph_modules, cuda_graph_warmup_steps, **kwargs
+        self,
+        ep_size,
+        cuda_graph_impl,
+        cuda_graph_modules,
+        cuda_graph_warmup_steps,
+        *,
+        num_iterations=100,
+        after_capture=None,
+        step_observer=None,
+        **kwargs,
     ):
         """Test fp8_param with gpt_model."""
         args = self.create_test_args(
@@ -1511,13 +1520,16 @@ class TestPartialCudaGraph:
 
         loss_list = []
 
-        for i in range(100):
+        parameters = list(gpt_model[0].parameters())
+        for i in range(num_iterations):
             gpt_model[0].zero_grad_buffer()
             optimizer.zero_grad()
 
             # Capture CUDA graphs after warmup if helper is provided
             if self.cuda_graph_helper is not None and i == cuda_graph_warmup_steps:
                 self.cuda_graph_helper.create_cudagraphs()
+                if after_capture is not None:
+                    after_capture(gpt_model[0])
 
             gpt_model[0].set_is_first_microbatch()
             output = gpt_model[0].forward(
@@ -1536,11 +1548,23 @@ class TestPartialCudaGraph:
             loss = output.mean()
             loss.backward()
 
-            for param in gpt_model[0].parameters():
+            for param in parameters:
                 assert param.main_grad is not None
+
+            grad_snapshot = None
+            if step_observer is not None:
+                grad_snapshot = tuple(param.main_grad.detach().clone() for param in parameters)
 
             update_successful, _, _ = optimizer.step()
             assert update_successful
+
+            if step_observer is not None:
+                step_observer(
+                    i,
+                    loss.detach().clone(),
+                    grad_snapshot,
+                    tuple(param.detach().clone() for param in parameters),
+                )
 
             loss_list.append(loss.item())
 
@@ -1634,6 +1658,209 @@ class TestPartialCudaGraph:
 
             nccl_ep_finalize()
         Utils.destroy_model_parallel()
+
+    @pytest.mark.internal
+    @pytest.mark.flaky
+    @pytest.mark.flaky_in_dev
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+    @pytest.mark.skipif(
+        not (HAVE_TE and is_te_min_version("2.10.0")),
+        reason="Partial CUDA graph UT support requires TransformerEngine version >= 2.10.0",
+    )
+    def test_batch_invariant_alltoall_partial_te_graph_restores_inverse_map(
+        self, monkeypatch
+    ):
+        """Exercise the single-rank production TE boundary; Task 12 covers multi-rank A2A."""
+        import dataclasses
+
+        from megatron.core.transformer.attention import HAVE_FA3, HAVE_FA4
+        from megatron.core.transformer.custom_layers.batch_invariant_kernels import (
+            HAVE_DEEPGEMM_BF16,
+            set_batch_invariant_mode,
+            te_supports_batch_invariant_attention,
+        )
+        from megatron.core.transformer.moe.moe_utils import get_default_pg_collection
+        from megatron.core.transformer.moe.token_dispatcher import (
+            MoEAlltoAllTokenDispatcher,
+        )
+
+        if not HAVE_DEEPGEMM_BF16:
+            pytest.skip("DeepGEMM bf16 grouped bindings are unavailable")
+        if not te_supports_batch_invariant_attention():
+            pytest.skip("TransformerEngine does not support batch-invariant attention")
+        if not (HAVE_FA3 or HAVE_FA4):
+            pytest.skip("Batch-invariant attention requires FlashAttention 3 or 4")
+        if torch.cuda.get_device_capability()[0] < 9:
+            pytest.skip("DeepGEMM batch-invariant kernels require Hopper or newer")
+
+        for env_name in (
+            "NVTE_FLASH_ATTN",
+            "NVTE_FUSED_ATTN",
+            "NVTE_UNFUSED_ATTN",
+            "NVTE_FLASH_ATTN_V2",
+            "NVTE_FLASH_ATTN_V3",
+            "NVTE_FLASH_ATTN_V4",
+        ):
+            monkeypatch.delenv(env_name, raising=False)
+
+        self.seq_length = 64
+        self.micro_batch_size = 1
+        self.tp_size = 1
+        self.cp_size = 1
+        modules = [CudaGraphModule.moe_router, CudaGraphModule.moe_preprocess]
+        num_iterations = 5
+        warmup_steps = 3
+        fa_version = 4 if HAVE_FA4 else 3
+        common_kwargs = {
+            "attention_backend": AttnBackend.flash,
+            "batch_invariant_mode": True,
+            "flash_attention_version": fa_version,
+            "fp8": None,
+            "hidden_size": 128,
+            "max_position_embeddings": self.seq_length,
+            "moe_aux_loss_coeff": 0.0,
+            "moe_expert_capacity_factor": None,
+            "moe_ffn_hidden_size": 256,
+            "moe_grouped_gemm": True,
+            "moe_layer_freq": [1],
+            "moe_pad_expert_input_to_capacity": False,
+            "moe_permute_fusion": False,
+            "moe_router_fusion": False,
+            "moe_router_load_balancing_type": "none",
+            "moe_router_padding_for_quantization": False,
+            "moe_shared_expert_intermediate_size": None,
+            "moe_token_dispatcher_type": "alltoall",
+            "mtp_num_layers": 0,
+            "normalization": "RMSNorm",
+            "num_attention_heads": 4,
+            "num_layers": 1,
+        }
+        eager_steps = []
+        replay_state = {"restores": 0}
+
+        def record_eager_step(iteration, loss, grads, parameters):
+            eager_steps.append(
+                (
+                    iteration,
+                    loss.cpu(),
+                    tuple(grad.cpu() for grad in grads),
+                    tuple(parameter.cpu() for parameter in parameters),
+                )
+            )
+
+        def poison_inverse_map(model):
+            dispatchers = [
+                module.token_dispatcher
+                for module in model.modules()
+                if isinstance(
+                    getattr(module, "token_dispatcher", None),
+                    MoEAlltoAllTokenDispatcher,
+                )
+            ]
+            assert len(dispatchers) == 1
+            dispatcher = dispatchers[0]
+            pre_merge_schema = (
+                "tokens_per_expert",
+                "input_splits",
+                "output_splits",
+                "output_splits_tp",
+                "num_out_tokens",
+                "num_global_tokens_per_local_expert",
+                "reversed_local_input_permutation_mapping",
+                "routing_map",
+                "hidden_shape",
+                "probs",
+            )
+            baseline_dispatcher = MoEAlltoAllTokenDispatcher(
+                num_local_experts=dispatcher.num_local_experts,
+                local_expert_indices=dispatcher.local_expert_indices,
+                config=dataclasses.replace(dispatcher.config, batch_invariant_mode=False),
+                pg_collection=get_default_pg_collection(),
+            )
+            assert tuple(baseline_dispatcher.cudagraph_attrs) == pre_merge_schema
+            assert tuple(dispatcher.cudagraph_attrs) == (
+                *pre_merge_schema,
+                "batch_invariant_inverse_permutation_mapping",
+            )
+            assert dispatcher.valid_cudagraph_attrs[-1] == (
+                "batch_invariant_inverse_permutation_mapping"
+            )
+
+            inverse_map = dispatcher.batch_invariant_inverse_permutation_mapping
+            assert torch.is_tensor(inverse_map)
+            replay_state["dispatcher"] = dispatcher
+            replay_state["poison"] = torch.full_like(inverse_map, -1)
+            dispatcher.batch_invariant_inverse_permutation_mapping = replay_state["poison"]
+
+        def observe_graph_step(iteration, loss, grads, parameters):
+            eager_iteration, eager_loss, eager_grads, eager_parameters = eager_steps[iteration]
+            assert iteration == eager_iteration
+            assert torch.equal(loss.cpu(), eager_loss)
+            assert len(grads) == len(eager_grads)
+            assert len(parameters) == len(eager_parameters)
+            assert all(
+                torch.equal(graph_grad.cpu(), eager_grad)
+                for graph_grad, eager_grad in zip(grads, eager_grads)
+            )
+            assert all(
+                torch.equal(graph_parameter.cpu(), eager_parameter)
+                for graph_parameter, eager_parameter in zip(parameters, eager_parameters)
+            )
+            if iteration < warmup_steps:
+                return
+            dispatcher = replay_state["dispatcher"]
+            poison = replay_state["poison"]
+            restored = dispatcher.batch_invariant_inverse_permutation_mapping
+            assert restored is not poison
+            assert not torch.equal(restored, poison)
+            replay_state["restores"] += 1
+            if iteration + 1 < num_iterations:
+                replay_state["poison"] = torch.full_like(restored, -(iteration + 2))
+                dispatcher.batch_invariant_inverse_permutation_mapping = replay_state["poison"]
+
+        initialize_rng_tracker(use_te_rng_tracker=True, force_reset=True)
+        Utils.initialize_model_parallel(
+            tensor_model_parallel_size=1,
+            context_parallel_size=1,
+            pipeline_model_parallel_size=1,
+            expert_tensor_parallel_size=1,
+            expert_model_parallel_size=1,
+        )
+        try:
+            with set_batch_invariant_mode(True, backend="deepgemm"):
+                eager_losses = self._run_test_helper(
+                    1,
+                    "none",
+                    None,
+                    0,
+                    num_iterations=num_iterations,
+                    step_observer=record_eager_step,
+                    **common_kwargs,
+                )
+                graph_losses = self._run_test_helper(
+                    1,
+                    "transformer_engine",
+                    modules,
+                    warmup_steps,
+                    num_iterations=num_iterations,
+                    after_capture=poison_inverse_map,
+                    step_observer=observe_graph_step,
+                    **common_kwargs,
+                )
+        finally:
+            try:
+                if (
+                    self.cuda_graph_helper is not None
+                    and self.cuda_graph_helper.graphs_created()
+                ):
+                    self.cuda_graph_helper.delete_cuda_graphs()
+            finally:
+                self.cuda_graph_helper = None
+                Utils.destroy_model_parallel()
+
+        assert replay_state["restores"] == num_iterations - warmup_steps
+        assert torch.equal(graph_losses, eager_losses)
+        assert len(eager_steps) == num_iterations
 
 
 class _SimpleModule(MegatronModule):

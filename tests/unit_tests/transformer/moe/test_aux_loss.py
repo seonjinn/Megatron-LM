@@ -9,10 +9,15 @@ from torch.utils._python_dispatch import TorchDispatchMode
 from megatron.core import parallel_state
 from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.process_groups_config import ProcessGroupCollection
-from megatron.core.tensor_parallel.mappings import reduce_from_tensor_model_parallel_region
+from megatron.core.tensor_parallel.mappings import (
+    reduce_from_tensor_model_parallel_region,
+)
 from megatron.core.tensor_parallel.random import (
     get_cuda_rng_tracker,
     model_parallel_cuda_manual_seed,
+)
+from megatron.core.transformer.custom_layers.batch_invariant_kernels import (
+    set_batch_invariant_mode,
 )
 from megatron.core.transformer.moe.moe_utils import (
     MoEAuxLossAutoScaler,
@@ -766,7 +771,9 @@ class TestRouterAuxLoss:
         packed_seq_params with the flattened input produces the same
         seq_load_balancing_loss as the un-flattened input.
         """
-        from megatron.core.models.gpt.gpt_layer_specs import get_gpt_layer_local_submodules
+        from megatron.core.models.gpt.gpt_layer_specs import (
+            get_gpt_layer_local_submodules,
+        )
         from megatron.core.packed_seq_params import PackedSeqParams
         from megatron.core.transformer.transformer_layer import TransformerLayer
 
@@ -1286,6 +1293,62 @@ class TestRouterAuxLoss:
 
     @pytest.mark.internal
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+    @pytest.mark.parametrize(
+        "load_balancing_type,aux_loss_coeff",
+        (
+            pytest.param("seq_aux_loss", 1.0, id="string"),
+            pytest.param(["aux_loss", "seq_aux_loss"], [0.5, 1.0], id="list"),
+        ),
+    )
+    def test_variable_packed_seq_aux_rejects_batch_invariant_mode(
+        self, monkeypatch, load_balancing_type, aux_loss_coeff
+    ):
+        """Batch invariance rejects only seq_aux routing with explicit packed ownership."""
+        import megatron.core.transformer.moe.router as router_module
+
+        container = AuxlossTestContainer(
+            tp_size=1,
+            ep_size=1,
+            pp_size=1,
+            num_moe_experts=4,
+            moe_router_topk=2,
+            moe_token_dispatcher_type="alltoall",
+            moe_router_load_balancing_type=load_balancing_type,
+            moe_aux_loss_coeff=aux_loss_coeff,
+        )
+        router = container.moe_layer.router
+        router.config.batch_invariant_mode = True
+        router.config.thd_max_packed_sequences = 2
+        hidden_states = torch.randn((8, 1, container.config.hidden_size), device="cuda")
+        ownership = {
+            "seq_aux_loss_sample_ids": torch.zeros(8, dtype=torch.long, device="cuda"),
+            "seq_aux_loss_num_samples": torch.tensor(1, dtype=torch.long, device="cuda"),
+            "seq_aux_loss_max_samples": 2,
+        }
+
+        def reject_loss_call(*args, **kwargs):
+            raise AssertionError("batch-invariant packed seq_aux reached loss computation")
+
+        with monkeypatch.context() as guard_patch:
+            guard_patch.setattr(
+                router_module, "switch_load_balancing_loss_func", reject_loss_call
+            )
+            with set_batch_invariant_mode(True):
+                with pytest.raises(
+                    ValueError,
+                    match="variable packed seq_aux_loss.*batch_invariant_mode",
+                ):
+                    container.moe_layer.route(hidden_states, **ownership)
+
+        clear_aux_losses_tracker()
+        with set_batch_invariant_mode(True):
+            probs, routing_map = container.moe_layer.route(hidden_states)
+        assert probs.shape == (8, container.config.num_moe_experts)
+        assert routing_map.shape == (8, container.config.num_moe_experts)
+        clear_aux_losses_tracker()
+
+    @pytest.mark.internal
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
     def test_fixed_capacity_seq_aux_recompute_closure_forwards_ownership(self, monkeypatch):
         """MoELayer recomputation routes with the same explicit dynamic ownership tensors."""
         container = AuxlossTestContainer(
@@ -1468,6 +1531,38 @@ class TestRouterAuxLoss:
 
 
 class TestFixedCapacitySeqAuxLossValidation:
+    @pytest.mark.parametrize(
+        "load_balancing_type,aux_loss_coeff",
+        (
+            pytest.param("seq_aux_loss", 1.0, id="string"),
+            pytest.param(["aux_loss", "seq_aux_loss"], [0.5, 1.0], id="list"),
+        ),
+    )
+    def test_variable_packed_seq_aux_batch_invariant_validation_boundary(
+        self, load_balancing_type, aux_loss_coeff
+    ):
+        """The BIK guard applies only after a complete packed ownership tuple appears."""
+        router = _new_cpu_fixed_capacity_router()
+        router.routing_type = load_balancing_type
+        router.config.moe_router_load_balancing_type = load_balancing_type
+        router.config.moe_aux_loss_coeff = aux_loss_coeff
+        router.config.batch_invariant_mode = True
+        router.config.thd_max_packed_sequences = 2
+        logits = torch.randn((2, 1, router.config.num_moe_experts))
+
+        assert not router._validate_variable_packed_seq_aux_loss_metadata(
+            logits, None, None, None
+        )
+        with pytest.raises(
+            ValueError, match="variable packed seq_aux_loss.*batch_invariant_mode"
+        ):
+            router._validate_variable_packed_seq_aux_loss_metadata(
+                logits,
+                torch.zeros(2, dtype=torch.long),
+                torch.tensor(1, dtype=torch.long),
+                2,
+            )
+
     @pytest.mark.parametrize("sample_ids", ((-1, 0), (0, 2)), ids=("negative", "at_num_samples"))
     def test_fixed_capacity_seq_aux_ids_use_async_device_validation(self, sample_ids):
         """Dynamic ownership bounds fail through _assert_async without a host scalar read."""

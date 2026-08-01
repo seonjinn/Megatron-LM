@@ -7,7 +7,9 @@ import torch
 
 from megatron.core.inference.utils import InferenceMode
 from megatron.core.jit import jit_fuser
-from megatron.core.tensor_parallel.mappings import reduce_from_tensor_model_parallel_region
+from megatron.core.tensor_parallel.mappings import (
+    reduce_from_tensor_model_parallel_region,
+)
 from megatron.core.transformer.custom_layers.batch_invariant_kernels import (
     is_batch_invariant_mode_enabled,
 )
@@ -450,6 +452,11 @@ class TopKRouter(Router):
             raise ValueError(
                 "seq_aux_loss_sample_ids, seq_aux_loss_num_samples, and "
                 "seq_aux_loss_max_samples must be provided together"
+            )
+        if self.config.batch_invariant_mode:
+            raise ValueError(
+                "variable packed seq_aux_loss is unsupported with batch_invariant_mode; "
+                "disable batch invariance or omit packed ownership metadata"
             )
         if (
             not isinstance(seq_aux_loss_max_samples, int)
