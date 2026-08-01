@@ -8,8 +8,11 @@ from megatron.core.models.common.embeddings.rotary_pos_embedding import (
     MultimodalRotaryEmbedding,
     RotaryEmbedding,
 )
+from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.tensor_parallel.random import model_parallel_cuda_manual_seed
+from megatron.core.transformer.enums import CudaGraphModule
 from megatron.core.transformer.transformer_config import TransformerConfig
+from megatron.core.transformer.transformer_layer import TransformerLayer
 
 try:
     from transformer_engine.pytorch.attention.rope import apply_fused_qkv_rotary_pos_emb
@@ -33,6 +36,42 @@ class _FakeCPGroup:
 
     def rank(self) -> int:
         return self._rank
+
+
+class _PackedTHDRoPECaptureLayer(TransformerLayer):
+    """Minimal attention-scope layer that exercises packed metadata reconstruction."""
+
+    def __init__(self, config: TransformerConfig) -> None:
+        torch.nn.Module.__init__(self)
+        self.config = config
+        self.is_moe_layer = False
+
+    def _forward_attention(
+        self,
+        hidden_states: torch.Tensor,
+        rotary_pos_emb: torch.Tensor | None = None,
+        packed_seq_params: PackedSeqParams | None = None,
+        padding_mask: torch.Tensor | None = None,
+        **_: object,
+    ) -> tuple[torch.Tensor, None]:
+        assert rotary_pos_emb is not None
+        assert packed_seq_params is not None
+        assert padding_mask is not None
+        output = apply_rotary_pos_emb(
+            hidden_states,
+            rotary_pos_emb,
+            self.config,
+            cu_seqlens=packed_seq_params.cu_seqlens_q,
+            cp_group=_FakeCPGroup(),
+            max_seqlen=packed_seq_params.max_seqlen_q,
+        )
+        metadata_bias = (
+            packed_seq_params.cu_seqlens_kv[-1]
+            + packed_seq_params.cu_seqlens_q_padded[1]
+            + packed_seq_params.cu_seqlens_kv_padded[1]
+        ).to(output.dtype)
+        output = output + metadata_bias.reshape(1, 1, 1) * 0.01
+        return output.masked_fill(padding_mask.T.unsqueeze(-1), 0.0), None
 
 
 def _thd_rope_reference(
@@ -109,6 +148,109 @@ def test_thd_rope_cuda_graph_accepts_max_seqlen_with_forward_and_gradient_parity
         grad_outputs=output_gradient,
     )[0]
     assert torch.allclose(actual_gradient, reference_gradient)
+
+
+@pytest.mark.internal
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+def test_transformer_layer_thd_graph_replays_two_packs_with_forward_and_gradient_parity() -> None:
+    """One attention graph must replay changed packed metadata in forward and backward."""
+    device = torch.device("cuda", torch.cuda.current_device())
+    config = TransformerConfig(
+        num_layers=1,
+        hidden_size=8,
+        num_attention_heads=1,
+        apply_rope_fusion=False,
+        cuda_graph_impl="transformer_engine",
+        cuda_graph_modules=[CudaGraphModule.attn],
+        max_seqlen_per_dp_cp_rank=7,
+        pad_packed_seq_alignment="max",
+        thd_max_packed_sequences=2,
+        thd_tail_padding_policy="extend_last",
+    )
+    layer = _PackedTHDRoPECaptureLayer(config)
+    base_hidden = torch.linspace(-1.0, 1.0, 10 * 2 * 8, device=device).reshape(10, 2, 8)
+    base_freqs = torch.linspace(-0.7, 0.9, 7 * 8, device=device).reshape(7, 1, 1, 8)
+    output_gradient = torch.linspace(-0.5, 0.5, base_hidden.numel(), device=device).reshape_as(
+        base_hidden
+    )
+    packs: list[tuple[list[int], list[int], list[bool], list[int], float]] = [
+        ([0, 4, 8], [0, 4, 10], [False] * 8 + [True, True], [0, 1, 2, 3, 0, 1, 2, 3, 4, 5], 0.16),
+        (
+            [0, 3, 8],
+            [0, 5, 10],
+            [False, False, False, True, False, False, False, False, False, True],
+            [0, 1, 2, 0, 1, 2, 3, 4, 5, 6],
+            0.18,
+        ),
+    ]
+
+    first_compact, first_padded, first_mask, _, _ = packs[0]
+    static_hidden = base_hidden.clone().requires_grad_()
+    static_freqs = base_freqs.clone()
+    static_cu_q = torch.tensor(first_compact, dtype=torch.int32, device=device)
+    static_cu_kv = static_cu_q.clone()
+    static_cu_q_padded = torch.tensor(first_padded, dtype=torch.int32, device=device)
+    static_cu_kv_padded = static_cu_q_padded.clone()
+    static_padding_mask = torch.tensor(first_mask, dtype=torch.bool, device=device).reshape(1, -1)
+
+    def run_static_step() -> torch.Tensor:
+        return layer._te_cuda_graph_capture(
+            static_hidden,
+            rotary_pos_emb=static_freqs,
+            cu_seqlens_q=static_cu_q,
+            cu_seqlens_kv=static_cu_kv,
+            cu_seqlens_q_padded=static_cu_q_padded,
+            cu_seqlens_kv_padded=static_cu_kv_padded,
+            padding_mask=static_padding_mask,
+        )[0]
+
+    warmup_stream = torch.cuda.Stream()
+    warmup_stream.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(warmup_stream):
+        for _ in range(2):
+            static_hidden.grad = None
+            run_static_step().backward(output_gradient)
+    torch.cuda.current_stream().wait_stream(warmup_stream)
+
+    static_hidden.grad = torch.zeros_like(static_hidden)
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph):
+        static_hidden.grad.zero_()
+        captured_output = run_static_step()
+        captured_output.backward(output_gradient)
+    captured_gradient = static_hidden.grad
+
+    replay_outputs: list[torch.Tensor] = []
+    for compact_values, padded_values, mask_values, position_values, metadata_bias in packs:
+        compact = torch.tensor(compact_values, dtype=torch.int32, device=device)
+        padded = torch.tensor(padded_values, dtype=torch.int32, device=device)
+        padding_mask = torch.tensor(mask_values, dtype=torch.bool, device=device).reshape(1, -1)
+        with torch.no_grad():
+            static_hidden.copy_(base_hidden)
+            static_freqs.copy_(base_freqs)
+            static_cu_q.copy_(compact)
+            static_cu_kv.copy_(compact)
+            static_cu_q_padded.copy_(padded)
+            static_cu_kv_padded.copy_(padded)
+            static_padding_mask.copy_(padding_mask)
+        graph.replay()
+
+        actual_output = captured_output.clone()
+        actual_gradient = captured_gradient.clone()
+        reference_input = base_hidden.clone().requires_grad_()
+        positions = torch.tensor(position_values, dtype=torch.long, device=device)
+        reference_output = _thd_rope_reference(reference_input, base_freqs, positions)
+        reference_output = reference_output + metadata_bias
+        reference_output = reference_output.masked_fill(padding_mask.T.unsqueeze(-1), 0.0)
+        reference_gradient = torch.autograd.grad(
+            reference_output, reference_input, grad_outputs=output_gradient
+        )[0]
+
+        assert torch.allclose(actual_output, reference_output)
+        assert torch.allclose(actual_gradient, reference_gradient)
+        replay_outputs.append(actual_output)
+
+    assert not torch.allclose(replay_outputs[0], replay_outputs[1])
 
 
 @pytest.mark.internal
