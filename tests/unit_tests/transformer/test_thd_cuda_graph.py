@@ -3,6 +3,7 @@
 """Tests for the fixed-shape packed-THD CUDA Graph input contract."""
 
 from argparse import ArgumentParser
+from typing import Literal, cast
 
 import pytest
 import torch
@@ -84,6 +85,115 @@ def test_extend_last_preserves_real_boundaries_and_fixes_all_input_shapes():
     assert padded.tokens_per_sample == 8
     assert torch.equal(original.cu_seqlens_q, original_valid)
     assert torch.equal(original.cu_seqlens_q_padded, original_padded)
+
+
+@pytest.mark.internal
+def test_append_dummy_preserves_physical_gaps_at_real_sequence_capacity():
+    """The sequence bound counts real sequences and reserves a dummy-tail slot."""
+    original = _make_packed_seq_params()
+
+    _, _, _, _, padded, _ = packed_seq.pad_sequence_for_thd(
+        torch.ones((1, 8), dtype=torch.int64),
+        None,
+        None,
+        None,
+        original,
+        target_len=12,
+        max_num_seqs=2,
+        tail_padding_policy="append_dummy_seq",
+        cp_size=1,
+    )
+
+    assert padded.cu_seqlens_q.tolist() == [0, 3, 5, 9]
+    assert padded.cu_seqlens_kv.tolist() == [0, 3, 5, 9]
+    assert padded.cu_seqlens_q_padded.tolist() == [0, 4, 8, 12]
+    assert padded.cu_seqlens_kv_padded.tolist() == [0, 4, 8, 12]
+
+
+@pytest.mark.internal
+@pytest.mark.parametrize(
+    "tail_padding_policy,target_len,expected_valid,expected_padded,expected_max",
+    [
+        ("append_dummy_seq", 14, [0, 3, 5, 11], [0, 4, 8, 14], 6),
+        ("extend_last", 10, [0, 3, 5], [0, 4, 10], 6),
+    ],
+)
+def test_tail_padding_recomputes_maxima_without_sequence_bound(
+    tail_padding_policy: Literal["append_dummy_seq", "extend_last"],
+    target_len: int,
+    expected_valid: list[int],
+    expected_padded: list[int],
+    expected_max: int,
+):
+    """THD kernel maxima must cover every resulting physical sequence."""
+    _, _, _, _, padded, _ = packed_seq.pad_sequence_for_thd(
+        torch.ones((1, 8), dtype=torch.int64),
+        None,
+        None,
+        None,
+        _make_packed_seq_params(),
+        target_len=target_len,
+        tail_padding_policy=tail_padding_policy,
+        cp_size=1,
+    )
+
+    assert padded.cu_seqlens_q.tolist() == expected_valid
+    assert padded.cu_seqlens_kv.tolist() == expected_valid
+    assert padded.cu_seqlens_q_padded.tolist() == expected_padded
+    assert padded.cu_seqlens_kv_padded.tolist() == expected_padded
+    assert padded.max_seqlen_q == expected_max
+    assert padded.max_seqlen_kv == expected_max
+
+
+@pytest.mark.internal
+def test_process_group_only_cp_context_rejects_padding(monkeypatch: pytest.MonkeyPatch):
+    """A CP process group must not silently fall back to a one-rank context."""
+    fake_group = cast(torch.distributed.ProcessGroup, object())
+    params = _make_packed_seq_params()
+    params.cp_group = fake_group
+
+    def fake_world_size(group: object) -> int:
+        assert group is fake_group
+        return 2
+
+    monkeypatch.setattr(packed_seq.dist, "get_world_size", fake_world_size)
+
+    with pytest.raises(ValueError, match="before CP slicing"):
+        packed_seq.pad_sequence_for_thd(
+            torch.ones((1, 8), dtype=torch.int64),
+            None,
+            None,
+            None,
+            params,
+            target_len=10,
+            tail_padding_policy="extend_last",
+        )
+
+
+@pytest.mark.internal
+def test_target_sized_padding_mask_still_masks_appended_token_tail():
+    """An existing fixed-shape mask must be merged with the explicit token tail."""
+    padding_mask = torch.zeros((2, 12), dtype=torch.bool)
+    padding_mask[1, 2] = True
+
+    _, _, _, _, _, padded_mask = packed_seq.pad_sequence_for_thd(
+        torch.ones((1, 8), dtype=torch.int64),
+        None,
+        None,
+        None,
+        _make_packed_seq_params(),
+        target_len=12,
+        tail_padding_policy="extend_last",
+        padding_mask=padding_mask,
+        cp_size=1,
+    )
+
+    assert padded_mask.shape == (2, 12)
+    assert padded_mask.dtype == torch.bool
+    expected_mask = torch.zeros((2, 12), dtype=torch.bool)
+    expected_mask[1, 2] = True
+    expected_mask[:, 8:] = True
+    assert torch.equal(padded_mask, expected_mask)
 
 
 @pytest.mark.internal
