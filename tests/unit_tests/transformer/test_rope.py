@@ -90,6 +90,97 @@ def _thd_rope_reference(
 @pytest.mark.internal
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
 @pytest.mark.parametrize(
+    "mrope_section,freqs_are_packed,position_values",
+    [
+        pytest.param(None, True, [0, 1, 2, 3, 4, 5, 6, 7], id="explicit-packed"),
+        pytest.param(None, False, [0, 1, 2, 3, 0, 1, 2, 3], id="explicit-reset"),
+        pytest.param([1, 1, 2], None, [0, 1, 2, 3, 4, 5, 6, 7], id="mrope-default"),
+        pytest.param([1, 1, 2], False, [0, 1, 2, 3, 0, 1, 2, 3], id="mrope-explicit-reset"),
+    ],
+)
+def test_thd_rope_equal_length_freqs_use_declared_layout(
+    mrope_section: list[int] | None, freqs_are_packed: bool | None, position_values: list[int]
+) -> None:
+    """An exact-length frequency table must not make packed and reset layouts ambiguous."""
+    device = torch.device("cuda", torch.cuda.current_device())
+    config = TransformerConfig(
+        num_layers=1,
+        hidden_size=16,
+        num_attention_heads=2,
+        apply_rope_fusion=False,
+        mrope_section=mrope_section,
+    )
+    cu_seqlens = torch.tensor([0, 4, 8], dtype=torch.int32, device=device)
+    freqs = torch.linspace(-0.7, 0.9, 8 * 8, device=device).reshape(8, 1, 1, 8)
+    tensor = torch.linspace(-1.0, 1.0, 8 * 2 * 8, device=device).reshape(8, 2, 8)
+    expected_positions = torch.tensor(position_values, dtype=torch.long, device=device)
+
+    layout_kwargs = {} if freqs_are_packed is None else {"freqs_are_packed": freqs_are_packed}
+    output = apply_rotary_pos_emb(
+        tensor,
+        freqs,
+        config,
+        cu_seqlens=cu_seqlens,
+        cp_group=_FakeCPGroup(),
+        max_seqlen=8,
+        **layout_kwargs,
+    )
+
+    assert torch.allclose(output, _thd_rope_reference(tensor, freqs, expected_positions))
+
+
+@pytest.mark.internal
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+def test_thd_rope_cuda_graph_replays_equal_length_packed_freqs() -> None:
+    """An explicit packed layout remains static while a captured RoPE graph replays."""
+    device = torch.device("cuda", torch.cuda.current_device())
+    config = TransformerConfig(
+        num_layers=1, hidden_size=16, num_attention_heads=2, apply_rope_fusion=False
+    )
+    cu_seqlens = torch.tensor([0, 4, 8], dtype=torch.int32, device=device)
+    freqs = torch.linspace(-0.7, 0.9, 8 * 8, device=device).reshape(8, 1, 1, 8)
+    capture_input = torch.zeros(8, 2, 8, device=device)
+    replay_input = torch.linspace(-1.0, 1.0, capture_input.numel(), device=device).reshape_as(
+        capture_input
+    )
+    packed_positions = torch.tensor([0, 1, 2, 3, 4, 5, 6, 7], device=device)
+    reset_positions = torch.tensor([0, 1, 2, 3, 0, 1, 2, 3], device=device)
+
+    def apply_thd_rope() -> torch.Tensor:
+        return apply_rotary_pos_emb(
+            capture_input,
+            freqs,
+            config,
+            cu_seqlens=cu_seqlens,
+            cp_group=_FakeCPGroup(),
+            max_seqlen=8,
+            freqs_are_packed=True,
+        )
+
+    warmup_stream = torch.cuda.Stream()
+    warmup_stream.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(warmup_stream):
+        apply_thd_rope()
+    torch.cuda.current_stream().wait_stream(warmup_stream)
+
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph):
+        captured_output = apply_thd_rope()
+
+    capture_input.copy_(replay_input)
+    graph.replay()
+
+    assert torch.allclose(
+        captured_output, _thd_rope_reference(replay_input, freqs, packed_positions)
+    )
+    assert not torch.allclose(
+        captured_output, _thd_rope_reference(replay_input, freqs, reset_positions)
+    )
+
+
+@pytest.mark.internal
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+@pytest.mark.parametrize(
     "cu_values,position_values,alternate_position_values",
     [
         ([0, 4, 8], [0, 1, 2, 3, 0, 1, 2, 3, 4, 5], [0, 1, 2, 0, 1, 2, 3, 4, 5, 6]),
