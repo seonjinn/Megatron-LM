@@ -480,21 +480,10 @@ def test_dropless_hybridep_router_graph_boundary_preserves_padded_routes_and_gra
         ).transpose(0, 1)
         padded_rows = padding_mask.transpose(0, 1).reshape(-1)
 
-        eager_hidden = base_hidden.detach().clone().requires_grad_()
-        eager_pre_mlp_hidden = layer._forward_pre_mlp_layernorm(eager_hidden)
-        eager_probs, eager_routing_map = moe_layer.route(
-            eager_pre_mlp_hidden, padding_mask.transpose(0, 1)
-        )
-        if CudaGraphModule.moe_preprocess in cuda_graph_modules:
-            _, eager_probs = moe_layer.preprocess(
-                eager_pre_mlp_hidden, eager_probs, eager_routing_map
-            )
-            eager_routing_map = moe_layer.token_dispatcher._comm_manager.routing_map
-        eager_input_grad, eager_router_grad = torch.autograd.grad(
-            eager_probs.sum(), (eager_hidden, moe_layer.router.weight)
-        )
-
         static_hidden = base_hidden.detach().clone().requires_grad_()
+        for parameter in model.parameters():
+            if parameter.requires_grad:
+                parameter.grad = torch.zeros_like(parameter)
         cuda_graph_helper = TECudaGraphHelper(
             model=[model], config=config, seq_length=8, micro_batch_size=1, optimizers=[]
         )
@@ -513,12 +502,32 @@ def test_dropless_hybridep_router_graph_boundary_preserves_padded_routes_and_gra
         captured_probs.sum().backward()
         torch.cuda.synchronize()
 
+        captured_probs = captured_probs.detach().clone()
+        captured_routing_map = captured_routing_map.detach().clone()
+        captured_input_grad = static_hidden.grad.detach().clone()
+        captured_router_grad = moe_layer.router.weight.grad.detach().clone()
+
+        model.zero_grad(set_to_none=True)
+        eager_hidden = base_hidden.detach().clone().requires_grad_()
+        eager_pre_mlp_hidden = layer._forward_pre_mlp_layernorm(eager_hidden)
+        eager_probs, eager_routing_map = moe_layer.route(
+            eager_pre_mlp_hidden, padding_mask.transpose(0, 1)
+        )
+        if CudaGraphModule.moe_preprocess in cuda_graph_modules:
+            _, eager_probs = moe_layer.preprocess(
+                eager_pre_mlp_hidden, eager_probs, eager_routing_map
+            )
+            eager_routing_map = moe_layer.token_dispatcher._comm_manager.routing_map
+        eager_input_grad, eager_router_grad = torch.autograd.grad(
+            eager_probs.sum(), (eager_hidden, moe_layer.router.weight)
+        )
+
         torch.testing.assert_close(captured_probs, eager_probs)
         assert torch.equal(captured_routing_map, eager_routing_map)
         assert torch.count_nonzero(captured_probs[padded_rows]) == 0
         assert not captured_routing_map[padded_rows].any()
-        torch.testing.assert_close(static_hidden.grad, eager_input_grad)
-        torch.testing.assert_close(moe_layer.router.weight.grad, eager_router_grad)
+        torch.testing.assert_close(captured_input_grad, eager_input_grad)
+        torch.testing.assert_close(captured_router_grad, eager_router_grad)
     finally:
         if cuda_graph_helper is not None and cuda_graph_helper.graphs_created():
             cuda_graph_helper.delete_cuda_graphs()
