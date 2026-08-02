@@ -9,7 +9,11 @@ from megatron.core.models.hybrid.hybrid_block import HybridStackSubmodules
 from megatron.core.models.hybrid.hybrid_layer_specs import hybrid_stack_spec
 from megatron.core.process_groups_config import ProcessGroupCollection
 from megatron.core.ssm.mamba_layer import MambaLayerSubmodules
-from megatron.core.ssm.mamba_mixer import MambaMixer, MambaMixerSubmodules
+from megatron.core.ssm.mamba_mixer import (
+    MambaMixer,
+    MambaMixerSubmodules,
+    _validate_mamba_training_seq_idx,
+)
 from megatron.core.tensor_parallel.random import model_parallel_cuda_manual_seed
 from megatron.core.transformer import TransformerConfig
 from tests.unit_tests.test_utilities import Utils
@@ -109,6 +113,20 @@ class TestMambaMixer:
 
 
 class TestMambaMixerErrorChecks:
+
+    def test_training_seq_idx_must_match_post_cp_input_shape(self):
+        zxBCdt = torch.empty((1, 32, 64))
+
+        with pytest.raises(ValueError, match="post-context-parallel"):
+            _validate_mamba_training_seq_idx(
+                torch.zeros((1, 16), dtype=torch.int32),
+                zxBCdt,
+            )
+
+        _validate_mamba_training_seq_idx(
+            torch.zeros((1, 32), dtype=torch.int32),
+            zxBCdt,
+        )
 
     @pytest.mark.parametrize(
         "hidden_size, ngroups, tp_size, expected_error_message",

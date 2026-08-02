@@ -111,6 +111,28 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def _validate_mamba_training_seq_idx(
+    seq_idx: Optional[torch.Tensor], zxBCdt: torch.Tensor
+) -> None:
+    """Validate sequence IDs against the post-context-parallel Mamba input."""
+    if seq_idx is None:
+        return
+
+    expected_shape = tuple(zxBCdt.shape[:2])
+    if tuple(seq_idx.shape) != expected_shape:
+        raise ValueError(
+            "Packed Mamba seq_idx must match the post-context-parallel training "
+            f"input shape [batch, sequence]: {tuple(seq_idx.shape)} != {expected_shape}."
+        )
+    if seq_idx.dtype != torch.int32:
+        raise TypeError(f"Packed Mamba seq_idx must use torch.int32, got {seq_idx.dtype}.")
+    if seq_idx.device != zxBCdt.device:
+        raise ValueError(
+            "Packed Mamba seq_idx and the post-context-parallel training input must "
+            f"share a device: {seq_idx.device} != {zxBCdt.device}."
+        )
+
+
 class ExtendedRMSNorm(RMSNormGated):
     """
     RMSNormGated with sharded state dict.
@@ -755,6 +777,7 @@ class MambaMixer(MegatronModule):
             )
             assert sequence_packing_available, reason_for_no_sequence_packing
             seq_idx = packed_seq_params.seq_idx
+            _validate_mamba_training_seq_idx(seq_idx, zxBCdt)
 
         state_dtype_kwarg = (
             {"state_dtype": self.mamba_training_ssm_states_dtype} if MAMBA_HAS_STATE_DTYPE else {}
