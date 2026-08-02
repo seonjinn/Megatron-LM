@@ -539,9 +539,19 @@ def test_packed_mamba_te_graph_replays_runtime_boundaries_with_gradient_parity()
                 qkv_format="thd", seq_idx=layout, total_tokens=fixed_local_tokens
             )
             output = (
-                layer(hidden_states, packed_seq_params=packed_seq_params)
+                layer(
+                    hidden_states=hidden_states,
+                    attention_mask=None,
+                    inference_context=None,
+                    packed_seq_params=packed_seq_params,
+                )
                 if captured
-                else layer.forward(hidden_states, packed_seq_params=packed_seq_params)
+                else layer.forward(
+                    hidden_states=hidden_states,
+                    attention_mask=None,
+                    inference_context=None,
+                    packed_seq_params=packed_seq_params,
+                )
             )
             input_grad, weight_grad = torch.autograd.grad(
                 output.float().square().mean(), (hidden_states, layer.mixer.weight)

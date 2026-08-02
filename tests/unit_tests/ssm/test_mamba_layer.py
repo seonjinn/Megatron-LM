@@ -156,7 +156,10 @@ def test_mamba_te_replay_forwards_only_tensorized_packed_seq_idx() -> None:
     packed_seq_params = PackedSeqParams(qkv_format="thd", seq_idx=packed_seq_idx, total_tokens=8)
 
     output = layer._te_cuda_graph_replay(
-        hidden_states, packed_seq_params=packed_seq_params, inference_context=None
+        hidden_states=hidden_states,
+        attention_mask=None,
+        inference_context=None,
+        packed_seq_params=packed_seq_params,
     )
 
     assert observed["packed_seq_idx"] is packed_seq_idx
