@@ -19,6 +19,7 @@ from megatron.core.num_microbatches_calculator import (
 from megatron.core.transformer.cuda_graphs import (
     HAVE_TE_GRAPHS,
     TECudaGraphHelper,
+    _set_capture_end,
     is_graph_capturing,
 )
 from megatron.core.transformer.enums import CudaGraphModule
@@ -525,4 +526,5 @@ def test_dropless_hybridep_router_graph_boundary_preserves_padded_routes_and_gra
         get_moe_metrics_tracker().clear()
         Utils.destroy_model_parallel()
         destroy_num_microbatches_calculator()
+        _set_capture_end()
         assert not is_graph_capturing()
