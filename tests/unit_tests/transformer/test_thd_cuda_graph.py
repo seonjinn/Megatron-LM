@@ -10,13 +10,23 @@ import pytest
 import torch
 
 import megatron.core.packed_seq_params as packed_seq
-from megatron.core.models.gpt.gpt_layer_specs import get_gpt_layer_local_submodules
+from megatron.core.models.gpt.gpt_layer_specs import get_gpt_layer_local_spec
+from megatron.core.models.gpt.gpt_model import GPTModel
+from megatron.core.num_microbatches_calculator import (
+    destroy_num_microbatches_calculator,
+    init_num_microbatches_calculator,
+)
+from megatron.core.transformer.cuda_graphs import (
+    HAVE_TE_GRAPHS,
+    TECudaGraphHelper,
+    is_graph_capturing,
+)
 from megatron.core.transformer.enums import CudaGraphModule
-from megatron.core.transformer.moe.fused_a2a import HAVE_HYBRIDEP
-from megatron.core.transformer.moe.moe_layer import MoELayer, MoESubmodules
-from megatron.core.transformer.spec_utils import get_submodules
+from megatron.core.transformer.moe.fused_a2a import HAVE_HYBRIDEP, reset_hybrid_ep_buffer
+from megatron.core.transformer.moe.moe_logging import get_moe_metrics_tracker
 from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.transformer.transformer_layer import TransformerLayer
+from megatron.core.utils import is_te_min_version
 from megatron.training.arguments import _add_network_size_args
 from tests.unit_tests.test_utilities import Utils
 
@@ -386,6 +396,10 @@ def test_moe_preprocess_graph_scope_requires_moe_router() -> None:
 @pytest.mark.internal
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
 @pytest.mark.skipif(not HAVE_HYBRIDEP, reason="HybridEP is not available")
+@pytest.mark.skipif(
+    not (HAVE_TE_GRAPHS and is_te_min_version("2.10.0")),
+    reason="HybridEP partial CUDA graph coverage requires TransformerEngine >= 2.10.0",
+)
 @pytest.mark.parametrize(
     "cuda_graph_modules",
     [[CudaGraphModule.moe_router], [CudaGraphModule.moe_router, CudaGraphModule.moe_preprocess]],
@@ -400,17 +414,22 @@ def test_dropless_hybridep_router_graph_boundary_preserves_padded_routes_and_gra
     The break this catches is a router boundary that leaves padded rows selected when a
     captured HybridEP dispatch consumes its sparse routing metadata.
     """
-    world_size = Utils.world_size
+    cuda_graph_helper = None
     Utils.initialize_model_parallel(
-        tensor_model_parallel_size=1,
-        pipeline_model_parallel_size=1,
-        expert_model_parallel_size=world_size,
+        tensor_model_parallel_size=1, pipeline_model_parallel_size=1, expert_model_parallel_size=1
+    )
+    init_num_microbatches_calculator(
+        rank=Utils.rank,
+        global_batch_size=Utils.world_size,
+        micro_batch_size=1,
+        data_parallel_size=Utils.world_size,
+        decrease_batch_size_if_needed=False,
     )
     try:
-        num_experts = max(world_size, 4)
+        num_experts = 4
         config = TransformerConfig(
             tensor_model_parallel_size=1,
-            expert_model_parallel_size=world_size,
+            expert_model_parallel_size=1,
             pipeline_model_parallel_size=1,
             num_layers=1,
             hidden_size=16,
@@ -422,68 +441,76 @@ def test_dropless_hybridep_router_graph_boundary_preserves_padded_routes_and_gra
             moe_router_dtype="fp32",
             moe_token_dispatcher_type="flex",
             moe_flex_dispatcher_backend="hybridep",
+            moe_hybridep_pad_uneven_dispatch_inputs=False,
             use_cpu_initialization=True,
+            bf16=True,
             cuda_graph_impl="transformer_engine",
             cuda_graph_modules=cuda_graph_modules,
+            max_seqlen_per_dp_cp_rank=8,
+            pad_packed_seq_alignment="max",
+            thd_max_packed_sequences=1,
+            thd_tail_padding_policy="extend_last",
         )
-        submodules = get_submodules(
-            get_gpt_layer_local_submodules(num_experts=num_experts, moe_grouped_gemm=False).mlp
+        model = GPTModel(
+            config=config,
+            transformer_layer_spec=get_gpt_layer_local_spec(
+                num_experts=num_experts, moe_grouped_gemm=False
+            ),
+            vocab_size=16,
+            max_sequence_length=8,
+            pre_process=False,
+            post_process=False,
+            position_embedding_type="none",
         )
-        assert isinstance(submodules, MoESubmodules)
-        moe_layer = MoELayer(config, submodules).cuda().to(dtype=torch.bfloat16)
-        moe_layer.train()
+        model = model.cuda().to(dtype=torch.bfloat16)
+        model.train()
+        layer = model.decoder.layers[0]
+        moe_layer = layer.mlp
 
         torch.manual_seed(1234 + Utils.rank)
         base_hidden = torch.randn(8, 1, config.hidden_size, device="cuda", dtype=torch.bfloat16)
-        router_mask = torch.tensor(
+        padding_mask = torch.tensor(
             (
                 [[False], [False], [True], [False], [True], [False], [True], [True]]
                 if has_padding
                 else [[False]] * 8
             ),
             device="cuda",
-        )
-        padded_rows = router_mask.reshape(-1)
+        ).transpose(0, 1)
+        padded_rows = padding_mask.transpose(0, 1).reshape(-1)
 
         eager_hidden = base_hidden.detach().clone().requires_grad_()
-        eager_probs, eager_routing_map = moe_layer.router(eager_hidden, router_mask)
+        eager_pre_mlp_hidden = layer._forward_pre_mlp_layernorm(eager_hidden)
+        eager_probs, eager_routing_map = moe_layer.route(
+            eager_pre_mlp_hidden, padding_mask.transpose(0, 1)
+        )
+        if CudaGraphModule.moe_preprocess in cuda_graph_modules:
+            _, eager_probs = moe_layer.preprocess(
+                eager_pre_mlp_hidden, eager_probs, eager_routing_map
+            )
+            eager_routing_map = moe_layer.token_dispatcher._comm_manager.routing_map
         eager_input_grad, eager_router_grad = torch.autograd.grad(
             eager_probs.sum(), (eager_hidden, moe_layer.router.weight)
         )
 
         static_hidden = base_hidden.detach().clone().requires_grad_()
+        cuda_graph_helper = TECudaGraphHelper(
+            model=[model], config=config, seq_length=8, micro_batch_size=1, optimizers=[]
+        )
+        cuda_graph_helper.create_cudagraphs()
+        assert cuda_graph_helper.graphs_created()
 
-        def run_capture_boundary() -> tuple[torch.Tensor, torch.Tensor]:
-            probs, routing_map = moe_layer.router(static_hidden, router_mask)
-            if CudaGraphModule.moe_preprocess in cuda_graph_modules:
-                _, probs = moe_layer.preprocess(static_hidden, probs, routing_map)
-                routing_map = moe_layer.token_dispatcher._comm_manager.routing_map
-            return probs, routing_map
-
-        warmup_stream = torch.cuda.Stream()
-        warmup_stream.wait_stream(torch.cuda.current_stream())
-        with torch.cuda.stream(warmup_stream):
-            for _ in range(2):
-                moe_layer.zero_grad(set_to_none=True)
-                static_hidden.grad = None
-                run_capture_boundary()[0].sum().backward()
-        torch.cuda.current_stream().wait_stream(warmup_stream)
-
-        static_hidden.grad = torch.zeros_like(static_hidden)
-        moe_layer.router.weight.grad = torch.zeros_like(moe_layer.router.weight)
-        graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(graph):
-            static_hidden.grad.zero_()
-            moe_layer.router.weight.grad.zero_()
-            captured_probs, captured_routing_map = run_capture_boundary()
-            captured_probs.sum().backward()
-        graph.replay()
-        torch.cuda.current_stream().synchronize()
-        assert not torch.cuda.is_current_stream_capturing()
-
+        captured_outputs = layer.cuda_graphs[0](static_hidden, padding_mask=padding_mask)
+        captured_probs = captured_outputs[1]
         if CudaGraphModule.moe_preprocess in cuda_graph_modules:
-            captured_routing_map = captured_routing_map.reshape_as(eager_routing_map)
-            captured_probs = captured_probs.reshape_as(eager_probs)
+            captured_attrs = dict(
+                zip(moe_layer.token_dispatcher.valid_cudagraph_attrs, captured_outputs[2:-1])
+            )
+            captured_routing_map = captured_attrs["_comm_manager.routing_map"]
+        else:
+            captured_routing_map = captured_outputs[2]
+        captured_probs.sum().backward()
+        torch.cuda.synchronize()
 
         torch.testing.assert_close(captured_probs, eager_probs)
         assert torch.equal(captured_routing_map, eager_routing_map)
@@ -492,4 +519,10 @@ def test_dropless_hybridep_router_graph_boundary_preserves_padded_routes_and_gra
         torch.testing.assert_close(static_hidden.grad, eager_input_grad)
         torch.testing.assert_close(moe_layer.router.weight.grad, eager_router_grad)
     finally:
+        if cuda_graph_helper is not None and cuda_graph_helper.graphs_created():
+            cuda_graph_helper.delete_cuda_graphs()
+        reset_hybrid_ep_buffer()
+        get_moe_metrics_tracker().clear()
         Utils.destroy_model_parallel()
+        destroy_num_microbatches_calculator()
+        assert not is_graph_capturing()
