@@ -3,6 +3,7 @@
 import dataclasses
 import gc
 import inspect
+import json
 import logging
 import math
 import os
@@ -67,6 +68,125 @@ except:
 _IS_GRAPH_CAPTURING = False
 _IS_GRAPH_WARMUP = False
 logger = logging.getLogger(__name__)
+
+
+class CudaGraphMemoryReporter:
+    """Emit deterministic per-rank CUDA Graph memory lifecycle records."""
+
+    _PHASES = {
+        "warmup_start",
+        "capture_start",
+        "capture_complete",
+        "steady_state",
+        "run_complete",
+    }
+
+    def __init__(self, enabled: bool, graph_profile: bool) -> None:
+        self.enabled = enabled
+        self.graph_profile = graph_profile
+        self._emitted_phases: set[str] = set()
+
+    def _already_emitted(self, phase: str) -> bool:
+        return not self.enabled or phase in self._emitted_phases
+
+    def _emit(self, phase: str, *, graphs_created: bool, graph_count: int) -> None:
+        if self._already_emitted(phase):
+            return
+        if phase not in self._PHASES:
+            raise ValueError(f"Unknown CUDA Graph memory phase: {phase}")
+        if graph_count < 0 or graphs_created != (graph_count > 0):
+            raise ValueError(
+                "graphs_created must be equivalent to graph_count > 0, "
+                f"got graphs_created={graphs_created}, graph_count={graph_count}"
+            )
+
+        device = torch.cuda.current_device()
+        torch.cuda.synchronize(device)
+        free_bytes, total_bytes = torch.cuda.mem_get_info(device)
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            rank = torch.distributed.get_rank()
+        else:
+            rank = 0
+        record = {
+            "rank": int(rank),
+            "phase": phase,
+            "total_bytes": int(total_bytes),
+            "free_bytes": int(free_bytes),
+            "allocated_bytes": int(torch.cuda.memory_allocated(device)),
+            "reserved_bytes": int(torch.cuda.memory_reserved(device)),
+            "peak_allocated_bytes": int(torch.cuda.max_memory_allocated(device)),
+            "peak_reserved_bytes": int(torch.cuda.max_memory_reserved(device)),
+            "graphs_created": bool(graphs_created),
+            "graph_count": int(graph_count),
+        }
+        print(f"cuda_graph_memory={json.dumps(record, sort_keys=True)}", flush=True)
+        self._emitted_phases.add(phase)
+
+    def warmup_start(self) -> None:
+        self._emit("warmup_start", graphs_created=False, graph_count=0)
+
+    def capture_start(self) -> None:
+        if self._already_emitted("capture_start"):
+            return
+        if not self.graph_profile:
+            raise ValueError("capture_start is only valid for a CUDA Graph profile")
+        device = torch.cuda.current_device()
+        torch.cuda.reset_peak_memory_stats(device)
+        self._emit("capture_start", graphs_created=False, graph_count=0)
+
+    def capture_complete(self, *, graphs_created: bool, graph_count: int) -> None:
+        if self._already_emitted("capture_complete"):
+            return
+        if not self.graph_profile or not graphs_created or graph_count <= 0:
+            raise ValueError(
+                "capture_complete requires a graph profile with at least one created graph"
+            )
+        self._emit(
+            "capture_complete", graphs_created=graphs_created, graph_count=graph_count
+        )
+
+    def steady_state(
+        self,
+        *,
+        graphs_created: bool,
+        graph_count: int,
+        training_iteration_completed: bool,
+    ) -> None:
+        if self._already_emitted("steady_state"):
+            return
+        if not training_iteration_completed:
+            raise ValueError("steady_state requires a completed training iteration")
+        if self.graph_profile and (not graphs_created or graph_count <= 0):
+            raise ValueError("graph steady_state requires a completed CUDA Graph replay")
+        if not self.graph_profile and (graphs_created or graph_count != 0):
+            raise ValueError("control steady_state cannot report created CUDA Graphs")
+        self._emit("steady_state", graphs_created=graphs_created, graph_count=graph_count)
+
+    def training_iteration_complete(
+        self,
+        *,
+        iteration_offset: int,
+        warmup_steps: int,
+        graphs_created: bool,
+        graph_count: int,
+        training_step_executed: bool = True,
+    ) -> None:
+        if (
+            self._already_emitted("steady_state")
+            or not training_step_executed
+            or iteration_offset < warmup_steps
+        ):
+            return
+        self.steady_state(
+            graphs_created=graphs_created,
+            graph_count=graph_count,
+            training_iteration_completed=True,
+        )
+
+    def run_complete(self, *, graphs_created: bool = False, graph_count: int = 0) -> None:
+        if not self.graph_profile and (graphs_created or graph_count != 0):
+            raise ValueError("control run_complete cannot report created CUDA Graphs")
+        self._emit("run_complete", graphs_created=graphs_created, graph_count=graph_count)
 
 
 def _set_skip_fp8_weight_update_tensor(skip: bool) -> None:
@@ -1807,6 +1927,7 @@ class TECudaGraphHelper:
         #   layers found)
         self._capture_finished = False
         self._graphs_created = False
+        self._graph_count = 0
 
     def _discover_layers(self):
         """Discover captureable layers from the model and populate internal data structures."""
@@ -1901,6 +2022,10 @@ class TECudaGraphHelper:
         were found, and True if at least one graph was successfully created.
         """
         return self._graphs_created
+
+    def graph_count(self) -> int:
+        """Return the number of CUDA Graph callables created by Transformer Engine."""
+        return self._graph_count
 
     def _get_sample_arguments(self, order, chunk_id_list=None):
         """
@@ -2409,7 +2534,8 @@ class TECudaGraphHelper:
                         layer.cuda_graphs.append(graphs[graph_idx])
                 num_layers_accumulated += len(layers)
 
-            self._graphs_created = True
+            self._graph_count = len(graphs)
+            self._graphs_created = self._graph_count > 0
 
         self._finish_capturing(start_time)
 
@@ -2452,6 +2578,7 @@ class TECudaGraphHelper:
             f'{graphs_not_reset} graphs deleted without explicit reset.',
         )
         self._graphs_created = False
+        self._graph_count = 0
 
 
 def convert_schedule_table_to_order(num_warmup_microbatches, num_model_chunks, schedule_table):

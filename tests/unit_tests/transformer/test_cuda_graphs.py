@@ -1117,7 +1117,7 @@ class TestCudaGraphMemoryReporter:
         events: list[tuple[str, object]] = []
         expected_result = ({"loss": 1.0}, 1, False)
 
-        def fake_train_step(*args: object, **kwargs: object) -> tuple[str]:
+        def fake_train_step(*args: object, **kwargs: object) -> tuple[object, ...]:
             events.append(("train_step", (args, kwargs)))
             return expected_result
 

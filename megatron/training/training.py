@@ -157,7 +157,7 @@ from megatron.core.pipeline_parallel.utils import (
     is_vp_last_stage,
 )
 from megatron.core.process_groups_config import ProcessGroupCollection
-from megatron.core.transformer.cuda_graphs import TECudaGraphHelper
+from megatron.core.transformer.cuda_graphs import CudaGraphMemoryReporter, TECudaGraphHelper
 from megatron.core.transformer.module import Float16Module
 from megatron.core.transformer.moe.paged_stash import PagedStashRunner
 from megatron.core.utils import (
@@ -3354,6 +3354,57 @@ def checkpoint_and_decide_exit(
     return False
 
 
+def _capture_transformer_engine_cuda_graphs(
+    cuda_graph_helper: TECudaGraphHelper, memory_reporter: CudaGraphMemoryReporter
+) -> None:
+    """Capture TE CUDA Graphs while preserving the memory-report ordering contract."""
+    memory_reporter.capture_start()
+    cuda_graph_helper.create_cudagraphs()
+    memory_reporter.capture_complete(
+        graphs_created=cuda_graph_helper.graphs_created(),
+        graph_count=cuda_graph_helper.graph_count(),
+    )
+
+
+def _train_step_with_cuda_graph_memory(
+    *,
+    train_step_args: Tuple[Any, ...],
+    train_step_kwargs: Dict[str, Any],
+    memory_reporter: CudaGraphMemoryReporter,
+    cuda_graph_helper: Optional[TECudaGraphHelper],
+    iteration_offset: int,
+    warmup_steps: int,
+) -> Any:
+    """Run one real training step, then report the first eligible steady state."""
+    result = train_step(*train_step_args, **train_step_kwargs)
+    graphs_created = cuda_graph_helper is not None and cuda_graph_helper.graphs_created()
+    graph_count = cuda_graph_helper.graph_count() if cuda_graph_helper is not None else 0
+    memory_reporter.training_iteration_complete(
+        iteration_offset=iteration_offset,
+        warmup_steps=warmup_steps,
+        graphs_created=graphs_created,
+        graph_count=graph_count,
+        training_step_executed=True,
+    )
+    return result
+
+
+def _finish_cuda_graph_memory_reporting(
+    *,
+    cuda_graph_helper: Optional[TECudaGraphHelper],
+    memory_reporter: CudaGraphMemoryReporter,
+) -> None:
+    """Report final graph-resident memory before deleting any TE CUDA Graphs."""
+    graphs_created = cuda_graph_helper is not None and cuda_graph_helper.graphs_created()
+    graph_count = cuda_graph_helper.graph_count() if cuda_graph_helper is not None else 0
+    memory_reporter.run_complete(
+        graphs_created=graphs_created,
+        graph_count=graph_count,
+    )
+    if graphs_created:
+        cuda_graph_helper.delete_cuda_graphs()
+
+
 def train(
     forward_step_func,
     model,
@@ -3678,7 +3729,12 @@ def train(
         torch.distributed.barrier()
         print_rank_0(f">>> Weight hashes match after {iteration} iterations...")
 
-    # Initialize CUDA Graphs helper.
+    # Initialize CUDA Graphs helper and memory lifecycle reporting.
+    cuda_graph_helper = None
+    cuda_graph_memory_reporter = CudaGraphMemoryReporter(
+        enabled=config.cuda_graph_memory_report,
+        graph_profile=args.cuda_graph_impl == "transformer_engine",
+    )
     if args.cuda_graph_impl == "transformer_engine":
         cuda_graph_helper = TECudaGraphHelper(
             model=model,
@@ -3687,6 +3743,7 @@ def train(
             micro_batch_size=args.micro_batch_size,
             optimizers=[optimizer],
         )
+    cuda_graph_memory_reporter.warmup_start()
 
     def _finished_training(iteration):
         return (
@@ -3764,7 +3821,10 @@ def train(
         ):
             if args.cuda_graph_warmup_steps > 0 and should_disable_forward_pre_hook(args):
                 disable_forward_pre_hook(model, param_sync=False)
-            cuda_graph_helper.create_cudagraphs()
+            _capture_transformer_engine_cuda_graphs(
+                cuda_graph_helper=cuda_graph_helper,
+                memory_reporter=cuda_graph_memory_reporter,
+            )
             if args.cuda_graph_warmup_steps > 0 and should_disable_forward_pre_hook(args):
                 enable_forward_pre_hook(model)
                 cuda_graph_helper.cuda_graph_set_manual_hooks()
@@ -3830,8 +3890,21 @@ def train(
                 num_zeros_in_grad,
                 max_attention_logit,
                 samples_seen_in_iteration,
-            ) = train_step(
-                forward_step_func, train_data_iterator, model, optimizer, opt_param_scheduler, config, forward_backward_func, iteration=iteration
+            ) = _train_step_with_cuda_graph_memory(
+                train_step_args=(
+                    forward_step_func,
+                    train_data_iterator,
+                    model,
+                    optimizer,
+                    opt_param_scheduler,
+                    config,
+                    forward_backward_func,
+                ),
+                train_step_kwargs={"iteration": iteration},
+                memory_reporter=cuda_graph_memory_reporter,
+                cuda_graph_helper=cuda_graph_helper,
+                iteration_offset=iteration - start_iteration,
+                warmup_steps=args.cuda_graph_warmup_steps,
             )
             ft_integration.on_training_step_end()
             if _maybe_raise_workload_exception is not None and iteration != start_iteration:
@@ -4075,9 +4148,11 @@ def train(
         if should_exit:
             break
 
-    # Destroy CUDA Graphs.
-    if args.cuda_graph_impl == "transformer_engine" and cuda_graph_helper.graphs_created():
-        cuda_graph_helper.delete_cuda_graphs()
+    # Report graph-resident memory before destroying CUDA Graphs.
+    _finish_cuda_graph_memory_reporting(
+        cuda_graph_helper=cuda_graph_helper,
+        memory_reporter=cuda_graph_memory_reporter,
+    )
 
     # Call OptimizerCudaGraph destructor to destroy optimizer CUDA graph
     if args.optimizer_cuda_graph:
