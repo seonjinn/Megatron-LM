@@ -530,6 +530,15 @@ def test_packed_mamba_te_graph_replays_runtime_boundaries_with_gradient_parity()
             optimizers=[],
             pg_collection=pg_collection,
         )
+        sample_args, graph_helper_kwargs = cuda_graph_helper._get_cuda_graph_input_data()
+        sample_kwargs = graph_helper_kwargs["sample_kwargs"]
+        assert all(isinstance(argument, torch.Tensor) for args in sample_args for argument in args)
+        assert all(set(kwargs) == {"packed_seq_idx"} for kwargs in sample_kwargs)
+        assert all(
+            value is None or isinstance(value, torch.Tensor)
+            for kwargs in sample_kwargs
+            for value in kwargs.values()
+        )
         cuda_graph_helper.create_cudagraphs()
         assert cuda_graph_helper.graphs_created()
 
