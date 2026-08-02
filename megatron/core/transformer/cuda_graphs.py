@@ -148,8 +148,8 @@ class CudaGraphMemoryReporter:
     def steady_state(
         self,
         *,
-        graphs_created: bool,
-        graph_count: int,
+        graphs_created: bool = False,
+        graph_count: int = 0,
         training_iteration_completed: bool,
     ) -> None:
         if self._already_emitted("steady_state"):
