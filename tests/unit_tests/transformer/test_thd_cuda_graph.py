@@ -530,8 +530,9 @@ def test_dropless_hybridep_router_graph_boundary_preserves_padded_routes_and_gra
 
         torch.testing.assert_close(captured_probs, eager_probs)
         assert torch.equal(captured_routing_map, eager_routing_map)
-        assert torch.count_nonzero(captured_probs[padded_rows]) == 0
-        assert not captured_routing_map[padded_rows].any()
+        original_tokens = padded_rows.numel()
+        assert torch.count_nonzero(captured_probs[:original_tokens][padded_rows]) == 0
+        assert not captured_routing_map[:original_tokens][padded_rows].any()
         torch.testing.assert_close(captured_input_grad, eager_input_grad)
         torch.testing.assert_close(captured_router_grad, eager_router_grad)
     finally:
