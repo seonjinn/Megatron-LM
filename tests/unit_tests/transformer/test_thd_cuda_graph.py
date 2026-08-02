@@ -526,8 +526,6 @@ def test_dropless_hybridep_router_graph_boundary_preserves_padded_routes_and_gra
         )
         cuda_graph_helper.create_cudagraphs()
         assert cuda_graph_helper.graphs_created()
-        captured_aux_loss = metrics_tracker.metrics["load_balancing_loss"].values.detach().clone()
-        metrics_tracker.clear()
 
         captured_outputs = layer.cuda_graphs[0](static_hidden, padding_mask=padding_mask)
         captured_probs = captured_outputs[1]
@@ -545,6 +543,8 @@ def test_dropless_hybridep_router_graph_boundary_preserves_padded_routes_and_gra
         captured_routing_map = captured_routing_map.detach().clone()
         captured_input_grad = static_hidden.grad.detach().clone()
         captured_router_grad = moe_layer.router.weight.grad.detach().clone()
+        captured_aux_loss = metrics_tracker.metrics["load_balancing_loss"].values.detach().clone()
+        metrics_tracker.clear()
 
         model.zero_grad(set_to_none=True)
         eager_hidden = base_hidden.detach().clone().requires_grad_()
