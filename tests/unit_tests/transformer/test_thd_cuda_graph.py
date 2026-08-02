@@ -437,7 +437,6 @@ def test_dropless_hybridep_router_graph_boundary_preserves_padded_routes_and_gra
         router_mask = torch.tensor(
             [[False], [False], [True], [False], [True], [False], [True], [True]], device="cuda"
         )
-        layer_mask = router_mask.transpose(0, 1)
         padded_rows = router_mask.reshape(-1)
 
         eager_hidden = base_hidden.detach().clone().requires_grad_()
@@ -448,14 +447,12 @@ def test_dropless_hybridep_router_graph_boundary_preserves_padded_routes_and_gra
 
         static_hidden = base_hidden.detach().clone().requires_grad_()
 
-        def run_capture_boundary() -> list[torch.Tensor]:
-            return moe_layer(static_hidden, padding_mask=layer_mask)
-
-        def warm_capture_boundary() -> torch.Tensor:
+        def run_capture_boundary() -> tuple[torch.Tensor, torch.Tensor]:
             probs, routing_map = moe_layer.router(static_hidden, router_mask)
             if CudaGraphModule.moe_preprocess in cuda_graph_modules:
                 _, probs = moe_layer.preprocess(static_hidden, probs, routing_map)
-            return probs
+                routing_map = moe_layer.token_dispatcher._comm_manager.routing_map
+            return probs, routing_map
 
         warmup_stream = torch.cuda.Stream()
         warmup_stream.wait_stream(torch.cuda.current_stream())
@@ -463,7 +460,7 @@ def test_dropless_hybridep_router_graph_boundary_preserves_padded_routes_and_gra
             for _ in range(2):
                 moe_layer.zero_grad(set_to_none=True)
                 static_hidden.grad = None
-                warm_capture_boundary().sum().backward()
+                run_capture_boundary()[0].sum().backward()
         torch.cuda.current_stream().wait_stream(warmup_stream)
 
         moe_layer.zero_grad(set_to_none=True)
@@ -471,17 +468,14 @@ def test_dropless_hybridep_router_graph_boundary_preserves_padded_routes_and_gra
         graph = torch.cuda.CUDAGraph()
         with torch.cuda.graph(graph):
             static_hidden.grad.zero_()
-            captured_outputs = run_capture_boundary()
-            captured_outputs[1].sum().backward()
+            captured_probs, captured_routing_map = run_capture_boundary()
+            captured_probs.sum().backward()
         graph.replay()
         torch.cuda.current_stream().synchronize()
 
-        captured_probs = captured_outputs[1]
         if CudaGraphModule.moe_preprocess in cuda_graph_modules:
-            captured_routing_map = captured_outputs[-1].reshape_as(eager_routing_map)
+            captured_routing_map = captured_routing_map.reshape_as(eager_routing_map)
             captured_probs = captured_probs.reshape_as(eager_probs)
-        else:
-            captured_routing_map = captured_outputs[2]
 
         torch.testing.assert_close(captured_probs, eager_probs)
         assert torch.equal(captured_routing_map, eager_routing_map)
