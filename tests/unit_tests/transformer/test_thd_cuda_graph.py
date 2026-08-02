@@ -11,12 +11,15 @@ import torch
 
 import megatron.core.packed_seq_params as packed_seq
 from megatron.core import tensor_parallel
+from megatron.core.fusions.fused_bias_dropout import get_bias_dropout_add
 from megatron.core.models.gpt.gpt_layer_specs import get_gpt_layer_local_spec
 from megatron.core.models.gpt.gpt_model import GPTModel
 from megatron.core.num_microbatches_calculator import (
     destroy_num_microbatches_calculator,
     init_num_microbatches_calculator,
 )
+from megatron.core.process_groups_config import ProcessGroupCollection
+from megatron.core.ssm.mamba_layer import MambaLayer, MambaLayerSubmodules
 from megatron.core.transformer.cuda_graphs import (
     HAVE_TE_GRAPHS,
     TECudaGraphHelper,
@@ -32,6 +35,44 @@ from megatron.core.transformer.transformer_layer import TransformerLayer
 from megatron.core.utils import is_te_min_version
 from megatron.training.arguments import _add_network_size_args
 from tests.unit_tests.test_utilities import Utils
+
+
+class _PackedSeqIdxMixer(torch.nn.Module):
+    """Small differentiable mixer that exposes Mamba's packed metadata contract."""
+
+    def __init__(self, config: TransformerConfig, d_model: int, **_: object) -> None:
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.linspace(0.5, 1.5, d_model))
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        *,
+        inference_context: object | None,
+        packed_seq_params: packed_seq.PackedSeqParams | None,
+    ) -> tuple[torch.Tensor, None]:
+        if packed_seq_params is None or packed_seq_params.seq_idx is None:
+            raise ValueError("fake Mamba mixer requires packed seq_idx metadata")
+        seq_idx = packed_seq_params.seq_idx.transpose(0, 1).unsqueeze(-1).to(hidden_states.dtype)
+        return hidden_states * self.weight + seq_idx * self.weight, None
+
+
+class _MambaGraphDecoder(torch.nn.Module):
+
+    def __init__(self, layer: MambaLayer) -> None:
+        super().__init__()
+        self.layers = torch.nn.ModuleList([layer])
+
+
+class _MambaGraphModel(torch.nn.Module):
+
+    def __init__(self, layer: MambaLayer) -> None:
+        super().__init__()
+        self.decoder = _MambaGraphDecoder(layer)
+
+    def zero_grad_buffer(self) -> None:
+        for parameter in self.parameters():
+            parameter.grad = None
 
 
 def _make_packed_seq_params() -> packed_seq.PackedSeqParams:
@@ -421,6 +462,113 @@ def test_moe_preprocess_graph_scope_requires_moe_router() -> None:
             cuda_graph_impl="transformer_engine",
             cuda_graph_modules=[CudaGraphModule.moe_preprocess],
         )
+
+
+@pytest.mark.internal
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+@pytest.mark.skipif(
+    not (HAVE_TE_GRAPHS and is_te_min_version("2.10.0")),
+    reason="Packed Mamba partial CUDA graph coverage requires TransformerEngine >= 2.10.0",
+)
+def test_packed_mamba_te_graph_replays_runtime_boundaries_with_gradient_parity() -> None:
+    """A captured Mamba layer must consume each replay's packed token boundary map.
+
+    The break this catches is a graph that captures one Python ``PackedSeqParams`` instance and
+    silently reuses its ``seq_idx`` after the runtime packed layout changes.
+    """
+    cuda_graph_helper = None
+    Utils.initialize_model_parallel(tensor_model_parallel_size=1, pipeline_model_parallel_size=1)
+    init_num_microbatches_calculator(
+        rank=Utils.rank,
+        global_batch_size=Utils.world_size,
+        micro_batch_size=1,
+        data_parallel_size=Utils.world_size,
+        decrease_batch_size_if_needed=False,
+    )
+    try:
+        fixed_local_tokens = 8
+        config = TransformerConfig(
+            tensor_model_parallel_size=1,
+            pipeline_model_parallel_size=1,
+            context_parallel_size=1,
+            num_layers=1,
+            hidden_size=16,
+            num_attention_heads=4,
+            use_cpu_initialization=True,
+            bf16=True,
+            hidden_dropout=0.0,
+            cuda_graph_impl="transformer_engine",
+            cuda_graph_modules=[CudaGraphModule.mamba],
+            max_seqlen_per_dp_cp_rank=fixed_local_tokens,
+            pad_packed_seq_alignment="max",
+            thd_max_packed_sequences=3,
+            thd_tail_padding_policy="extend_last",
+        )
+        pg_collection = ProcessGroupCollection.use_mpu_process_groups(
+            required_pgs=["tp", "pp", "cp"]
+        )
+        layer = MambaLayer(
+            config,
+            MambaLayerSubmodules(mixer=_PackedSeqIdxMixer, mamba_bda=get_bias_dropout_add),
+            pg_collection=pg_collection,
+        )
+        model = _MambaGraphModel(layer).cuda().to(dtype=torch.bfloat16)
+        model.train()
+
+        torch.manual_seed(1234 + Utils.rank)
+        base_hidden = torch.randn(
+            fixed_local_tokens, 1, config.hidden_size, device="cuda", dtype=torch.bfloat16
+        )
+        layouts = (
+            torch.tensor([[0, 0, 0, 1, 1, 1, 1, 1]], device="cuda", dtype=torch.int32),
+            torch.tensor([[0, 0, 1, 1, 2, 2, 2, 2]], device="cuda", dtype=torch.int32),
+        )
+
+        cuda_graph_helper = TECudaGraphHelper(
+            model=[model],
+            config=config,
+            seq_length=fixed_local_tokens,
+            micro_batch_size=1,
+            optimizers=[],
+            pg_collection=pg_collection,
+        )
+        cuda_graph_helper.create_cudagraphs()
+        assert cuda_graph_helper.graphs_created()
+
+        def run(layout: torch.Tensor, captured: bool) -> tuple[torch.Tensor, ...]:
+            hidden_states = base_hidden.detach().clone().requires_grad_()
+            packed_seq_params = packed_seq.PackedSeqParams(
+                qkv_format="thd", seq_idx=layout, total_tokens=fixed_local_tokens
+            )
+            output = (
+                layer(hidden_states, packed_seq_params=packed_seq_params)
+                if captured
+                else layer.forward(hidden_states, packed_seq_params=packed_seq_params)
+            )
+            input_grad, weight_grad = torch.autograd.grad(
+                output.float().square().mean(), (hidden_states, layer.mixer.weight)
+            )
+            torch.cuda.synchronize()
+            return (
+                output.detach().clone(),
+                input_grad.detach().clone(),
+                weight_grad.detach().clone(),
+            )
+
+        captured_results = [run(layout, captured=True) for layout in layouts]
+        eager_results = [run(layout, captured=False) for layout in layouts]
+
+        for captured_result, eager_result in zip(captured_results, eager_results):
+            for captured_tensor, eager_tensor in zip(captured_result, eager_result):
+                torch.testing.assert_close(captured_tensor, eager_tensor)
+        assert not torch.equal(captured_results[0][0], captured_results[1][0])
+    finally:
+        if cuda_graph_helper is not None and cuda_graph_helper.graphs_created():
+            cuda_graph_helper.delete_cuda_graphs()
+        destroy_num_microbatches_calculator()
+        Utils.destroy_model_parallel()
+        _set_capture_end()
+        assert not is_graph_capturing()
 
 
 @pytest.mark.internal
