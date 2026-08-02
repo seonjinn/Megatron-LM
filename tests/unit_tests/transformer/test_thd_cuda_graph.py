@@ -429,11 +429,11 @@ def test_dropless_hybridep_router_graph_boundary_preserves_padded_routes_and_gra
             get_gpt_layer_local_submodules(num_experts=num_experts, moe_grouped_gemm=False).mlp
         )
         assert isinstance(submodules, MoESubmodules)
-        moe_layer = MoELayer(config, submodules).cuda()
+        moe_layer = MoELayer(config, submodules).cuda().to(dtype=torch.bfloat16)
         moe_layer.train()
 
         torch.manual_seed(1234 + Utils.rank)
-        base_hidden = torch.randn(8, 1, config.hidden_size, device="cuda")
+        base_hidden = torch.randn(8, 1, config.hidden_size, device="cuda", dtype=torch.bfloat16)
         router_mask = torch.tensor(
             [[False], [False], [True], [False], [True], [False], [True], [True]], device="cuda"
         )
@@ -451,13 +451,19 @@ def test_dropless_hybridep_router_graph_boundary_preserves_padded_routes_and_gra
         def run_capture_boundary() -> list[torch.Tensor]:
             return moe_layer(static_hidden, padding_mask=layer_mask)
 
+        def warm_capture_boundary() -> torch.Tensor:
+            probs, routing_map = moe_layer.router(static_hidden, router_mask)
+            if CudaGraphModule.moe_preprocess in cuda_graph_modules:
+                _, probs = moe_layer.preprocess(static_hidden, probs, routing_map)
+            return probs
+
         warmup_stream = torch.cuda.Stream()
         warmup_stream.wait_stream(torch.cuda.current_stream())
         with torch.cuda.stream(warmup_stream):
             for _ in range(2):
                 moe_layer.zero_grad(set_to_none=True)
                 static_hidden.grad = None
-                run_capture_boundary()[1].sum().backward()
+                warm_capture_boundary().sum().backward()
         torch.cuda.current_stream().wait_stream(warmup_stream)
 
         moe_layer.zero_grad(set_to_none=True)
