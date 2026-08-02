@@ -47,6 +47,7 @@ from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.transformer.transformer_layer import TransformerLayer
 from megatron.core.utils import is_te_min_version
 from megatron.training import arguments as training_arguments
+from megatron.training import training as training_module
 from megatron.training.arguments import core_transformer_config_from_args, parse_args, validate_args
 from megatron.training.global_vars import (
     destroy_global_vars,
@@ -1000,6 +1001,145 @@ class TestCudaGraphMemoryReporter:
         ]
         assert all(record["graphs_created"] is False for record in records)
         assert all(record["graph_count"] == 0 for record in records)
+
+    def test_cuda_graph_memory_capture_wrapper_orders_events(self) -> None:
+        events: list[tuple[str, object]] = []
+
+        class FakeReporter:
+            def capture_start(self) -> None:
+                events.append(("capture_start", None))
+
+            def capture_complete(self, *, graphs_created: bool, graph_count: int) -> None:
+                events.append(("capture_complete", (graphs_created, graph_count)))
+
+        class FakeGraphHelper:
+            def create_cudagraphs(self) -> None:
+                events.append(("create_cudagraphs", None))
+
+            def graphs_created(self) -> bool:
+                return True
+
+            def graph_count(self) -> int:
+                return 5
+
+        training_module._capture_transformer_engine_cuda_graphs(
+            cuda_graph_helper=FakeGraphHelper(), memory_reporter=FakeReporter()
+        )
+
+        assert events == [
+            ("capture_start", None),
+            ("create_cudagraphs", None),
+            ("capture_complete", (True, 5)),
+        ]
+
+    def test_cuda_graph_memory_train_step_wrapper_reports_only_after_real_step(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        events: list[tuple[str, object]] = []
+        expected_result = ("train-step-result",)
+
+        def fake_train_step(*args: object, **kwargs: object) -> tuple[str]:
+            events.append(("train_step", (args, kwargs)))
+            return expected_result
+
+        class FakeReporter:
+            def steady_state(
+                self,
+                *,
+                graphs_created: bool,
+                graph_count: int,
+                training_iteration_completed: bool,
+            ) -> None:
+                events.append(
+                    (
+                        "steady_state",
+                        (graphs_created, graph_count, training_iteration_completed),
+                    )
+                )
+
+        class FakeGraphHelper:
+            def graphs_created(self) -> bool:
+                return True
+
+            def graph_count(self) -> int:
+                return 3
+
+        monkeypatch.setattr(training_module, "train_step", fake_train_step)
+
+        result = training_module._train_step_with_cuda_graph_memory(
+            train_step_args=("forward", "data", "model"),
+            train_step_kwargs={"iteration": 9},
+            memory_reporter=FakeReporter(),
+            cuda_graph_helper=FakeGraphHelper(),
+            iteration_offset=9,
+            warmup_steps=9,
+        )
+
+        assert result is expected_result
+        assert events == [
+            (
+                "train_step",
+                (("forward", "data", "model"), {"iteration": 9}),
+            ),
+            ("steady_state", (True, 3, True)),
+        ]
+
+    def test_cuda_graph_memory_control_uses_equivalent_warmup_offset(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        steady_state_events: list[tuple[bool, int]] = []
+
+        monkeypatch.setattr(training_module, "train_step", lambda *args, **kwargs: None)
+
+        class FakeReporter:
+            def steady_state(
+                self,
+                *,
+                graphs_created: bool,
+                graph_count: int,
+                training_iteration_completed: bool,
+            ) -> None:
+                assert training_iteration_completed is True
+                steady_state_events.append((graphs_created, graph_count))
+
+        reporter = FakeReporter()
+        for iteration_offset in range(3):
+            training_module._train_step_with_cuda_graph_memory(
+                train_step_args=(),
+                train_step_kwargs={},
+                memory_reporter=reporter,
+                cuda_graph_helper=None,
+                iteration_offset=iteration_offset,
+                warmup_steps=2,
+            )
+
+        assert steady_state_events == [(False, 0)]
+
+    def test_cuda_graph_memory_run_complete_precedes_graph_deletion(self) -> None:
+        events: list[tuple[str, object]] = []
+
+        class FakeReporter:
+            def run_complete(self, *, graphs_created: bool, graph_count: int) -> None:
+                events.append(("run_complete", (graphs_created, graph_count)))
+
+        class FakeGraphHelper:
+            def graphs_created(self) -> bool:
+                return True
+
+            def graph_count(self) -> int:
+                return 2
+
+            def delete_cuda_graphs(self) -> None:
+                events.append(("delete_cuda_graphs", None))
+
+        training_module._finish_cuda_graph_memory_reporting(
+            cuda_graph_helper=FakeGraphHelper(), memory_reporter=FakeReporter()
+        )
+
+        assert events == [
+            ("run_complete", (True, 2)),
+            ("delete_cuda_graphs", None),
+        ]
 
 
 class TestTECudaGraphHelper:
