@@ -60,6 +60,7 @@ class MegatronCheckpointLoaderLLaVA(MegatronCheckpointLoaderBase):
         """
         # Copy values for llava model from checkpoint, should only need to be dummy values
         margs.use_te = getattr(checkpoint_args, "use_te", margs.transformer_impl == "transformer_engine")
+        margs.vision_use_local_spec = getattr(checkpoint_args, "vision_use_local_spec", False)
         margs.language_model_type = checkpoint_args.language_model_type
         margs.vision_model_type = checkpoint_args.vision_model_type
         margs.tokenizer_prompt_format = getattr(checkpoint_args, "tokenizer_prompt_format", "dummy")
