@@ -391,8 +391,9 @@ def test_moe_preprocess_graph_scope_requires_moe_router() -> None:
     [[CudaGraphModule.moe_router], [CudaGraphModule.moe_router, CudaGraphModule.moe_preprocess]],
     ids=["moe_router", "moe_router_and_preprocess"],
 )
+@pytest.mark.parametrize("has_padding", [False, True], ids=["unpadded_control", "padded_routes"])
 def test_dropless_hybridep_router_graph_boundary_preserves_padded_routes_and_gradients(
-    cuda_graph_modules: list[CudaGraphModule],
+    cuda_graph_modules: list[CudaGraphModule], has_padding: bool
 ) -> None:
     """TE partial capture must preserve dropless HybridEP routing across padded THD rows.
 
@@ -435,7 +436,12 @@ def test_dropless_hybridep_router_graph_boundary_preserves_padded_routes_and_gra
         torch.manual_seed(1234 + Utils.rank)
         base_hidden = torch.randn(8, 1, config.hidden_size, device="cuda", dtype=torch.bfloat16)
         router_mask = torch.tensor(
-            [[False], [False], [True], [False], [True], [False], [True], [True]], device="cuda"
+            (
+                [[False], [False], [True], [False], [True], [False], [True], [True]]
+                if has_padding
+                else [[False]] * 8
+            ),
+            device="cuda",
         )
         padded_rows = router_mask.reshape(-1)
 
@@ -463,15 +469,17 @@ def test_dropless_hybridep_router_graph_boundary_preserves_padded_routes_and_gra
                 run_capture_boundary()[0].sum().backward()
         torch.cuda.current_stream().wait_stream(warmup_stream)
 
-        moe_layer.zero_grad(set_to_none=True)
         static_hidden.grad = torch.zeros_like(static_hidden)
+        moe_layer.router.weight.grad = torch.zeros_like(moe_layer.router.weight)
         graph = torch.cuda.CUDAGraph()
         with torch.cuda.graph(graph):
             static_hidden.grad.zero_()
+            moe_layer.router.weight.grad.zero_()
             captured_probs, captured_routing_map = run_capture_boundary()
             captured_probs.sum().backward()
         graph.replay()
         torch.cuda.current_stream().synchronize()
+        assert not torch.cuda.is_current_stream_capturing()
 
         if CudaGraphModule.moe_preprocess in cuda_graph_modules:
             captured_routing_map = captured_routing_map.reshape_as(eager_routing_map)
