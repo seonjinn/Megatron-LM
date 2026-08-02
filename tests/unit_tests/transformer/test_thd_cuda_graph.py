@@ -465,6 +465,12 @@ def test_dropless_hybridep_router_graph_boundary_preserves_padded_routes_and_gra
         )
         model = model.cuda().to(dtype=torch.bfloat16)
         model.train()
+
+        def zero_grad_buffer() -> None:
+            for parameter in model.parameters():
+                parameter.grad = None
+
+        setattr(model, "zero_grad_buffer", zero_grad_buffer)
         layer = model.decoder.layers[0]
         moe_layer = layer.mlp
 
