@@ -467,8 +467,8 @@ def test_moe_preprocess_graph_scope_requires_moe_router() -> None:
 @pytest.mark.internal
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
 @pytest.mark.skipif(
-    not (HAVE_TE_GRAPHS and is_te_min_version("2.10.0")),
-    reason="Packed Mamba partial CUDA graph coverage requires TransformerEngine >= 2.10.0",
+    not (HAVE_TE_GRAPHS and is_te_min_version("1.10.0")),
+    reason="Packed Mamba partial CUDA graph coverage requires TransformerEngine >= 1.10.0",
 )
 def test_packed_mamba_te_graph_replays_runtime_boundaries_with_gradient_parity() -> None:
     """A captured Mamba layer must consume each replay's packed token boundary map.
