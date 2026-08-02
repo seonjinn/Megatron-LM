@@ -442,7 +442,7 @@ def test_dropless_hybridep_router_graph_boundary_preserves_padded_routes_and_gra
             moe_router_dtype="fp32",
             moe_token_dispatcher_type="flex",
             moe_flex_dispatcher_backend="hybridep",
-            moe_hybridep_pad_uneven_dispatch_inputs=False,
+            moe_hybridep_pad_uneven_dispatch_inputs=True,
             use_cpu_initialization=True,
             bf16=True,
             cuda_graph_impl="transformer_engine",

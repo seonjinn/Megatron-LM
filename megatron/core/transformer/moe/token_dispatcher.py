@@ -16,6 +16,7 @@ from megatron.core.tensor_parallel import (
     gather_from_sequence_parallel_region,
     reduce_scatter_to_sequence_parallel_region,
 )
+from megatron.core.transformer.cuda_graphs import is_graph_capturing
 from megatron.core.transformer.enums import CudaGraphModule
 from megatron.core.transformer.moe.fused_a2a import (
     HYBRIDEP_TOKEN_ALIGNMENT,
@@ -1044,15 +1045,26 @@ class _HybridEPManager(_DispatchManager):
 
         padded_num_tokens = num_tokens
         if self.config.moe_hybridep_pad_uneven_dispatch_inputs:
-            # Use the actual tp_ep max so all ranks in the MoE communication
-            # group pass the same token count to HybridEP.
-            max_num_tokens_across_ep = torch.tensor(
-                [num_tokens], device=routing_map.device, dtype=torch.long
+            has_fixed_thd_graph_bounds = (
+                self.config.cuda_graph_impl == "transformer_engine"
+                and self.config.max_seqlen_per_dp_cp_rank is not None
+                and self.config.pad_packed_seq_alignment is not None
+                and self.config.thd_max_packed_sequences is not None
             )
-            torch.distributed.all_reduce(
-                max_num_tokens_across_ep, op=torch.distributed.ReduceOp.MAX, group=self.group
-            )
-            padded_num_tokens = int(max_num_tokens_across_ep.item())
+            if has_fixed_thd_graph_bounds and is_graph_capturing():
+                # Static THD capture pads every participating rank to the same bound.
+                # Avoid the dynamic reduction and device-to-host conversion in the graph.
+                padded_num_tokens = num_tokens
+            else:
+                # Use the actual tp_ep max so all ranks in the MoE communication
+                # group pass the same token count to HybridEP.
+                max_num_tokens_across_ep = torch.tensor(
+                    [num_tokens], device=routing_map.device, dtype=torch.long
+                )
+                torch.distributed.all_reduce(
+                    max_num_tokens_across_ep, op=torch.distributed.ReduceOp.MAX, group=self.group
+                )
+                padded_num_tokens = int(max_num_tokens_across_ep.item())
             padded_num_tokens += -padded_num_tokens % HYBRIDEP_TOKEN_ALIGNMENT
         self._padded_num_tokens = padded_num_tokens
 
