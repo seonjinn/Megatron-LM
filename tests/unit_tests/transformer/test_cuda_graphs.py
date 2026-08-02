@@ -5,6 +5,7 @@ import json
 import os
 import sys
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 import torch
@@ -849,7 +850,7 @@ class TestCudaGraphMemoryReporter:
         return events
 
     @staticmethod
-    def _records(captured: pytest.CaptureResult[str]) -> list[dict[str, object]]:
+    def _records(captured: Any) -> list[dict[str, object]]:
         prefix = "cuda_graph_memory="
         lines = captured.out.splitlines()
         assert all(line.startswith(prefix) for line in lines)
