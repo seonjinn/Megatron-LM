@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 import gc
+import json
 import os
 import sys
 
@@ -30,6 +31,7 @@ from megatron.core.tensor_parallel.random import (
     initialize_rng_tracker,
     model_parallel_cuda_manual_seed,
 )
+from megatron.core.transformer import cuda_graphs as cuda_graphs_module
 from megatron.core.transformer.cuda_graphs import (
     CudaGraphManager,
     TECudaGraphHelper,
@@ -811,6 +813,195 @@ class TestParallelHybridBlockCudagraphs:
 _unique_buffer_counts = {}
 
 
+class TestCudaGraphMemoryReporter:
+    _MEMORY_VALUES = {
+        "total_bytes": 1_000,
+        "free_bytes": 700,
+        "allocated_bytes": 100,
+        "reserved_bytes": 200,
+        "peak_allocated_bytes": 300,
+        "peak_reserved_bytes": 400,
+    }
+
+    @staticmethod
+    def _patch_cuda_memory(
+        monkeypatch: pytest.MonkeyPatch, events: list[tuple[str, int]] | None = None
+    ) -> list[tuple[str, int]]:
+        if events is None:
+            events = []
+
+        monkeypatch.setattr(torch.cuda, "current_device", lambda: 3)
+        monkeypatch.setattr(
+            torch.cuda, "synchronize", lambda device: events.append(("synchronize", device))
+        )
+        monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: (700, 1_000))
+        monkeypatch.setattr(torch.cuda, "memory_allocated", lambda device: 100)
+        monkeypatch.setattr(torch.cuda, "memory_reserved", lambda device: 200)
+        monkeypatch.setattr(torch.cuda, "max_memory_allocated", lambda device: 300)
+        monkeypatch.setattr(torch.cuda, "max_memory_reserved", lambda device: 400)
+        monkeypatch.setattr(
+            torch.cuda,
+            "reset_peak_memory_stats",
+            lambda device: events.append(("reset_peak_memory_stats", device)),
+        )
+        return events
+
+    @staticmethod
+    def _records(captured: pytest.CaptureResult[str]) -> list[dict[str, object]]:
+        prefix = "cuda_graph_memory="
+        lines = captured.out.splitlines()
+        assert all(line.startswith(prefix) for line in lines)
+        return [json.loads(line.removeprefix(prefix)) for line in lines]
+
+    def test_cuda_graph_memory_reporting_disabled_is_silent(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        def unexpected_cuda_call(*args: object, **kwargs: object) -> None:
+            raise AssertionError("disabled reporting must not inspect CUDA memory")
+
+        monkeypatch.setattr(torch.cuda, "current_device", unexpected_cuda_call)
+
+        reporter = cuda_graphs_module.CudaGraphMemoryReporter(
+            enabled=False, graph_profile=True
+        )
+        reporter.warmup_start()
+        reporter.capture_start()
+        reporter.capture_complete(graphs_created=True, graph_count=2)
+        reporter.steady_state(
+            graphs_created=True, graph_count=2, training_iteration_completed=True
+        )
+        reporter.run_complete(graphs_created=True, graph_count=2)
+
+        assert capsys.readouterr().out == ""
+
+    def test_cuda_graph_memory_record_is_strict_sorted_json(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        events = self._patch_cuda_memory(monkeypatch)
+        monkeypatch.setattr(torch.distributed, "is_available", lambda: True)
+        monkeypatch.setattr(torch.distributed, "is_initialized", lambda: False)
+
+        reporter = cuda_graphs_module.CudaGraphMemoryReporter(
+            enabled=True, graph_profile=True
+        )
+        reporter.warmup_start()
+
+        captured = capsys.readouterr()
+        records = self._records(captured)
+        assert len(records) == 1
+        expected = {
+            "rank": 0,
+            "phase": "warmup_start",
+            **self._MEMORY_VALUES,
+            "graphs_created": False,
+            "graph_count": 0,
+        }
+        assert records == [expected]
+        assert captured.out == f"cuda_graph_memory={json.dumps(expected, sort_keys=True)}\n"
+        assert events == [("synchronize", 3)]
+
+    def test_cuda_graph_memory_graph_lifecycle_is_all_rank_and_resets_peaks(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        events = self._patch_cuda_memory(monkeypatch)
+        monkeypatch.setattr(torch.distributed, "is_available", lambda: True)
+        monkeypatch.setattr(torch.distributed, "is_initialized", lambda: True)
+        monkeypatch.setattr(torch.distributed, "get_rank", lambda: 7)
+
+        reporter = cuda_graphs_module.CudaGraphMemoryReporter(
+            enabled=True, graph_profile=True
+        )
+        reporter.warmup_start()
+        events.clear()
+        reporter.capture_start()
+        assert events[:2] == [
+            ("reset_peak_memory_stats", 3),
+            ("synchronize", 3),
+        ]
+        reporter.capture_complete(graphs_created=True, graph_count=4)
+        reporter.steady_state(
+            graphs_created=True, graph_count=4, training_iteration_completed=True
+        )
+        reporter.run_complete(graphs_created=True, graph_count=4)
+
+        records = self._records(capsys.readouterr())
+        assert [record["phase"] for record in records] == [
+            "warmup_start",
+            "capture_start",
+            "capture_complete",
+            "steady_state",
+            "run_complete",
+        ]
+        assert all(record["rank"] == 7 for record in records)
+        assert [record["graphs_created"] for record in records] == [
+            False,
+            False,
+            True,
+            True,
+            True,
+        ]
+        assert [record["graph_count"] for record in records] == [0, 0, 4, 4, 4]
+
+    def test_cuda_graph_memory_capture_complete_requires_created_graphs(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        self._patch_cuda_memory(monkeypatch)
+        reporter = cuda_graphs_module.CudaGraphMemoryReporter(
+            enabled=True, graph_profile=True
+        )
+        reporter.warmup_start()
+        reporter.capture_start()
+
+        with pytest.raises(ValueError, match="capture_complete requires"):
+            reporter.capture_complete(graphs_created=False, graph_count=0)
+
+        assert [record["phase"] for record in self._records(capsys.readouterr())] == [
+            "warmup_start",
+            "capture_start",
+        ]
+
+    def test_cuda_graph_memory_steady_state_requires_completed_replay(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        self._patch_cuda_memory(monkeypatch)
+        reporter = cuda_graphs_module.CudaGraphMemoryReporter(
+            enabled=True, graph_profile=True
+        )
+        reporter.warmup_start()
+        reporter.capture_start()
+        reporter.capture_complete(graphs_created=True, graph_count=1)
+
+        with pytest.raises(ValueError, match="completed training iteration"):
+            reporter.steady_state(
+                graphs_created=True, graph_count=1, training_iteration_completed=False
+            )
+
+        reporter.steady_state(
+            graphs_created=True, graph_count=1, training_iteration_completed=True
+        )
+        assert self._records(capsys.readouterr())[-1]["phase"] == "steady_state"
+
+    def test_cuda_graph_memory_control_lifecycle_has_no_capture(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        self._patch_cuda_memory(monkeypatch)
+        reporter = cuda_graphs_module.CudaGraphMemoryReporter(
+            enabled=True, graph_profile=False
+        )
+        reporter.warmup_start()
+        reporter.steady_state(training_iteration_completed=True)
+        reporter.run_complete()
+
+        records = self._records(capsys.readouterr())
+        assert [record["phase"] for record in records] == [
+            "warmup_start",
+            "steady_state",
+            "run_complete",
+        ]
+        assert all(record["graphs_created"] is False for record in records)
+        assert all(record["graph_count"] == 0 for record in records)
+
+
 class TestTECudaGraphHelper:
     def setup_method(self, method):
         # Initialize parallel state
@@ -822,6 +1013,12 @@ class TestTECudaGraphHelper:
         destroy_num_microbatches_calculator()
         # Note: _unique_buffer_counts is intentionally NOT cleared here so we can
         # compare values across parametrized test runs
+
+    def test_graph_count_accessor_reports_captured_graph_count(self) -> None:
+        cuda_graph_helper = TECudaGraphHelper.__new__(TECudaGraphHelper)
+        cuda_graph_helper._graph_count = 6
+
+        assert cuda_graph_helper.graph_count() == 6
 
     @pytest.mark.parametrize("num_microbatches", [16, 64, 256])
     @pytest.mark.parametrize("pp_size", [1, 2, 4])
