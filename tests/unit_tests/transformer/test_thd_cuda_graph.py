@@ -10,6 +10,7 @@ import pytest
 import torch
 
 import megatron.core.packed_seq_params as packed_seq
+from megatron.core import tensor_parallel
 from megatron.core.models.gpt.gpt_layer_specs import get_gpt_layer_local_spec
 from megatron.core.models.gpt.gpt_model import GPTModel
 from megatron.core.num_microbatches_calculator import (
@@ -24,6 +25,7 @@ from megatron.core.transformer.cuda_graphs import (
 )
 from megatron.core.transformer.enums import CudaGraphModule
 from megatron.core.transformer.moe.fused_a2a import HAVE_HYBRIDEP, reset_hybrid_ep_buffer
+from megatron.core.transformer.moe.moe_layer import MoELayer
 from megatron.core.transformer.moe.moe_logging import get_moe_metrics_tracker
 from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.transformer.transformer_layer import TransformerLayer
@@ -62,6 +64,33 @@ def _make_transformer_config(**overrides: object) -> TransformerConfig:
     }
     values.update(overrides)
     return TransformerConfig(**values)
+
+
+@pytest.mark.internal
+def test_moe_layer_aligns_sequence_parallel_padding_mask(monkeypatch):
+    """A batch-first mask follows the same sequence shard as its hidden states."""
+    layer = object.__new__(MoELayer)
+    layer.config = SimpleNamespace(sequence_parallel=True, tensor_model_parallel_size=2)
+    padding_mask = torch.tensor([[False, True, False, True, False, True, False, True], [True] * 8])
+    hidden_states = torch.empty(4, 2, 16)
+
+    def scatter(mask: torch.Tensor) -> torch.Tensor:
+        assert torch.equal(mask, padding_mask.transpose(0, 1))
+        return mask[:4]
+
+    monkeypatch.setattr(tensor_parallel, "scatter_to_sequence_parallel_region", scatter)
+
+    assert torch.equal(layer._align_padding_mask(padding_mask, hidden_states), padding_mask[:, :4])
+
+
+@pytest.mark.internal
+def test_moe_layer_rejects_unalignable_padding_mask():
+    """A mask that is neither local nor a sequence-parallel global shape is rejected."""
+    layer = object.__new__(MoELayer)
+    layer.config = SimpleNamespace(sequence_parallel=True, tensor_model_parallel_size=2)
+
+    with pytest.raises(AssertionError, match="cannot be aligned"):
+        layer._align_padding_mask(torch.zeros(2, 7, dtype=torch.bool), torch.empty(4, 2, 16))
 
 
 @pytest.mark.internal
@@ -490,11 +519,15 @@ def test_dropless_hybridep_router_graph_boundary_preserves_padded_routes_and_gra
         for parameter in model.parameters():
             if parameter.requires_grad:
                 parameter.grad = torch.zeros_like(parameter)
+        metrics_tracker = get_moe_metrics_tracker()
+        metrics_tracker.clear()
         cuda_graph_helper = TECudaGraphHelper(
             model=[model], config=config, seq_length=8, micro_batch_size=1, optimizers=[]
         )
         cuda_graph_helper.create_cudagraphs()
         assert cuda_graph_helper.graphs_created()
+        captured_aux_loss = metrics_tracker.metrics["load_balancing_loss"].values.detach().clone()
+        metrics_tracker.clear()
 
         captured_outputs = layer.cuda_graphs[0](static_hidden, padding_mask=padding_mask)
         captured_probs = captured_outputs[1]
@@ -527,9 +560,11 @@ def test_dropless_hybridep_router_graph_boundary_preserves_padded_routes_and_gra
         eager_input_grad, eager_router_grad = torch.autograd.grad(
             eager_probs.sum(), (eager_hidden, moe_layer.router.weight)
         )
+        eager_aux_loss = metrics_tracker.metrics["load_balancing_loss"].values.detach().clone()
 
         torch.testing.assert_close(captured_probs, eager_probs)
         assert torch.equal(captured_routing_map, eager_routing_map)
+        torch.testing.assert_close(captured_aux_loss, eager_aux_loss)
         original_tokens = padded_rows.numel()
         assert torch.count_nonzero(captured_probs[:original_tokens][padded_rows]) == 0
         assert not captured_routing_map[:original_tokens][padded_rows].any()

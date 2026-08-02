@@ -634,26 +634,7 @@ class MoELayer(BaseMoELayer):
             else:
                 self.token_dispatcher = self._training_token_dispatcher
                 self.shared_expert_overlap = self.config.moe_shared_expert_overlap
-        # Align a batch-first padding mask with an already sequence-parallel hidden state.
-        if padding_mask is not None and padding_mask.shape[1] != hidden_states.shape[0]:
-            if (
-                self.config.sequence_parallel
-                and padding_mask.shape[1] % self.config.tensor_model_parallel_size == 0
-                and padding_mask.shape[1] // self.config.tensor_model_parallel_size
-                == hidden_states.shape[0]
-            ):
-                padding_mask = (
-                    tensor_parallel.scatter_to_sequence_parallel_region(
-                        padding_mask.transpose(0, 1).contiguous()
-                    )
-                    .transpose(0, 1)
-                    .contiguous()
-                )
-            else:
-                raise AssertionError(
-                    f"padding_mask shape {padding_mask.shape} cannot be aligned to "
-                    f"hidden_states sequence length {hidden_states.shape[0]}"
-                )
+        padding_mask = self._align_padding_mask(padding_mask, hidden_states)
 
         # Transpose from [bsz, seq_length] to [seq_length, bsz] to align with hidden_states
         if padding_mask is not None:
@@ -722,6 +703,31 @@ class MoELayer(BaseMoELayer):
             outputs = custom_forward(hidden_states, intermediate_tensors, padding_mask)
 
         return outputs
+
+    def _align_padding_mask(
+        self, padding_mask: Optional[torch.Tensor], hidden_states: torch.Tensor
+    ) -> Optional[torch.Tensor]:
+        """Match a batch-first padding mask to a sequence-parallel hidden-state shard."""
+        if padding_mask is not None and padding_mask.shape[1] != hidden_states.shape[0]:
+            if (
+                self.config.sequence_parallel
+                and padding_mask.shape[1] % self.config.tensor_model_parallel_size == 0
+                and padding_mask.shape[1] // self.config.tensor_model_parallel_size
+                == hidden_states.shape[0]
+            ):
+                padding_mask = (
+                    tensor_parallel.scatter_to_sequence_parallel_region(
+                        padding_mask.transpose(0, 1).contiguous()
+                    )
+                    .transpose(0, 1)
+                    .contiguous()
+                )
+            else:
+                raise AssertionError(
+                    f"padding_mask shape {padding_mask.shape} cannot be aligned to "
+                    f"hidden_states sequence length {hidden_states.shape[0]}"
+                )
+        return padding_mask
 
     def backward_dw(self, routed_experts: bool = True, shared_experts: bool = False):
         """Compute weight gradients for experts and shared experts."""

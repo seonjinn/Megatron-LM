@@ -56,7 +56,7 @@ else:
 def switch_load_balancing_loss_func(
     probs: torch.Tensor,
     tokens_per_expert: torch.Tensor,
-    total_num_tokens: int,
+    total_num_tokens: Union[int, torch.Tensor],
     topk: int,
     num_experts: int,
     moe_aux_loss_coeff: float,
@@ -226,7 +226,7 @@ def get_tokens_per_expert_and_token_count(
     reduce_group: torch.distributed.ProcessGroup,
     topk: int = None,
     with_padding_mask: bool = False,
-) -> torch.Tensor:
+) -> Tuple[torch.Tensor, Union[int, torch.Tensor], Union[int, torch.Tensor]]:
     """
     Compute global_tokens_per_expert, local_num_tokens and total_num_tokens with padding mask.
     """
