@@ -73,13 +73,7 @@ logger = logging.getLogger(__name__)
 class CudaGraphMemoryReporter:
     """Emit deterministic per-rank CUDA Graph memory lifecycle records."""
 
-    _PHASES = {
-        "warmup_start",
-        "capture_start",
-        "capture_complete",
-        "steady_state",
-        "run_complete",
-    }
+    _PHASES = {"warmup_start", "capture_start", "capture_complete", "steady_state", "run_complete"}
 
     def __init__(self, enabled: bool, graph_profile: bool) -> None:
         self.enabled = enabled
@@ -141,9 +135,7 @@ class CudaGraphMemoryReporter:
             raise ValueError(
                 "capture_complete requires a graph profile with at least one created graph"
             )
-        self._emit(
-            "capture_complete", graphs_created=graphs_created, graph_count=graph_count
-        )
+        self._emit("capture_complete", graphs_created=graphs_created, graph_count=graph_count)
 
     def steady_state(
         self,
