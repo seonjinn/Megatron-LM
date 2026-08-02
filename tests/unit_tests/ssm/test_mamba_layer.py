@@ -3,6 +3,7 @@
 import pytest
 import torch
 
+from megatron.core.fusions.fused_bias_dropout import get_bias_dropout_add
 from megatron.core.models.hybrid.hybrid_block import HybridStackSubmodules
 from megatron.core.models.hybrid.hybrid_layer_specs import hybrid_stack_spec
 from megatron.core.packed_seq_params import PackedSeqParams
@@ -11,6 +12,7 @@ from megatron.core.ssm.mamba_layer import MambaLayer, MambaLayerSubmodules
 from megatron.core.tensor_parallel.random import model_parallel_cuda_manual_seed
 from megatron.core.transformer import TransformerConfig
 from megatron.core.transformer.enums import CudaGraphModule
+from megatron.core.transformer.identity_op import IdentityOp
 from tests.unit_tests.test_utilities import Utils
 
 
@@ -37,24 +39,75 @@ def _make_static_thd_mamba_layer(
 @pytest.mark.internal
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
 @pytest.mark.parametrize(
-    "sequence_parallel,tensor_model_parallel_size,expected_local_tokens",
+    "sequence_parallel,tensor_model_parallel_size,expected_hidden_tokens",
     [(False, 1, 8), (True, 2, 4)],
     ids=["unsharded", "sequence_parallel"],
 )
 def test_mamba_static_thd_inputs_include_local_packed_seq_idx(
-    sequence_parallel: bool, tensor_model_parallel_size: int, expected_local_tokens: int
+    sequence_parallel: bool, tensor_model_parallel_size: int, expected_hidden_tokens: int
 ) -> None:
-    """Static TE capture must allocate the packed boundary map at the local token bound."""
+    """Static TE capture keeps the packed map at the pre-sequence-parallel token bound."""
     layer = _make_static_thd_mamba_layer(
         sequence_parallel=sequence_parallel, tensor_model_parallel_size=tensor_model_parallel_size
     )
 
     static_inputs = layer.get_layer_static_inputs(seq_length=23, micro_batch_size=3)
 
-    assert static_inputs["hidden_states"].shape == (expected_local_tokens, 1, 16)
-    assert static_inputs["packed_seq_idx"].shape == (1, expected_local_tokens)
+    assert static_inputs["hidden_states"].shape == (expected_hidden_tokens, 1, 16)
+    assert static_inputs["packed_seq_idx"].shape == (1, 8)
     assert static_inputs["packed_seq_idx"].dtype == torch.int32
     assert not static_inputs["packed_seq_idx"].any()
+    assert all(isinstance(value, torch.Tensor) for value in static_inputs.values())
+
+
+@pytest.mark.internal
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+def test_mamba_local_graph_static_inputs_do_not_add_te_packed_seq_idx() -> None:
+    """The packed tensor adapter must not alter the existing local CUDA Graph interface."""
+    layer = _make_static_thd_mamba_layer()
+    layer.config.cuda_graph_impl = "local"
+
+    static_inputs = layer.get_layer_static_inputs(seq_length=8, micro_batch_size=1)
+
+    assert set(static_inputs) == {"hidden_states"}
+
+
+@pytest.mark.internal
+@pytest.mark.parametrize("cuda_graph_impl", ["none", "local"], ids=["eager", "local"])
+def test_mamba_non_te_forward_preserves_public_packed_seq_params(cuda_graph_impl: str) -> None:
+    """Eager and local configurations must pass the caller's metadata object through unchanged."""
+    layer = object.__new__(MambaLayer)
+    torch.nn.Module.__init__(layer)
+    layer.config = TransformerConfig(num_layers=1, hidden_size=16, num_attention_heads=4)
+    layer.config.cuda_graph_impl = cuda_graph_impl
+    layer.norm = IdentityOp()
+    observed: dict[str, object] = {}
+
+    class Mixer(torch.nn.Module):
+
+        def forward(
+            self,
+            hidden_states: torch.Tensor,
+            *,
+            inference_context: object | None,
+            packed_seq_params: PackedSeqParams | None,
+        ) -> tuple[torch.Tensor, None]:
+            observed["packed_seq_params"] = packed_seq_params
+            return hidden_states, None
+
+    layer.mixer = Mixer()
+    layer.mamba_bda = get_bias_dropout_add
+    layer.hidden_dropout = 0.0
+    layer.bias_dropout_add_exec_handler = torch.enable_grad
+    packed_seq_params = PackedSeqParams(
+        qkv_format="thd", seq_idx=torch.zeros((1, 8), dtype=torch.int32), total_tokens=8
+    )
+    hidden_states = torch.ones((8, 1, 16))
+
+    output = layer(hidden_states, packed_seq_params=packed_seq_params)
+
+    assert observed["packed_seq_params"] is packed_seq_params
+    assert torch.equal(output, hidden_states * 2)
 
 
 @pytest.mark.internal

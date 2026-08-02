@@ -504,9 +504,7 @@ def test_packed_mamba_te_graph_replays_runtime_boundaries_with_gradient_parity()
             thd_max_packed_sequences=3,
             thd_tail_padding_policy="extend_last",
         )
-        pg_collection = ProcessGroupCollection.use_mpu_process_groups(
-            required_pgs=["tp", "pp", "cp"]
-        )
+        pg_collection = ProcessGroupCollection.use_mpu_process_groups()
         layer = MambaLayer(
             config,
             MambaLayerSubmodules(mixer=_PackedSeqIdxMixer, mamba_bda=get_bias_dropout_add),
