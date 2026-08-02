@@ -186,6 +186,35 @@ class MambaLayer(GraphableMegatronModule):
             apply_prefix_mapping(sharded_state_dict, prefixed_map)
         return sharded_state_dict
 
+    def _is_static_thd_te_cuda_graph(self) -> bool:
+        """Return whether this layer uses the fixed packed-THD TE graph interface."""
+        return self.config.cuda_graph_impl == "transformer_engine" and self._is_thd_cuda_graph()
+
+    def get_layer_static_inputs(
+        self, seq_length: int, micro_batch_size: int
+    ) -> dict[str, torch.Tensor]:
+        """Get static Mamba inputs, including the packed token map for fixed THD TE graphs."""
+        static_inputs = super().get_layer_static_inputs(seq_length, micro_batch_size)
+        if self._is_static_thd_te_cuda_graph():
+            fixed_tokens = self.config.max_seqlen_per_dp_cp_rank
+            assert fixed_tokens is not None
+            static_inputs["packed_seq_idx"] = torch.zeros(
+                (1, fixed_tokens), dtype=torch.int32, device=torch.cuda.current_device()
+            )
+        return static_inputs
+
+    def _te_cuda_graph_capture(self, *args, **kwargs):
+        """Reconstruct packed Python metadata inside the TE graph capture boundary."""
+        if self._is_static_thd_te_cuda_graph():
+            fixed_tokens = self.config.max_seqlen_per_dp_cp_rank
+            assert fixed_tokens is not None
+            kwargs["packed_seq_params"] = PackedSeqParams(
+                qkv_format="thd",
+                seq_idx=kwargs.pop("packed_seq_idx", None),
+                total_tokens=fixed_tokens,
+            )
+        return super()._te_cuda_graph_capture(*args, **kwargs)
+
     def _te_cuda_graph_replay(self, *args, **kwargs):
         """
         CUDA graph replay for this layer and microbatch `self.current_microbatch` using TE
@@ -197,6 +226,37 @@ class MambaLayer(GraphableMegatronModule):
             "CUDA graph accepts only Tensor inputs. inference_context is excluded from input list. "
             "For inference cuda graph, please use cuda_graph_impl=local instead."
         )
+        if self._is_static_thd_te_cuda_graph():
+            packed_seq_params = kwargs.pop("packed_seq_params", None)
+            if packed_seq_params is None:
+                raise ValueError(
+                    "Packed THD Mamba CUDA Graph replay requires packed_seq_params metadata."
+                )
+
+            packed_seq_idx = packed_seq_params.seq_idx
+            if not isinstance(packed_seq_idx, torch.Tensor):
+                raise TypeError(
+                    "Packed THD Mamba CUDA Graph seq_idx must be a torch.Tensor, "
+                    f"got {type(packed_seq_idx).__name__}."
+                )
+            if packed_seq_idx.dtype != torch.int32:
+                raise TypeError(
+                    "Packed THD Mamba CUDA Graph seq_idx must have dtype torch.int32, "
+                    f"got {packed_seq_idx.dtype}."
+                )
+
+            fixed_tokens = self.config.max_seqlen_per_dp_cp_rank
+            assert fixed_tokens is not None
+            expected_shape = (1, fixed_tokens)
+            if tuple(packed_seq_idx.shape) != expected_shape:
+                raise ValueError(
+                    "Packed THD Mamba CUDA Graph seq_idx must have shape "
+                    f"[1, {fixed_tokens}], got {list(packed_seq_idx.shape)}."
+                )
+
+            kwargs.pop("attention_mask", None)
+            kwargs.pop("inference_context", None)
+            kwargs["packed_seq_idx"] = packed_seq_idx
         return super()._te_cuda_graph_replay(*args, **kwargs)
 
     def _should_call_local_cudagraph(self, *args, **kwargs):
