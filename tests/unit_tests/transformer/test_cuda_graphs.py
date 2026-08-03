@@ -87,6 +87,9 @@ class _CountingEvalTELinear(torch.nn.Module):
 
 def _te_eval_probe() -> tuple[_CountingEvalTELinear, torch.Tensor]:
     assert torch.cuda.is_available(), "direct TE CUDA Graph capability requires a CUDA worker"
+    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+    assert 0 <= local_rank < torch.cuda.device_count()
+    torch.cuda.set_device(local_rank)
     torch.manual_seed(1234)
     module = _CountingEvalTELinear().eval()
     sample = torch.full((4, 16), 0.25, dtype=torch.bfloat16, device="cuda")
