@@ -8,6 +8,8 @@
 #SBATCH --cpus-per-task=32
 #SBATCH --dependency=singleton
 #SBATCH --nodes=64
+#SBATCH --segment=16
+#SBATCH --exclude=nvl72039-T10,nvl72125-T05,nvl72086-T16,nvl72088-T06,nvl72020-T18,nvl72044-T06,nvl72169-T17,nvl72095-T06,nvl72005-T[01-14,16-17],nvl72018-T[01-16],nvl72089-T[01-16],nvl72108-T[01-16],nvl72027-T07,nvl72004-T06,nvl72140-T02,nvl72098-T16,nvl72018-T04,nvl72024-T17,nvl72071-T04,nvl72138-T17,nvl72030-T17,nvl72169-T18,nvl72137-T06,nvl72171-T15,nvl72106-T01,nvl72115-T18,nvl72008-T11,nvl72059-T05,nvl72106-T17,nvl72018-T03,nvl72024-T02,nvl72148-T04,nvl72065-T07,nvl72050-T03,nvl72017-T18,nvl72017-T04,nvl72005-T04,nvl72109-T10,nvl72137-T15,nvl72082-T18,nvl72073-T15,nvl72170-T15,nvl72114-T[01-07,09-18],nvl72161-T[01-06,08-10,12-18],nvl72117-T04,nvl72102-T12,nvl72121-T03,nvl72126-T17,nvl72138-T01,nvl72155-T06,nvl72093-T16,nvl72104-T13,nvl72111-T18,nvl72006-T03,nvl72037-T10,nvl72022-T09,nvl72033-T07,nvl72074-T18,nvl72136-T09,nvl72126-T05,nvl72125-T[01-15,18],nvl72009-T17
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --gpus-per-node=4
@@ -36,7 +38,7 @@ NANO_V35_RESOURCES=${NANO_V35_RESOURCES:-"${NANO_V35_PROJECT_ROOT}/resources"}
 WORKSPACE=${WORKSPACE:-"/lustre/fsw/portfolios/llmservice/users/guyueh/super-3p5-vl/nano-3p5-joint-sft/joint-sft-from-midtrain"}
 OUTPUT_BASE=${OUTPUT_BASE:-"${WORKSPACE}/workspace/output"}
 CONTAINER_IMAGE="/lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/tpoon/containers/pytorch25.11-moe-avlm-editable-energon-super-triton35.sqsh"
-CONTAINER_MOUNTS=${CONTAINER_MOUNTS:-"/lustre"}
+CONTAINER_MOUNTS=${CONTAINER_MOUNTS:-"/lustre,/home/svc-dss:/home/svc-dss"}
 
 VISION_PRETRAIN_MODEL_NAME=${VISION_PRETRAIN_MODEL_NAME:-"nano35_midtrain_100B_lc_vision_pretrain_0723"}
 MODEL_NAME=${MODEL_NAME:-"nano35_midtrain_100B_lc_joint_sft_20260728_cp32-dss-fix-text-vision-1to1"}
@@ -54,6 +56,7 @@ export NCCL_P2P_NET_CHUNKSIZE=${NCCL_P2P_NET_CHUNKSIZE:-2097152}
 export NCCL_DEBUG=${NCCL_DEBUG:-WARN}
 export TORCHINDUCTOR_WORKER_START=${TORCHINDUCTOR_WORKER_START:-fork}
 export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
+export NVDATASET_CACHE_DIR=${NVDATASET_CACHE_DIR:-"/home/svc-dss/cache/nemotron"}
 
 # This recipe is intended to run through Slurm only. Keep argument escaping
 # compatible with the srun sh -c launch below.
@@ -80,7 +83,7 @@ CP=${CP:-16}
 EP=${EP:-32}
 NUM_GPU=${NUM_GPU:-4}
 MBZ=${MBZ:-1}
-NW=${NW:-8}
+NW=${NW:-5}
 AD=${AD:-0.0}
 HD=${HD:-0.0}
 LI=${LI:-1}
@@ -121,13 +124,13 @@ MTP_LOSS_SCALING_FACTOR=${MTP_LOSS_SCALING_FACTOR:-1.5e-4}
 SEQ_LEN=${SEQ_LEN:-256}
 DECODER_SEQ_LEN=${DECODER_SEQ_LEN:-524288}
 PACKING_SEQ_LEN=${PACKING_SEQ_LEN:-${DECODER_SEQ_LEN}}
-PBS=${PBS:-10000}
+PBS=${PBS:-5000}
 BZ=${BZ:-32}
 LR=${LR:-2e-5}
 MIN_LR=${MIN_LR:-5e-6}
 LR_WARMUP_FRACTION=${LR_WARMUP_FRACTION:-0.1}
 WEIGHT_DECAY=${WEIGHT_DECAY:-0.05}
-SAVE_INTERVAL=${SAVE_INTERVAL:-5000}
+SAVE_INTERVAL=${SAVE_INTERVAL:-200}
 MOE_AUX_LOSS_COEFF=${MOE_AUX_LOSS_COEFF:-1e-8}
 USE_LOSS_SCALING=${USE_LOSS_SCALING:-1}
 
