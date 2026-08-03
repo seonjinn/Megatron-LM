@@ -3,7 +3,7 @@
 #SBATCH --account=nemotron_omni_vision
 #SBATCH --partition=batch
 #SBATCH --qos=normal
-#SBATCH --nodes=64
+#SBATCH --nodes=128
 #SBATCH --ntasks-per-node=4
 #SBATCH --cpus-per-task=32
 #SBATCH --gpus-per-node=4
@@ -13,7 +13,7 @@
 #SBATCH --exclusive
 #SBATCH --overcommit
 #SBATCH --dependency=singleton
-#SBATCH --job-name=super35_radio_v4_h_text_sft_0730
+#SBATCH --job-name=super35_radio_v4_h_text_sft_0731
 
 set -euo pipefail
 
@@ -43,7 +43,8 @@ if [[ ! -f "${TRAIN_ENTRYPOINT}" ]]; then
     exit 1
 fi
 
-WORKSPACE=${WORKSPACE:-"/lustre/fsw/portfolios/llmservice/users/guyueh/super-3p5-vl/super-3p5-text-sft/text-sft-from-radio-v4-h-pretrain"}
+USER_NAME=${SLURM_JOB_USER:-${USER:-$(whoami)}}
+WORKSPACE=${WORKSPACE:-"/lustre/fs1/portfolios/nemotron/projects/nemotron_omni_vision/users/${USER_NAME}"}
 OUTPUT_BASE=${OUTPUT_BASE:-"${WORKSPACE}/workspace/output"}
 
 CONTAINER_IMAGE=${CONTAINER_IMAGE:-"/lustre/fs1/portfolios/llmservice/projects/llmservice_fm_vision/users/tpoon/containers/pytorch25.11-moe-avlm-editable-energon-super-triton35.sqsh"}
@@ -56,11 +57,11 @@ case ",${CONTAINER_MOUNTS}," in
     *) CONTAINER_MOUNTS+=",${NVDATASET_CACHE_DIR}:${NVDATASET_CACHE_DIR}" ;;
 esac
 
-VISION_PRETRAIN_MODEL_NAME=${VISION_PRETRAIN_MODEL_NAME:-"super35_radio_v4_h_tp8_ep8_vision_adapter_pretrain_1377_dss_0729"}
-MODEL_NAME=${MODEL_NAME:-"super35_radio_v4_h_tp8_ep8_text_sft_0730"}
+VISION_PRETRAIN_MODEL_NAME=${VISION_PRETRAIN_MODEL_NAME:-"super35_radio_v4_h_tp8_ep8_vision_adapter_pretrain_1377_dss_0730"}
+MODEL_NAME=${MODEL_NAME:-"super35_radio_v4_h_text_sft_0731"}
 VISION_PRETRAIN_CKPT_DIR=${VISION_PRETRAIN_CKPT_DIR:-"${OUTPUT_BASE}/${VISION_PRETRAIN_MODEL_NAME}/checkpoints"}
 CHECKPOINT_DIR=${CHECKPOINT_DIR:-"${VISION_PRETRAIN_CKPT_DIR}"}
-DATA_TRAIN=${DATA_TRAIN:-"${CODE_DIR}/examples/multimodal/v3p5_super/text_v18mix60.yaml"}
+DATA_TRAIN=${DATA_TRAIN:-"${CODE_DIR}/examples/multimodal/v3_baseline_dss/sft_combined_512k_vlm_v18mix60.yaml"}
 
 # This tokenizer has the same 131072 token-to-ID mapping as the Super tokenizer,
 # except that reserved IDs 18-26 are renamed to the nine multimodal markup tokens.
@@ -135,12 +136,12 @@ EP=${EP:-8}
 CP=${CP:-16}
 NUM_GPU=${NUM_GPU:-4}
 
-# Multimodal SFT settings inherited from the Nano v3.5 stage.
+# Multimodal SFT runtime settings inherited from the Nano v3.5 stage.
 MBZ=${MBZ:-1}
-NW=${NW:-8}
+NW=${NW:-1}
 AD=${AD:-0.0}
 HD=${HD:-0.0}
-LI=${LI:-5}
+LI=${LI:-10}
 TIMING_LOG_LEVEL=${TIMING_LOG_LEVEL:-1}
 ENABLE_TENSORBOARD_TIMERS=${ENABLE_TENSORBOARD_TIMERS:-1}
 LOG_PACKED_SEQUENCE_STATS=${LOG_PACKED_SEQUENCE_STATS:-1}
@@ -148,6 +149,7 @@ EARLY_EXIT_ITERS=${EARLY_EXIT_ITERS:-0}
 SKIP_SAVE=${SKIP_SAVE:-0}
 NO_SAVE_OPTIM=${NO_SAVE_OPTIM:-0}
 NO_SAVE_RNG=${NO_SAVE_RNG:-0}
+STRICT_DATALOADER_STATE_LOAD=${STRICT_DATALOADER_STATE_LOAD:-1}
 USE_MTP=${USE_MTP:-1}
 USE_DYNAMIC_RES=${USE_DYNAMIC_RES:-1}
 USE_IMAGE_BREAK=${USE_IMAGE_BREAK:-0}
@@ -159,7 +161,6 @@ USE_BUCKETING=${USE_BUCKETING:-0}
 USE_CHECKPOINT_ARGS=${USE_CHECKPOINT_ARGS:-1}
 USE_SEQUENCE_PARALLEL=${USE_SEQUENCE_PARALLEL:-1}
 USE_MOE_GROUPED_GEMM=${USE_MOE_GROUPED_GEMM:-1}
-LANGUAGE_RECOMPUTE_MODULES=${LANGUAGE_RECOMPUTE_MODULES:-"core_attn mlp layernorm moe_act moe"}
 VISION_RECOMPUTE_NUM_LAYERS=${VISION_RECOMPUTE_NUM_LAYERS:-32}
 
 MAIN_HYBRID_PATTERN=${MAIN_HYBRID_PATTERN:-"MEMEMEM*EMEMEMEM*EMEMEMEM*EMEMEMEMEM*EMEMEMEMEM*EMEMEMEMEM*EMEMEMEMEM*EMEMEMEM*EMEMEMEME"}
@@ -169,20 +170,25 @@ if [[ "${USE_MTP}" -eq 1 ]]; then
 else
     HYBRID_LAYER_PATTERN=${HYBRID_LAYER_PATTERN:-"${MAIN_HYBRID_PATTERN}"}
 fi
-MTP_LOSS_SCALING_FACTOR=${MTP_LOSS_SCALING_FACTOR:-1.5e-4}
+MTP_LOSS_SCALING_FACTOR=${MTP_LOSS_SCALING_FACTOR:-0.3}
 
 SEQ_LEN=${SEQ_LEN:-256}
 DECODER_SEQ_LEN=${DECODER_SEQ_LEN:-524288}
-PACKING_SEQ_LEN=${PACKING_SEQ_LEN:-${DECODER_SEQ_LEN}}
+# Keep the model's 512K context limit, but leave activation headroom for
+# media-heavy VLM batches. 491520 is divisible by CP=16 and is 15/16 of 512K.
+PACKING_SEQ_LEN=${PACKING_SEQ_LEN:-491520}
 PBS=${PBS:-10000}
 BZ=${BZ:-32}
 LR=${LR:-1e-5}
 MIN_LR=${MIN_LR:-2e-6}
-LR_WARMUP_FRACTION=${LR_WARMUP_FRACTION:-0.1}
-WEIGHT_DECAY=${WEIGHT_DECAY:-0.05}
-SAVE_INTERVAL=${SAVE_INTERVAL:-1000}
-MOE_AUX_LOSS_COEFF=${MOE_AUX_LOSS_COEFF:-1e-8}
-USE_LOSS_SCALING=${USE_LOSS_SCALING:-1}
+LR_WARMUP_SAMPLES=${LR_WARMUP_SAMPLES:-100}
+WEIGHT_DECAY=${WEIGHT_DECAY:-0.1}
+SAVE_INTERVAL=${SAVE_INTERVAL:-500}
+SAVE_RETAIN_INTERVAL=${SAVE_RETAIN_INTERVAL:-${SAVE_INTERVAL}}
+CKPT_FORMAT=${CKPT_FORMAT:-torch_dist}
+MOE_AUX_LOSS_COEFF=${MOE_AUX_LOSS_COEFF:-1e-4}
+# Match the text recipe's alpha=1.0 objective: normalize globally over supervised tokens.
+USE_LOSS_SCALING=${USE_LOSS_SCALING:-0}
 
 if [[ "${BATCH}" -eq 0 ]]; then
     SPECIAL_TOKENS=" --special-tokens <image> <img> </img> <quad> </quad> <ref> </ref> <box> </box>"
@@ -276,7 +282,7 @@ if [[ "${USE_LOSS_SCALING}" -eq 1 ]]; then
     EXTRA_ARGS+=" --use-loss-scaling"
 fi
 
-EXTRA_ARGS+=" --recompute-granularity selective --recompute-modules ${LANGUAGE_RECOMPUTE_MODULES}"
+EXTRA_ARGS+=" --recompute-granularity full --recompute-method uniform --recompute-num-layers 1"
 EXTRA_ARGS+=" --recompute-vision --recompute-method-vision block --recompute-granularity-vision full --recompute-vision-num-layers ${VISION_RECOMPUTE_NUM_LAYERS}"
 EXTRA_ARGS+=" --log-model-grad-norms --log-model-act-norms --allow-checkpoint-without-temporal-compression ${CUSTOM_ARGS:-}"
 
@@ -298,14 +304,19 @@ fi
 CHECKPOINT_ARGS=" \
     --pretrained-checkpoint ${CHECKPOINT_DIR} \
     --load ${FINETUNE_DIR} \
-    --ckpt-format torch \
+    --ckpt-format ${CKPT_FORMAT} \
 "
+
+if [[ "${STRICT_DATALOADER_STATE_LOAD}" -eq 1 ]]; then
+    CHECKPOINT_ARGS+=" --strict-dataloader-state-load"
+fi
 
 if [[ "${SKIP_SAVE}" -eq 0 ]]; then
     CHECKPOINT_ARGS+=" \
         --save ${FINETUNE_DIR} \
         --dataloader-save ${FINETUNE_DIR}/dataloader \
         --save-interval ${SAVE_INTERVAL} \
+        --save-retain-interval ${SAVE_RETAIN_INTERVAL} \
     "
     if [[ "${NO_SAVE_OPTIM}" -eq 1 ]]; then
         CHECKPOINT_ARGS+=" --no-save-optim"
@@ -358,7 +369,7 @@ OPTIONS=" \
     --hybrid-layer-pattern '${HYBRID_LAYER_PATTERN}' \
     --spec megatron.core.models.mamba.mamba_layer_specs mamba_stack_spec \
     --tiktoken-pattern v2 \
-    --distributed-timeout-minutes 30 \
+    --distributed-timeout-minutes 120 \
     --use-mcore-models \
     --untie-embeddings-and-output-weights \
     --disable-bias-linear \
@@ -386,10 +397,10 @@ OPTIONS=" \
     --max-position-embeddings ${DECODER_SEQ_LEN} \
     --micro-batch-size ${MBZ} \
     --global-batch-size ${BZ} \
-    --lr-warmup-fraction ${LR_WARMUP_FRACTION} \
+    --lr-warmup-samples ${LR_WARMUP_SAMPLES} \
     --lr ${LR} \
     --min-lr ${MIN_LR} \
-    --lr-decay-style cosine \
+    --lr-decay-style constant \
     --override-opt-param-scheduler \
     --weight-decay ${WEIGHT_DECAY} \
     --clip-grad 1.0 \
@@ -415,7 +426,7 @@ OPTIONS=" \
     --manual-gc \
     --bf16 \
     --adam-beta1 0.9 \
-    --adam-beta2 0.999 \
+    --adam-beta2 0.95 \
     --use-distributed-optimizer \
     --num-workers ${NW} \
     --tensorboard-dir ${TENSORBOARD_DIR} \
@@ -445,7 +456,11 @@ if [[ "${BATCH}" -eq 0 ]]; then
     cd "${CODE_DIR}"
     torchrun --nproc_per_node "${NUM_GPU}" "${TRAIN_ENTRYPOINT}" ${OPTIONS}
 else
-    git -C "${CODE_DIR}" log --oneline -1
+    if git -C "${CODE_DIR}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        git -C "${CODE_DIR}" log --oneline -1
+    else
+        echo "Git metadata unavailable in code snapshot."
+    fi
     DATETIME=$(date +'date_%y-%m-%d_time_%H-%M-%S')
     srun -l --verbose \
         --mpi=none \
