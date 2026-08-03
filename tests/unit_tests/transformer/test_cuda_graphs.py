@@ -85,19 +85,28 @@ class _CountingEvalTELinear(torch.nn.Module):
         return self.linear(value)
 
 
-def _te_eval_probe() -> tuple[_CountingEvalTELinear, torch.Tensor]:
+def _te_eval_probe() -> tuple[_CountingEvalTELinear, torch.Tensor, dict[str, int]]:
     assert torch.cuda.is_available(), "direct TE CUDA Graph capability requires a CUDA worker"
     local_rank = int(os.environ.get("LOCAL_RANK", "0"))
-    assert 0 <= local_rank < torch.cuda.device_count()
+    local_world_size = int(os.environ.get("LOCAL_WORLD_SIZE", str(torch.cuda.device_count())))
+    node_rank = int(os.environ.get("GROUP_RANK", "0"))
+    assert local_world_size == torch.cuda.device_count()
+    assert 0 <= local_rank < local_world_size
+    assert node_rank >= 0
     torch.cuda.set_device(local_rank)
+    assert torch.cuda.current_device() == local_rank
     torch.manual_seed(1234)
     module = _CountingEvalTELinear().eval()
     sample = torch.full((4, 16), 0.25, dtype=torch.bfloat16, device="cuda")
-    return module, sample
+    return module, sample, {
+        "node_rank": node_rank,
+        "local_rank": local_rank,
+        "cuda_device_index": torch.cuda.current_device(),
+    }
 
 
 def test_te_make_graphed_callables_supports_eval_no_grad() -> None:
-    module, sample = _te_eval_probe()
+    module, sample, device_binding = _te_eval_probe()
     first_actual = torch.full_like(sample, 0.5)
     second_actual = torch.full_like(sample, 1.5)
 
@@ -136,6 +145,7 @@ def test_te_make_graphed_callables_supports_eval_no_grad() -> None:
         "TE_CAPABILITY_JSON="
         + json.dumps(
             {
+                **device_binding,
                 "all_eval_callables_supported": True,
                 "backward_executed": False,
                 "fallback_forward_counter_increment": 1,
@@ -150,7 +160,7 @@ def test_te_make_graphed_callables_supports_eval_no_grad() -> None:
 
 
 def test_te_eval_graph_input_output_buffer_reuse_capability() -> None:
-    module, sample = _te_eval_probe()
+    module, sample, device_binding = _te_eval_probe()
     accepted = False
     rejection = None
     with torch.no_grad():
@@ -176,6 +186,7 @@ def test_te_eval_graph_input_output_buffer_reuse_capability() -> None:
         "TE_CAPABILITY_JSON="
         + json.dumps(
             {
+                **device_binding,
                 "mcore_eval_reuse_graph_io": "not_implemented",
                 "raw_te_eval_reuse_graph_io": accepted,
                 "raw_te_eval_reuse_rejection": rejection,
