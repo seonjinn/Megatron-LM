@@ -1,12 +1,15 @@
 # Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 import gc
+import json
 import os
 import sys
 
 import pytest
 import torch
+import transformer_engine.pytorch as te
 from transformer_engine.pytorch.fp8 import check_fp8_support
+from transformer_engine.pytorch.graph import make_graphed_callables
 
 from megatron.core.enums import ModelType
 from megatron.core.models.gpt.gpt_layer_specs import (
@@ -63,6 +66,120 @@ from megatron.training.training import setup_model_and_optimizer
 from tests.unit_tests.test_utilities import Utils
 
 fp8_available, _ = check_fp8_support()
+
+
+class _CountingEvalTELinear(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.linear = te.Linear(
+            16,
+            16,
+            bias=True,
+            params_dtype=torch.bfloat16,
+            device="cuda",
+        )
+        self.forward_invocations = 0
+
+    def forward(self, value: torch.Tensor) -> torch.Tensor:
+        self.forward_invocations += 1
+        return self.linear(value)
+
+
+def _te_eval_probe() -> tuple[_CountingEvalTELinear, torch.Tensor]:
+    assert torch.cuda.is_available(), "direct TE CUDA Graph capability requires a CUDA worker"
+    torch.manual_seed(1234)
+    module = _CountingEvalTELinear().eval()
+    sample = torch.full((4, 16), 0.25, dtype=torch.bfloat16, device="cuda")
+    return module, sample
+
+
+def test_te_make_graphed_callables_supports_eval_no_grad() -> None:
+    module, sample = _te_eval_probe()
+    first_actual = torch.full_like(sample, 0.5)
+    second_actual = torch.full_like(sample, 1.5)
+
+    with torch.no_grad():
+        (graphed,) = make_graphed_callables(
+            (module,),
+            ((sample,),),
+            _order=[1, -1],
+            _num_layers_per_chunk=[1],
+            _reuse_graph_input_output_buffers=False,
+        )
+        invocations_after_capture = module.forward_invocations
+        first_expected = module(first_actual).clone()
+        before_first_replay = module.forward_invocations
+        first_replayed = graphed(first_actual).clone()
+        assert module.forward_invocations == before_first_replay
+        second_expected = module(second_actual).clone()
+        before_second_replay = module.forward_invocations
+        second_replayed = graphed(second_actual).clone()
+        assert module.forward_invocations == before_second_replay
+        torch.testing.assert_close(first_replayed, first_expected)
+        torch.testing.assert_close(second_replayed, second_expected)
+        assert not torch.equal(first_replayed, second_replayed)
+
+        module.train()
+        before_fallback = module.forward_invocations
+        fallback = graphed(second_actual).clone()
+        assert module.forward_invocations == before_fallback + 1
+        torch.testing.assert_close(fallback, second_expected)
+        module.eval()
+
+    no_parameter_grads = all(parameter.grad is None for parameter in module.parameters())
+    assert invocations_after_capture > 0
+    assert no_parameter_grads
+    print(
+        "TE_CAPABILITY_JSON="
+        + json.dumps(
+            {
+                "all_eval_callables_supported": True,
+                "backward_executed": False,
+                "fallback_forward_counter_increment": 1,
+                "forward_invocations_after_capture": invocations_after_capture,
+                "no_parameter_grads": no_parameter_grads,
+                "outputs_changed": True,
+                "replay_forward_counter_increment": 0,
+            },
+            sort_keys=True,
+        )
+    )
+
+
+def test_te_eval_graph_input_output_buffer_reuse_capability() -> None:
+    module, sample = _te_eval_probe()
+    accepted = False
+    rejection = None
+    with torch.no_grad():
+        try:
+            (graphed,) = make_graphed_callables(
+                (module,),
+                ((sample,),),
+                _order=[1, -1],
+                _num_layers_per_chunk=[1],
+                _reuse_graph_input_output_buffers=True,
+            )
+        except RuntimeError as error:
+            rejection = str(error)
+        else:
+            accepted = True
+            first = graphed(torch.full_like(sample, 0.5)).clone()
+            second = graphed(torch.full_like(sample, 1.5)).clone()
+            assert not torch.equal(first, second)
+
+    assert accepted or "only available in training mode" in (rejection or "")
+    assert all(parameter.grad is None for parameter in module.parameters())
+    print(
+        "TE_CAPABILITY_JSON="
+        + json.dumps(
+            {
+                "mcore_eval_reuse_graph_io": "not_implemented",
+                "raw_te_eval_reuse_graph_io": accepted,
+                "raw_te_eval_reuse_rejection": rejection,
+            },
+            sort_keys=True,
+        )
+    )
 
 
 def _base_cuda_graph_config(**kwargs) -> TransformerConfig:
