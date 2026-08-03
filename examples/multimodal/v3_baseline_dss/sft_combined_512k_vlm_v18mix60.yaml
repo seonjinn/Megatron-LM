@@ -1,0 +1,14 @@
+# Combined 512K VLM SFT mix using the de-duplicated DSS recipes.
+__class__: MetadatasetV2
+__module__: megatron.energon
+splits:
+  train:
+    blend_epochized:
+    - path: sft_combined_omni_16k_vlm_only_webbrowse_no_ultra_text_dss.yaml
+      repetitions: 1
+    - path: sft_49k_video_dss.yaml
+      repetitions: 1
+    - path: mmlongbench_ultra_long_filtered_best_dss.yaml
+      repetitions: 1
+    - path: /lustre/fs1/portfolios/nemotron/projects/nemotron_omni_vision/users/matthieul/repos/megatron-lm/examples/multimodal/v3p5_super/text_v18mix60.yaml
+      repetitions: 1
