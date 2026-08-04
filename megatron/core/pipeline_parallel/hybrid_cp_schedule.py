@@ -543,7 +543,17 @@ def hybrid_context_parallel_forward_backward(
             partner_cp_size = len(
                 [True for sample_ids in sample_id_groups[group_id] if sub_sample_id in sample_ids]
             )
-            sample["local_cp_size"] = torch.tensor(partner_cp_size, dtype=torch.int32)
+            if "cu_seqlens" in sample and "imgs" in sample:
+                # Energon multimodal samples are routed in a tensor-only wire
+                # format. Restore the batch-shaped dict expected by
+                # examples/multimodal/train.py only after scheduling/routing.
+                from megatron.core.datasets.data_schedule import (
+                    restore_multimodal_hybrid_cp_sample,
+                )
+
+                sample = restore_multimodal_hybrid_cp_sample(sample, partner_cp_size)
+            else:
+                sample["local_cp_size"] = torch.tensor(partner_cp_size, dtype=torch.int32)
             new_data_iterator = RerunDataIterator(iter([sample]))
             return new_data_iterator
         else:
