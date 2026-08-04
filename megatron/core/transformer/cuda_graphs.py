@@ -73,7 +73,14 @@ logger = logging.getLogger(__name__)
 class CudaGraphMemoryReporter:
     """Emit deterministic per-rank CUDA Graph memory lifecycle records."""
 
-    _PHASES = {"warmup_start", "capture_start", "capture_complete", "steady_state", "run_complete"}
+    _PHASES = {
+        "warmup_start",
+        "capture_start",
+        "capture_complete",
+        "capture_skipped",
+        "steady_state",
+        "run_complete",
+    }
 
     def __init__(self, enabled: bool, graph_profile: bool) -> None:
         self.enabled = enabled
@@ -137,6 +144,13 @@ class CudaGraphMemoryReporter:
             )
         self._emit("capture_complete", graphs_created=graphs_created, graph_count=graph_count)
 
+    def capture_skipped(self, *, graph_count: int = 0) -> None:
+        if self._already_emitted("capture_skipped"):
+            return
+        if not self.graph_profile:
+            raise ValueError("capture_skipped is only valid for a CUDA Graph profile")
+        self._emit("capture_skipped", graphs_created=False, graph_count=graph_count)
+
     def steady_state(
         self,
         *,
@@ -165,6 +179,7 @@ class CudaGraphMemoryReporter:
     ) -> None:
         if (
             self._already_emitted("steady_state")
+            or self._already_emitted("capture_skipped")
             or not training_step_executed
             or iteration_offset < warmup_steps
         ):

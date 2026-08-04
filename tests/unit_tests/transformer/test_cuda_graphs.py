@@ -943,6 +943,27 @@ class TestCudaGraphMemoryReporter:
             "capture_start",
         ]
 
+    def test_cuda_graph_memory_capture_skipped_is_terminal_for_graph_lifecycle(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        self._patch_cuda_memory(monkeypatch)
+        reporter = cuda_graphs_module.CudaGraphMemoryReporter(enabled=True, graph_profile=True)
+        reporter.warmup_start()
+        reporter.capture_start()
+        reporter.capture_skipped(graph_count=0)
+        reporter.training_iteration_complete(
+            iteration_offset=4,
+            warmup_steps=3,
+            graphs_created=False,
+            graph_count=0,
+        )
+
+        assert [record["phase"] for record in self._records(capsys.readouterr())] == [
+            "warmup_start",
+            "capture_start",
+            "capture_skipped",
+        ]
+
     def test_cuda_graph_memory_steady_state_requires_completed_replay(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
@@ -1065,6 +1086,42 @@ class TestCudaGraphMemoryReporter:
             ("capture_start", None),
             ("create_cudagraphs", None),
             ("capture_complete", (True, 5)),
+        ]
+
+    def test_cuda_graph_memory_capture_wrapper_skips_zero_graphs(self) -> None:
+        events: list[tuple[str, object]] = []
+
+        class FakeReporter:
+            def capture_start(self) -> None:
+                events.append(("capture_start", None))
+
+            def capture_complete(self, *, graphs_created: bool, graph_count: int) -> None:
+                raise AssertionError(
+                    f"capture_complete must not receive zero graphs: "
+                    f"{graphs_created=}, {graph_count=}"
+                )
+
+            def capture_skipped(self, *, graph_count: int) -> None:
+                events.append(("capture_skipped", graph_count))
+
+        class FakeGraphHelper:
+            def create_cudagraphs(self) -> None:
+                events.append(("create_cudagraphs", None))
+
+            def graphs_created(self) -> bool:
+                return False
+
+            def graph_count(self) -> int:
+                return 0
+
+        training_module._capture_transformer_engine_cuda_graphs(
+            cuda_graph_helper=FakeGraphHelper(), memory_reporter=FakeReporter()
+        )
+
+        assert events == [
+            ("capture_start", None),
+            ("create_cudagraphs", None),
+            ("capture_skipped", 0),
         ]
 
     def test_cuda_graph_memory_train_step_wrapper_reports_only_after_real_step(

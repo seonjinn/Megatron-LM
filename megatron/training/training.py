@@ -3360,10 +3360,12 @@ def _capture_transformer_engine_cuda_graphs(
     """Capture TE CUDA Graphs while preserving the memory-report ordering contract."""
     memory_reporter.capture_start()
     cuda_graph_helper.create_cudagraphs()
-    memory_reporter.capture_complete(
-        graphs_created=cuda_graph_helper.graphs_created(),
-        graph_count=cuda_graph_helper.graph_count(),
-    )
+    graphs_created = cuda_graph_helper.graphs_created()
+    graph_count = cuda_graph_helper.graph_count()
+    if graphs_created and graph_count > 0:
+        memory_reporter.capture_complete(graphs_created=True, graph_count=graph_count)
+    else:
+        memory_reporter.capture_skipped(graph_count=graph_count)
 
 
 def _train_step_with_cuda_graph_memory(
