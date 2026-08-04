@@ -14,6 +14,7 @@ from megatron.core.transformer.custom_layers.batch_invariant_kernels import (
     is_batch_invariant_mode_enabled,
 )
 from megatron.core.transformer.module import MegatronModule
+from megatron.core.transformer.moe.capacity_tracker import get_moe_capacity_tracker
 from megatron.core.transformer.moe.moe_logging import get_moe_metrics_tracker
 from megatron.core.transformer.moe.moe_utils import (
     MoEAuxLossAutoScaler,
@@ -999,6 +1000,12 @@ class TopKRouter(Router):
 
         # Apply token dropping to probs and routing_map.
         if self.config.moe_expert_capacity_factor is not None:
+            tracker = get_moe_capacity_tracker()
+            original_routing_map = None
+            if tracker.initialized:
+                original_routing_map = routing_map
+                if padding_mask is not None:
+                    original_routing_map = original_routing_map & (~padding_mask).unsqueeze(-1)
             probs, routing_map = apply_router_token_dropping(
                 probs,
                 routing_map,
@@ -1007,6 +1014,14 @@ class TopKRouter(Router):
                 drop_policy=self.config.moe_token_drop_policy,
                 pad_to_capacity=self.config.moe_pad_expert_input_to_capacity,
             )
+            if original_routing_map is not None:
+                kept_routes = original_routing_map & routing_map
+                selected_assignments = original_routing_map.sum()
+                tracker.record_assignments(
+                    selected_assignments,
+                    selected_assignments - kept_routes.sum(),
+                    (original_routing_map.any(dim=-1) & ~kept_routes.any(dim=-1)).sum(),
+                )
 
         # Apply each aux loss type and attach aux loss autograd function to probs
         if self.training and torch.is_grad_enabled() and self.is_aux_loss_enabled():

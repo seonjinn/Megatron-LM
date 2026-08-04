@@ -13,6 +13,10 @@ from megatron.core.models.gpt.gpt_layer_specs import (
     get_gpt_layer_local_submodules,
     get_gpt_layer_with_transformer_engine_spec,
 )
+from megatron.core.transformer.moe.capacity_tracker import (
+    destroy_moe_capacity_tracker,
+    get_moe_capacity_tracker,
+)
 from megatron.core.transformer.moe.fused_a2a import HYBRIDEP_TOKEN_ALIGNMENT, reset_hybrid_ep_buffer
 from megatron.core.transformer.moe.moe_layer import MoELayer, MoESubmodules
 from megatron.core.transformer.moe.moe_utils import get_capacity
@@ -516,6 +520,93 @@ def is_op_fuser_available():
     except ImportError:
         return False
     return is_te_min_version("2.14.0")
+
+
+@pytest.fixture
+def capacity_tracker():
+    destroy_moe_capacity_tracker()
+    tracker = get_moe_capacity_tracker()
+    tracker.initialize(torch.device("cpu"))
+    yield tracker
+    destroy_moe_capacity_tracker()
+
+
+def _make_hybridep_capacity_manager(rank_capacity_factor: float | None) -> _HybridEPManager:
+    manager = _HybridEPManager.__new__(_HybridEPManager)
+    manager.group = SimpleNamespace(size=lambda: 1)
+    manager.num_local_experts = 2
+    manager.num_experts = 2
+    manager.config = SimpleNamespace(
+        fp8=False,
+        fp4=False,
+        moe_flex_dispatcher_num_sms=8,
+        moe_hybridep_num_blocks_permute=4,
+        moe_hybridep_num_blocks_unpermute=4,
+        moe_permute_fusion_into_hybridep=False,
+        moe_hybridep_num_sms_preprocessing=4,
+    )
+    manager.moe_expert_rank_capacity_factor = rank_capacity_factor
+    manager.drop_and_pad = False
+    manager.num_permuted_tokens = 4 if rank_capacity_factor is not None else None
+    manager.token_probs = torch.ones((2, 2), dtype=torch.float32)
+    manager.routing_map = torch.ones((2, 2), dtype=torch.bool)
+    manager.handle = None
+    manager.pad_multiple = None
+    manager._padded_num_tokens = 2
+    manager.over_budget = torch.zeros(1, dtype=torch.bool)
+    return manager
+
+
+def test_hybridep_capacity_tracker_records_static_rank_overflow(
+    monkeypatch, capacity_tracker
+) -> None:
+    manager = _make_hybridep_capacity_manager(rank_capacity_factor=1.0)
+    overflow = torch.tensor(1, dtype=torch.int64)
+
+    def fake_hybrid_ep_dispatch(**kwargs):
+        return kwargs["x"], kwargs["probs"].flatten(), None, torch.tensor([2, 2]), [overflow]
+
+    monkeypatch.setattr(
+        "megatron.core.transformer.moe.token_dispatcher.hybrid_ep_dispatch",
+        fake_hybrid_ep_dispatch,
+    )
+
+    manager.dispatch(torch.ones((2, 4)))
+
+    snapshot = capacity_tracker.snapshot()
+    assert snapshot.selected_assignments == 0
+    assert snapshot.dropped_assignments == 0
+    assert snapshot.valid_token_drops == 0
+    assert snapshot.rank_overflow_events == 1
+
+
+def test_hybridep_dropless_capacity_tracker_preserves_dynamic_allocation(
+    monkeypatch, capacity_tracker
+) -> None:
+    manager = _make_hybridep_capacity_manager(rank_capacity_factor=None)
+    opaque_handle = object()
+    observed_bound = None
+
+    def fake_hybrid_ep_dispatch(**kwargs):
+        nonlocal observed_bound
+        observed_bound = kwargs["num_permuted_tokens"]
+        return kwargs["x"], kwargs["probs"].flatten(), None, torch.tensor([1, 3]), opaque_handle
+
+    monkeypatch.setattr(
+        "megatron.core.transformer.moe.token_dispatcher.hybrid_ep_dispatch",
+        fake_hybrid_ep_dispatch,
+    )
+
+    manager.dispatch(torch.ones((2, 4)))
+
+    assert observed_bound is None
+    assert manager.handle is opaque_handle
+    assert manager.num_permuted_tokens == 4
+    snapshot = capacity_tracker.snapshot()
+    assert snapshot.selected_assignments == 0
+    assert snapshot.dropped_assignments == 0
+    assert snapshot.valid_token_drops == 0
+    assert snapshot.rank_overflow_events == 0
 
 
 def test_hybridep_pad_uneven_dispatch_inputs_metadata(monkeypatch):

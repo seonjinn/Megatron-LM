@@ -19,6 +19,7 @@ from megatron.core.tensor_parallel import (
     reduce_scatter_to_sequence_parallel_region,
 )
 from megatron.core.transformer.enums import CudaGraphModule
+from megatron.core.transformer.moe.capacity_tracker import get_moe_capacity_tracker
 from megatron.core.transformer.moe.cuda_graph_replay import (
     AlltoAllCudaGraphState,
     HybridEPCudaGraphState,
@@ -1367,6 +1368,9 @@ class _HybridEPManager(_DispatchManager):
             # dropped because permuted count exceeded num_permuted_tokens from setup_metadata.
             over_budget = self.handle[-1] != 0
             self.over_budget |= over_budget
+            tracker = get_moe_capacity_tracker()
+            if tracker.initialized:
+                tracker.record_rank_overflow(over_budget)
         # When capacity factor is None, skip overflow tracking (no token drops). Actual
         # permuted size is resolved below via tokens_per_expert.sum() (CPU sync).
 
