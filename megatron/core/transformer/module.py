@@ -2,6 +2,7 @@
 
 """Megatron Module."""
 from functools import partial
+import os
 from typing import Optional, Tuple
 
 import torch
@@ -332,11 +333,27 @@ class GraphableMegatronModule(MegatronModule):
         """
         from megatron.core.transformer.cuda_graphs import is_graph_capturing
 
-        return (
+        should_call = (
             self.config.cuda_graph_impl == "transformer_engine"
             and self.training
             and (is_graph_capturing() or self.cuda_graphs)
         )
+        if not should_call:
+            return False
+
+        # TE's graph callable accepts Tensor arguments only. Multimodal SFT
+        # supplies PackedSeqParams on every packed batch, including during the
+        # initial capture. Opt-in profiles skip the TE graph path entirely for
+        # these inputs so capture cannot hang and the layer runs eagerly.
+        packed_input_fallback = os.getenv(
+            "MEGATRON_TE_CUDAGRAPH_PACKED_FALLBACK", "0"
+        ).strip().lower() in {"1", "true", "yes", "on"}
+        if packed_input_fallback and (
+            kwargs.get("inference_context") is not None
+            or kwargs.get("packed_seq_params") is not None
+        ):
+            return False
+        return True
 
     def __call__(self, *args, **kwargs):
         if self._should_call_local_cudagraph(*args, **kwargs):
