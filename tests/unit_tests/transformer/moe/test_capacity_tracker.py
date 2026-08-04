@@ -154,6 +154,13 @@ def test_records_accumulate_during_cuda_graph_capture() -> None:
 
     graph.replay()
     snapshot = tracker.snapshot()
+    assert snapshot.selected_assignments == 3
+    assert snapshot.dropped_assignments == 1
+    assert snapshot.valid_token_drops == 1
+    assert snapshot.rank_overflow_events == 1
+
+    graph.replay()
+    snapshot = tracker.snapshot()
     assert snapshot.selected_assignments == 6
     assert snapshot.dropped_assignments == 2
     assert snapshot.valid_token_drops == 2
