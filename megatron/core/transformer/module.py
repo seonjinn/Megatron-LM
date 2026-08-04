@@ -223,7 +223,18 @@ class GraphableMegatronModule(MegatronModule):
             return
         self.cuda_graphs[cg_index].backward_dw()
 
-    def get_layer_static_inputs(self, seq_length, micro_batch_size):
+    def _is_thd_cuda_graph(self) -> bool:
+        """Return whether explicit fixed THD bounds define this graph's inputs."""
+        return (
+            self.config.cuda_graph_impl != "none"
+            and self.config.max_seqlen_per_dp_cp_rank is not None
+            and self.config.pad_packed_seq_alignment is not None
+            and self.config.thd_max_packed_sequences is not None
+        )
+
+    def get_layer_static_inputs(
+        self, seq_length: int, micro_batch_size: int
+    ) -> dict[str, torch.Tensor]:
         """
         Get the static inputs for the layer.
         We assume that the module has one hidden_states input, whose shape is inferred
@@ -233,23 +244,34 @@ class GraphableMegatronModule(MegatronModule):
         Returns:
             Dict[str, torch.Tensor]: A dictionary containing the static inputs for the layer.
         """
-        # Calculate data shape related values.
         context_parallel_size = self.config.context_parallel_size
-        slen_per_cp = seq_length // context_parallel_size
         sequence_parallel = self.config.sequence_parallel
         tensor_model_parallel_size = self.config.tensor_model_parallel_size
+        if self._is_thd_cuda_graph():
+            slen_per_cp = self.config.max_seqlen_per_dp_cp_rank
+            batch_size = 1
+        else:
+            slen_per_cp = seq_length // context_parallel_size
+            batch_size = micro_batch_size
         slen_per_cptp = (
             slen_per_cp // tensor_model_parallel_size if sequence_parallel else slen_per_cp
         )
 
-        static_inputs = {}
-        static_inputs["hidden_states"] = torch.ones(
-            (slen_per_cptp, micro_batch_size, self.config.hidden_size),
-            dtype=torch.bfloat16,
-            requires_grad=True,
-            device=torch.cuda.current_device(),
-        )
-        return static_inputs
+        if self.config.bf16:
+            dtype = torch.bfloat16
+        elif self.config.fp16:
+            dtype = torch.float16
+        else:
+            dtype = torch.float32
+
+        return {
+            "hidden_states": torch.ones(
+                (slen_per_cptp, batch_size, self.config.hidden_size),
+                dtype=dtype,
+                requires_grad=True,
+                device=torch.cuda.current_device(),
+            )
+        }
 
     def setup_manual_hooks(self, make_hook_func):
         """

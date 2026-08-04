@@ -20,7 +20,12 @@ from megatron.core import mpu, parallel_state, tensor_parallel
 from megatron.core.enums import ModelType
 from megatron.core.models.multimodal import context_parallel
 from megatron.core.models.multimodal.llava_model import IGNORE_INDEX, LLaVAModel
-from megatron.core.packed_seq_params import PackedSeqParams
+from megatron.core.packed_seq_params import (
+    PackedSeqParams,
+    get_thd_padding_kwargs,
+    pad_sequence_for_thd,
+    resolve_thd_tail_padding_policy,
+)
 from megatron.core.parallel_state import (
     get_pipeline_model_parallel_world_size,
     get_tensor_model_parallel_rank,
@@ -264,6 +269,47 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
             packed_seq_params.cu_seqlens_q_padded,
         )
     nvtx_range_pop("get_ltor_masks_and_position_ids")
+
+    # TE CUDA Graphs require every replay to pass the same THD metadata shapes
+    # that were used during capture. The multimodal entrypoint historically
+    # constructed PackedSeqParams directly from compact dataloader boundaries,
+    # so a batch with two or three packed samples replayed into the graph's
+    # fixed ``thd_max_packed_sequences + 1`` surface and failed inside TE's
+    # static-input copy. Apply the fixed token/sequence padding before LLaVA
+    # expands the packed samples.
+    if packed_seq_params is not None and getattr(args, "pad_packed_seq_alignment", None) is not None:
+        alignment, target_len, max_num_seqs = get_thd_padding_kwargs(
+            args.pad_packed_seq_alignment,
+            getattr(args, "max_seqlen_per_dp_cp_rank", None),
+            getattr(args, "thd_max_packed_sequences", None),
+            getattr(args, "cuda_graph_impl", "none") != "none",
+        )
+        (
+            tokens,
+            labels,
+            loss_mask,
+            position_ids,
+            packed_seq_params,
+            padding_mask,
+        ) = pad_sequence_for_thd(
+            tokens,
+            labels,
+            loss_mask,
+            position_ids,
+            packed_seq_params,
+            alignment=alignment,
+            target_len=target_len,
+            max_num_seqs=max_num_seqs,
+            tail_padding_policy=resolve_thd_tail_padding_policy(args),
+            cp_size=getattr(args, "context_parallel_size", 1),
+        )
+        if tokens is not None:
+            tokens = tokens.masked_fill(padding_mask, tokenizer.pad)
+        if labels is not None:
+            labels = labels.masked_fill(padding_mask, IGNORE_INDEX)
+        if loss_mask is not None:
+            loss_mask = loss_mask.masked_fill(padding_mask, 0)
+        packed_seq_params.tokens_per_sample = packed_seq_params.total_tokens
 
     if getattr(args, "log_packed_sequence_stats", False) and packed_seq_params is not None:
         update_packed_sequence_stats(sample_lengths, loss_mask)

@@ -599,6 +599,26 @@ class LLaVAModel(MegatronModule):
                     continue
                 param.requires_grad = False
 
+    def _get_thd_graph_token_capacity(
+        self, packed_seq_params: Optional[PackedSeqParams]
+    ) -> Optional[int]:
+        """Return the fixed language token capacity required by a TE THD graph."""
+        if packed_seq_params is None or packed_seq_params.qkv_format != "thd":
+            return None
+
+        language_config = self.language_model.config
+        cuda_graph_impl = getattr(language_config, "cuda_graph_impl", "none")
+        pad_alignment = getattr(language_config, "pad_packed_seq_alignment", None)
+        max_tokens_per_rank = getattr(language_config, "max_seqlen_per_dp_cp_rank", None)
+        if (
+            cuda_graph_impl == "none"
+            or max_tokens_per_rank is None
+            or pad_alignment not in ("max", max_tokens_per_rank)
+        ):
+            return None
+
+        return int(max_tokens_per_rank) * max(1, int(getattr(self, "context_parallel_lm", 1) or 1))
+
     def _preprocess_data(
         self,
         image_embeddings,
@@ -740,6 +760,21 @@ class LLaVAModel(MegatronModule):
                 and inference_context is None
             ):
                 max_seq_len = self._language_max_sequence_length
+
+            # TE CUDA graphs use a fixed THD token surface. The input batch is padded to this
+            # capacity before entering LLaVA, but multimodal replacement above derives
+            # ``max_seq_len`` from the real expanded samples and would otherwise discard that
+            # tail padding. Preserve the graph capacity so the language decoder receives the
+            # same hidden-state shape used during graph capture. The padding mask and padded
+            # cu-seqlens metadata make the appended slots invisible to attention and loss.
+            graph_token_capacity = self._get_thd_graph_token_capacity(packed_seq_params)
+            if graph_token_capacity is not None:
+                current_seq_len = (
+                    int(max_seq_len.item())
+                    if isinstance(max_seq_len, torch.Tensor)
+                    else int(max_seq_len)
+                )
+                max_seq_len = max(current_seq_len, graph_token_capacity)
 
             batch_indices, non_image_indices = torch.where(image_token_mask != True)
 

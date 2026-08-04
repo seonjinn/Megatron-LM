@@ -17,6 +17,7 @@ from packaging.version import Version as PkgVersion
 from megatron.core.activations import squared_relu
 from megatron.core.dist_checkpointing.validation import StrictHandling
 from megatron.core.fusions.fused_bias_geglu import quick_gelu
+from megatron.core.model_parallel_config import _parse_pad_packed_seq_alignment
 from megatron.core.msc_utils import MultiStorageClientFeature
 from megatron.core.quantization.utils import (
     kitchen_quantization_recipe_config,
@@ -1740,6 +1741,62 @@ def validate_args(args, defaults={}):
         args.cpu_offloading = True
 
     # CUDA Graphs
+    if args.pad_packed_seq_alignment is not None:
+        args.pad_packed_seq_alignment = _parse_pad_packed_seq_alignment(
+            args.pad_packed_seq_alignment
+        )
+        if args.max_seqlen_per_dp_cp_rank is None:
+            raise ValueError(
+                '--max-seqlen-per-dp-cp-rank must be set when '
+                '--pad-packed-seq-alignment is enabled.'
+            )
+        if (
+            args.pad_packed_seq_alignment != 'max'
+            and args.pad_packed_seq_alignment > args.max_seqlen_per_dp_cp_rank
+        ):
+            raise ValueError(
+                '--pad-packed-seq-alignment must not exceed '
+                f'--max-seqlen-per-dp-cp-rank ({args.max_seqlen_per_dp_cp_rank}), '
+                f'got {args.pad_packed_seq_alignment}.'
+            )
+
+    if args.thd_max_packed_sequences is not None and args.thd_max_packed_sequences <= 0:
+        raise ValueError(
+            '--thd-max-packed-sequences must be positive, '
+            f'got {args.thd_max_packed_sequences}.'
+        )
+
+    static_thd_requested = any(
+        value is not None
+        for value in (
+            args.pad_packed_seq_alignment,
+            args.thd_max_packed_sequences,
+            args.thd_tail_padding_policy,
+        )
+    )
+    if args.cuda_graph_impl != 'none' and static_thd_requested:
+        missing_bounds = []
+        if args.max_seqlen_per_dp_cp_rank is None:
+            missing_bounds.append('--max-seqlen-per-dp-cp-rank')
+        if args.pad_packed_seq_alignment is None:
+            missing_bounds.append('--pad-packed-seq-alignment')
+        if args.thd_max_packed_sequences is None:
+            missing_bounds.append('--thd-max-packed-sequences')
+        if missing_bounds:
+            raise ValueError(
+                'Static THD CUDA Graph configuration requires fixed bounds: '
+                + ', '.join(missing_bounds)
+                + '.'
+            )
+        if args.pad_packed_seq_alignment not in (
+            'max',
+            args.max_seqlen_per_dp_cp_rank,
+        ):
+            raise ValueError(
+                'Static THD CUDA Graph requires --pad-packed-seq-alignment=max or the '
+                'exact --max-seqlen-per-dp-cp-rank value.'
+            )
+
     if args.cuda_graph_impl != "none":
         if (
             "transformer_engine" in (args.transformer_impl, args.cuda_graph_impl)

@@ -337,6 +337,10 @@ def _validate_hybrid_ep_ib_tx_depth(num_tokens: int, group: torch.distributed.Pr
     )
 
 
+# HybridEP dispatch/combine kernels use 64-token chunks for their public APIs.
+HYBRIDEP_TOKEN_ALIGNMENT = 64
+
+
 def init_hybrid_ep_buffer(
     group: torch.distributed.ProcessGroup,
     hidden_dim: int,

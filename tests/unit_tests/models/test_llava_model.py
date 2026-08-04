@@ -94,6 +94,29 @@ class TestLLaVAModel:
         assert num_weights == 1488736
 
     @pytest.mark.internal
+    def test_thd_graph_token_capacity(self):
+        """Static TE THD graphs retain the full language token surface."""
+        original_language_model = self.model.language_model
+        self.model.language_model = SimpleNamespace(
+            config=SimpleNamespace(
+                cuda_graph_impl="transformer_engine",
+                pad_packed_seq_alignment="max",
+                max_seqlen_per_dp_cp_rank=1024,
+            )
+        )
+        self.model.context_parallel_lm = 2
+
+        assert (
+            self.model._get_thd_graph_token_capacity(PackedSeqParams(qkv_format="thd")) == 2048
+        )
+        assert self.model._get_thd_graph_token_capacity(PackedSeqParams(qkv_format="sbhd")) is None
+
+        self.model.language_model.config.pad_packed_seq_alignment = 128
+        assert self.model._get_thd_graph_token_capacity(PackedSeqParams(qkv_format="thd")) is None
+
+        self.model.language_model = original_language_model
+
+    @pytest.mark.internal
     def test_set_input_tensor(self):
         expected_shape = (1, 2, 3, 4)
         input_tensor = torch.zeros(expected_shape)

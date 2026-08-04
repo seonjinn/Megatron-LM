@@ -1036,7 +1036,9 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
         """
         return self.self_attention.linear_qkv.layer_norm_weight.data
 
-    def get_layer_static_inputs(self, seq_length, micro_batch_size):
+    def get_layer_static_inputs(
+        self, seq_length: int, micro_batch_size: int
+    ) -> Dict[str, torch.Tensor]:
         """
         Get the static inputs for the transformer layer. Besides the hidden_states that is
         generated in GraphableMegatronModule, we also add the attention_mask.
@@ -1045,15 +1047,41 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             Dict[str, torch.Tensor]: A dictionary containing the static inputs for the layer.
         """
         static_inputs = super().get_layer_static_inputs(seq_length, micro_batch_size)
-
-        if not isinstance(self.self_attention, IdentityOp) and (
+        device = torch.cuda.current_device()
+        attn_in_graph = not isinstance(self.self_attention, IdentityOp) and (
             not self.config.cuda_graph_modules
             or CudaGraphModule.attn in self.config.cuda_graph_modules
-        ):
+        )
+
+        if self._is_thd_cuda_graph():
+            max_tokens = self.config.max_seqlen_per_dp_cp_rank
+            max_real_sequences = self.config.thd_max_packed_sequences
+            assert max_tokens is not None
+            assert max_real_sequences is not None
+            if attn_in_graph:
+                global_token_capacity = max_tokens * self.config.context_parallel_size
+                reserve_dummy_slot = self.config.thd_tail_padding_policy != "extend_last"
+                cu_entries = max_real_sequences + 1 + int(reserve_dummy_slot)
+                cu_seqlens = torch.full(
+                    (cu_entries,), global_token_capacity, dtype=torch.int32, device=device
+                )
+                cu_seqlens[0] = 0
+                static_inputs["cu_seqlens_q"] = cu_seqlens
+                static_inputs["cu_seqlens_kv"] = cu_seqlens.clone()
+                static_inputs["cu_seqlens_q_padded"] = cu_seqlens.clone()
+                static_inputs["cu_seqlens_kv_padded"] = cu_seqlens.clone()
+
+            mask_tokens = max_tokens
+            if self.config.sequence_parallel:
+                mask_tokens //= self.config.tensor_model_parallel_size
+            static_inputs["padding_mask"] = torch.zeros(
+                (1, mask_tokens), dtype=torch.bool, device=device
+            )
+        elif attn_in_graph:
             slen_per_cp = seq_length // self.config.context_parallel_size
             static_inputs["attention_mask"] = (
                 ~(torch.tril(torch.ones((slen_per_cp, seq_length))).bool())
-                .to(torch.cuda.current_device())
+                .to(device)
                 .reshape(1, 1, slen_per_cp, seq_length)
                 .tile(micro_batch_size, 1, 1, 1)
             )
@@ -1087,6 +1115,36 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                 submodules += [self.mlp.shared_experts]
         return submodules
 
+    @staticmethod
+    def _decompose_packed_seq_params_to_kwargs(kwargs: Dict[str, Any]) -> None:
+        """Replace packed metadata with its tensor fields for a TE graph call."""
+        packed_seq_params = kwargs.pop("packed_seq_params", None)
+        if packed_seq_params is None:
+            return
+        kwargs["cu_seqlens_q"] = packed_seq_params.cu_seqlens_q
+        kwargs["cu_seqlens_kv"] = packed_seq_params.cu_seqlens_kv
+        kwargs["cu_seqlens_q_padded"] = packed_seq_params.cu_seqlens_q_padded
+        kwargs["cu_seqlens_kv_padded"] = packed_seq_params.cu_seqlens_kv_padded
+
+    def _reconstruct_packed_seq_params_from_kwargs(self, kwargs: Dict[str, Any]) -> None:
+        """Rebuild static Python metadata around the graph's tensor inputs."""
+        if "cu_seqlens_q" not in kwargs:
+            return
+        max_tokens = self.config.max_seqlen_per_dp_cp_rank
+        assert max_tokens is not None
+        max_seqlen = max_tokens * self.config.context_parallel_size
+        kwargs["packed_seq_params"] = PackedSeqParams(
+            qkv_format="thd",
+            cu_seqlens_q=kwargs.pop("cu_seqlens_q"),
+            cu_seqlens_kv=kwargs.pop("cu_seqlens_kv"),
+            cu_seqlens_q_padded=kwargs.pop("cu_seqlens_q_padded"),
+            cu_seqlens_kv_padded=kwargs.pop("cu_seqlens_kv_padded"),
+            max_seqlen_q=max_seqlen,
+            max_seqlen_kv=max_seqlen,
+            pad_between_seqs=True,
+            cp_partition_mode=getattr(self.config, "cp_partition_mode", "zigzag"),
+        )
+
     def _te_cuda_graph_capture(self, *args, **kwargs):
         """
         CUDA Graph capture for this layer using TE interface.
@@ -1095,6 +1153,7 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
            attribute can be set to control the scope of the CUDA graph.
         2. If context is None, it cannot be returned as output.
         """
+        self._reconstruct_packed_seq_params_from_kwargs(kwargs)
         context = None
         if (
             not self.config.cuda_graph_modules
@@ -1118,7 +1177,9 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                 )
             )
         ):
-            hidden_states = self._forward_mlp(hidden_states)
+            hidden_states = self._forward_mlp(
+                hidden_states, padding_mask=kwargs.get("padding_mask")
+            )
         if not isinstance(hidden_states, list) and not isinstance(hidden_states, tuple):
             cuda_graph_outputs = [hidden_states]
         else:
@@ -1135,6 +1196,7 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
         Hence, `inference_context` and `packed_seq_params` are excluded from input list.
         """
         context = None
+        padding_mask = kwargs.get("padding_mask")
         if (
             os.getenv("MEGATRON_TE_CUDAGRAPH_PACKED_FALLBACK", "0").strip().lower()
             in {"1", "true", "yes", "on"}
@@ -1158,6 +1220,10 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             hidden_states, context = self._forward_attention(*args, **kwargs)
             args = (hidden_states,)
             kwargs = {}
+            if padding_mask is not None:
+                kwargs["padding_mask"] = padding_mask
+        else:
+            self._decompose_packed_seq_params_to_kwargs(kwargs)
 
         assert (kwargs.get('inference_context') is None) and (
             kwargs.get('packed_seq_params') is None
@@ -1268,7 +1334,7 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                 return residual, hidden_states, probs, shared_expert_output
 
             # CUDA Graph does not capture the MLP/MoE part at all.
-            output = self._forward_mlp(*cuda_graph_output)
+            output = self._forward_mlp(*cuda_graph_output, padding_mask=kwargs.get("padding_mask"))
         return output, context
 
     def _get_te_cuda_graph_replay_args(self, *args, **kwargs):
@@ -1279,6 +1345,15 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             len(cudagraph_args) == 1
         ), "Exactly one positional argument `hidden_states` is expected."
         hidden_states = cudagraph_args[0]
+
+        # The static THD graph surface includes a local padding mask even when
+        # eager multimodal callers do not expose one.  TE still requires the
+        # same tensor slot during replay; synthesize the capture-equivalent
+        # zero mask instead of passing ``None`` into its input surface.
+        if self._is_thd_cuda_graph() and cudagraph_kwargs.get("padding_mask") is None:
+            cudagraph_kwargs["padding_mask"] = torch.zeros(
+                (1, hidden_states.shape[0]), dtype=torch.bool, device=hidden_states.device
+            )
 
         try:
             import transformer_engine.pytorch as te  # pylint: disable=unused-import
