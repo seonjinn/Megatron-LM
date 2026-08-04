@@ -7,6 +7,7 @@ import pytest
 import torch
 
 import pretrain_hybrid
+from megatron.core.packed_seq_params import get_thd_padding_kwargs
 
 
 class _NoOpTimer:
@@ -61,6 +62,23 @@ def _packed_inputs() -> dict[str, torch.Tensor]:
         "cu_seqlens_padded": torch.tensor([0, 4, 8], dtype=torch.int32),
         "max_seqlen": torch.tensor(5, dtype=torch.int32),
     }
+
+
+def test_static_numeric_alignment_resolves_to_fixed_target() -> None:
+    alignment, target_len, max_num_seqs = get_thd_padding_kwargs(
+        12, max_seqlen_per_dp_cp_rank=12, thd_max_packed_sequences=4, cuda_graph_static=True
+    )
+
+    assert alignment is None
+    assert target_len == 12
+    assert max_num_seqs == 4
+
+
+def test_static_alignment_smaller_than_capacity_is_rejected() -> None:
+    with pytest.raises(ValueError, match="fixed target"):
+        get_thd_padding_kwargs(
+            8, max_seqlen_per_dp_cp_rank=12, thd_max_packed_sequences=4, cuda_graph_static=True
+        )
 
 
 def _prepare(

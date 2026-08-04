@@ -200,6 +200,21 @@ def get_thd_padding_kwargs(
     cuda_graph_static: bool,
 ) -> Tuple[Optional[int], Optional[int], Optional[int]]:
     """Resolve the typed arguments for :func:`pad_sequence_for_thd`."""
+    if cuda_graph_static:
+        if max_seqlen_per_dp_cp_rank is None:
+            raise ValueError(
+                "--max-seqlen-per-dp-cp-rank is required for static THD CUDA Graph padding."
+            )
+        if pad_packed_seq_alignment != "max" and int(pad_packed_seq_alignment) != int(
+            max_seqlen_per_dp_cp_rank
+        ):
+            raise ValueError(
+                "Static THD CUDA Graph padding requires a fixed target equal to "
+                "--max-seqlen-per-dp-cp-rank; use --pad-packed-seq-alignment=max or the "
+                "same numeric value (fixed target)."
+            )
+        return None, int(max_seqlen_per_dp_cp_rank), thd_max_packed_sequences
+
     if pad_packed_seq_alignment == "max":
         if max_seqlen_per_dp_cp_rank is None:
             raise ValueError(
@@ -207,8 +222,7 @@ def get_thd_padding_kwargs(
             )
         return None, int(max_seqlen_per_dp_cp_rank), thd_max_packed_sequences
 
-    max_num_seqs = thd_max_packed_sequences if cuda_graph_static else None
-    return int(pad_packed_seq_alignment), None, max_num_seqs
+    return int(pad_packed_seq_alignment), None, None
 
 
 def resolve_thd_tail_padding_policy(config: object) -> Literal["append_dummy_seq", "extend_last"]:
