@@ -27,6 +27,20 @@ from megatron.core.transformer.moe.router_replay import RouterReplay
 from megatron.core.transformer.transformer_config import TransformerConfig
 
 
+def _prepare_padding_mask_for_routing(
+    padding_mask: torch.Tensor, routing_map: torch.Tensor
+) -> torch.Tensor:
+    """Make a token padding mask broadcastable over the expert dimension."""
+    flattened_mask = padding_mask.reshape(-1)
+    token_count = routing_map.shape[0]
+    if flattened_mask.numel() != token_count:
+        raise ValueError(
+            f"padding_mask has {flattened_mask.numel()} tokens, "
+            f"but routing_map has {token_count}"
+        )
+    return flattened_mask.unsqueeze(-1)
+
+
 class Router(ABC, MegatronModule):
     """Base Router class"""
 
@@ -580,6 +594,9 @@ class TopKRouter(Router):
         if self.enable_expert_bias and torch.is_grad_enabled():
             with torch.no_grad():
                 if padding_mask is not None:
+                    padding_mask = _prepare_padding_mask_for_routing(
+                        padding_mask, routing_map
+                    )
                     routing_map = routing_map & (~padding_mask)
                 self.local_tokens_per_expert += routing_map.sum(dim=0)
 
