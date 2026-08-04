@@ -1080,7 +1080,16 @@ class MultiModalTaskEncoder(
 
     @stateless(restore_seeds=True)
     def preencode_sample_for_packing(self, sample: ConversationSample):
-        encoded_sample = self.preencode_sample(sample)
+        try:
+            encoded_sample = self.preencode_sample(sample)
+        except NoTrainableTokensError:
+            if not getattr(self.args, "skip_no_trainable_tokens", False):
+                raise
+            # A short diagnostic packing horizon can truncate a valid sample
+            # before its first assistant label.  Such a sample cannot
+            # contribute to SFT loss and must not abort every worker in the
+            # batch; omit it from the packed stream instead.
+            return
         samples = getattr(encoded_sample, "samples", None)
         if samples is not None:
             yield from samples
