@@ -65,7 +65,31 @@ from megatron.training.global_vars import (
 from megatron.training.training import setup_model_and_optimizer
 from tests.unit_tests.test_utilities import Utils
 
+
+def _bind_local_rank_before_cuda_query() -> None:
+    raw_local_rank = os.environ.get("LOCAL_RANK")
+    if raw_local_rank is None:
+        return
+    local_rank = int(raw_local_rank)
+    local_world_size = int(os.environ["LOCAL_WORLD_SIZE"])
+    if local_rank not in range(local_world_size):
+        raise ValueError("LOCAL_RANK is outside LOCAL_WORLD_SIZE")
+    torch.cuda.set_device(local_rank)
+
+
+_bind_local_rank_before_cuda_query()
 fp8_available, _ = check_fp8_support()
+
+
+def test_local_rank_binding_uses_worker_cuda_device(monkeypatch) -> None:
+    selected_devices: list[int] = []
+    monkeypatch.setenv("LOCAL_RANK", "3")
+    monkeypatch.setenv("LOCAL_WORLD_SIZE", "4")
+    monkeypatch.setattr(torch.cuda, "set_device", selected_devices.append)
+
+    _bind_local_rank_before_cuda_query()
+
+    assert selected_devices == [3]
 
 
 class _CountingEvalTELinear(torch.nn.Module):
@@ -165,6 +189,7 @@ def test_te_eval_graph_input_output_buffer_reuse_capability() -> None:
     accepted = False
     rejection = None
     reuse_evidence = {
+        "raw_te_eval_reuse_eager_parity": None,
         "raw_te_eval_reuse_fallback_forward_counter_increment": None,
         "raw_te_eval_reuse_outputs_changed": None,
         "raw_te_eval_reuse_replay_forward_counter_increment": None,
@@ -205,13 +230,15 @@ def test_te_eval_graph_input_output_buffer_reuse_capability() -> None:
             module.eval()
             assert invocations_after_capture > 0
             reuse_evidence = {
+                "raw_te_eval_reuse_eager_parity": True,
                 "raw_te_eval_reuse_fallback_forward_counter_increment": 1,
                 "raw_te_eval_reuse_outputs_changed": True,
                 "raw_te_eval_reuse_replay_forward_counter_increment": 0,
             }
 
     assert accepted or "only available in training mode" in (rejection or "")
-    assert all(parameter.grad is None for parameter in module.parameters())
+    no_parameter_grads = all(parameter.grad is None for parameter in module.parameters())
+    assert no_parameter_grads
     print(
         "TE_CAPABILITY_JSON="
         + json.dumps(
@@ -220,6 +247,7 @@ def test_te_eval_graph_input_output_buffer_reuse_capability() -> None:
                 "mcore_eval_reuse_graph_io": "not_implemented",
                 "raw_te_eval_reuse_graph_io": accepted,
                 "raw_te_eval_reuse_rejection": rejection,
+                "raw_te_eval_reuse_no_parameter_grads": no_parameter_grads,
                 **reuse_evidence,
             },
             sort_keys=True,
