@@ -92,6 +92,42 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def _slice_packed_seq_idx_for_sequence_parallel(
+    seq_idx: torch.Tensor, local_tokens: int, tp_rank: int, tp_size: int
+) -> torch.Tensor:
+    """Return the packed sequence IDs for one tensor-parallel sequence shard.
+
+    ``PackedSeqParams`` is shared with THD attention and therefore describes the
+    full packed token bound.  With sequence parallelism, Mamba sees only the
+    contiguous token shard owned by the current TP rank.  The Mamba kernels
+    require metadata with the same ``[batch, local_tokens]`` shape as their
+    input, so slice the shared map at this boundary instead of mutating the
+    caller-owned metadata.
+    """
+    if seq_idx.ndim != 2 or seq_idx.shape[0] != 1:
+        raise ValueError(
+            "Packed Mamba seq_idx must have shape [1, tokens], "
+            f"got {list(seq_idx.shape)}."
+        )
+
+    global_tokens = seq_idx.shape[1]
+    if global_tokens == local_tokens:
+        return seq_idx
+
+    expected_global_tokens = local_tokens * tp_size
+    if global_tokens != expected_global_tokens:
+        raise ValueError(
+            "cannot map packed Mamba seq_idx to sequence-parallel input: "
+            f"metadata has {global_tokens} tokens, input has {local_tokens}, "
+            f"and tensor parallel size is {tp_size}."
+        )
+    if not 0 <= tp_rank < tp_size:
+        raise ValueError(f"Invalid tensor-parallel rank {tp_rank} for size {tp_size}.")
+
+    start = tp_rank * local_tokens
+    return seq_idx[:, start : start + local_tokens].contiguous()
+
+
 class ExtendedRMSNorm(RMSNormGated):
     """
     RMSNormGated with sharded state dict.
@@ -730,6 +766,13 @@ class MambaMixer(MegatronModule):
             seq_idx = packed_seq_params.seq_idx
             if seq_idx is None:
                 seq_idx = self._create_packed_seq_idx(packed_seq_params, zxBCdt.shape[1])
+            elif self.config.sequence_parallel:
+                seq_idx = _slice_packed_seq_idx_for_sequence_parallel(
+                    seq_idx,
+                    local_tokens=zxBCdt.shape[1],
+                    tp_rank=parallel_state.get_tensor_model_parallel_rank(),
+                    tp_size=parallel_state.get_tensor_model_parallel_world_size(),
+                )
 
         y = mamba_split_conv1d_scan_combined(
             zxBCdt,

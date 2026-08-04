@@ -9,11 +9,48 @@ from megatron.core.models.hybrid.hybrid_layer_specs import hybrid_stack_spec
 from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.process_groups_config import ProcessGroupCollection
 from megatron.core.ssm.mamba_layer import MambaLayer, MambaLayerSubmodules
+from megatron.core.ssm.mamba_mixer import _slice_packed_seq_idx_for_sequence_parallel
 from megatron.core.tensor_parallel.random import model_parallel_cuda_manual_seed
 from megatron.core.transformer import TransformerConfig
 from megatron.core.transformer.enums import CudaGraphModule
 from megatron.core.transformer.identity_op import IdentityOp
 from tests.unit_tests.test_utilities import Utils
+
+
+@pytest.mark.internal
+@pytest.mark.parametrize("tp_rank", [0, 1], ids=["first_tp_rank", "second_tp_rank"])
+def test_slice_packed_seq_idx_for_sequence_parallel(tp_rank: int) -> None:
+    """Sequence-parallel Mamba receives the metadata slice matching its local tokens."""
+    seq_idx = torch.arange(8, dtype=torch.int32).reshape(1, 8)
+
+    local_seq_idx = _slice_packed_seq_idx_for_sequence_parallel(
+        seq_idx, local_tokens=4, tp_rank=tp_rank, tp_size=2
+    )
+
+    assert torch.equal(local_seq_idx, seq_idx[:, tp_rank * 4 : (tp_rank + 1) * 4])
+
+
+@pytest.mark.internal
+def test_slice_packed_seq_idx_keeps_already_local_metadata() -> None:
+    """Context-parallel Mamba paths may already expose local-length metadata."""
+    seq_idx = torch.arange(4, dtype=torch.int32).reshape(1, 4)
+
+    local_seq_idx = _slice_packed_seq_idx_for_sequence_parallel(
+        seq_idx, local_tokens=4, tp_rank=0, tp_size=2
+    )
+
+    assert local_seq_idx is seq_idx
+
+
+@pytest.mark.internal
+def test_slice_packed_seq_idx_rejects_incompatible_lengths() -> None:
+    """A metadata/input mismatch that is not explained by TP must fail explicitly."""
+    seq_idx = torch.arange(7, dtype=torch.int32).reshape(1, 7)
+
+    with pytest.raises(ValueError, match="cannot map packed Mamba seq_idx"):
+        _slice_packed_seq_idx_for_sequence_parallel(
+            seq_idx, local_tokens=4, tp_rank=0, tp_size=2
+        )
 
 
 def _make_static_thd_mamba_layer(
