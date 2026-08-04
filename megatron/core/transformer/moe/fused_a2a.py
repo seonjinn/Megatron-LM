@@ -273,8 +273,10 @@ try:
     from deep_ep import HybridEPBuffer
 
     HAVE_HYBRIDEP = True
-except ImportError:
+except ImportError as exc:
     HAVE_HYBRIDEP = False
+    if os.getenv("MEGATRON_HYBRIDEP_DEBUG", "0").strip().lower() in {"1", "true", "yes", "on"}:
+        print(f"[hybridep-debug] import failed: {exc!r}", flush=True)
 
 _hybrid_ep_buffer = None
 _HYBRID_EP_TOKEN_ALIGNMENT = 16
