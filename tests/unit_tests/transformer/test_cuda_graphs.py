@@ -86,15 +86,16 @@ class _CountingEvalTELinear(torch.nn.Module):
 
 
 def _te_eval_probe() -> tuple[_CountingEvalTELinear, torch.Tensor, dict[str, int]]:
-    assert torch.cuda.is_available(), "direct TE CUDA Graph capability requires a CUDA worker"
-    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
-    local_world_size = int(os.environ.get("LOCAL_WORLD_SIZE", str(torch.cuda.device_count())))
+    local_rank = int(os.environ["LOCAL_RANK"])
+    local_world_size = int(os.environ["LOCAL_WORLD_SIZE"])
     node_rank = int(os.environ.get("GROUP_RANK", "0"))
-    assert local_world_size == torch.cuda.device_count()
+    assert local_world_size > 0
     assert 0 <= local_rank < local_world_size
     assert node_rank >= 0
     torch.cuda.set_device(local_rank)
+    assert torch.cuda.is_available(), "direct TE CUDA Graph capability requires a CUDA worker"
     assert torch.cuda.current_device() == local_rank
+    assert local_world_size == torch.cuda.device_count()
     torch.manual_seed(1234)
     module = _CountingEvalTELinear().eval()
     sample = torch.full((4, 16), 0.25, dtype=torch.bfloat16, device="cuda")
@@ -163,6 +164,11 @@ def test_te_eval_graph_input_output_buffer_reuse_capability() -> None:
     module, sample, device_binding = _te_eval_probe()
     accepted = False
     rejection = None
+    reuse_evidence = {
+        "raw_te_eval_reuse_fallback_forward_counter_increment": None,
+        "raw_te_eval_reuse_outputs_changed": None,
+        "raw_te_eval_reuse_replay_forward_counter_increment": None,
+    }
     with torch.no_grad():
         try:
             (graphed,) = make_graphed_callables(
@@ -176,9 +182,33 @@ def test_te_eval_graph_input_output_buffer_reuse_capability() -> None:
             rejection = str(error)
         else:
             accepted = True
-            first = graphed(torch.full_like(sample, 0.5)).clone()
-            second = graphed(torch.full_like(sample, 1.5)).clone()
-            assert not torch.equal(first, second)
+            invocations_after_capture = module.forward_invocations
+            first_actual = torch.full_like(sample, 0.5)
+            second_actual = torch.full_like(sample, 1.5)
+            first_expected = module(first_actual).clone()
+            before_first_replay = module.forward_invocations
+            first_replayed = graphed(first_actual).clone()
+            assert module.forward_invocations == before_first_replay
+            second_expected = module(second_actual).clone()
+            before_second_replay = module.forward_invocations
+            second_replayed = graphed(second_actual).clone()
+            assert module.forward_invocations == before_second_replay
+            torch.testing.assert_close(first_replayed, first_expected)
+            torch.testing.assert_close(second_replayed, second_expected)
+            assert not torch.equal(first_replayed, second_replayed)
+
+            module.train()
+            before_fallback = module.forward_invocations
+            fallback = graphed(second_actual).clone()
+            assert module.forward_invocations == before_fallback + 1
+            torch.testing.assert_close(fallback, second_expected)
+            module.eval()
+            assert invocations_after_capture > 0
+            reuse_evidence = {
+                "raw_te_eval_reuse_fallback_forward_counter_increment": 1,
+                "raw_te_eval_reuse_outputs_changed": True,
+                "raw_te_eval_reuse_replay_forward_counter_increment": 0,
+            }
 
     assert accepted or "only available in training mode" in (rejection or "")
     assert all(parameter.grad is None for parameter in module.parameters())
@@ -190,6 +220,7 @@ def test_te_eval_graph_input_output_buffer_reuse_capability() -> None:
                 "mcore_eval_reuse_graph_io": "not_implemented",
                 "raw_te_eval_reuse_graph_io": accepted,
                 "raw_te_eval_reuse_rejection": rejection,
+                **reuse_evidence,
             },
             sort_keys=True,
         )
