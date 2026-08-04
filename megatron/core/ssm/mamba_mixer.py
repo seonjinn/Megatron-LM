@@ -93,16 +93,20 @@ logger = logging.getLogger(__name__)
 
 
 def _slice_packed_seq_idx_for_sequence_parallel(
-    seq_idx: torch.Tensor, local_tokens: int, tp_rank: int, tp_size: int
+    seq_idx: torch.Tensor,
+    local_tokens: int,
+    tp_rank: int,
+    tp_size: int,
+    target_tokens: Optional[int] = None,
 ) -> torch.Tensor:
-    """Return the packed sequence IDs for one tensor-parallel sequence shard.
+    """Return packed sequence IDs matching one Mamba input shard.
 
     ``PackedSeqParams`` is shared with THD attention and therefore describes the
-    full packed token bound.  With sequence parallelism, Mamba sees only the
-    contiguous token shard owned by the current TP rank.  The Mamba kernels
-    require metadata with the same ``[batch, local_tokens]`` shape as their
-    input, so slice the shared map at this boundary instead of mutating the
-    caller-owned metadata.
+    full packed token bound.  A static THD graph may add a tail after the
+    metadata was created, while sequence parallelism may make Mamba see only a
+    contiguous token shard.  First extend a short map using the final sequence
+    ID (the configured ``extend_last`` policy), then slice the shared map at
+    this boundary without mutating caller-owned metadata.
     """
     if seq_idx.ndim != 2 or seq_idx.shape[0] != 1:
         raise ValueError(
@@ -111,6 +115,21 @@ def _slice_packed_seq_idx_for_sequence_parallel(
         )
 
     global_tokens = seq_idx.shape[1]
+    if global_tokens == 0:
+        raise ValueError("Packed Mamba seq_idx cannot be empty.")
+
+    if target_tokens is not None:
+        if target_tokens < local_tokens:
+            raise ValueError(
+                "Packed Mamba seq_idx target token capacity cannot be smaller than "
+                f"the local Mamba input: {target_tokens} < {local_tokens}."
+            )
+        global_tokens = max(global_tokens, target_tokens)
+
+    if seq_idx.shape[1] < global_tokens:
+        tail = seq_idx[:, -1:].expand(1, global_tokens - seq_idx.shape[1])
+        seq_idx = torch.cat((seq_idx, tail), dim=1).contiguous()
+
     if global_tokens == local_tokens:
         return seq_idx
 
@@ -772,6 +791,12 @@ class MambaMixer(MegatronModule):
                     local_tokens=zxBCdt.shape[1],
                     tp_rank=parallel_state.get_tensor_model_parallel_rank(),
                     tp_size=parallel_state.get_tensor_model_parallel_world_size(),
+                    target_tokens=(
+                        int(self.config.max_seqlen_per_dp_cp_rank)
+                        * max(1, self.cp.cp_size)
+                        if self.config.max_seqlen_per_dp_cp_rank is not None
+                        else None
+                    ),
                 )
 
         y = mamba_split_conv1d_scan_combined(

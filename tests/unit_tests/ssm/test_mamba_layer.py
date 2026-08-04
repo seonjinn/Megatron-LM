@@ -43,6 +43,22 @@ def test_slice_packed_seq_idx_keeps_already_local_metadata() -> None:
 
 
 @pytest.mark.internal
+@pytest.mark.parametrize("tp_rank", [0, 1], ids=["first_tp_rank", "second_tp_rank"])
+def test_slice_packed_seq_idx_extends_static_tail_before_sharding(tp_rank: int) -> None:
+    """Static graph tail padding is assigned to the final packed sequence."""
+    seq_idx = torch.tensor([[0, 0, 1, 1]], dtype=torch.int32)
+
+    local_seq_idx = _slice_packed_seq_idx_for_sequence_parallel(
+        seq_idx, local_tokens=4, tp_rank=tp_rank, tp_size=2, target_tokens=8
+    )
+
+    expected = torch.tensor([[0, 0, 1, 1]], dtype=torch.int32)
+    if tp_rank == 1:
+        expected = torch.ones((1, 4), dtype=torch.int32)
+    assert torch.equal(local_seq_idx, expected)
+
+
+@pytest.mark.internal
 def test_slice_packed_seq_idx_rejects_incompatible_lengths() -> None:
     """A metadata/input mismatch that is not explained by TP must fail explicitly."""
     seq_idx = torch.arange(7, dtype=torch.int32).reshape(1, 7)
