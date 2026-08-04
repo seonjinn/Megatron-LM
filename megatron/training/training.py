@@ -3465,7 +3465,13 @@ def train(
     one_logger = get_one_logger()
 
     if args.hybrid_context_parallel:
-        train_data_iterator = iter(HybridCPDataLoaderWrapper(train_data_iterator, config))
+        # Keep the top-level iterator compatible with the rerun state machine.
+        # The wrapper consumes the existing (possibly external/Energon)
+        # RerunDataIterator, while its scheduled output must itself remain
+        # replayable for result validation.
+        train_data_iterator = RerunDataIterator(
+            iter(HybridCPDataLoaderWrapper(train_data_iterator, config))
+        )
 
     if args.run_workload_inspector_server:
         try:
