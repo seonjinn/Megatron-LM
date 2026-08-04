@@ -468,6 +468,13 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
         self.mlp_bda = build_module(submodules.mlp_bda)
 
         self.is_moe_layer = isinstance(self.mlp, MoELayer)
+        self._te_cuda_graph_dispatcher_replay_states = ()
+        if (
+            self.is_moe_layer
+            and self.config.cuda_graph_impl == "transformer_engine"
+            and CudaGraphModule.moe_preprocess in self.config.cuda_graph_modules
+        ):
+            self._validate_te_cuda_graph_dispatcher_replay_capability()
 
         self.recompute_input_layernorm = False
         self.recompute_pre_mlp_layernorm = False
@@ -550,6 +557,84 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
         # use_nvfuser = TORCH_MAJOR > 1 or (TORCH_MAJOR == 1 and TORCH_MINOR >= 10)
         # self.bias_dropout_add_exec_handler = nullcontext if use_nvfuser else torch.enable_grad
         self.bias_dropout_add_exec_handler = torch.enable_grad
+
+    def _validate_te_cuda_graph_dispatcher_replay_capability(self) -> None:
+        """Fail before capture when the eager MoE continuation cannot be restored."""
+
+        from megatron.core.transformer.moe.token_dispatcher import (
+            MoEAlltoAllTokenDispatcher,
+            MoEFlexTokenDispatcher,
+        )
+
+        if self.config.overlap_moe_expert_parallel_comm:
+            raise RuntimeError(
+                "overlap_moe_expert_parallel_comm is unsupported with partial TE MoE preprocess "
+                "CUDA graphs until the fine-grained schedule carries exact-index dispatcher "
+                "state through combine and validates the continuation there."
+            )
+        dispatcher = self.mlp.token_dispatcher
+        dispatcher.validate_cudagraph_replay_capability()
+        if (
+            isinstance(dispatcher, MoEAlltoAllTokenDispatcher)
+            and not dispatcher.drop_and_pad
+            and (
+                getattr(dispatcher.config, "moe_expert_capacity_factor", None) is not None
+                or getattr(dispatcher.config, "moe_router_padding_for_quantization", False)
+            )
+        ):
+            raise RuntimeError(
+                "Partial TE MoE preprocess capture cannot snapshot the routing-dependent CUDA "
+                "scalar num_out_tokens during actual stream capture. Use dropless static output "
+                "geometry or drop-and-pad fixed capacity."
+            )
+        if (
+            isinstance(dispatcher, MoEFlexTokenDispatcher)
+            and dispatcher.config.moe_flex_dispatcher_backend == "hybridep"
+            and dispatcher.config.moe_hybridep_pad_uneven_dispatch_inputs
+        ):
+            raise RuntimeError(
+                "Partial TE HybridEP uneven-input padding requires a GPU-to-host maximum-token "
+                "read during metadata setup and is unsafe inside actual stream capture."
+            )
+
+    def _record_te_cuda_graph_dispatcher_replay_state(
+        self, graph_index: int, graph_input: torch.Tensor, preprocessed_hidden_states: torch.Tensor
+    ) -> MoECudaGraphReplayState:
+        """Pair one immutable dispatcher snapshot with an exact TE graph index."""
+
+        states = self._te_cuda_graph_dispatcher_replay_states
+        if graph_index < 0 or graph_index > len(states):
+            raise RuntimeError(
+                "TE CUDA graph capture did not provide contiguous dispatcher graph ownership: "
+                f"received index {graph_index} with {len(states)} recorded states."
+            )
+        state = self.mlp.token_dispatcher.snapshot_cudagraph_replay_state(
+            graph_input, preprocessed_hidden_states
+        )
+        if graph_index == len(states):
+            self._te_cuda_graph_dispatcher_replay_states += (state,)
+        elif states[graph_index] != state:
+            raise RuntimeError(
+                f"TE CUDA graph index {graph_index} produced conflicting dispatcher replay state."
+            )
+        return self._te_cuda_graph_dispatcher_replay_states[graph_index]
+
+    def _restore_te_cuda_graph_dispatcher_replay_state(
+        self, graph_index: int, graph_input: torch.Tensor, preprocessed_hidden_states: torch.Tensor
+    ) -> MoECudaGraphReplayState:
+        """Restore the dispatcher state paired with ``graph_index`` without fallback."""
+
+        states = self._te_cuda_graph_dispatcher_replay_states
+        if graph_index < 0 or graph_index >= len(states):
+            raise RuntimeError(
+                "No dispatcher replay state is paired with TE CUDA graph index "
+                f"{graph_index}; capture and graph-bank activation must install it explicitly."
+            )
+        state = states[graph_index]
+        self.mlp.token_dispatcher.restore_cudagraph_replay_state(
+            state, graph_input, preprocessed_hidden_states
+        )
+        return state
 
     def create_mcore_cudagraph_manager(self, config):
         """Register the transformer layer for cudagraphs."""
@@ -2151,92 +2236,8 @@ class MoETransformerLayer(TransformerLayer):
         self.use_partial_cudagraphs = False
         self.moe_layer_recompute = False
         self._local_cudagraph_attr_names = None
-        self._te_cuda_graph_dispatcher_replay_states = ()
 
         super().__init__(*args, **kwargs)
-
-        if (
-            self.config.cuda_graph_impl == "transformer_engine"
-            and CudaGraphModule.moe_preprocess in self.config.cuda_graph_modules
-        ):
-            self._validate_te_cuda_graph_dispatcher_replay_capability()
-
-    def _validate_te_cuda_graph_dispatcher_replay_capability(self) -> None:
-        """Fail before capture when Task 5 cannot validate the eager continuation."""
-
-        from megatron.core.transformer.moe.token_dispatcher import (
-            MoEAlltoAllTokenDispatcher,
-            MoEFlexTokenDispatcher,
-        )
-
-        if self.config.overlap_moe_expert_parallel_comm:
-            raise RuntimeError(
-                "overlap_moe_expert_parallel_comm is unsupported with partial TE MoE preprocess "
-                "CUDA graphs until the fine-grained schedule carries exact-index dispatcher "
-                "state through combine and validates the continuation there."
-            )
-        dispatcher = self.mlp.token_dispatcher
-        dispatcher.validate_cudagraph_replay_capability()
-        if (
-            isinstance(dispatcher, MoEAlltoAllTokenDispatcher)
-            and not dispatcher.drop_and_pad
-            and (
-                getattr(dispatcher.config, "moe_expert_capacity_factor", None) is not None
-                or getattr(dispatcher.config, "moe_router_padding_for_quantization", False)
-            )
-        ):
-            raise RuntimeError(
-                "Partial TE MoE preprocess capture cannot snapshot the routing-dependent CUDA "
-                "scalar num_out_tokens during actual stream capture. Use dropless static output "
-                "geometry or drop-and-pad fixed capacity."
-            )
-        if (
-            isinstance(dispatcher, MoEFlexTokenDispatcher)
-            and dispatcher.config.moe_flex_dispatcher_backend == "hybridep"
-            and dispatcher.config.moe_hybridep_pad_uneven_dispatch_inputs
-        ):
-            raise RuntimeError(
-                "Partial TE HybridEP uneven-input padding requires a GPU-to-host maximum-token "
-                "read during metadata setup and is unsafe inside actual stream capture."
-            )
-
-    def _record_te_cuda_graph_dispatcher_replay_state(
-        self, graph_index: int, graph_input: torch.Tensor, preprocessed_hidden_states: torch.Tensor
-    ) -> MoECudaGraphReplayState:
-        """Pair one immutable dispatcher snapshot with an exact TE graph index."""
-
-        if graph_index < 0 or graph_index > len(self._te_cuda_graph_dispatcher_replay_states):
-            raise RuntimeError(
-                "TE CUDA graph capture did not provide contiguous dispatcher graph ownership: "
-                f"received index {graph_index} with "
-                f"{len(self._te_cuda_graph_dispatcher_replay_states)} recorded states."
-            )
-        state = self.mlp.token_dispatcher.snapshot_cudagraph_replay_state(
-            graph_input, preprocessed_hidden_states
-        )
-        if graph_index == len(self._te_cuda_graph_dispatcher_replay_states):
-            self._te_cuda_graph_dispatcher_replay_states += (state,)
-        elif self._te_cuda_graph_dispatcher_replay_states[graph_index] != state:
-            raise RuntimeError(
-                f"TE CUDA graph index {graph_index} produced conflicting dispatcher replay state."
-            )
-        return self._te_cuda_graph_dispatcher_replay_states[graph_index]
-
-    def _restore_te_cuda_graph_dispatcher_replay_state(
-        self, graph_index: int, graph_input: torch.Tensor, preprocessed_hidden_states: torch.Tensor
-    ) -> MoECudaGraphReplayState:
-        """Restore the dispatcher state paired with ``graph_index`` without fallback."""
-
-        if graph_index < 0 or graph_index >= len(self._te_cuda_graph_dispatcher_replay_states):
-            raise RuntimeError(
-                "No dispatcher replay state is paired with TE CUDA graph index "
-                f"{graph_index}; capture and graph-bank activation must install it explicitly."
-            )
-        state = self._te_cuda_graph_dispatcher_replay_states[graph_index]
-        self.mlp.token_dispatcher.restore_cudagraph_replay_state(
-            state, graph_input, preprocessed_hidden_states
-        )
-        return state
 
     def _should_call_local_cudagraph(self, *args, **kwargs):
         """
