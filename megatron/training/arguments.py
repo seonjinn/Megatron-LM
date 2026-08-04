@@ -1391,7 +1391,15 @@ def validate_args(args, defaults={}):
         assert not args.pipeline_model_parallel_size > 1, 'Hybrid context parallelism not supported with pipeline parallelism'
         assert not args.enable_cuda_graph, 'Hybrid context parallelism not supported with CUDA Graph'
         assert not args.use_megatron_fsdp, 'Hybrid context parallelism not supported with Megatron FSDP'
-        assert args.dataloader_type == 'single', 'Hybrid context parallelism only supported with single dataloader type'
+        # HybridCPDataLoaderWrapper performs the sample scheduling after the
+        # training iterator has been built.  It therefore works with the
+        # external (Energon) iterator used by multimodal SFT as well as the
+        # indexed Megatron ``single`` dataloader.  Keeping ``external`` here
+        # avoids forcing an Energon iterator through the indexed sampler,
+        # which requires ``len(dataset)`` and ``dataset[index]``.
+        assert args.dataloader_type in ('single', 'external'), (
+            'Hybrid context parallelism only supported with single or external dataloader type'
+        )
         assert args.calculate_per_token_loss, 'Hybrid context parallelism must be used with --calculate-per-token-loss'
 
     # disable async_tensor_model_parallel_allreduce when
