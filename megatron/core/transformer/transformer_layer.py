@@ -1329,6 +1329,15 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
         ), "Exactly one positional argument `hidden_states` is expected."
         hidden_states = cudagraph_args[0]
 
+        # The static THD graph surface includes a local padding mask even when
+        # eager multimodal callers do not expose one.  TE still requires the
+        # same tensor slot during replay; synthesize the capture-equivalent
+        # zero mask instead of passing ``None`` into its input surface.
+        if self._is_thd_cuda_graph() and cudagraph_kwargs.get("padding_mask") is None:
+            cudagraph_kwargs["padding_mask"] = torch.zeros(
+                (1, hidden_states.shape[0]), dtype=torch.bool, device=hidden_states.device
+            )
+
         try:
             import transformer_engine.pytorch as te  # pylint: disable=unused-import
 
