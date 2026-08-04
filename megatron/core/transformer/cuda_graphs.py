@@ -1826,6 +1826,31 @@ class CudaGraphManager(torch.nn.Module):
 
 
 # The following functions are for capturing CUDA Graphs using TE make_graphed_callables().
+def _get_cuda_graph_decoder_owner(model_chunk):
+    """Return the model object that owns the language decoder, if present."""
+    candidates = [model_chunk]
+    visited = set()
+    while candidates:
+        candidate = candidates.pop(0)
+        if candidate is None or id(candidate) in visited:
+            continue
+        visited.add(id(candidate))
+
+        if getattr(candidate, 'decoder', None) is not None:
+            return candidate
+
+        candidates.extend(
+            child
+            for child in (
+                getattr(candidate, 'module', None),
+                getattr(candidate, 'language_model', None),
+            )
+            if child is not None
+        )
+
+    return None
+
+
 def _layer_is_graphable(layer, config):
     """
     Check if a layer is graphable.
@@ -1930,11 +1955,8 @@ class TECudaGraphHelper:
         self.flattened_callables = []
         self.flattened_callables_is_mtp = []
         for chunk_number, model_chunk in enumerate(self.model):
-            try:
-                chunk_with_decoder = get_attr_wrapped_model(
-                    model_chunk, 'decoder', allow_none=False, return_model_obj=True
-                )
-            except RuntimeError:
+            chunk_with_decoder = _get_cuda_graph_decoder_owner(model_chunk)
+            if chunk_with_decoder is None:
                 num_graphable_layers = 0
                 log_on_each_pipeline_stage(
                     logger=logger,
@@ -1973,19 +1995,19 @@ class TECudaGraphHelper:
                     f'{num_decoder_layers} decoder layers and {num_mtp_layers} MTP layers in '
                     f'model chunk {chunk_number}. {num_graphable_layers} graphable layers.',
                 )
-            finally:
-                if num_graphable_layers > 0:
-                    self.chunks_with_decoder.append(chunk_with_decoder)
-                    self.num_layers_per_chunk.append(num_graphable_layers)
-                    self.callables_per_chunk.append(callables)
-                    self.callables_per_chunk_is_mtp.append(callables_is_mtp)
-                    self.flattened_callables.extend(callables)
-                    self.flattened_callables_is_mtp.extend(callables_is_mtp)
-                else:
-                    self.chunks_with_decoder.append(None)
-                    self.num_layers_per_chunk.append(0)
-                    self.callables_per_chunk.append([])
-                    self.callables_per_chunk_is_mtp.append([])
+
+            if num_graphable_layers > 0:
+                self.chunks_with_decoder.append(chunk_with_decoder)
+                self.num_layers_per_chunk.append(num_graphable_layers)
+                self.callables_per_chunk.append(callables)
+                self.callables_per_chunk_is_mtp.append(callables_is_mtp)
+                self.flattened_callables.extend(callables)
+                self.flattened_callables_is_mtp.extend(callables_is_mtp)
+            else:
+                self.chunks_with_decoder.append(None)
+                self.num_layers_per_chunk.append(0)
+                self.callables_per_chunk.append([])
+                self.callables_per_chunk_is_mtp.append([])
 
         log_on_each_pipeline_stage(
             logger=logger,

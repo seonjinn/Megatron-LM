@@ -38,6 +38,7 @@ from megatron.core.transformer.cuda_graphs import (
     CudaGraphManager,
     TECudaGraphHelper,
     _CudagraphGlobalRecord,
+    _get_cuda_graph_decoder_owner,
 )
 from megatron.core.transformer.enums import CudaGraphModule, CudaGraphScope, InferenceCudaGraphScope
 from megatron.core.transformer.mlp import MLPSubmodules
@@ -1202,6 +1203,29 @@ class TestTECudaGraphHelper:
         destroy_num_microbatches_calculator()
         # Note: _unique_buffer_counts is intentionally NOT cleared here so we can
         # compare values across parametrized test runs
+
+    def test_cuda_graph_decoder_owner_resolves_direct_decoder(self):
+        decoder = SimpleNamespace(layers=[])
+        owner = SimpleNamespace(decoder=decoder)
+
+        assert _get_cuda_graph_decoder_owner(owner) is owner
+
+    def test_cuda_graph_decoder_owner_resolves_language_model_decoder(self):
+        decoder = SimpleNamespace(layers=[])
+        language_model = SimpleNamespace(decoder=decoder)
+        model = SimpleNamespace(language_model=language_model)
+
+        assert _get_cuda_graph_decoder_owner(model) is language_model
+
+    def test_cuda_graph_decoder_owner_resolves_wrapped_language_model_decoder(self):
+        decoder = SimpleNamespace(layers=[])
+        language_model = SimpleNamespace(decoder=decoder)
+        model = SimpleNamespace(module=SimpleNamespace(language_model=language_model))
+
+        assert _get_cuda_graph_decoder_owner(model) is language_model
+
+    def test_cuda_graph_decoder_owner_returns_none_without_decoder(self):
+        assert _get_cuda_graph_decoder_owner(SimpleNamespace()) is None
 
     def test_graph_count_accessor_reports_captured_graph_count(self) -> None:
         cuda_graph_helper = TECudaGraphHelper.__new__(TECudaGraphHelper)
