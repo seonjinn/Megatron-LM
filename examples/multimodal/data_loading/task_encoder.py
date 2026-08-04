@@ -6,6 +6,7 @@ import json
 import os
 import random
 import re
+import time
 from collections import defaultdict
 from functools import partial
 from typing import List, Literal, Tuple, TypedDict, Union
@@ -1131,7 +1132,21 @@ class MultiModalTaskEncoder(
                 sample_lengths=sample.sample_lengths,
             )
 
+        media_debug = os.environ.get("MEGATRON_MEDIA_DEBUG", "0") == "1"
+        media_debug_started = time.monotonic()
+        if media_debug:
+            print(
+                f"[media-debug] load-start key={sample.__key__!r} "
+                f"images={len(sample.images)} audio={len(sample.audio)}",
+                flush=True,
+            )
         self._load_media(sample)
+        if media_debug:
+            print(
+                f"[media-debug] load-done key={sample.__key__!r} "
+                f"elapsed={time.monotonic() - media_debug_started:.3f}s",
+                flush=True,
+            )
 
         data_augment = sample.__subflavors__.get("data_augment", False) and not self.is_val
 
@@ -1578,6 +1593,14 @@ class MultiModalTaskEncoder(
                 media_value = media.get(sample)
                 if isinstance(media_value, AVDecoder):
                     media_value.suppress_warnings = True
+                    media_debug = os.environ.get("MEGATRON_MEDIA_DEBUG", "0") == "1"
+                    decode_started = time.monotonic()
+                    if media_debug:
+                        print(
+                            f"[media-debug] decode-start key={sample.__key__!r} "
+                            f"frames={len(frames)} decoder={type(media_value).__name__}",
+                            flush=True,
+                        )
                     frame_clips = media_value.get_clips(
                         video_clip_ranges=[
                             (frame.media.timestamp, frame.media.timestamp)
@@ -1585,6 +1608,13 @@ class MultiModalTaskEncoder(
                         ],
                         video_unit="seconds",
                     )
+                    if media_debug:
+                        print(
+                            f"[media-debug] decode-done key={sample.__key__!r} "
+                            f"frames={len(frames)} clips={len(frame_clips.video_clips)} "
+                            f"elapsed={time.monotonic() - decode_started:.3f}s",
+                            flush=True,
+                        )
                     images = [
                         tensor_to_pil(img[0]) for img in frame_clips.video_clips
                     ]
