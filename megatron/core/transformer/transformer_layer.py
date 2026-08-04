@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import functools
 import logging
+import os
 import warnings
 from abc import ABC
 from dataclasses import dataclass, field
@@ -1134,6 +1135,22 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
         Hence, `inference_context` and `packed_seq_params` are excluded from input list.
         """
         context = None
+        if (
+            os.getenv("MEGATRON_TE_CUDAGRAPH_PACKED_FALLBACK", "0").strip().lower()
+            in {"1", "true", "yes", "on"}
+            and (
+                kwargs.get("inference_context") is not None
+                or kwargs.get("packed_seq_params") is not None
+            )
+        ):
+            if not getattr(self, "_te_cudagraph_packed_fallback_warned", False):
+                logger.warning(
+                    "TE CUDA Graph fallback to eager for non-Tensor graph inputs "
+                    "(inference_context or packed_seq_params); graph replay is skipped "
+                    "for this layer/input shape."
+                )
+                self._te_cudagraph_packed_fallback_warned = True
+            return self.forward(*args, **kwargs)
         if (
             self.config.cuda_graph_modules
             and CudaGraphModule.attn not in self.config.cuda_graph_modules
