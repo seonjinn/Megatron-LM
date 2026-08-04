@@ -34,6 +34,7 @@ from megatron.core.transformer.cuda_graphs import (
     CudaGraphManager,
     TECudaGraphHelper,
     _CudagraphGlobalRecord,
+    _get_cuda_graph_decoder_owner,
 )
 from megatron.core.transformer.enums import CudaGraphModule, CudaGraphScope, InferenceCudaGraphScope
 from megatron.core.transformer.mlp import MLPSubmodules
@@ -56,6 +57,17 @@ from megatron.training.training import setup_model_and_optimizer
 from tests.unit_tests.test_utilities import Utils
 
 fp8_available, _ = check_fp8_support()
+
+
+def test_cuda_graph_decoder_owner_finds_multimodal_language_model_decoder():
+    """The multimodal wrapper stores the graphable decoder below language_model."""
+
+    decoder_owner = type("DecoderOwner", (), {"decoder": object()})()
+    model_chunk = type("MultimodalChunk", (), {})()
+    model_chunk.language_model = type("LanguageModel", (), {})()
+    model_chunk.language_model.module = decoder_owner
+
+    assert _get_cuda_graph_decoder_owner(model_chunk) is decoder_owner
 
 
 def _base_cuda_graph_config(**kwargs) -> TransformerConfig:
