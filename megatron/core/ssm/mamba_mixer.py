@@ -92,6 +92,22 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def _mamba_target_tokens_for_static_graph(config: TransformerConfig, cp_size: int) -> int | None:
+    """Return the fixed Mamba token capacity only for static CUDA Graph runs.
+
+    Eager HybridCP routes variable-length samples and must derive ``seq_idx``
+    from the actual sample metadata.  Applying the configured per-rank graph
+    capacity in that path creates a synthetic 262K-token map for a shorter
+    sample, which cannot be reconciled with sequence-parallel Mamba input.
+    """
+    if getattr(config, "cuda_graph_impl", "none") == "none":
+        return None
+    max_seqlen_per_dp_cp_rank = getattr(config, "max_seqlen_per_dp_cp_rank", None)
+    if max_seqlen_per_dp_cp_rank is None:
+        return None
+    return int(max_seqlen_per_dp_cp_rank) * max(1, int(cp_size))
+
+
 def _slice_packed_seq_idx_for_sequence_parallel(
     seq_idx: torch.Tensor,
     local_tokens: int,
@@ -791,11 +807,8 @@ class MambaMixer(MegatronModule):
                     local_tokens=zxBCdt.shape[1],
                     tp_rank=parallel_state.get_tensor_model_parallel_rank(),
                     tp_size=parallel_state.get_tensor_model_parallel_world_size(),
-                    target_tokens=(
-                        int(self.config.max_seqlen_per_dp_cp_rank)
-                        * max(1, self.cp.cp_size)
-                        if self.config.max_seqlen_per_dp_cp_rank is not None
-                        else None
+                    target_tokens=_mamba_target_tokens_for_static_graph(
+                        self.config, self.cp.cp_size
                     ),
                 )
 
