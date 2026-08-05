@@ -536,6 +536,20 @@ def hybrid_context_parallel_forward_backward(
         _broadcast(num_samples_this_group_broadcast)
         return num_samples_this_group_broadcast
 
+    def _broadcast_global_sample_count(global_sample_count):
+        """Broadcast the unique sample count for this scheduled global batch."""
+
+        dev = torch.cuda.current_device()
+        count = torch.tensor(
+            [0 if global_sample_count is None else int(global_sample_count)],
+            dtype=torch.int32,
+            device=dev,
+        )
+        _broadcast(count)
+        if int(count.item()) < 1:
+            raise RuntimeError("HybridCP scheduled global batch contains no samples")
+        return int(count.item())
+
     def _get_new_data_iterator(sample_id_in_group, group_id):
         if is_first_tp_rank:
             sub_sample_id = sample_ids_this_group[sample_id_in_group]
@@ -568,8 +582,11 @@ def hybrid_context_parallel_forward_backward(
         data = next(data_iterator)
         sample_id_groups = data[1]
         batch = data[0]
+        global_sample_count = data[2]
     else:
-        data, sample_id_groups, batch = None, None, None
+        data, sample_id_groups, batch, global_sample_count = None, None, None, None
+
+    global_sample_count = _broadcast_global_sample_count(global_sample_count)
 
     num_samples_this_group = None
     if is_first_tp_rank:
@@ -666,5 +683,13 @@ def hybrid_context_parallel_forward_backward(
     total_num_tokens += num_tokens.item()
     if not forward_only:
         backward_step(input_tensor, output_tensor, output_tensor_grad, config)
+
+    # Every rank may execute a different CP group's sample, so the local
+    # ``_samples_seen`` list is not a reliable global-batch count.  Preserve
+    # the scheduler's unique count for the training loop's global accounting.
+    if forward_data_store and isinstance(forward_data_store[-1], dict):
+        forward_data_store[-1]["_hybrid_cp_global_samples_seen"] = torch.tensor(
+            global_sample_count, dtype=torch.float32, device=torch.cuda.current_device()
+        )
 
     return forward_data_store, total_num_tokens

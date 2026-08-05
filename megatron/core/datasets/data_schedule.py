@@ -10,6 +10,22 @@ from megatron.core.pipeline_parallel.hybrid_cp_schedule import BalancedCPSchedul
 from megatron.core.process_groups_config import ProcessGroupCollection
 
 
+def collect_hybrid_cp_microbatches(data_iterator, num_microbatches: int) -> list[Any]:
+    """Consume exactly one global batch from an underlying data iterator.
+
+    The legacy multimodal HybridCP wrapper was called once per optimizer step
+    but consumed only one item from the external iterator.  That silently
+    dropped the remaining global-batch microbatches whenever
+    ``global_batch_size > micro_batch_size * data_parallel_size``.  Keep the
+    consumption contract explicit and testable so the scheduler can route the
+    complete global batch before forming its CP groups.
+    """
+
+    if num_microbatches < 1:
+        raise ValueError(f"num_microbatches must be positive, got {num_microbatches}")
+    return [next(data_iterator) for _ in range(num_microbatches)]
+
+
 def _require_tensor(batch: Mapping[str, Any], key: str) -> torch.Tensor:
     value = batch.get(key)
     if not isinstance(value, torch.Tensor):
@@ -671,16 +687,36 @@ class HybridCPDataLoaderWrapper:
 
     def __next__(self) -> Any:
         """
-        Get the next item from the dataset, pull scheduling metadata and return it.
+        Get one scheduled global batch from the dataset.
+
+        The external loader yields one packed item per microbatch.  Consume the
+        full global batch before scheduling so dynamic CP can distribute all
+        microbatches participating in the optimizer step.  The returned third
+        field is the number of unique routed samples and is used by the
+        HybridCP training path for global ``samples_seen`` accounting.
         """
         if self.data_iterator is None:
             # TP0 reads from data_iterator, others receive via broadcast.
-            return None, None
-        else:
-            batch = next(self.data_iterator)
-        is_multimodal = isinstance(batch, Mapping) and "cu_lengths" in batch
-        if is_multimodal:
-            batch = unpack_multimodal_batch(batch)
+            return None, None, None
+
+        from megatron.core.num_microbatches_calculator import get_num_microbatches
+
+        num_microbatches = get_num_microbatches()
+        if num_microbatches is None:
+            num_microbatches = 1
+        raw_batches = collect_hybrid_cp_microbatches(self.data_iterator, num_microbatches)
+
+        batch = []
+        is_multimodal = False
+        for raw_batch in raw_batches:
+            raw_is_multimodal = isinstance(raw_batch, Mapping) and "cu_lengths" in raw_batch
+            is_multimodal = is_multimodal or raw_is_multimodal
+            if raw_is_multimodal:
+                batch.extend(unpack_multimodal_batch(raw_batch))
+            elif isinstance(raw_batch, Mapping):
+                batch.append(raw_batch)
+            else:
+                batch.extend(raw_batch)
 
         subsample_seqlens = []
         for sample in batch:
@@ -713,4 +749,4 @@ class HybridCPDataLoaderWrapper:
             offsets,
             multimodal=is_multimodal,
         )
-        return samples_this_rank_with_id, sample_id_groups
+        return samples_this_rank_with_id, sample_id_groups, len(global_id_seqlens)

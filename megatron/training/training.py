@@ -2447,14 +2447,32 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
 
     if any("_samples_seen" in loss for loss in losses_reduced):
         samples_seen = [loss.pop("_samples_seen", 1) for loss in losses_reduced]
-        assert len(samples_seen) == get_num_microbatches(), (
-            f"{len(samples_seen)=} != {get_num_microbatches()=}"
-        )
-        samples_seen_in_iteration = sum(samples_seen)
-        if isinstance(samples_seen_in_iteration, torch.Tensor):
-            samples_seen_in_iteration = samples_seen_in_iteration.item()
-        samples_seen_in_iteration = _reduce_sum_across_data_parallel_group(samples_seen_in_iteration)
-        samples_seen_in_iteration = int(samples_seen_in_iteration)
+        hybrid_global_samples_seen = [
+            loss.pop("_hybrid_cp_global_samples_seen", None) for loss in losses_reduced
+        ]
+        if args.hybrid_context_parallel and any(
+            value is not None for value in hybrid_global_samples_seen
+        ):
+            # HybridCP schedules unique samples over disjoint, variable-size
+            # CP groups.  A rank-local loss list therefore does not have one
+            # entry per global microbatch.  The scheduler broadcasts the
+            # unique count explicitly instead of relying on the static
+            # ``get_num_microbatches()`` invariant used by ordinary DDP.
+            samples_seen_in_iteration = next(
+                value for value in hybrid_global_samples_seen if value is not None
+            )
+            if isinstance(samples_seen_in_iteration, torch.Tensor):
+                samples_seen_in_iteration = samples_seen_in_iteration.item()
+            samples_seen_in_iteration = int(samples_seen_in_iteration)
+        else:
+            assert len(samples_seen) == get_num_microbatches(), (
+                f"{len(samples_seen)=} != {get_num_microbatches()=}"
+            )
+            samples_seen_in_iteration = sum(samples_seen)
+            if isinstance(samples_seen_in_iteration, torch.Tensor):
+                samples_seen_in_iteration = samples_seen_in_iteration.item()
+            samples_seen_in_iteration = _reduce_sum_across_data_parallel_group(samples_seen_in_iteration)
+            samples_seen_in_iteration = int(samples_seen_in_iteration)
     else:
         samples_seen_in_iteration = get_num_microbatches() * args.micro_batch_size * args.data_parallel_size
 

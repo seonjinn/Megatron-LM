@@ -2,6 +2,7 @@ import pytest
 import torch
 
 from megatron.core.datasets.data_schedule import (
+    collect_hybrid_cp_microbatches,
     restore_multimodal_hybrid_cp_sample,
     unpack_multimodal_batch,
 )
@@ -91,3 +92,17 @@ def test_hybrid_cp_metadata_disables_cp_for_single_rank_samples():
 
     assert params.local_cp_size == 1
     assert params.cp_group is None
+
+
+def test_collect_hybrid_cp_microbatches_consumes_the_global_batch():
+    iterator = iter([{"id": 1}, {"id": 2}, {"id": 3}])
+
+    result = collect_hybrid_cp_microbatches(iterator, num_microbatches=2)
+
+    assert result == [{"id": 1}, {"id": 2}]
+    assert next(iterator) == {"id": 3}
+
+
+def test_collect_hybrid_cp_microbatches_rejects_empty_global_batches():
+    with pytest.raises(ValueError, match="num_microbatches must be positive"):
+        collect_hybrid_cp_microbatches(iter(()), num_microbatches=0)
