@@ -124,6 +124,13 @@ def train_valid_test_dataloaders_provider(train_val_test_num_samples, task_encod
     """Build multimodal train, validation and test dataloaders."""
     args = get_args()
 
+    dataloader_prefetch_factor = getattr(args, "dataloader_prefetch_factor", 2)
+    if dataloader_prefetch_factor <= 0:
+        raise ValueError(
+            "--dataloader-prefetch-factor must be positive, "
+            f"got {dataloader_prefetch_factor}"
+        )
+
     if task_encoder is None:
         task_encoder = TaskEncoder()
 
@@ -152,6 +159,9 @@ def train_valid_test_dataloaders_provider(train_val_test_num_samples, task_encod
     train_ds, valid_ds1, test_ds = datasets_provider(task_encoder, worker_config)
 
     if use_new_dataloader_path():
+        prefetch_kwargs = {}
+        if args.num_workers > 0:
+            prefetch_kwargs["prefetch_factor"] = dataloader_prefetch_factor
         train_dataloader = get_savable_loader(
             train_ds,
             cache_pool=FileStoreCachePool(
@@ -161,6 +171,7 @@ def train_valid_test_dataloaders_provider(train_val_test_num_samples, task_encod
             ),
             watchdog_timeout_seconds=5*60,
             watchdog_initial_timeout_seconds=5*60 + (args.packing_buffer_size or 0) * 0.0075,
+            **prefetch_kwargs,
         )
     else:
         train_dataloader = get_savable_loader(train_ds, worker_config=worker_config)

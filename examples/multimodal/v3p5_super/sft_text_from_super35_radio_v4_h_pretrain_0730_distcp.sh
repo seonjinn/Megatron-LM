@@ -138,7 +138,9 @@ NUM_GPU=${NUM_GPU:-4}
 
 # Multimodal SFT runtime settings inherited from the Nano v3.5 stage.
 MBZ=${MBZ:-1}
-NW=${NW:-1}
+NW=${NW:-4}
+DATALOADER_PREFETCH_FACTOR=${DATALOADER_PREFETCH_FACTOR:-8}
+VIDEO_DECODE_THREAD_COUNT=${VIDEO_DECODE_THREAD_COUNT:-8}
 AD=${AD:-0.0}
 HD=${HD:-0.0}
 LI=${LI:-10}
@@ -273,6 +275,8 @@ EXTRA_ARGS+=" --video-maintain-aspect-ratio --separate-video-embedder"
 EXTRA_ARGS+=" --video-target-num-patches ${VIDEO_TARGET_NUM_PATCHES}"
 EXTRA_ARGS+=" --video-max-num-frames ${VIDEO_MAX_NUM_FRAMES}"
 EXTRA_ARGS+=" --video-temporal-patch-size 2 --video-prompt-version 2"
+EXTRA_ARGS+=" --dataloader-prefetch-factor ${DATALOADER_PREFETCH_FACTOR}"
+EXTRA_ARGS+=" --video-decode-thread-count ${VIDEO_DECODE_THREAD_COUNT}"
 if [[ "${VIDEO_AUG_SCALE_FRAMES_UP}" != "None" ]]; then
     EXTRA_ARGS+=" --video-aug-scale-frames-up ${VIDEO_AUG_SCALE_FRAMES_UP}"
 fi

@@ -74,6 +74,12 @@ def add_multimodal_extra_args(parser):
         help="The seed for the dataloader to use for training.",
     )
     group.add_argument(
+        "--dataloader-prefetch-factor",
+        type=int,
+        default=2,
+        help="Number of batches prefetched by each Energon dataloader worker.",
+    )
+    group.add_argument(
         "--lr-data-range-start",
         type=float,
         default=0,
@@ -245,6 +251,16 @@ def add_multimodal_extra_args(parser):
     )
     group.add_argument(
         "--video-frame-temporal-jitter", action="store_true", default=False, help="Enable temporal jittering of the frames to sample from the video as input to the model.",
+    )
+    group.add_argument(
+        "--video-decode-thread-count",
+        type=int,
+        default=0,
+        help=(
+            "Positive values enable worker-local FFmpeg frame threads while preserving "
+            "Energon's original indexing, seeking, and frame selection. The default 0 "
+            "leaves Energon's decoder unchanged."
+        ),
     )
     group.add_argument(
         "--video-target-img-size", type=int, default=None,

@@ -2,10 +2,12 @@
 import ast
 import dataclasses
 import hashlib
+import importlib
 import json
 import os
 import random
 import re
+import threading
 from collections import defaultdict
 from functools import partial
 from typing import List, Literal, Tuple, TypedDict, Union
@@ -63,6 +65,7 @@ from .knapsacks import (
 AUDIO_MIN_DURATION_SECONDS = 0.1
 AUDIO_MAX_DURATION_SECONDS = 1800
 IDENTITY_FILTER_DATASETS = ("apps, taco", "new sft problems", "NemotronX RL")
+_ENERGON_AV_OPEN_LOCK = threading.Lock()
 
 
 def _parse_packing_algorithm_parameters(raw_parameters: object) -> dict[str, str]:
@@ -1563,6 +1566,81 @@ class MultiModalTaskEncoder(
     def encode_batch(self, batch: BatchedPackedTaskSample) -> dict:
         return dataclasses.asdict(batch)
 
+    def _decode_video_frames_with_energon(
+        self,
+        av_decoder: AVDecoder,
+        targets: list[float],
+        *,
+        thread_count: int = 0,
+    ) -> list[Image.Image]:
+        """Use Energon's exact seek policy with optional worker-local codec threads."""
+        if thread_count < 0:
+            raise ValueError("video_decode_thread_count must be non-negative")
+        if not targets:
+            return []
+
+        def get_clips():
+            return av_decoder.get_clips(
+                video_clip_ranges=[(timestamp, timestamp) for timestamp in targets],
+                video_unit="seconds",
+            )
+
+        if thread_count == 0:
+            frame_clips = get_clips()
+        else:
+            # Energon disables codec threads before dataloader workers fork. The
+            # editable production build reads this module-level hook when a
+            # worker opens the container, so configure only that worker-local
+            # open and preserve Energon's indexing, seeking, and frame choice.
+            decoder_module = importlib.import_module(AVDecoder.__module__)
+            with _ENERGON_AV_OPEN_LOCK:
+                original_av_open = getattr(decoder_module, "av_open", None)
+                if not callable(original_av_open):
+                    frame_clips = get_clips()
+                else:
+
+                    def threaded_av_open(*args, **kwargs):
+                        container = original_av_open(*args, **kwargs)
+                        try:
+                            for media_stream in container.streams:
+                                if media_stream.type != "video":
+                                    continue
+                                codec_context = media_stream.codec_context
+                                if codec_context is None:
+                                    continue
+                                codec_context.thread_type = "FRAME"
+                                codec_context.thread_count = thread_count
+                        except Exception:
+                            container.close()
+                            raise
+                        return container
+
+                    decoder_module.av_open = threaded_av_open
+                    try:
+                        frame_clips = get_clips()
+                    finally:
+                        decoder_module.av_open = original_av_open
+                    # Some codecs retain delayed frames with FRAME threading.
+                    # Retry only that video through the exact unthreaded path.
+                    if len(frame_clips.video_clips) < len(targets):
+                        frame_clips = get_clips()
+
+        images = [tensor_to_pil(image[0]) for image in frame_clips.video_clips]
+        if not images:
+            raise ValueError("Unable to decode video frames: Energon returned no frames")
+        if len(images) < len(targets):
+            images.extend([images[-1]] * (len(targets) - len(images)))
+        return images
+
+    def _decode_video_frames(
+        self, av_decoder: AVDecoder, targets: list[float]
+    ) -> list[Image.Image]:
+        """Decode target frames with Energon-exact worker-local frame threads."""
+        thread_count = int(getattr(self.args, "video_decode_thread_count", 0))
+        return self._decode_video_frames_with_energon(
+            av_decoder, targets, thread_count=thread_count
+        )
+
     def _load_media(self, sample: PreEncodedTaskSample) -> None:
         """Loads all lazy media in the sample."""
         if len(sample.images) > 1:
@@ -1578,21 +1656,9 @@ class MultiModalTaskEncoder(
                 media_value = media.get(sample)
                 if isinstance(media_value, AVDecoder):
                     media_value.suppress_warnings = True
-                    frame_clips = media_value.get_clips(
-                        video_clip_ranges=[
-                            (frame.media.timestamp, frame.media.timestamp)
-                            for frame in frames
-                        ],
-                        video_unit="seconds",
+                    images = self._decode_video_frames(
+                        media_value, [frame.media.timestamp for frame in frames]
                     )
-                    images = [
-                        tensor_to_pil(img[0]) for img in frame_clips.video_clips
-                    ]
-
-                    if len(images) < len(frames):
-                        last_image = images[-1]
-                        images.extend([last_image] * (len(frames) - len(images)))
-
                     for frame, image in zip(frames, images):
                         frame.media.value = image
                 elif isinstance(media_value, Image.Image):
