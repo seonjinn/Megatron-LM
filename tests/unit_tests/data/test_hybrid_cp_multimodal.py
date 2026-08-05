@@ -23,6 +23,7 @@ def _packed_batch():
         "sample_image_counts": [[1, 1]],
         "sample_num_tiles": [[[1], [1]]],
         "sample_num_frames": [[[1], [1]]],
+        "has_pad_img": torch.tensor(False),
     }
 
 
@@ -53,6 +54,7 @@ def test_restore_multimodal_hybrid_cp_sample_rebuilds_get_batch_contract():
     assert restored["max_lengths"].tolist() == [2]
     assert restored["imgs"].shape == (1, 2, 1)
     assert restored["vision_cu_lengths"].tolist() == [[0, 2]]
+    assert restored["has_pad_img"].item() is False
     assert restored["local_cp_size"].item() == 2
 
 

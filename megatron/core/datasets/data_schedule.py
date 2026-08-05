@@ -141,6 +141,15 @@ def unpack_multimodal_batch(batch: Mapping[str, Any]) -> list[dict[str, torch.Te
     if imgs_sizes is not None and not isinstance(imgs_sizes, torch.Tensor):
         raise ValueError("multimodal HybridCP imgs_sizes must be a tensor")
 
+    has_pad_img = batch.get("has_pad_img")
+    if has_pad_img is None:
+        # Older task encoders did not emit this optional FP8 image-padding flag.
+        has_pad_img = torch.tensor(False, dtype=torch.bool)
+    elif not isinstance(has_pad_img, torch.Tensor) or has_pad_img.numel() != 1:
+        raise ValueError("multimodal HybridCP batch key 'has_pad_img' must be a scalar tensor")
+    else:
+        has_pad_img = has_pad_img.reshape(()).to(dtype=torch.bool)
+
     sound_clips = batch.get("sound_clips")
     sound_length = batch.get("sound_length")
     sound_timestamps = batch.get("sound_timestamps")
@@ -167,6 +176,8 @@ def unpack_multimodal_batch(batch: Mapping[str, Any]) -> list[dict[str, torch.Te
             "max_seqlen": torch.tensor(padded_end - start, dtype=torch.int32),
             "sample_lengths": torch.tensor([end - start], dtype=torch.int32),
             "samples_seen": torch.tensor(1, dtype=torch.int32),
+            # Preserve the scalar expected by examples/multimodal/train.py.
+            "has_pad_img": has_pad_img.clone(),
         }
 
         for key in ("position_ids", "loss_mask", "attention_mask"):
