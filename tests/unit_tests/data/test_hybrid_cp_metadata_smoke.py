@@ -8,6 +8,7 @@ from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.models.multimodal.llava_model import (
     update_multimodal_packed_seq_params,
 )
+from megatron.core.ssm.mamba_mixer import _slice_packed_seq_idx_for_sequence_parallel
 from megatron.core.utils import set_hybrid_cp_metadata
 
 
@@ -47,6 +48,13 @@ class HybridCPMetadataTest(unittest.TestCase):
         self.assertEqual(params.cu_seqlens_q_padded.tolist(), [0, 8])
         self.assertEqual(params.total_tokens, 8)
         self.assertEqual(params.seq_idx.shape, (1, 8))
+
+    def test_hybrid_cp_mamba_accepts_single_sample_media_expansion(self):
+        seq_idx = torch.zeros((1, 4), dtype=torch.int32)
+        result = _slice_packed_seq_idx_for_sequence_parallel(
+            seq_idx, local_tokens=8, tp_rank=0, tp_size=8, allow_short_metadata=True
+        )
+        self.assertEqual(result.shape, (1, 8))
 
 
 if __name__ == "__main__":

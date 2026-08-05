@@ -114,6 +114,7 @@ def _slice_packed_seq_idx_for_sequence_parallel(
     tp_rank: int,
     tp_size: int,
     target_tokens: Optional[int] = None,
+    allow_short_metadata: bool = False,
 ) -> torch.Tensor:
     """Return packed sequence IDs matching one Mamba input shard.
 
@@ -145,6 +146,13 @@ def _slice_packed_seq_idx_for_sequence_parallel(
     if seq_idx.shape[1] < global_tokens:
         tail = seq_idx[:, -1:].expand(1, global_tokens - seq_idx.shape[1])
         seq_idx = torch.cat((seq_idx, tail), dim=1).contiguous()
+
+    if allow_short_metadata and seq_idx.shape[1] < local_tokens:
+        # HybridCP routes one packed sample at a time.  Media replacement can
+        # make the language embedding surface longer than the text-derived
+        # ``seq_idx`` map; all expanded tokens still belong to that one sample.
+        seq_idx = seq_idx[:, :1].expand(1, local_tokens).contiguous()
+        return seq_idx
 
     if global_tokens == local_tokens:
         return seq_idx
@@ -809,6 +817,11 @@ class MambaMixer(MegatronModule):
                     tp_size=parallel_state.get_tensor_model_parallel_world_size(),
                     target_tokens=_mamba_target_tokens_for_static_graph(
                         self.config, self.cp.cp_size
+                    ),
+                    allow_short_metadata=(
+                        packed_seq_params.local_cp_size is not None
+                        and packed_seq_params.cu_seqlens_q is not None
+                        and packed_seq_params.cu_seqlens_q.numel() == 2
                     ),
                 )
 
