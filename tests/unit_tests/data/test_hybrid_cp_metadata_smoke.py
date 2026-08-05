@@ -34,6 +34,19 @@ class HybridCPMetadataTest(unittest.TestCase):
         self.assertEqual(params.local_cp_size, 1)
         self.assertIsNone(params.cp_group)
 
+    def test_non_hybrid_cp_packed_metadata_is_not_rewritten(self):
+        params = PackedSeqParams(
+            qkv_format="thd",
+            cu_seqlens_q=torch.tensor([0, 4, 8], dtype=torch.int32),
+            cu_seqlens_kv=torch.tensor([0, 4, 8], dtype=torch.int32),
+            cu_seqlens_q_padded=torch.tensor([0, 4, 8], dtype=torch.int32),
+            cu_seqlens_kv_padded=torch.tensor([0, 4, 8], dtype=torch.int32),
+            total_tokens=8,
+        )
+        update_multimodal_packed_seq_params(params, torch.tensor([12], dtype=torch.int32))
+        self.assertEqual(params.cu_seqlens_q.tolist(), [0, 4, 8])
+        self.assertEqual(params.total_tokens, 8)
+
     def test_multimodal_expansion_rebuilds_mamba_seq_idx(self):
         params = PackedSeqParams(
             qkv_format="thd",
@@ -43,6 +56,7 @@ class HybridCPMetadataTest(unittest.TestCase):
             cu_seqlens_kv_padded=torch.tensor([0, 4], dtype=torch.int32),
             total_tokens=4,
         )
+        set_hybrid_cp_metadata(params, 1)
         update_multimodal_packed_seq_params(params, torch.tensor([8], dtype=torch.int32))
         self.assertEqual(params.cu_seqlens_q.tolist(), [0, 8])
         self.assertEqual(params.cu_seqlens_q_padded.tolist(), [0, 8])

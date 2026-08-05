@@ -76,6 +76,13 @@ def update_multimodal_packed_seq_params(
     """
     if packed_seq_params is None or packed_seq_params.qkv_format != "thd":
         return packed_seq_params
+    # The text-derived THD boundaries are already authoritative for the
+    # normal eager/graph path.  Only HybridCP attaches ``local_cp_size`` and
+    # routes a sample whose media-expanded boundaries must be rebuilt here.
+    # Keeping this updater scoped prevents a singleton ``seq_lens`` tensor from
+    # being applied to an ordinary multi-sample packed batch.
+    if getattr(packed_seq_params, "local_cp_size", None) is None:
+        return packed_seq_params
     if sequence_lengths.ndim != 1 or sequence_lengths.numel() == 0:
         raise ValueError("multimodal packed sequence lengths must be a non-empty 1D tensor")
 
