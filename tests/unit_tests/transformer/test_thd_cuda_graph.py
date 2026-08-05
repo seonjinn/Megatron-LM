@@ -582,7 +582,17 @@ def test_packed_mamba_te_graph_replays_runtime_boundaries_with_gradient_parity()
         sample_args, graph_helper_kwargs = cuda_graph_helper._get_cuda_graph_input_data()
         sample_kwargs = graph_helper_kwargs["sample_kwargs"]
         assert all(isinstance(argument, torch.Tensor) for args in sample_args for argument in args)
-        assert all(set(kwargs) == {"packed_seq_idx"} for kwargs in sample_kwargs)
+        assert all(
+            set(kwargs)
+            == {
+                "packed_seq_idx",
+                "cu_seqlens_q",
+                "cu_seqlens_kv",
+                "cu_seqlens_q_padded",
+                "cu_seqlens_kv_padded",
+            }
+            for kwargs in sample_kwargs
+        )
         assert all(
             value is None or isinstance(value, torch.Tensor)
             for kwargs in sample_kwargs
@@ -593,9 +603,21 @@ def test_packed_mamba_te_graph_replays_runtime_boundaries_with_gradient_parity()
 
         def run(layout: torch.Tensor, captured: bool) -> tuple[torch.Tensor, ...]:
             hidden_states = base_hidden.detach().clone().requires_grad_()
-            packed_seq_params = packed_seq.PackedSeqParams(
-                qkv_format="thd", seq_idx=layout, total_tokens=fixed_local_tokens
+            cu_seqlens = torch.tensor(
+                [0, fixed_local_tokens, fixed_local_tokens, fixed_local_tokens],
+                device="cuda",
+                dtype=torch.int32,
             )
+            packed_seq_params = packed_seq.PackedSeqParams(
+                qkv_format="thd",
+                seq_idx=layout,
+                cu_seqlens_q=cu_seqlens,
+                cu_seqlens_kv=cu_seqlens.clone(),
+                cu_seqlens_q_padded=cu_seqlens.clone(),
+                cu_seqlens_kv_padded=cu_seqlens.clone(),
+                total_tokens=fixed_local_tokens,
+            )
+            packed_seq_params.seq_idx = layout
             output = (
                 layer(
                     hidden_states=hidden_states,
