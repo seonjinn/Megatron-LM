@@ -284,6 +284,7 @@ def test_mamba_te_replay_forwards_only_tensorized_packed_seq_idx() -> None:
         cu_seqlens_kv_padded=cu_seqlens.clone(),
         total_tokens=8,
     )
+    packed_seq_params.seq_idx = packed_seq_idx
 
     output = layer._te_cuda_graph_replay(
         hidden_states=hidden_states,
