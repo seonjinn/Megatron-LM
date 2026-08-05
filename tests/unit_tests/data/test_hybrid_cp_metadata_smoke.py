@@ -48,6 +48,13 @@ class HybridCPMetadataTest(unittest.TestCase):
         self.assertEqual(params.cu_seqlens_q_padded.tolist(), [0, 8])
         self.assertEqual(params.total_tokens, 8)
         self.assertEqual(params.seq_idx.shape, (1, 8))
+        for name in (
+            "cu_seqlens_q",
+            "cu_seqlens_kv",
+            "cu_seqlens_q_padded",
+            "cu_seqlens_kv_padded",
+        ):
+            self.assertEqual(getattr(params, name).dtype, torch.int32)
 
     def test_hybrid_cp_mamba_accepts_single_sample_media_expansion(self):
         seq_idx = torch.zeros((1, 4), dtype=torch.int32)

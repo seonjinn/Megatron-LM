@@ -88,9 +88,14 @@ def update_multimodal_packed_seq_params(
             f"{sequence_lengths.numel()} != {cu_seqlens.numel() - 1}"
         )
 
-    sequence_lengths = sequence_lengths.to(device=cu_seqlens.device, dtype=cu_seqlens.dtype)
+    # Transformer Engine requires every THD boundary tensor (including the
+    # padded graph-capture surface) to use int32.  Some multimodal packing
+    # paths materialize the padded boundaries as int64, so normalize the
+    # complete metadata set here instead of preserving a mixed dtype.
+    cu_dtype = torch.int32
+    sequence_lengths = sequence_lengths.to(device=cu_seqlens.device, dtype=cu_dtype)
     new_cu_seqlens = torch.cat(
-        [torch.zeros(1, dtype=cu_seqlens.dtype, device=cu_seqlens.device), sequence_lengths.cumsum(0)]
+        [torch.zeros(1, dtype=cu_dtype, device=cu_seqlens.device), sequence_lengths.cumsum(0)]
     )
 
     old_padded = packed_seq_params.cu_seqlens_q_padded
@@ -99,7 +104,7 @@ def update_multimodal_packed_seq_params(
         # Preserve the fixed THD surface selected by the dataloader/graph
         # capture, while never truncating a media-expanded sample.
         padded_total = max(int(old_padded[-1].item()), int(new_cu_seqlens[-1].item()))
-        new_padded = new_cu_seqlens.to(dtype=old_padded.dtype).clone()
+        new_padded = new_cu_seqlens.clone()
         new_padded[-1] += padded_total - int(new_cu_seqlens[-1].item())
 
     packed_seq_params.cu_seqlens_q = new_cu_seqlens
