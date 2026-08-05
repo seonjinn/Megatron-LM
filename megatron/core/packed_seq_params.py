@@ -220,12 +220,21 @@ def get_thd_padding_kwargs(
             raise ValueError(
                 "--max-seqlen-per-dp-cp-rank is required for static THD CUDA Graph padding."
             )
-        if pad_packed_seq_alignment != "max" and int(pad_packed_seq_alignment) != token_capacity:
-            raise ValueError(
-                "Static THD CUDA Graph padding requires a fixed target equal to "
-                "the global CP token capacity (local --max-seqlen-per-dp-cp-rank * CP size); "
-                "use --pad-packed-seq-alignment=max or the same numeric value (fixed target)."
-            )
+        if pad_packed_seq_alignment != "max":
+            # The command-line option is documented and validated as a
+            # *per-rank* value.  The external multimodal loader invokes this
+            # helper before CP slicing, however, so its tensors use global
+            # coordinates.  Treat either spelling as the same fixed graph
+            # surface instead of rejecting the valid ``--pad-packed-seq-
+            # alignment=<local capacity>`` form for CP > 1.
+            numeric_alignment = int(pad_packed_seq_alignment)
+            if numeric_alignment not in (int(max_seqlen_per_dp_cp_rank), token_capacity):
+                raise ValueError(
+                    "Static THD CUDA Graph padding requires a fixed target equal to "
+                    "the per-rank --max-seqlen-per-dp-cp-rank or its global CP capacity "
+                    "(local capacity * CP size); use --pad-packed-seq-alignment=max or "
+                    "one of those numeric values."
+                )
         return None, token_capacity, thd_max_packed_sequences
 
     if pad_packed_seq_alignment == "max":

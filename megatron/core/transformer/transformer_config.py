@@ -2271,10 +2271,17 @@ class TransformerConfig(ModelParallelConfig):
                     + ", ".join(missing_bounds)
                     + "."
                 )
-            if self.pad_packed_seq_alignment not in ("max", self.max_seqlen_per_dp_cp_rank):
+            global_thd_capacity = self.max_seqlen_per_dp_cp_rank * max(
+                1, self.context_parallel_size
+            )
+            if self.pad_packed_seq_alignment not in (
+                "max",
+                self.max_seqlen_per_dp_cp_rank,
+                global_thd_capacity,
+            ):
                 raise ValueError(
                     "Static THD CUDA Graph requires --pad-packed-seq-alignment=max or the "
-                    "exact --max-seqlen-per-dp-cp-rank value."
+                    "exact per-rank capacity or its global CP capacity."
                 )
 
         self.inference_cuda_graph_scope = normalize_inference_cuda_graph_scope(
