@@ -978,6 +978,11 @@ class TransformerConfig(ModelParallelConfig):
     """Fixed maximum number of real THD sequences in a graph-replayed microbatch.
 
     The padding helper reserves a separate cumulative-length slot for an ordinary dummy tail.
+    The four int32 ``cu_seqlens`` surfaces therefore cost only
+    ``4 * 4 * (thd_max_packed_sequences + 1)`` bytes per graph input; this bound
+    may be set to the loader's maximum sample count without enumerating or
+    storing every possible boundary vector. Token/activation capacity remains
+    the dominant memory trade-off.
     """
 
     cuda_graph_memory_report: bool = False
