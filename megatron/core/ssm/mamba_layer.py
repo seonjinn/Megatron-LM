@@ -218,7 +218,9 @@ class MambaLayer(GraphableMegatronModule):
             ):
                 static_inputs[name] = cu_seqlens.clone()
             static_inputs["packed_seq_idx"] = torch.zeros(
-                (1, fixed_tokens), dtype=torch.int32, device=torch.cuda.current_device()
+                (1, global_token_capacity),
+                dtype=torch.int32,
+                device=torch.cuda.current_device(),
             )
         return static_inputs
 
@@ -324,11 +326,12 @@ class MambaLayer(GraphableMegatronModule):
 
             fixed_tokens = self.config.max_seqlen_per_dp_cp_rank
             assert fixed_tokens is not None
-            expected_shape = (1, fixed_tokens)
+            expected_global_tokens = fixed_tokens * self.config.context_parallel_size
+            expected_shape = (1, expected_global_tokens)
             if tuple(packed_seq_idx.shape) != expected_shape:
                 raise ValueError(
                     "Packed THD Mamba CUDA Graph seq_idx must have shape "
-                    f"[1, {fixed_tokens}], got {list(packed_seq_idx.shape)}."
+                    f"[1, {expected_global_tokens}], got {list(packed_seq_idx.shape)}."
                 )
 
             cu_seqlens = {

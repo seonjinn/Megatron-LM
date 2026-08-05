@@ -153,6 +153,8 @@ def test_mamba_static_thd_inputs_include_global_cu_seqlens_capacity() -> None:
 
     static_inputs = layer.get_layer_static_inputs(seq_length=23, micro_batch_size=3)
 
+    assert static_inputs["packed_seq_idx"].shape == (1, 32)
+    assert static_inputs["packed_seq_idx"].dtype == torch.int32
     for name in ("cu_seqlens_q", "cu_seqlens_kv", "cu_seqlens_q_padded", "cu_seqlens_kv_padded"):
         cu_seqlens = static_inputs[name]
         assert cu_seqlens.shape == (3,)
