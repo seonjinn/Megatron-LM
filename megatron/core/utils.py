@@ -2466,6 +2466,20 @@ def set_hybrid_cp_metadata(
     return packed_seq_params
 
 
+def use_global_context_parallel_loss_reduction(args: Any) -> bool:
+    """Return whether loss reporting may reduce over the static global CP group.
+
+    Dynamic/HybridCP schedules execute different samples on different CP
+    subsets.  A reporting all-reduce over the static global CP group can then
+    wait for ranks that are not participating in the current sample.  Regular
+    CP keeps the historical global-group reduction.
+    """
+    return bool(
+        getattr(args, "context_parallel_size", 1) > 1
+        and not getattr(args, "hybrid_context_parallel", False)
+    )
+
+
 ######################
 ### NVTX profiling ###
 ######################

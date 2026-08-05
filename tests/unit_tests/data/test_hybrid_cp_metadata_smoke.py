@@ -9,7 +9,10 @@ from megatron.core.models.multimodal.llava_model import (
     update_multimodal_packed_seq_params,
 )
 from megatron.core.ssm.mamba_mixer import _slice_packed_seq_idx_for_sequence_parallel
-from megatron.core.utils import set_hybrid_cp_metadata
+from megatron.core.utils import (
+    set_hybrid_cp_metadata,
+    use_global_context_parallel_loss_reduction,
+)
 
 
 class _Group:
@@ -33,6 +36,14 @@ class HybridCPMetadataTest(unittest.TestCase):
         set_hybrid_cp_metadata(params, 1)
         self.assertEqual(params.local_cp_size, 1)
         self.assertIsNone(params.cp_group)
+
+    def test_hybrid_cp_does_not_use_global_loss_reduction(self):
+        args = type("Args", (), {"context_parallel_size": 4, "hybrid_context_parallel": True})()
+        self.assertFalse(use_global_context_parallel_loss_reduction(args))
+
+    def test_regular_cp_uses_global_loss_reduction(self):
+        args = type("Args", (), {"context_parallel_size": 4, "hybrid_context_parallel": False})()
+        self.assertTrue(use_global_context_parallel_loss_reduction(args))
 
     def test_non_hybrid_cp_packed_metadata_is_not_rewritten(self):
         params = PackedSeqParams(

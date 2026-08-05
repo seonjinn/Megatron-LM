@@ -38,6 +38,7 @@ from megatron.core.utils import (
     nvtx_range_pop,
     nvtx_range_push,
     set_hybrid_cp_metadata,
+    use_global_context_parallel_loss_reduction,
 )
 from megatron.training import get_args, get_timers, get_tokenizer, pretrain
 from megatron.training.argument_utils import pretrain_cfg_container_from_args
@@ -550,7 +551,7 @@ def loss_func(loss_mask, output_tensor, samples_seen):
     reporting_loss_sum = loss.clone().detach()
     global_num_tokens = num_tokens.clone()
     global_loss = reporting_loss_sum.clone()
-    if torch.distributed.is_initialized() and args.context_parallel_size > 1:
+    if torch.distributed.is_initialized() and use_global_context_parallel_loss_reduction(args):
         torch.distributed.all_reduce(
             global_loss,
             op=torch.distributed.ReduceOp.SUM,
