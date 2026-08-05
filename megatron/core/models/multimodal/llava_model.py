@@ -1,7 +1,6 @@
 # Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
 import copy
 import logging
-import os
 from collections import namedtuple
 from copy import deepcopy
 from functools import partial
@@ -62,16 +61,6 @@ DEFAULT_SOUND_TOKEN_INDEX = -300
 IMAGE_TOKEN = "<image>"
 VIDEO_TOKEN = "<video>"
 SOUND_TOKEN = "<so_embedding>"
-
-
-def _hybrid_cp_debug(message: str) -> None:
-    """Emit one-rank diagnostics for HybridCP multimodal shape debugging."""
-    if os.environ.get("MEGATRON_HYBRID_CP_DEBUG") != "1":
-        return
-    if torch.distributed.is_available() and torch.distributed.is_initialized():
-        if torch.distributed.get_rank() != 0:
-            return
-    print(f"[HYBRID_CP_DEBUG] {message}", flush=True)
 
 
 def pad_sequence_lengths_for_context_parallel(
@@ -831,13 +820,6 @@ class LLaVAModel(MegatronModule):
                 hybrid_cp_shard_factor = self._calc_shard_factor_for_cp_size(
                     int(local_cp_size)
                 )
-        _hybrid_cp_debug(
-            "preprocess input "
-            f"input_shape={tuple(input_ids.shape)} "
-            f"local_cp_size={getattr(packed_seq_params, 'local_cp_size', None)} "
-            f"cp_factor={hybrid_cp_shard_factor} "
-            f"cu={getattr(packed_seq_params, 'cu_seqlens_q', None)}"
-        )
 
         has_labels = labels is not None
         if has_labels:
@@ -1165,13 +1147,6 @@ class LLaVAModel(MegatronModule):
                 expanded_lengths = expanded_lengths.new_tensor([expanded_tokens])
             update_multimodal_packed_seq_params(packed_seq_params, expanded_lengths)
 
-        _hybrid_cp_debug(
-            "preprocess output "
-            f"embedding_shape={None if final_embedding is None else tuple(final_embedding.shape)} "
-            f"local_cp_size={getattr(packed_seq_params, 'local_cp_size', None)} "
-            f"cu={getattr(packed_seq_params, 'cu_seqlens_q', None)} "
-            f"cu_padded={getattr(packed_seq_params, 'cu_seqlens_q_padded', None)}"
-        )
 
         if final_embedding is not None and final_labels is not None:
             assert (
@@ -1312,13 +1287,6 @@ class LLaVAModel(MegatronModule):
 
         active_cp_size, active_cp_group = self._get_active_cp_metadata(
             packed_seq_params, self.context_parallel_lm, self.cp_group
-        )
-        _hybrid_cp_debug(
-            "token parallel input "
-            f"embedding_shape={tuple(combined_embeddings.shape)} "
-            f"active_cp_size={active_cp_size} "
-            f"local_cp_size={getattr(packed_seq_params, 'local_cp_size', None)} "
-            f"cu_padded={getattr(packed_seq_params, 'cu_seqlens_q_padded', None)}"
         )
         _ = self._calc_shard_factor_for_cp_size(
             active_cp_size, validate_with_combined_embeddings=combined_embeddings

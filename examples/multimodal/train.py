@@ -59,16 +59,6 @@ def _broadcast_data(keys, data, datatype, optimize):
     return tensor_parallel.broadcast_data(keys, data, datatype, **kwargs)
 
 
-def _hybrid_cp_debug(message: str) -> None:
-    """Emit one-rank diagnostics for HybridCP batch metadata debugging."""
-    if os.environ.get("MEGATRON_HYBRID_CP_DEBUG") != "1":
-        return
-    if torch.distributed.is_available() and torch.distributed.is_initialized():
-        if torch.distributed.get_rank() != 0:
-            return
-    print(f"[HYBRID_CP_DEBUG] {message}", flush=True)
-
-
 def get_batch(data_iterator, image_token_index, img_seq_len):
     """Generate a batch
 
@@ -268,13 +258,6 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
                 local_cp_size=local_cp_size_value,
                 cp_group=hybrid_cp_group,
             )
-            _hybrid_cp_debug(
-                "get_batch packed params "
-                f"local_cp_size={packed_seq_params.local_cp_size} "
-                f"cu={packed_seq_params.cu_seqlens_q} "
-                f"cu_padded={packed_seq_params.cu_seqlens_q_padded} "
-                f"tokens={tuple(data_text.shape)}"
-            )
 
     # If cu_lengths and max_lengths are non-dummy, construct PackedSeqParams. Otherwise, leave it at None.
     vision_packed_seq_params = None
@@ -370,14 +353,6 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
             if loss_mask is not None:
                 loss_mask = loss_mask.masked_fill(padding_mask, 0)
             packed_seq_params.tokens_per_sample = packed_seq_params.total_tokens
-            _hybrid_cp_debug(
-                "get_batch after THD padding "
-                f"local_cp_size={packed_seq_params.local_cp_size} "
-                f"cu={packed_seq_params.cu_seqlens_q} "
-                f"cu_padded={packed_seq_params.cu_seqlens_q_padded} "
-                f"total_tokens={packed_seq_params.total_tokens} "
-                f"tokens={tuple(tokens.shape)}"
-            )
         elif overflow:
             # Keep the original dynamic metadata and make the graph bypass
             # explicit so LLaVA does not force the fixed token surface after
