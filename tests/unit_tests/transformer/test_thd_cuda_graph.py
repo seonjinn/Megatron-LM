@@ -187,6 +187,28 @@ def test_static_thd_attention_inputs_use_explicit_bounds_without_scheduler():
 
 
 @pytest.mark.internal
+def test_unbounded_packed_thd_graph_falls_back_before_capture(monkeypatch: pytest.MonkeyPatch):
+    """Packed THD must not enter TE capture without fixed token/metadata bounds."""
+    from megatron.core.transformer import cuda_graphs
+
+    layer = object.__new__(TransformerLayer)
+    layer.config = SimpleNamespace(
+        cuda_graph_impl="transformer_engine",
+        max_seqlen_per_dp_cp_rank=None,
+        pad_packed_seq_alignment=None,
+        thd_max_packed_sequences=None,
+    )
+    layer.training = True
+    layer.cuda_graphs = [object()]
+    monkeypatch.setattr(cuda_graphs, "is_graph_capturing", lambda: True)
+
+    assert not layer._should_call_te_cudagraph(
+        packed_seq_params=_make_packed_seq_params()
+    )
+    assert layer._te_cudagraph_unbounded_thd_warned is True
+
+
+@pytest.mark.internal
 def test_extend_last_preserves_real_boundaries_and_fixes_all_input_shapes():
     """Static padding must not replace compact valid-token boundaries."""
     original = _make_packed_seq_params()
