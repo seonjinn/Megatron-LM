@@ -1243,8 +1243,13 @@ class LLaVAModel(MegatronModule):
         if validate_with_combined_embeddings is not None and shard_factor is not None:
             assert (
                     validate_with_combined_embeddings.shape[seq_dim] % shard_factor == 0
-            ), f"Sequence length should be divisible by {shard_factor} for \
-                        Sequence/Context parallelism"
+            ), (
+                f"Sequence length should be divisible by {shard_factor} for Sequence/Context "
+                f"parallelism; shape={tuple(validate_with_combined_embeddings.shape)}, "
+                f"seq_dim={seq_dim}, cp_size={context_parallel_lm}, "
+                f"sequence_parallel={self.sequence_parallel_lm}, "
+                f"tp_size={self.tensor_model_parallel_size_lm}"
+            )
             if self.sequence_parallel_lm and self.tp_comm_overlap_lm:
                 assert (
                         validate_with_combined_embeddings.shape[seq_dim] == self._language_max_sequence_length
