@@ -198,29 +198,42 @@ def get_thd_padding_kwargs(
     max_seqlen_per_dp_cp_rank: Optional[int],
     thd_max_packed_sequences: Optional[int],
     cuda_graph_static: bool,
+    cp_size: int = 1,
 ) -> Tuple[Optional[int], Optional[int], Optional[int]]:
-    """Resolve the typed arguments for :func:`pad_sequence_for_thd`."""
+    """Resolve the typed arguments for :func:`pad_sequence_for_thd`.
+
+    ``max_seqlen_per_dp_cp_rank`` is a per-rank bound. The external
+    multimodal loader calls this helper before context-parallel partitioning,
+    so its input tensors still use global token coordinates. Resolve the
+    global capacity here instead of making every caller duplicate the
+    ``local_capacity * cp_size`` rule.
+    """
+    if cp_size <= 0:
+        raise ValueError(f"Context-parallel size must be positive, got {cp_size}.")
+    if max_seqlen_per_dp_cp_rank is not None:
+        token_capacity = int(max_seqlen_per_dp_cp_rank) * int(cp_size)
+    else:
+        token_capacity = None
+
     if cuda_graph_static:
-        if max_seqlen_per_dp_cp_rank is None:
+        if token_capacity is None:
             raise ValueError(
                 "--max-seqlen-per-dp-cp-rank is required for static THD CUDA Graph padding."
             )
-        if pad_packed_seq_alignment != "max" and int(pad_packed_seq_alignment) != int(
-            max_seqlen_per_dp_cp_rank
-        ):
+        if pad_packed_seq_alignment != "max" and int(pad_packed_seq_alignment) != token_capacity:
             raise ValueError(
                 "Static THD CUDA Graph padding requires a fixed target equal to "
-                "--max-seqlen-per-dp-cp-rank; use --pad-packed-seq-alignment=max or the "
-                "same numeric value (fixed target)."
+                "the global CP token capacity (local --max-seqlen-per-dp-cp-rank * CP size); "
+                "use --pad-packed-seq-alignment=max or the same numeric value (fixed target)."
             )
-        return None, int(max_seqlen_per_dp_cp_rank), thd_max_packed_sequences
+        return None, token_capacity, thd_max_packed_sequences
 
     if pad_packed_seq_alignment == "max":
-        if max_seqlen_per_dp_cp_rank is None:
+        if token_capacity is None:
             raise ValueError(
                 "--max-seqlen-per-dp-cp-rank is required when " "--pad-packed-seq-alignment=max."
             )
-        return None, int(max_seqlen_per_dp_cp_rank), thd_max_packed_sequences
+        return None, token_capacity, thd_max_packed_sequences
 
     return int(pad_packed_seq_alignment), None, None
 

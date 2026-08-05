@@ -774,7 +774,14 @@ class LLaVAModel(MegatronModule):
                     if isinstance(max_seq_len, torch.Tensor)
                     else int(max_seq_len)
                 )
-                max_seq_len = max(current_seq_len, graph_token_capacity)
+                if current_seq_len > graph_token_capacity:
+                    raise ValueError(
+                        "Packed multimodal CUDA Graph token capacity exceeded after "
+                        f"media expansion: required {current_seq_len}, configured "
+                        f"{graph_token_capacity}. Increase the global packing length or "
+                        "--max-seqlen-per-dp-cp-rank."
+                    )
+                max_seq_len = graph_token_capacity
 
             batch_indices, non_image_indices = torch.where(image_token_mask != True)
 

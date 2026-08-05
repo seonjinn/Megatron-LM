@@ -283,6 +283,7 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
             getattr(args, "max_seqlen_per_dp_cp_rank", None),
             getattr(args, "thd_max_packed_sequences", None),
             getattr(args, "cuda_graph_impl", "none") != "none",
+            cp_size=getattr(args, "context_parallel_size", 1),
         )
         (
             tokens,
@@ -301,7 +302,9 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
             target_len=target_len,
             max_num_seqs=max_num_seqs,
             tail_padding_policy=resolve_thd_tail_padding_policy(args),
-            cp_size=getattr(args, "context_parallel_size", 1),
+            # Padding is applied to the global batch before LLaVA expands
+            # multimodal tokens and before CP partitions the language input.
+            cp_size=1,
         )
         if tokens is not None:
             tokens = tokens.masked_fill(padding_mask, tokenizer.pad)

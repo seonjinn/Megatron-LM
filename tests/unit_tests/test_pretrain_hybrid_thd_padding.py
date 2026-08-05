@@ -81,6 +81,17 @@ def test_static_alignment_smaller_than_capacity_is_rejected() -> None:
         )
 
 
+def test_static_cp_padding_resolves_global_token_capacity() -> None:
+    alignment, target_len, max_num_seqs = get_thd_padding_kwargs(
+        "max", max_seqlen_per_dp_cp_rank=12, thd_max_packed_sequences=4,
+        cuda_graph_static=True, cp_size=16
+    )
+
+    assert alignment is None
+    assert target_len == 192
+    assert max_num_seqs == 4
+
+
 def _prepare(
     config: SimpleNamespace | None = None, context_parallel_size: int = 1
 ) -> tuple[dict[str, torch.Tensor], tuple[Any, ...]]:
