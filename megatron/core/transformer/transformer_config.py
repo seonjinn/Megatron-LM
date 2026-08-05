@@ -985,6 +985,22 @@ class TransformerConfig(ModelParallelConfig):
     the dominant memory trade-off.
     """
 
+    thd_overflow_policy: Literal["error", "eager"] = field(
+        default="error",
+        metadata={
+            "argparse_meta": {
+                "arg_names": ["--thd-overflow-policy"],
+                "type": str,
+                "choices": ["error", "eager"],
+            }
+        },
+    )
+    """Handling for packed batches beyond the fixed CUDA Graph THD bounds.
+
+    ``error`` preserves strict validation. ``eager`` leaves an overflow batch
+    unpadded and lets the transformer layer bypass the TE graph for that step.
+    """
+
     cuda_graph_memory_report: bool = False
     """Emit CUDA Graph memory lifecycle telemetry when reporting hooks are installed."""
 
@@ -2252,6 +2268,12 @@ class TransformerConfig(ModelParallelConfig):
             raise ValueError(
                 "--thd-max-packed-sequences must be positive, "
                 f"got {self.thd_max_packed_sequences}."
+            )
+
+        if self.thd_overflow_policy not in ("error", "eager"):
+            raise ValueError(
+                "--thd-overflow-policy must be 'error' or 'eager', "
+                f"got {self.thd_overflow_policy!r}."
             )
 
         static_thd_requested = any(

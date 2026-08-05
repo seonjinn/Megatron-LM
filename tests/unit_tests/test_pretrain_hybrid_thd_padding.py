@@ -177,6 +177,28 @@ def test_context_parallel_packed_batch_points_to_dynamic_cp_follow_up() -> None:
         _prepare(context_parallel_size=2)
 
 
+def test_static_thd_overflow_policy_eager_preserves_unpadded_batch() -> None:
+    """An over-capacity packed batch can run eagerly instead of aborting the step."""
+    inputs = _packed_inputs()
+    inputs["cu_seqlens"] = torch.tensor([0, 1, 2, 3, 4, 5], dtype=torch.int32)
+    inputs["cu_seqlens_padded"] = inputs["cu_seqlens"].clone()
+    inputs["tokens"] = torch.arange(5, dtype=torch.int64).unsqueeze(0)
+    inputs["labels"] = torch.arange(5, dtype=torch.int64).unsqueeze(0)
+    inputs["loss_mask"] = torch.ones((1, 5))
+    inputs["position_ids"] = torch.arange(5, dtype=torch.int64).unsqueeze(0)
+    config = _static_config()
+    config.thd_overflow_policy = "eager"
+
+    _, (tokens, labels, loss_mask, position_ids, packed, padding_mask) = _prepare(config=config)
+
+    assert torch.equal(tokens, inputs["tokens"])
+    assert torch.equal(labels, inputs["labels"])
+    assert torch.equal(loss_mask, inputs["loss_mask"])
+    assert torch.equal(position_ids, inputs["position_ids"])
+    assert packed.cu_seqlens_q.tolist() == [0, 1, 2, 3, 4, 5]
+    assert padding_mask is None
+
+
 def test_eager_packed_batch_preserves_existing_shapes_and_values() -> None:
     config = SimpleNamespace(
         cuda_graph_impl="none",

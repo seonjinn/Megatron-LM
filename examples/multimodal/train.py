@@ -24,6 +24,7 @@ from megatron.core.packed_seq_params import (
     PackedSeqParams,
     get_thd_padding_kwargs,
     pad_sequence_for_thd,
+    packed_thd_exceeds_capacity,
     resolve_thd_tail_padding_policy,
 )
 from megatron.core.parallel_state import (
@@ -285,34 +286,45 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
             getattr(args, "cuda_graph_impl", "none") != "none",
             cp_size=getattr(args, "context_parallel_size", 1),
         )
-        (
-            tokens,
-            labels,
-            loss_mask,
-            position_ids,
+        overflow = packed_thd_exceeds_capacity(
             packed_seq_params,
-            padding_mask,
-        ) = pad_sequence_for_thd(
-            tokens,
-            labels,
-            loss_mask,
-            position_ids,
-            packed_seq_params,
-            alignment=alignment,
-            target_len=target_len,
-            max_num_seqs=max_num_seqs,
-            tail_padding_policy=resolve_thd_tail_padding_policy(args),
-            # Padding is applied to the global batch before LLaVA expands
-            # multimodal tokens and before CP partitions the language input.
-            cp_size=1,
+            (tokens, labels, loss_mask, position_ids),
+            target_len,
+            max_num_seqs,
         )
-        if tokens is not None:
-            tokens = tokens.masked_fill(padding_mask, tokenizer.pad)
-        if labels is not None:
-            labels = labels.masked_fill(padding_mask, IGNORE_INDEX)
-        if loss_mask is not None:
-            loss_mask = loss_mask.masked_fill(padding_mask, 0)
-        packed_seq_params.tokens_per_sample = packed_seq_params.total_tokens
+        if not (
+            overflow
+            and getattr(args, "cuda_graph_impl", "none") != "none"
+            and getattr(args, "thd_overflow_policy", "error") == "eager"
+        ):
+            (
+                tokens,
+                labels,
+                loss_mask,
+                position_ids,
+                packed_seq_params,
+                padding_mask,
+            ) = pad_sequence_for_thd(
+                tokens,
+                labels,
+                loss_mask,
+                position_ids,
+                packed_seq_params,
+                alignment=alignment,
+                target_len=target_len,
+                max_num_seqs=max_num_seqs,
+                tail_padding_policy=resolve_thd_tail_padding_policy(args),
+                # Padding is applied to the global batch before LLaVA expands
+                # multimodal tokens and before CP partitions the language input.
+                cp_size=1,
+            )
+            if tokens is not None:
+                tokens = tokens.masked_fill(padding_mask, tokenizer.pad)
+            if labels is not None:
+                labels = labels.masked_fill(padding_mask, IGNORE_INDEX)
+            if loss_mask is not None:
+                loss_mask = loss_mask.masked_fill(padding_mask, 0)
+            packed_seq_params.tokens_per_sample = packed_seq_params.total_tokens
 
     if getattr(args, "log_packed_sequence_stats", False) and packed_seq_params is not None:
         update_packed_sequence_stats(sample_lengths, loss_mask)

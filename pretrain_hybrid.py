@@ -33,6 +33,7 @@ from megatron.core.packed_seq_params import (
     PackedSeqParams,
     get_thd_padding_kwargs,
     pad_sequence_for_thd,
+    packed_thd_exceeds_capacity,
     resolve_thd_tail_padding_policy,
 )
 from megatron.core.parallel_state import (
@@ -155,6 +156,17 @@ def _prepare_packed_thd_batch(
         getattr(config, "thd_max_packed_sequences", None),
         getattr(config, "cuda_graph_impl", "none") != "none",
     )
+    if (
+        getattr(config, "cuda_graph_impl", "none") != "none"
+        and getattr(config, "thd_overflow_policy", "error") == "eager"
+        and packed_thd_exceeds_capacity(
+            packed_seq_params,
+            token_like_tensors,
+            target_len,
+            max_num_seqs,
+        )
+    ):
+        return (tokens, labels, loss_mask, position_ids, packed_seq_params, None)
     (
         padded_tokens,
         padded_labels,

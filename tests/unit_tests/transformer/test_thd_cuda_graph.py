@@ -209,6 +209,29 @@ def test_unbounded_packed_thd_graph_falls_back_before_capture(monkeypatch: pytes
 
 
 @pytest.mark.internal
+def test_static_thd_graph_falls_back_for_runtime_metadata_overflow(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Eager overflow batches must not be passed to a fixed-shape TE graph."""
+    from megatron.core.transformer import cuda_graphs
+
+    layer = object.__new__(TransformerLayer)
+    layer.config = _make_transformer_config(thd_overflow_policy="eager")
+    layer.training = True
+    layer.cuda_graphs = [object()]
+    monkeypatch.setattr(cuda_graphs, "is_graph_capturing", lambda: True)
+
+    overflow = _make_packed_seq_params()
+    overflow.cu_seqlens_q = torch.arange(6, dtype=torch.int32)
+    overflow.cu_seqlens_kv = overflow.cu_seqlens_q.clone()
+    overflow.cu_seqlens_q_padded = overflow.cu_seqlens_q.clone()
+    overflow.cu_seqlens_kv_padded = overflow.cu_seqlens_q.clone()
+    overflow.total_tokens = 5
+
+    assert not layer._should_call_te_cudagraph(packed_seq_params=overflow)
+
+
+@pytest.mark.internal
 def test_extend_last_preserves_real_boundaries_and_fixes_all_input_shapes():
     """Static padding must not replace compact valid-token boundaries."""
     original = _make_packed_seq_params()
@@ -424,6 +447,8 @@ def test_static_thd_arguments_parse_exact_profile_values():
             "--thd-tail-padding-policy",
             "extend_last",
             "--cuda-graph-memory-report",
+            "--thd-overflow-policy",
+            "eager",
         ]
     )
 
@@ -431,6 +456,7 @@ def test_static_thd_arguments_parse_exact_profile_values():
     assert args.thd_max_packed_sequences == 100
     assert args.thd_tail_padding_policy == "extend_last"
     assert args.cuda_graph_memory_report is True
+    assert args.thd_overflow_policy == "eager"
 
 
 @pytest.mark.internal
@@ -442,6 +468,7 @@ def test_complete_static_thd_graph_configuration_is_accepted():
     assert config.pad_packed_seq_alignment == "max"
     assert config.thd_max_packed_sequences == 100
     assert config.thd_tail_padding_policy == "extend_last"
+    assert config.thd_overflow_policy == "error"
     assert config.cuda_graph_memory_report is True
 
 

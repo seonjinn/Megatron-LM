@@ -186,6 +186,88 @@ def _updated_max_seqlen(
     return max(current_max or 0, resulting_max)
 
 
+def packed_thd_exceeds_capacity(
+    packed_seq_params: PackedSeqParams,
+    token_tensors: Tuple[Optional[Tensor], ...],
+    target_len: Optional[int],
+    max_num_seqs: Optional[int],
+) -> bool:
+    """Return whether a packed batch exceeds a declared static THD surface."""
+    if target_len is not None:
+        observed_tokens = max(
+            [int(tensor.shape[-1]) for tensor in token_tensors if tensor is not None]
+            + [
+                int(cu_seqlens[-1].item())
+                for cu_seqlens in (
+                    packed_seq_params.cu_seqlens_q,
+                    packed_seq_params.cu_seqlens_kv,
+                    packed_seq_params.cu_seqlens_q_padded,
+                    packed_seq_params.cu_seqlens_kv_padded,
+                )
+                if cu_seqlens is not None
+            ]
+        )
+        if observed_tokens > int(target_len):
+            return True
+
+    if max_num_seqs is not None:
+        observed_sequences = max(
+            [
+                int(cu_seqlens.shape[0]) - 1
+                for cu_seqlens in (
+                    packed_seq_params.cu_seqlens_q,
+                    packed_seq_params.cu_seqlens_kv,
+                )
+                if cu_seqlens is not None
+            ]
+            or [0]
+        )
+        if observed_sequences > int(max_num_seqs):
+            return True
+    return False
+
+
+def packed_thd_matches_static_bounds(
+    packed_seq_params: PackedSeqParams,
+    max_seqlen_per_dp_cp_rank: Optional[int],
+    thd_max_packed_sequences: Optional[int],
+    tail_padding_policy: Literal["append_dummy_seq", "extend_last"],
+    cp_size: int = 1,
+) -> bool:
+    """Check that runtime THD metadata matches a TE graph's fixed input shape."""
+    if (
+        max_seqlen_per_dp_cp_rank is None
+        or thd_max_packed_sequences is None
+        or cp_size <= 0
+    ):
+        return False
+
+    expected_tokens = int(max_seqlen_per_dp_cp_rank) * int(cp_size)
+    reserve_dummy_slot = tail_padding_policy != "extend_last"
+    expected_entries = int(thd_max_packed_sequences) + 1 + int(reserve_dummy_slot)
+    metadata = (
+        packed_seq_params.cu_seqlens_q,
+        packed_seq_params.cu_seqlens_kv,
+        packed_seq_params.cu_seqlens_q_padded,
+        packed_seq_params.cu_seqlens_kv_padded,
+    )
+    if any(value is None for value in metadata):
+        return False
+    if any(int(value.shape[0]) != expected_entries for value in metadata):
+        return False
+    if any(
+        int(value[-1].item()) != expected_tokens
+        for value in (
+            packed_seq_params.cu_seqlens_q_padded,
+            packed_seq_params.cu_seqlens_kv_padded,
+        )
+    ):
+        return False
+    if packed_seq_params.total_tokens is not None and int(packed_seq_params.total_tokens) != expected_tokens:
+        return False
+    return True
+
+
 def _round_up_to_alignment(value: int, alignment: int) -> int:
     """Round ``value`` up to a positive alignment."""
     if alignment <= 0:

@@ -12,6 +12,10 @@ from torch.nn.parameter import Parameter
 
 from megatron.core import parallel_state
 from megatron.core.dist_checkpointing.mapping import ShardedStateDict
+from megatron.core.packed_seq_params import (
+    packed_thd_matches_static_bounds,
+    resolve_thd_tail_padding_policy,
+)
 from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.transformer.utils import (
     ensure_metadata_has_dp_cp_group,
@@ -386,6 +390,26 @@ class GraphableMegatronModule(MegatronModule):
                     "to provide a fixed graph metadata surface."
                 )
                 self._te_cudagraph_unbounded_thd_warned = True
+            return False
+
+        if (
+            packed_seq_params is not None
+            and getattr(packed_seq_params, "qkv_format", None) == "thd"
+            and self._is_thd_cuda_graph()
+            and not packed_thd_matches_static_bounds(
+                packed_seq_params,
+                self.config.max_seqlen_per_dp_cp_rank,
+                self.config.thd_max_packed_sequences,
+                resolve_thd_tail_padding_policy(self.config),
+                cp_size=getattr(self.config, "context_parallel_size", 1),
+            )
+        ):
+            if not getattr(self, "_te_cudagraph_overflow_warned", False):
+                logger.warning(
+                    "TE CUDA Graph fallback to eager for packed THD batch outside "
+                    "the configured token/sequence capacity."
+                )
+                self._te_cudagraph_overflow_warned = True
             return False
 
         # TE's graph callable accepts Tensor arguments only. Multimodal SFT
