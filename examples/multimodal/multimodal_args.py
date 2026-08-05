@@ -76,8 +76,8 @@ def add_multimodal_extra_args(parser):
     group.add_argument(
         "--dataloader-prefetch-factor",
         type=int,
-        default=2,
-        help="Number of batches prefetched by each Energon dataloader worker.",
+        default=8,
+        help="Number of batches prefetched by each Energon dataloader worker. Default: 8.",
     )
     group.add_argument(
         "--lr-data-range-start",
@@ -255,11 +255,11 @@ def add_multimodal_extra_args(parser):
     group.add_argument(
         "--video-decode-thread-count",
         type=int,
-        default=0,
+        default=8,
         help=(
             "Positive values enable worker-local FFmpeg frame threads while preserving "
-            "Energon's original indexing, seeking, and frame selection. The default 0 "
-            "leaves Energon's decoder unchanged."
+            "Energon's original indexing, seeking, and frame selection. Set to 0 to "
+            "leave Energon's decoder unchanged. Default: 8."
         ),
     )
     group.add_argument(

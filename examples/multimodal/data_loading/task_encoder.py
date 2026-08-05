@@ -1636,7 +1636,7 @@ class MultiModalTaskEncoder(
         self, av_decoder: AVDecoder, targets: list[float]
     ) -> list[Image.Image]:
         """Decode target frames with Energon-exact worker-local frame threads."""
-        thread_count = int(getattr(self.args, "video_decode_thread_count", 0))
+        thread_count = int(getattr(self.args, "video_decode_thread_count", 8))
         return self._decode_video_frames_with_energon(
             av_decoder, targets, thread_count=thread_count
         )

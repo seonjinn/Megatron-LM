@@ -124,7 +124,7 @@ def train_valid_test_dataloaders_provider(train_val_test_num_samples, task_encod
     """Build multimodal train, validation and test dataloaders."""
     args = get_args()
 
-    dataloader_prefetch_factor = getattr(args, "dataloader_prefetch_factor", 2)
+    dataloader_prefetch_factor = getattr(args, "dataloader_prefetch_factor", 8)
     if dataloader_prefetch_factor <= 0:
         raise ValueError(
             "--dataloader-prefetch-factor must be positive, "

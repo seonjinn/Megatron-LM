@@ -14,7 +14,7 @@ import dataloader_provider  # noqa: E402
 
 @pytest.mark.parametrize(
     ("num_workers", "configured_prefetch_factor", "expected_prefetch_factor"),
-    [(0, 4, None), (1, 4, 4), (1, None, 2)],
+    [(0, 4, None), (1, 4, 4), (1, None, 8)],
 )
 def test_new_dataloader_prefetch_factor(
     monkeypatch, num_workers, configured_prefetch_factor, expected_prefetch_factor
