@@ -146,6 +146,22 @@ def test_mamba_static_thd_inputs_include_local_packed_seq_idx(
 
 @pytest.mark.internal
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+def test_mamba_static_thd_inputs_include_global_cu_seqlens_capacity() -> None:
+    """Static Mamba graphs expose CP-global cumulative sequence metadata."""
+    layer = _make_static_thd_mamba_layer()
+    layer.config.context_parallel_size = 4
+
+    static_inputs = layer.get_layer_static_inputs(seq_length=23, micro_batch_size=3)
+
+    for name in ("cu_seqlens_q", "cu_seqlens_kv", "cu_seqlens_q_padded", "cu_seqlens_kv_padded"):
+        cu_seqlens = static_inputs[name]
+        assert cu_seqlens.shape == (3,)
+        assert cu_seqlens.dtype == torch.int32
+        assert cu_seqlens.tolist() == [0, 32, 32]
+
+
+@pytest.mark.internal
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
 def test_mamba_local_graph_static_inputs_do_not_add_te_packed_seq_idx() -> None:
     """The packed tensor adapter must not alter the existing local CUDA Graph interface."""
     layer = _make_static_thd_mamba_layer()
@@ -196,10 +212,11 @@ def test_mamba_non_te_forward_preserves_public_packed_seq_params(cuda_graph_impl
 
 @pytest.mark.internal
 def test_mamba_te_capture_reconstructs_minimal_packed_seq_params() -> None:
-    """The production mixer must receive Python metadata rebuilt inside the graph boundary."""
+    """The production mixer must receive all packed metadata rebuilt inside the graph boundary."""
     layer = _make_static_thd_mamba_layer()
     hidden_states = torch.ones((8, 1, 16))
     packed_seq_idx = torch.tensor([[0, 0, 1, 1, 1, 2, 2, 2]], dtype=torch.int32)
+    cu_seqlens = torch.tensor([0, 4, 8], dtype=torch.int32)
     observed: dict[str, object] = {}
 
     def forward(hidden_states: torch.Tensor, *, packed_seq_params: PackedSeqParams) -> torch.Tensor:
@@ -208,7 +225,14 @@ def test_mamba_te_capture_reconstructs_minimal_packed_seq_params() -> None:
 
     layer.forward = forward
 
-    output = layer._te_cuda_graph_capture(hidden_states, packed_seq_idx=packed_seq_idx)
+    output = layer._te_cuda_graph_capture(
+        hidden_states,
+        packed_seq_idx=packed_seq_idx,
+        cu_seqlens_q=cu_seqlens,
+        cu_seqlens_kv=cu_seqlens.clone(),
+        cu_seqlens_q_padded=cu_seqlens.clone(),
+        cu_seqlens_kv_padded=cu_seqlens.clone(),
+    )
 
     assert output is hidden_states
     reconstructed = observed["packed_seq_params"]
@@ -216,8 +240,10 @@ def test_mamba_te_capture_reconstructs_minimal_packed_seq_params() -> None:
     assert reconstructed.qkv_format == "thd"
     assert reconstructed.seq_idx is packed_seq_idx
     assert reconstructed.total_tokens == 8
-    assert reconstructed.cu_seqlens_q is None
-    assert reconstructed.cu_seqlens_kv is None
+    assert torch.equal(reconstructed.cu_seqlens_q, cu_seqlens)
+    assert torch.equal(reconstructed.cu_seqlens_kv, cu_seqlens)
+    assert torch.equal(reconstructed.cu_seqlens_q_padded, cu_seqlens)
+    assert torch.equal(reconstructed.cu_seqlens_kv_padded, cu_seqlens)
 
 
 @pytest.mark.internal
@@ -226,18 +252,38 @@ def test_mamba_te_replay_forwards_only_tensorized_packed_seq_idx() -> None:
     layer = _make_static_thd_mamba_layer()
     layer.cuda_graph_manual_hooks = []
     packed_seq_idx = torch.tensor([[0, 0, 1, 1, 1, 2, 2, 2]], dtype=torch.int32)
+    cu_seqlens = torch.tensor([0, 4, 8], dtype=torch.int32)
     hidden_states = torch.ones((8, 1, 16))
     observed: dict[str, object] = {}
 
     def graph(
-        hidden_states: torch.Tensor, *, packed_seq_idx: torch.Tensor, is_first_microbatch: bool
+        hidden_states: torch.Tensor,
+        *,
+        packed_seq_idx: torch.Tensor,
+        cu_seqlens_q: torch.Tensor,
+        cu_seqlens_kv: torch.Tensor,
+        cu_seqlens_q_padded: torch.Tensor,
+        cu_seqlens_kv_padded: torch.Tensor,
+        is_first_microbatch: bool,
     ) -> torch.Tensor:
         observed["packed_seq_idx"] = packed_seq_idx
+        observed["cu_seqlens_q"] = cu_seqlens_q
+        observed["cu_seqlens_kv"] = cu_seqlens_kv
+        observed["cu_seqlens_q_padded"] = cu_seqlens_q_padded
+        observed["cu_seqlens_kv_padded"] = cu_seqlens_kv_padded
         observed["is_first_microbatch"] = is_first_microbatch
         return hidden_states + packed_seq_idx.transpose(0, 1).unsqueeze(-1)
 
     layer.cuda_graphs = [graph]
-    packed_seq_params = PackedSeqParams(qkv_format="thd", seq_idx=packed_seq_idx, total_tokens=8)
+    packed_seq_params = PackedSeqParams(
+        qkv_format="thd",
+        seq_idx=packed_seq_idx,
+        cu_seqlens_q=cu_seqlens,
+        cu_seqlens_kv=cu_seqlens.clone(),
+        cu_seqlens_q_padded=cu_seqlens.clone(),
+        cu_seqlens_kv_padded=cu_seqlens.clone(),
+        total_tokens=8,
+    )
 
     output = layer._te_cuda_graph_replay(
         hidden_states=hidden_states,
@@ -247,6 +293,10 @@ def test_mamba_te_replay_forwards_only_tensorized_packed_seq_idx() -> None:
     )
 
     assert observed["packed_seq_idx"] is packed_seq_idx
+    assert observed["cu_seqlens_q"] is cu_seqlens
+    assert torch.equal(observed["cu_seqlens_kv"], cu_seqlens)
+    assert torch.equal(observed["cu_seqlens_q_padded"], cu_seqlens)
+    assert torch.equal(observed["cu_seqlens_kv_padded"], cu_seqlens)
     assert observed["is_first_microbatch"] is True
     assert torch.equal(output[:, 0, 0], torch.tensor([1, 1, 2, 2, 2, 3, 3, 3]))
 
