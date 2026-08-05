@@ -63,6 +63,63 @@ VIDEO_TOKEN = "<video>"
 SOUND_TOKEN = "<so_embedding>"
 
 
+def update_multimodal_packed_seq_params(
+    packed_seq_params: Optional[PackedSeqParams], sequence_lengths: torch.Tensor
+) -> Optional[PackedSeqParams]:
+    """Rebuild THD boundaries after text tokens are expanded with media tokens.
+
+    The multimodal dataloader creates packed metadata for the text-only
+    boundaries.  LLaVA later replaces image/audio placeholders with their
+    embedding spans, so Mamba's ``seq_idx`` and TE's THD boundaries must be
+    rebuilt from the expanded sample lengths before sequence parallelism.
+    HybridCP relies on this metadata being local to the routed sample.
+    """
+    if packed_seq_params is None or packed_seq_params.qkv_format != "thd":
+        return packed_seq_params
+    if sequence_lengths.ndim != 1 or sequence_lengths.numel() == 0:
+        raise ValueError("multimodal packed sequence lengths must be a non-empty 1D tensor")
+
+    cu_seqlens = packed_seq_params.cu_seqlens_q
+    if cu_seqlens is None:
+        raise ValueError("THD packed metadata requires cu_seqlens_q")
+    if sequence_lengths.numel() != cu_seqlens.numel() - 1:
+        raise ValueError(
+            "multimodal packed sequence count does not match cu_seqlens_q: "
+            f"{sequence_lengths.numel()} != {cu_seqlens.numel() - 1}"
+        )
+
+    sequence_lengths = sequence_lengths.to(device=cu_seqlens.device, dtype=cu_seqlens.dtype)
+    new_cu_seqlens = torch.cat(
+        [torch.zeros(1, dtype=cu_seqlens.dtype, device=cu_seqlens.device), sequence_lengths.cumsum(0)]
+    )
+
+    old_padded = packed_seq_params.cu_seqlens_q_padded
+    new_padded = None
+    if old_padded is not None:
+        # Preserve the fixed THD surface selected by the dataloader/graph
+        # capture, while never truncating a media-expanded sample.
+        padded_total = max(int(old_padded[-1].item()), int(new_cu_seqlens[-1].item()))
+        new_padded = new_cu_seqlens.to(dtype=old_padded.dtype).clone()
+        new_padded[-1] += padded_total - int(new_cu_seqlens[-1].item())
+
+    packed_seq_params.cu_seqlens_q = new_cu_seqlens
+    packed_seq_params.cu_seqlens_kv = new_cu_seqlens.clone()
+    packed_seq_params.cu_seqlens_q_padded = new_padded
+    packed_seq_params.cu_seqlens_kv_padded = new_padded.clone() if new_padded is not None else None
+    packed_seq_params.max_seqlen_q = int(
+        (new_padded[1:] - new_padded[:-1]).max().item()
+        if new_padded is not None
+        else sequence_lengths.max().item()
+    )
+    packed_seq_params.max_seqlen_kv = packed_seq_params.max_seqlen_q
+    packed_seq_params.total_tokens = int(
+        new_padded[-1].item() if new_padded is not None else new_cu_seqlens[-1].item()
+    )
+    packed_seq_params.seq_idx = None
+    packed_seq_params.__post_init__()
+    return packed_seq_params
+
+
 # Note: This is under development and may be missing features.
 class LLaVAModel(MegatronModule):
     """LLaVA multi-modal model.
@@ -1014,8 +1071,11 @@ class LLaVAModel(MegatronModule):
                 final_labels, final_loss_mask = self.efficient_video_sampler.mask_labels_and_loss_mask(
                     labels=final_labels, loss_mask=final_loss_mask, evs_mask=final_retention_mask, packed_seq_params=initial_packed_seq_params,
                     per_sample_pad_to_divisibility=shard_factor, sequence_pad_to_divisibility=sequence_pad_to_divisibility,
-                    labels_padding_value=IGNORE_INDEX, loss_padding_value=0
+                labels_padding_value=IGNORE_INDEX, loss_padding_value=0
                 )
+
+        if packed_seq_params is not None and packed_seq_params.qkv_format == "thd":
+            update_multimodal_packed_seq_params(packed_seq_params, seq_lens)
 
         if final_embedding is not None and final_labels is not None:
             assert (

@@ -2,7 +2,12 @@
 
 import unittest
 
+import torch
+
 from megatron.core.packed_seq_params import PackedSeqParams
+from megatron.core.models.multimodal.llava_model import (
+    update_multimodal_packed_seq_params,
+)
 from megatron.core.utils import set_hybrid_cp_metadata
 
 
@@ -27,6 +32,21 @@ class HybridCPMetadataTest(unittest.TestCase):
         set_hybrid_cp_metadata(params, 1)
         self.assertEqual(params.local_cp_size, 1)
         self.assertIsNone(params.cp_group)
+
+    def test_multimodal_expansion_rebuilds_mamba_seq_idx(self):
+        params = PackedSeqParams(
+            qkv_format="thd",
+            cu_seqlens_q=torch.tensor([0, 4], dtype=torch.int32),
+            cu_seqlens_kv=torch.tensor([0, 4], dtype=torch.int32),
+            cu_seqlens_q_padded=torch.tensor([0, 4], dtype=torch.int32),
+            cu_seqlens_kv_padded=torch.tensor([0, 4], dtype=torch.int32),
+            total_tokens=4,
+        )
+        update_multimodal_packed_seq_params(params, torch.tensor([8], dtype=torch.int32))
+        self.assertEqual(params.cu_seqlens_q.tolist(), [0, 8])
+        self.assertEqual(params.cu_seqlens_q_padded.tolist(), [0, 8])
+        self.assertEqual(params.total_tokens, 8)
+        self.assertEqual(params.seq_idx.shape, (1, 8))
 
 
 if __name__ == "__main__":
