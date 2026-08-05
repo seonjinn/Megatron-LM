@@ -790,12 +790,6 @@ class LLaVAModel(MegatronModule):
         """
 
         inference_context = deprecate_inference_params(inference_context, inference_params)
-        _hybrid_cp_debug(
-            f"llava_forward_enter input={tuple(input_ids.shape) if input_ids is not None else None} "
-            f"images={tuple(images.shape) if images is not None else None} "
-            f"packed={'yes' if packed_seq_params is not None else 'none'}"
-        )
-
         assert self.add_decoder, "input text preprocessing is only needed for the language model"
 
         # No pre- or postprocessing needed.
@@ -1565,6 +1559,11 @@ class LLaVAModel(MegatronModule):
             loss_mask (torch.Tensor): Loss mask expanded to combined sequence length. Shape [b, s].
         """
         inference_context = deprecate_inference_params(inference_context, inference_params)
+        _hybrid_cp_debug(
+            f"llava_forward_enter input={tuple(input_ids.shape) if input_ids is not None else None} "
+            f"images={tuple(images.shape) if images is not None else None} "
+            f"packed={'yes' if packed_seq_params is not None else 'none'}"
+        )
 
         # Keep a copy of the original imgs_sizes and num_frames in case we split to context parallel ranks later.
         global_imgs_sizes = imgs_sizes.clone() if imgs_sizes is not None else None
