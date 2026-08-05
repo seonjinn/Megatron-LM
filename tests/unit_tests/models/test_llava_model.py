@@ -109,6 +109,12 @@ class TestLLaVAModel:
         assert (
             self.model._get_thd_graph_token_capacity(PackedSeqParams(qkv_format="thd")) == 2048
         )
+        assert (
+            self.model._get_thd_graph_token_capacity(
+                PackedSeqParams(qkv_format="thd", cuda_graph_eligible=False)
+            )
+            is None
+        )
         assert self.model._get_thd_graph_token_capacity(PackedSeqParams(qkv_format="sbhd")) is None
 
         self.model.language_model.config.pad_packed_seq_alignment = 128

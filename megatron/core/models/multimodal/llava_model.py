@@ -605,6 +605,8 @@ class LLaVAModel(MegatronModule):
         """Return the fixed language token capacity required by a TE THD graph."""
         if packed_seq_params is None or packed_seq_params.qkv_format != "thd":
             return None
+        if getattr(packed_seq_params, "cuda_graph_eligible", None) is False:
+            return None
 
         language_config = self.language_model.config
         cuda_graph_impl = getattr(language_config, "cuda_graph_impl", "none")

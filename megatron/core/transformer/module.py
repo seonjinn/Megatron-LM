@@ -373,6 +373,16 @@ class GraphableMegatronModule(MegatronModule):
         packed_seq_params = kwargs.get("packed_seq_params")
         if (
             packed_seq_params is not None
+            and getattr(packed_seq_params, "cuda_graph_eligible", None) is False
+        ):
+            if not getattr(self, "_te_cudagraph_overflow_warned", False):
+                logger.warning(
+                    "TE CUDA Graph fallback to eager for a packed THD overflow batch."
+                )
+                self._te_cudagraph_overflow_warned = True
+            return False
+        if (
+            packed_seq_params is not None
             and getattr(packed_seq_params, "qkv_format", None) == "thd"
             and not self._is_thd_cuda_graph()
         ):

@@ -325,6 +325,11 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
             if loss_mask is not None:
                 loss_mask = loss_mask.masked_fill(padding_mask, 0)
             packed_seq_params.tokens_per_sample = packed_seq_params.total_tokens
+        elif overflow:
+            # Keep the original dynamic metadata and make the graph bypass
+            # explicit so LLaVA does not force the fixed token surface after
+            # media expansion.
+            packed_seq_params.cuda_graph_eligible = False
 
     if getattr(args, "log_packed_sequence_stats", False) and packed_seq_params is not None:
         update_packed_sequence_stats(sample_lengths, loss_mask)

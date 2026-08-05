@@ -29,6 +29,9 @@ class PackedSeqParams:
     pad_between_seqs: Optional[bool] = None
     cp_partition_mode: Literal["zigzag", "contiguous"] = "zigzag"
     tokens_per_sample: int = None
+    # ``False`` marks an overflow batch that must bypass a fixed-shape graph.
+    # ``None`` preserves the normal eligibility inference for eager callers.
+    cuda_graph_eligible: Optional[bool] = None
 
     def __post_init__(self):
         """Pre-compute seq_idx for Mamba mixer CUDA graph compatibility.

@@ -166,6 +166,7 @@ def _prepare_packed_thd_batch(
             max_num_seqs,
         )
     ):
+        packed_seq_params.cuda_graph_eligible = False
         return (tokens, labels, loss_mask, position_ids, packed_seq_params, None)
     (
         padded_tokens,

@@ -196,6 +196,7 @@ def test_static_thd_overflow_policy_eager_preserves_unpadded_batch() -> None:
     assert torch.equal(loss_mask, inputs["loss_mask"])
     assert torch.equal(position_ids, inputs["position_ids"])
     assert packed.cu_seqlens_q.tolist() == [0, 1, 2, 3, 4, 5]
+    assert packed.cuda_graph_eligible is False
     assert padding_mask is None
 
 
