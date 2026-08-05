@@ -278,7 +278,9 @@ class MambaLayer(GraphableMegatronModule):
                 cu_seqlens_kv_padded=cu_seqlens["cu_seqlens_kv_padded"],
                 max_seqlen_q=fixed_tokens * self.config.context_parallel_size,
                 max_seqlen_kv=fixed_tokens * self.config.context_parallel_size,
-                total_tokens=fixed_tokens * self.config.context_parallel_size,
+                # Avoid PackedSeqParams.__post_init__ allocating a new CUDA
+                # tensor from an integer while TE is already capturing.
+                total_tokens=None,
                 pad_between_seqs=True,
                 cp_partition_mode=getattr(self.config, "cp_partition_mode", "zigzag"),
             )
@@ -286,6 +288,7 @@ class MambaLayer(GraphableMegatronModule):
             # the explicit static map as a graph input for Mamba's existing
             # sequence-parallel metadata contract.
             packed_seq_params.seq_idx = packed_seq_idx
+            packed_seq_params.total_tokens = fixed_tokens * self.config.context_parallel_size
             kwargs["packed_seq_params"] = packed_seq_params
         return super()._te_cuda_graph_capture(*args, **kwargs)
 
