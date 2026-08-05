@@ -9,7 +9,10 @@ from megatron.core.models.hybrid.hybrid_layer_specs import hybrid_stack_spec
 from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.process_groups_config import ProcessGroupCollection
 from megatron.core.ssm.mamba_layer import MambaLayer, MambaLayerSubmodules
-from megatron.core.ssm.mamba_mixer import _slice_packed_seq_idx_for_sequence_parallel
+from megatron.core.ssm.mamba_mixer import (
+    _mamba_target_tokens_for_static_graph,
+    _slice_packed_seq_idx_for_sequence_parallel,
+)
 from megatron.core.tensor_parallel.random import model_parallel_cuda_manual_seed
 from megatron.core.transformer import TransformerConfig
 from megatron.core.transformer.enums import CudaGraphModule
@@ -67,6 +70,34 @@ def test_slice_packed_seq_idx_rejects_incompatible_lengths() -> None:
         _slice_packed_seq_idx_for_sequence_parallel(
             seq_idx, local_tokens=4, tp_rank=0, tp_size=2
         )
+
+
+@pytest.mark.internal
+def test_mamba_target_capacity_is_disabled_for_eager_hybrid_cp() -> None:
+    """Eager DynamicCP must use the actual sample length, not graph capacity."""
+    config = TransformerConfig(
+        num_layers=1,
+        hidden_size=16,
+        num_attention_heads=4,
+        cuda_graph_impl="none",
+        max_seqlen_per_dp_cp_rank=64,
+    )
+
+    assert _mamba_target_tokens_for_static_graph(config, cp_size=4) is None
+
+
+@pytest.mark.internal
+def test_mamba_target_capacity_is_set_for_static_graphs() -> None:
+    """Static graph captures retain the configured fixed Mamba token surface."""
+    config = TransformerConfig(
+        num_layers=1,
+        hidden_size=16,
+        num_attention_heads=4,
+        cuda_graph_impl="transformer_engine",
+        max_seqlen_per_dp_cp_rank=64,
+    )
+
+    assert _mamba_target_tokens_for_static_graph(config, cp_size=4) == 256
 
 
 def _make_static_thd_mamba_layer(
