@@ -627,9 +627,17 @@ def hybrid_context_parallel_forward_backward(
             for i in range(num_samples_this_group[j]):
                 # Call forward step for each sub-sample
                 new_data_iterator = _get_new_data_iterator(i, j)
-                sub_sample_id = sample_ids_this_group[i]
-                partner_cp_size = len(
-                    [True for sample_ids in sample_id_groups[j] if sub_sample_id in sample_ids]
+                sub_sample_id = sample_ids_this_group[i] if is_first_tp_rank else None
+                partner_cp_size = (
+                    len(
+                        [
+                            True
+                            for sample_ids in sample_id_groups[j]
+                            if sub_sample_id in sample_ids
+                        ]
+                    )
+                    if is_first_tp_rank
+                    else None
                 )
                 _hybrid_cp_debug(
                     f"before_forward group={j} index={i} gid={sub_sample_id} "
@@ -682,9 +690,17 @@ def hybrid_context_parallel_forward_backward(
         sample_ids_this_group = sample_id_groups[-1][hdp_rank] if is_first_tp_rank else None
         for i in range(num_samples_this_group[-1] - 1):
             new_data_iterator = _get_new_data_iterator(i, -1)
-            sub_sample_id = sample_ids_this_group[i]
-            partner_cp_size = len(
-                [True for sample_ids in sample_id_groups[-1] if sub_sample_id in sample_ids]
+            sub_sample_id = sample_ids_this_group[i] if is_first_tp_rank else None
+            partner_cp_size = (
+                len(
+                    [
+                        True
+                        for sample_ids in sample_id_groups[-1]
+                        if sub_sample_id in sample_ids
+                    ]
+                )
+                if is_first_tp_rank
+                else None
             )
             _hybrid_cp_debug(
                 f"before_forward group={num_total_groups - 1} index={i} gid={sub_sample_id} "
@@ -723,9 +739,17 @@ def hybrid_context_parallel_forward_backward(
     # The last sub-sample of the last group of the last microbatch is
     # run out of the context handler.
     new_data_iterator = _get_new_data_iterator(-1, -1)
-    sub_sample_id = sample_ids_this_group[-1]
-    partner_cp_size = len(
-        [True for sample_ids in sample_id_groups[-1] if sub_sample_id in sample_ids]
+    sub_sample_id = sample_ids_this_group[-1] if is_first_tp_rank else None
+    partner_cp_size = (
+        len(
+            [
+                True
+                for sample_ids in sample_id_groups[-1]
+                if sub_sample_id in sample_ids
+            ]
+        )
+        if is_first_tp_rank
+        else None
     )
     _hybrid_cp_debug(
         f"before_forward group={num_total_groups - 1} index=last gid={sub_sample_id} "
