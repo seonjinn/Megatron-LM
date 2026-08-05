@@ -54,6 +54,17 @@ _BROADCAST_DATA_SUPPORTS_OPTIMIZE = "optimize" in inspect.signature(
 ).parameters
 
 
+def _hybrid_cp_debug(message: str) -> None:
+    """Emit rank-local multimodal forward diagnostics when explicitly enabled."""
+
+    if os.environ.get("MEGATRON_HYBRID_CP_DEBUG") != "1":
+        return
+    rank = "?"
+    if torch.distributed.is_available() and torch.distributed.is_initialized():
+        rank = str(torch.distributed.get_rank())
+    print(f"[HYBRID_CP_DEBUG][rank={rank}] {message}", flush=True)
+
+
 def _broadcast_data(keys, data, datatype, optimize):
     kwargs = {"optimize": optimize} if _BROADCAST_DATA_SUPPORTS_OPTIMIZE else {}
     return tensor_parallel.broadcast_data(keys, data, datatype, **kwargs)
@@ -584,6 +595,21 @@ def forward_step(data_iterator, model: LLaVAModel):
         samples_seen,
     ) = get_batch(data_iterator, model.module.module.image_token_index, model.module.module.img_seq_len)
     timers('batch-generator').stop()
+    packed_metadata = "none"
+    if packed_seq_params is not None:
+        packed_metadata = (
+            f"q={tuple(packed_seq_params.cu_seqlens_q.shape)} "
+            f"qp={tuple(packed_seq_params.cu_seqlens_q_padded.shape)} "
+            f"total={packed_seq_params.total_tokens} "
+            f"local_cp={getattr(packed_seq_params, 'local_cp_size', None)}"
+        )
+    _hybrid_cp_debug(
+        f"get_batch_done tokens={tuple(tokens.shape) if tokens is not None else None} "
+        f"labels={tuple(labels.shape) if labels is not None else None} "
+        f"images={tuple(images.shape) if images is not None else None} "
+        f"packed={packed_metadata}"
+    )
+    _hybrid_cp_debug("before_model_forward")
 
     output_tensor, loss_mask = model(
         images,
@@ -602,6 +628,9 @@ def forward_step(data_iterator, model: LLaVAModel):
         sound_length=sound_length,
         sound_timestamps=sound_timestamps,
         num_sound_clips=num_sound_clips,
+    )
+    _hybrid_cp_debug(
+        f"after_model_forward output={tuple(output_tensor.shape) if output_tensor is not None else None}"
     )
     args = get_args()
     if args.use_loss_scaling and args.context_parallel_size <= 1:

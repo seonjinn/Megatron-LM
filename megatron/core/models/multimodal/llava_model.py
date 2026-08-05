@@ -1,6 +1,7 @@
 # Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
 import copy
 import logging
+import os
 from collections import namedtuple
 from copy import deepcopy
 from functools import partial
@@ -61,6 +62,17 @@ DEFAULT_SOUND_TOKEN_INDEX = -300
 IMAGE_TOKEN = "<image>"
 VIDEO_TOKEN = "<video>"
 SOUND_TOKEN = "<so_embedding>"
+
+
+def _hybrid_cp_debug(message: str) -> None:
+    """Emit rank-local LLaVA diagnostics when explicitly enabled."""
+
+    if os.environ.get("MEGATRON_HYBRID_CP_DEBUG") != "1":
+        return
+    rank = "?"
+    if torch.distributed.is_available() and torch.distributed.is_initialized():
+        rank = str(torch.distributed.get_rank())
+    print(f"[HYBRID_CP_DEBUG][rank={rank}] {message}", flush=True)
 
 
 def pad_sequence_lengths_for_context_parallel(
@@ -778,6 +790,11 @@ class LLaVAModel(MegatronModule):
         """
 
         inference_context = deprecate_inference_params(inference_context, inference_params)
+        _hybrid_cp_debug(
+            f"llava_forward_enter input={tuple(input_ids.shape) if input_ids is not None else None} "
+            f"images={tuple(images.shape) if images is not None else None} "
+            f"packed={'yes' if packed_seq_params is not None else 'none'}"
+        )
 
         assert self.add_decoder, "input text preprocessing is only needed for the language model"
 
@@ -1929,6 +1946,12 @@ class LLaVAModel(MegatronModule):
         active_cp_size, _ = self._get_active_cp_metadata(
             packed_seq_params, self.context_parallel_lm, self.cp_group
         )
+        _hybrid_cp_debug(
+            f"llava_preprocess_done embedding={tuple(combined_embeddings.shape) if combined_embeddings is not None else None} "
+            f"labels={tuple(new_labels.shape) if new_labels is not None else None} "
+            f"active_cp={active_cp_size} "
+            f"cu_padded={tuple(packed_seq_params.cu_seqlens_q_padded.shape) if packed_seq_params is not None else None}"
+        )
         if active_cp_size > 1 or self.sequence_parallel_lm:
             loss_weight = None
             if new_labels is not None:
@@ -1945,12 +1968,18 @@ class LLaVAModel(MegatronModule):
                     loss_weight[new_labels[0]==IGNORE_INDEX] = 0
                 loss_weight = loss_weight.unsqueeze(0)
 
+            _hybrid_cp_debug("before_token_parallel")
             combined_embeddings, new_labels, new_loss_mask, position_ids, packed_seq_params = (
                 self._process_embedding_token_parallel(
                     combined_embeddings, new_labels, new_loss_mask, loss_weight, position_ids, packed_seq_params
                 )
             )
+            _hybrid_cp_debug(
+                f"after_token_parallel embedding={tuple(combined_embeddings.shape) if combined_embeddings is not None else None} "
+                f"labels={tuple(new_labels.shape) if new_labels is not None else None}"
+            )
 
+        _hybrid_cp_debug("before_language_model")
         output = self.language_model(
             input_ids=None,
             position_ids=position_ids,
@@ -1961,6 +1990,9 @@ class LLaVAModel(MegatronModule):
             runtime_gather_output=runtime_gather_output,
             packed_seq_params=packed_seq_params,
             loss_mask=new_loss_mask,
+        )
+        _hybrid_cp_debug(
+            f"after_language_model output={tuple(output.shape) if isinstance(output, torch.Tensor) else type(output).__name__}"
         )
         # Track norms for language_model output
         if self.log_model_act_norms and self.training:

@@ -529,6 +529,20 @@ def hybrid_context_parallel_forward_backward(
                 group=parallel_state.get_tensor_model_parallel_group(),
             )
 
+    def _broadcast_cp_group_size(cp_group_size):
+        """Make the active sample CP size available on every TP rank."""
+
+        cp_group_size_tensor = torch.tensor(
+            [0 if cp_group_size is None else int(cp_group_size)],
+            dtype=torch.int32,
+            device=torch.cuda.current_device(),
+        )
+        _broadcast(cp_group_size_tensor)
+        cp_group_size = int(cp_group_size_tensor.item())
+        if cp_group_size < 1:
+            raise RuntimeError(f"HybridCP scheduled an invalid CP group size: {cp_group_size}")
+        return cp_group_size
+
     def _broadcast_num_samples_this_group(num_samples_this_group):
         dev = torch.cuda.current_device()
         torch.distributed.barrier()
@@ -639,9 +653,10 @@ def hybrid_context_parallel_forward_backward(
                     if is_first_tp_rank
                     else None
                 )
+                active_cp_group_size = _broadcast_cp_group_size(partner_cp_size)
                 _hybrid_cp_debug(
                     f"before_forward group={j} index={i} gid={sub_sample_id} "
-                    f"cp_size={partner_cp_size} current_microbatch={current_microbatch}"
+                    f"cp_size={active_cp_group_size} current_microbatch={current_microbatch}"
                 )
                 # TODO: Find the usage of current_microbatch and is_first_microbatch and
                 # how that may affect my usage.
@@ -653,7 +668,8 @@ def hybrid_context_parallel_forward_backward(
                     input_tensor,
                     forward_data_store,
                     config,
-                    collect_non_loss_data,
+                    cp_group_size=active_cp_group_size,
+                    collect_non_loss_data=collect_non_loss_data,
                     is_first_microbatch=check_first_val_step(
                         first_val_step, forward_only, current_microbatch == 0
                     ),
@@ -702,9 +718,10 @@ def hybrid_context_parallel_forward_backward(
                 if is_first_tp_rank
                 else None
             )
+            active_cp_group_size = _broadcast_cp_group_size(partner_cp_size)
             _hybrid_cp_debug(
                 f"before_forward group={num_total_groups - 1} index={i} gid={sub_sample_id} "
-                f"cp_size={partner_cp_size} current_microbatch={current_microbatch}"
+                f"cp_size={active_cp_group_size} current_microbatch={current_microbatch}"
             )
             # Call forward step for each sub-sample
             output_tensor, num_tokens = forward_step(
@@ -715,7 +732,8 @@ def hybrid_context_parallel_forward_backward(
                 input_tensor,
                 forward_data_store,
                 config,
-                collect_non_loss_data,
+                cp_group_size=active_cp_group_size,
+                collect_non_loss_data=collect_non_loss_data,
                 is_first_microbatch=check_first_val_step(
                     first_val_step, forward_only, current_microbatch == 0
                 ),
@@ -751,9 +769,10 @@ def hybrid_context_parallel_forward_backward(
         if is_first_tp_rank
         else None
     )
+    active_cp_group_size = _broadcast_cp_group_size(partner_cp_size)
     _hybrid_cp_debug(
         f"before_forward group={num_total_groups - 1} index=last gid={sub_sample_id} "
-        f"cp_size={partner_cp_size} current_microbatch={current_microbatch}"
+        f"cp_size={active_cp_group_size} current_microbatch={current_microbatch}"
     )
     # Call forward step for each sub-sample
     output_tensor, num_tokens = forward_step(
@@ -764,7 +783,8 @@ def hybrid_context_parallel_forward_backward(
         input_tensor,
         forward_data_store,
         config,
-        collect_non_loss_data,
+        cp_group_size=active_cp_group_size,
+        collect_non_loss_data=collect_non_loss_data,
         is_first_microbatch=check_first_val_step(
             first_val_step, forward_only, current_microbatch == 0
         ),
