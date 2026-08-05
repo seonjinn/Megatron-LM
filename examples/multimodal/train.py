@@ -28,11 +28,17 @@ from megatron.core.packed_seq_params import (
     resolve_thd_tail_padding_policy,
 )
 from megatron.core.parallel_state import (
+    get_hybrid_data_context_parallel_groups,
     get_pipeline_model_parallel_world_size,
     get_tensor_model_parallel_rank,
     is_pipeline_last_stage,
 )
-from megatron.core.utils import get_batch_on_this_cp_rank, nvtx_range_pop, nvtx_range_push
+from megatron.core.utils import (
+    get_batch_on_this_cp_rank,
+    nvtx_range_pop,
+    nvtx_range_push,
+    set_hybrid_cp_metadata,
+)
 from megatron.training import get_args, get_timers, get_tokenizer, pretrain
 from megatron.training.argument_utils import pretrain_cfg_container_from_args
 from megatron.training.arguments import parse_and_validate_args
@@ -77,6 +83,7 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
     num_sound_clips = None
     sound_length = None
     sample_lengths = None
+    local_cp_size = None
 
     args = get_args()
 
@@ -144,6 +151,14 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
         data['samples_seen'] = torch.tensor(1, dtype=torch.int32, device=data_text.device)
 
     samples_seen = _broadcast_data(["samples_seen"], data, torch.int32, args.optimize_broadcast)["samples_seen"]
+
+    # HybridCP routes each packed sample to a subset of the global CP ranks.
+    # Keep that choice on the TP source and broadcast it with the batch so the
+    # multimodal model can attach the matching process group to PackedSeqParams.
+    if getattr(args, "hybrid_context_parallel", False):
+        local_cp_size = _broadcast_data(
+            ["local_cp_size"], data, torch.int32, args.optimize_broadcast
+        )["local_cp_size"]
 
     if getattr(args, "log_packed_sequence_stats", False):
         if get_tensor_model_parallel_rank() == 0 and data is not None and "sample_lengths" not in data:
@@ -230,6 +245,18 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
             max_seqlen_kv=max_lengths,
             total_tokens=int(cu_lengths_for_params[-1].item()),
         )
+        if getattr(args, "hybrid_context_parallel", False):
+            local_cp_size_value = int(local_cp_size.reshape(-1)[0].item())
+            hybrid_cp_group = (
+                get_hybrid_data_context_parallel_groups(group_size=local_cp_size_value)
+                if local_cp_size_value > 1
+                else None
+            )
+            set_hybrid_cp_metadata(
+                packed_seq_params,
+                local_cp_size=local_cp_size_value,
+                cp_group=hybrid_cp_group,
+            )
 
     # If cu_lengths and max_lengths are non-dummy, construct PackedSeqParams. Otherwise, leave it at None.
     vision_packed_seq_params = None

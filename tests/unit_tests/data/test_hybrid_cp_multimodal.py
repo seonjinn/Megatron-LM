@@ -5,6 +5,8 @@ from megatron.core.datasets.data_schedule import (
     restore_multimodal_hybrid_cp_sample,
     unpack_multimodal_batch,
 )
+from megatron.core.packed_seq_params import PackedSeqParams
+from megatron.core.utils import set_hybrid_cp_metadata
 
 
 def _packed_batch():
@@ -64,3 +66,28 @@ def test_unpack_multimodal_batch_requires_per_sample_media_metadata():
 
     with pytest.raises(ValueError, match="sample_image_counts"):
         unpack_multimodal_batch(batch)
+
+
+def test_hybrid_cp_metadata_is_attached_to_language_packed_params():
+    """Dynamic CP must reach TE through the packed language metadata."""
+    class Group:
+        def size(self):
+            return 2
+
+    group = Group()
+    params = PackedSeqParams(qkv_format="thd")
+
+    result = set_hybrid_cp_metadata(params, local_cp_size=2, cp_group=group)
+
+    assert result is params
+    assert result.local_cp_size == 2
+    assert result.cp_group is group
+
+
+def test_hybrid_cp_metadata_disables_cp_for_single_rank_samples():
+    params = PackedSeqParams(qkv_format="thd")
+
+    set_hybrid_cp_metadata(params, local_cp_size=1)
+
+    assert params.local_cp_size == 1
+    assert params.cp_group is None

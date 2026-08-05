@@ -2431,6 +2431,41 @@ def get_batch_on_this_cp_rank(
     return batch
 
 
+def set_hybrid_cp_metadata(
+    packed_seq_params: Any,
+    local_cp_size: int,
+    cp_group: Optional[torch.distributed.ProcessGroup] = None,
+):
+    """Attach the per-sample HybridCP group to packed language metadata.
+
+    The multimodal forward path constructs ``PackedSeqParams`` after the
+    HybridCP scheduler has selected a CP subset.  Transformer Engine reads the
+    selected process group from that object; leaving it unset makes the
+    attention layer fall back to the global CP group and causes inactive ranks
+    to diverge from the active sample collective.
+    """
+    if local_cp_size is None:
+        raise ValueError("local_cp_size is required for hybrid context parallelism")
+    local_cp_size = int(local_cp_size)
+    if local_cp_size < 1:
+        raise ValueError(f"local_cp_size must be positive, got {local_cp_size}")
+    if local_cp_size == 1:
+        if cp_group is not None and cp_group.size() != 1:
+            raise ValueError("a single-rank HybridCP sample cannot use a multi-rank group")
+        packed_seq_params.local_cp_size = 1
+        packed_seq_params.cp_group = None
+        return packed_seq_params
+    if cp_group is None:
+        raise ValueError("cp_group is required when local_cp_size is greater than one")
+    if cp_group.size() != local_cp_size:
+        raise ValueError(
+            f"cp_group size ({cp_group.size()}) does not match local_cp_size ({local_cp_size})"
+        )
+    packed_seq_params.local_cp_size = local_cp_size
+    packed_seq_params.cp_group = cp_group
+    return packed_seq_params
+
+
 ######################
 ### NVTX profiling ###
 ######################
