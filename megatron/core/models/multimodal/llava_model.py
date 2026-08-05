@@ -95,7 +95,10 @@ def update_multimodal_packed_seq_params(
     cu_dtype = torch.int32
     sequence_lengths = sequence_lengths.to(device=cu_seqlens.device, dtype=cu_dtype)
     new_cu_seqlens = torch.cat(
-        [torch.zeros(1, dtype=cu_dtype, device=cu_seqlens.device), sequence_lengths.cumsum(0)]
+        [
+            torch.zeros(1, dtype=cu_dtype, device=cu_seqlens.device),
+            sequence_lengths.cumsum(0).to(dtype=cu_dtype),
+        ]
     )
 
     old_padded = packed_seq_params.cu_seqlens_q_padded
