@@ -1,6 +1,7 @@
 # Copyright (c) 2025 NVIDIA CORPORATION.  All rights reserved.
 
 from collections.abc import Mapping, Sequence
+import os
 from typing import Any, List, Optional
 
 import torch
@@ -8,6 +9,17 @@ import torch
 from megatron.core import parallel_state
 from megatron.core.pipeline_parallel.hybrid_cp_schedule import BalancedCPScheduler
 from megatron.core.process_groups_config import ProcessGroupCollection
+
+
+def _hybrid_cp_debug(message: str) -> None:
+    """Emit rank-local HybridCP scheduling diagnostics when explicitly enabled."""
+
+    if os.environ.get("MEGATRON_HYBRID_CP_DEBUG") != "1":
+        return
+    rank = "?"
+    if torch.distributed.is_available() and torch.distributed.is_initialized():
+        rank = str(torch.distributed.get_rank())
+    print(f"[HYBRID_CP_DEBUG][rank={rank}] {message}", flush=True)
 
 
 def collect_hybrid_cp_microbatches(data_iterator, num_microbatches: int) -> list[Any]:
@@ -705,6 +717,9 @@ class HybridCPDataLoaderWrapper:
         if num_microbatches is None:
             num_microbatches = 1
         raw_batches = collect_hybrid_cp_microbatches(self.data_iterator, num_microbatches)
+        _hybrid_cp_debug(
+            f"loader raw_batches={len(raw_batches)} num_microbatches={num_microbatches}"
+        )
 
         batch = []
         is_multimodal = False
@@ -728,6 +743,10 @@ class HybridCPDataLoaderWrapper:
             )
         subsample_seqlens = torch.tensor(subsample_seqlens, dtype=torch.int32).cuda()
         subsample_seqlens = subsample_seqlens[subsample_seqlens != 0]
+        _hybrid_cp_debug(
+            f"loader local_samples={len(batch)} local_nonzero_samples={subsample_seqlens.numel()} "
+            f"local_seqlens={subsample_seqlens.detach().cpu().tolist()} multimodal={is_multimodal}"
+        )
 
         seqlens_gathered, offsets = self.get_global_seqlens(subsample_seqlens)
 
@@ -737,6 +756,11 @@ class HybridCPDataLoaderWrapper:
 
         groups, sample_id_groups = self.cp_balancing_scheduler.get_groups_and_subsamples(
             global_id_seqlens, self.config
+        )
+        _hybrid_cp_debug(
+            f"loader schedule hdp_rank={self.dp_cp_group.rank()} global_samples={len(global_id_seqlens)} "
+            f"groups={len(groups)} per_group_counts="
+            f"{[[len(ids) for ids in group] for group in sample_id_groups]}"
         )
 
         if not is_multimodal:
@@ -748,5 +772,8 @@ class HybridCPDataLoaderWrapper:
             sample_id_groups,
             offsets,
             multimodal=is_multimodal,
+        )
+        _hybrid_cp_debug(
+            f"loader reroute received_ids={sorted(int(gid) for gid in samples_this_rank_with_id)}"
         )
         return samples_this_rank_with_id, sample_id_groups, len(global_id_seqlens)

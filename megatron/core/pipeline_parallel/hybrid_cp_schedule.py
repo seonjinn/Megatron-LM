@@ -3,12 +3,24 @@
 from collections import deque
 from functools import lru_cache
 from math import ceil, log2
+import os
 from typing import Callable, List, Optional, Tuple
 
 import torch
 
 from megatron.core import parallel_state
 from megatron.core.rerun_state_machine import RerunDataIterator
+
+
+def _hybrid_cp_debug(message: str) -> None:
+    """Emit rank-local HybridCP execution diagnostics when explicitly enabled."""
+
+    if os.environ.get("MEGATRON_HYBRID_CP_DEBUG") != "1":
+        return
+    rank = "?"
+    if torch.distributed.is_available() and torch.distributed.is_initialized():
+        rank = str(torch.distributed.get_rank())
+    print(f"[HYBRID_CP_DEBUG][rank={rank}] {message}", flush=True)
 
 
 class BalancedCPScheduler:
@@ -583,6 +595,11 @@ def hybrid_context_parallel_forward_backward(
         sample_id_groups = data[1]
         batch = data[0]
         global_sample_count = data[2]
+        _hybrid_cp_debug(
+            f"schedule input hdp_rank={hdp_rank} global_sample_count={global_sample_count} "
+            f"received_ids={sorted(int(gid) for gid in batch)} "
+            f"groups={[[len(ids) for ids in group] for group in sample_id_groups]}"
+        )
     else:
         data, sample_id_groups, batch, global_sample_count = None, None, None, None
 
@@ -597,6 +614,9 @@ def hybrid_context_parallel_forward_backward(
     num_samples_this_group = _broadcast_num_samples_this_group(num_samples_this_group)
     num_samples_this_group = num_samples_this_group.cpu().numpy()
     num_total_groups = num_samples_this_group.shape[0]
+    _hybrid_cp_debug(
+        f"schedule group_counts={num_samples_this_group.tolist()} num_total_groups={num_total_groups}"
+    )
 
     current_microbatch = 0
 
@@ -607,6 +627,14 @@ def hybrid_context_parallel_forward_backward(
             for i in range(num_samples_this_group[j]):
                 # Call forward step for each sub-sample
                 new_data_iterator = _get_new_data_iterator(i, j)
+                sub_sample_id = sample_ids_this_group[i]
+                partner_cp_size = len(
+                    [True for sample_ids in sample_id_groups[j] if sub_sample_id in sample_ids]
+                )
+                _hybrid_cp_debug(
+                    f"before_forward group={j} index={i} gid={sub_sample_id} "
+                    f"cp_size={partner_cp_size} current_microbatch={current_microbatch}"
+                )
                 # TODO: Find the usage of current_microbatch and is_first_microbatch and
                 # how that may affect my usage.
                 output_tensor, num_tokens = forward_step(
@@ -623,25 +651,45 @@ def hybrid_context_parallel_forward_backward(
                     ),
                     current_microbatch=current_microbatch,
                 )
+                _hybrid_cp_debug(
+                    f"after_forward group={j} index={i} gid={sub_sample_id} "
+                    f"num_tokens={int(num_tokens.item())} loss_entries={len(forward_data_store)}"
+                )
                 current_microbatch += 1
                 total_num_tokens += num_tokens.item()
                 if not forward_only:
+                    _hybrid_cp_debug(
+                        f"before_backward group={j} index={i} gid={sub_sample_id}"
+                    )
                     backward_step(
                         input_tensor, output_tensor, output_tensor_grad, config
+                    )
+                    _hybrid_cp_debug(
+                        f"after_backward group={j} index={i} gid={sub_sample_id}"
                     )
 
             # Create a barrier at end of each group.
             # This barrier ensures that all ranks are prepared to change assigned CP group sizes and
             # no rank is starting a sub-sample ahead of it's partner ranks.
+            _hybrid_cp_debug(f"before_barrier group={j}")
             torch.distributed.barrier(
                 parallel_state.get_data_parallel_group(with_context_parallel=True)
             )
+            _hybrid_cp_debug(f"after_barrier group={j}")
 
     # For the last group, we need to run the last sub-sample out of the context handler.
     with no_sync_func():
         sample_ids_this_group = sample_id_groups[-1][hdp_rank] if is_first_tp_rank else None
         for i in range(num_samples_this_group[-1] - 1):
             new_data_iterator = _get_new_data_iterator(i, -1)
+            sub_sample_id = sample_ids_this_group[i]
+            partner_cp_size = len(
+                [True for sample_ids in sample_id_groups[-1] if sub_sample_id in sample_ids]
+            )
+            _hybrid_cp_debug(
+                f"before_forward group={num_total_groups - 1} index={i} gid={sub_sample_id} "
+                f"cp_size={partner_cp_size} current_microbatch={current_microbatch}"
+            )
             # Call forward step for each sub-sample
             output_tensor, num_tokens = forward_step(
                 forward_step_func,
@@ -657,14 +705,32 @@ def hybrid_context_parallel_forward_backward(
                 ),
                 current_microbatch=current_microbatch,
             )
+            _hybrid_cp_debug(
+                f"after_forward group={num_total_groups - 1} index={i} gid={sub_sample_id} "
+                f"num_tokens={int(num_tokens.item())} loss_entries={len(forward_data_store)}"
+            )
             current_microbatch += 1
             total_num_tokens += num_tokens.item()
             if not forward_only:
+                _hybrid_cp_debug(
+                    f"before_backward group={num_total_groups - 1} index={i} gid={sub_sample_id}"
+                )
                 backward_step(input_tensor, output_tensor, output_tensor_grad, config)
+                _hybrid_cp_debug(
+                    f"after_backward group={num_total_groups - 1} index={i} gid={sub_sample_id}"
+                )
 
     # The last sub-sample of the last group of the last microbatch is
     # run out of the context handler.
     new_data_iterator = _get_new_data_iterator(-1, -1)
+    sub_sample_id = sample_ids_this_group[-1]
+    partner_cp_size = len(
+        [True for sample_ids in sample_id_groups[-1] if sub_sample_id in sample_ids]
+    )
+    _hybrid_cp_debug(
+        f"before_forward group={num_total_groups - 1} index=last gid={sub_sample_id} "
+        f"cp_size={partner_cp_size} current_microbatch={current_microbatch}"
+    )
     # Call forward step for each sub-sample
     output_tensor, num_tokens = forward_step(
         forward_step_func,
@@ -680,9 +746,19 @@ def hybrid_context_parallel_forward_backward(
         ),
         current_microbatch=current_microbatch,
     )
+    _hybrid_cp_debug(
+        f"after_forward group={num_total_groups - 1} index=last gid={sub_sample_id} "
+        f"num_tokens={int(num_tokens.item())} loss_entries={len(forward_data_store)}"
+    )
     total_num_tokens += num_tokens.item()
     if not forward_only:
+        _hybrid_cp_debug(
+            f"before_backward group={num_total_groups - 1} index=last gid={sub_sample_id}"
+        )
         backward_step(input_tensor, output_tensor, output_tensor_grad, config)
+        _hybrid_cp_debug(
+            f"after_backward group={num_total_groups - 1} index=last gid={sub_sample_id}"
+        )
 
     # Every rank may execute a different CP group's sample, so the local
     # ``_samples_seen`` list is not a reliable global-batch count.  Preserve
