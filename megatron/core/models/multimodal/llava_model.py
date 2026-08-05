@@ -1240,6 +1240,20 @@ class LLaVAModel(MegatronModule):
             tensor_model_parallel_size_lm=self.tensor_model_parallel_size_lm,
         )
 
+        # HybridCP can route a packed sample to a singleton local CP group
+        # while the model remains globally CP-enabled.  In that case the
+        # multimodal preprocessing surface is still batch-first ([B, S, H])
+        # until this function transposes it below; the generic SP path's
+        # sequence dimension (0) would incorrectly validate the batch size.
+        if (
+            validate_with_combined_embeddings is not None
+            and context_parallel_lm == 1
+            and self.context_parallel_lm > 1
+            and self.sequence_parallel_lm
+            and validate_with_combined_embeddings.dim() == 3
+        ):
+            seq_dim = 1
+
         if validate_with_combined_embeddings is not None and shard_factor is not None:
             assert (
                     validate_with_combined_embeddings.shape[seq_dim] % shard_factor == 0
