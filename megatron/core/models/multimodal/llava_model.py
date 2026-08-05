@@ -1075,7 +1075,18 @@ class LLaVAModel(MegatronModule):
                 )
 
         if packed_seq_params is not None and packed_seq_params.qkv_format == "thd":
-            update_multimodal_packed_seq_params(packed_seq_params, seq_lens)
+            expanded_lengths = seq_lens
+            if final_embedding is not None and expanded_lengths.numel() == 1:
+                # Mamba sees the actual language embedding surface after CP/TP
+                # preprocessing; use that surface rather than the pre-media
+                # length estimate when the model duplicates a CP shard.
+                expanded_tokens = (
+                    final_embedding.shape[1]
+                    if final_embedding.dim() == 3
+                    else final_embedding.shape[0]
+                )
+                expanded_lengths = expanded_lengths.new_tensor([expanded_tokens])
+            update_multimodal_packed_seq_params(packed_seq_params, expanded_lengths)
 
         if final_embedding is not None and final_labels is not None:
             assert (
