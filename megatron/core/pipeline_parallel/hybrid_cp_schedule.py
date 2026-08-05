@@ -610,7 +610,7 @@ def hybrid_context_parallel_forward_backward(
                 total_num_tokens += num_tokens.item()
                 if not forward_only:
                     backward_step(
-                        input_tensor, output_tensor, output_tensor_grad, model_type, config
+                        input_tensor, output_tensor, output_tensor_grad, config
                     )
 
             # Create a barrier at end of each group.
@@ -643,7 +643,7 @@ def hybrid_context_parallel_forward_backward(
             current_microbatch += 1
             total_num_tokens += num_tokens.item()
             if not forward_only:
-                backward_step(input_tensor, output_tensor, output_tensor_grad, model_type, config)
+                backward_step(input_tensor, output_tensor, output_tensor_grad, config)
 
     # The last sub-sample of the last group of the last microbatch is
     # run out of the context handler.
@@ -665,6 +665,6 @@ def hybrid_context_parallel_forward_backward(
     )
     total_num_tokens += num_tokens.item()
     if not forward_only:
-        backward_step(input_tensor, output_tensor, output_tensor_grad, model_type, config)
+        backward_step(input_tensor, output_tensor, output_tensor_grad, config)
 
     return forward_data_store, total_num_tokens
