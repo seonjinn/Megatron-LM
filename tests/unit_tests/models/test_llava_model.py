@@ -12,7 +12,10 @@ from megatron.core.models.gpt.gpt_layer_specs import (
     get_gpt_layer_with_transformer_engine_submodules,
 )
 from megatron.core.models.multimodal import context_parallel
-from megatron.core.models.multimodal.llava_model import LLaVAModel
+from megatron.core.models.multimodal.llava_model import (
+    LLaVAModel,
+    pad_sequence_lengths_for_context_parallel,
+)
 from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.tensor_parallel.random import model_parallel_cuda_manual_seed
 from megatron.core.transformer.enums import AttnMaskType
@@ -23,6 +26,18 @@ from megatron.core.transformer.transformer_layer import TransformerLayer
 from megatron.core.utils import is_te_min_version
 from megatron.training.global_vars import set_args
 from tests.unit_tests.test_utilities import Utils
+
+
+@pytest.mark.internal
+def test_pad_sequence_lengths_for_context_parallel_rounds_each_sample():
+    """HybridCP must pad every routed sample to the CP shard requirement."""
+    lengths = torch.tensor([13, 16, 17], dtype=torch.int32)
+
+    padded = pad_sequence_lengths_for_context_parallel(lengths, shard_factor=8)
+
+    assert torch.equal(padded, torch.tensor([16, 16, 24], dtype=torch.int32))
+    assert padded.dtype == lengths.dtype
+    assert padded.device == lengths.device
 
 
 class TestLLaVAModel:

@@ -63,6 +63,31 @@ VIDEO_TOKEN = "<video>"
 SOUND_TOKEN = "<so_embedding>"
 
 
+def pad_sequence_lengths_for_context_parallel(
+    sequence_lengths: torch.Tensor, shard_factor: int | None
+) -> torch.Tensor:
+    """Round each routed multimodal sample up to its CP shard alignment.
+
+    Hybrid context parallelism routes variable-length packed samples to a
+    dynamically selected CP group.  The multimodal embedding surface must be
+    divisible by the active group's CP/SP shard factor before the sequence is
+    partitioned.  The appended positions are represented as zero-loss padding
+    by the caller.
+    """
+    if shard_factor is None:
+        return sequence_lengths
+    if shard_factor <= 0:
+        raise ValueError(f"context-parallel shard factor must be positive, got {shard_factor}")
+    if sequence_lengths.ndim != 1:
+        raise ValueError(
+            "context-parallel sequence lengths must be a one-dimensional tensor, "
+            f"got shape {tuple(sequence_lengths.shape)}"
+        )
+    if torch.any(sequence_lengths < 0):
+        raise ValueError("context-parallel sequence lengths must be non-negative")
+    return ((sequence_lengths + shard_factor - 1) // shard_factor) * shard_factor
+
+
 def update_multimodal_packed_seq_params(
     packed_seq_params: Optional[PackedSeqParams], sequence_lengths: torch.Tensor
 ) -> Optional[PackedSeqParams]:
@@ -788,6 +813,14 @@ class LLaVAModel(MegatronModule):
 
         batch_size, text_seq_len = input_ids.shape
 
+        hybrid_cp_shard_factor = None
+        if packed_seq_params is not None:
+            local_cp_size = getattr(packed_seq_params, "local_cp_size", None)
+            if local_cp_size is not None:
+                hybrid_cp_shard_factor = self._calc_shard_factor_for_cp_size(
+                    int(local_cp_size)
+                )
+
         has_labels = labels is not None
         if has_labels:
             assert (
@@ -825,7 +858,16 @@ class LLaVAModel(MegatronModule):
                 seq_lens = (
                     num_image_tiles_batch * img_seq_len - num_images_per_sample + text_seq_len
                 )
-            max_seq_len = seq_lens.max()
+            # HybridCP routes each packed sample independently.  Its active
+            # CP group may be smaller than the global model group, so the
+            # media-expanded length must be aligned per sample before the
+            # dynamic CP partition is applied.  Keep ``seq_lens`` unchanged
+            # for label placement and use the rounded lengths only for the
+            # physical padded embedding/THD surface.
+            padded_seq_lens = pad_sequence_lengths_for_context_parallel(
+                seq_lens, hybrid_cp_shard_factor
+            )
+            max_seq_len = padded_seq_lens.max()
             #TODO: should remove this code and force people to us dataloader-seq-length when using pipeline parallelism?
             # Pipeline parallel expects fixed input size. Check if we need to pad.
             if (
@@ -1090,7 +1132,9 @@ class LLaVAModel(MegatronModule):
                 )
 
         if packed_seq_params is not None and packed_seq_params.qkv_format == "thd":
-            expanded_lengths = seq_lens
+            expanded_lengths = pad_sequence_lengths_for_context_parallel(
+                seq_lens, hybrid_cp_shard_factor
+            )
             if final_embedding is not None and expanded_lengths.numel() == 1:
                 # Mamba sees the actual language embedding surface after CP/TP
                 # preprocessing; use that surface rather than the pre-media
