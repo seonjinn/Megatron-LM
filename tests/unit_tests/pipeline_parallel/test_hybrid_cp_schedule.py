@@ -1,0 +1,60 @@
+from collections import Counter
+
+from megatron.core.pipeline_parallel.hybrid_cp_schedule import BalancedCPScheduler
+
+
+class _Group:
+    def __init__(self, size: int) -> None:
+        self._size = size
+
+    def size(self) -> int:
+        return self._size
+
+
+def _per_wave_counts(sample_id_groups: list[list[list[int]]]) -> list[list[int]]:
+    return [[len(sample_ids) for sample_ids in wave] for wave in sample_id_groups]
+
+
+def _participant_counts(sample_id_groups: list[list[list[int]]]) -> Counter[int]:
+    return Counter(
+        sample_id
+        for wave in sample_id_groups
+        for rank_ids in wave
+        for sample_id in rank_ids
+    )
+
+
+def test_mixed_cp_sizes_emit_one_invocation_per_rank_per_wave() -> None:
+    scheduler = BalancedCPScheduler(65_536, _Group(4))
+    samples = [(0, 71_264), (1, 41_184), (2, 9_952), (3, 8_000)]
+
+    _, sample_id_groups = scheduler.get_groups_and_subsamples(samples, config=None)
+
+    assert len(sample_id_groups) == 2
+    assert _per_wave_counts(sample_id_groups) == [[1, 1, 1, 1], [1, 1, 1, 1]]
+    coverage = _participant_counts(sample_id_groups)
+    assert set(coverage) == {0, 1, 2, 3}
+    assert sorted(coverage.values()) == [1, 1, 2, 4]
+
+
+def test_uniform_waves_cover_every_logical_sample_once() -> None:
+    scheduler = BalancedCPScheduler(65_536, _Group(4))
+    samples = [(10, 71_264), (11, 41_184), (12, 9_952), (13, 8_000)]
+
+    _, waves = scheduler.get_groups_and_subsamples(samples, config=None)
+    expected_lengths = dict(samples)
+    seen: set[int] = set()
+
+    for wave in waves:
+        participants: dict[int, list[int]] = {}
+        for rank, rank_ids in enumerate(wave):
+            assert len(rank_ids) == 1
+            participants.setdefault(rank_ids[0], []).append(rank)
+        for sample_id, ranks in participants.items():
+            assert sample_id not in seen
+            seen.add(sample_id)
+            assert len(ranks) >= scheduler.gpus_needed(expected_lengths[sample_id])
+            assert len(ranks) & (len(ranks) - 1) == 0
+            assert ranks == list(range(ranks[0], ranks[0] + len(ranks)))
+
+    assert seen == set(expected_lengths)
