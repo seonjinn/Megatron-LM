@@ -565,6 +565,10 @@ class MambaMixer(MegatronModule):
 
         zxBCdt, _ = self.in_proj(hidden_states)
 
+        cp = self.cp
+        if packed_seq_params is not None and getattr(packed_seq_params, "local_cp_size", None) is not None:
+            cp = self.cp.for_group(getattr(packed_seq_params, "cp_group", None))
+
         if packed_seq_params is not None:
             metadata_cp_group = getattr(packed_seq_params, "cp_group", None)
             metadata_cp_size = (
@@ -574,10 +578,10 @@ class MambaMixer(MegatronModule):
                 f"layer={self.layer_number} input={tuple(hidden_states.shape)} "
                 f"packed_local_cp={getattr(packed_seq_params, 'local_cp_size', None)} "
                 f"metadata_cp_size={metadata_cp_size} static_cp_size={self.cp.cp_size} "
-                f"static_cp_rank={getattr(self.cp, 'cp_rank', 0)}"
+                f"active_cp_size={cp.cp_size} active_cp_rank={getattr(cp, 'cp_rank', 0)}"
             )
 
-        zxBCdt = self.cp.pre_conv_ssm(zxBCdt, packed_seq_params)
+        zxBCdt = cp.pre_conv_ssm(zxBCdt, packed_seq_params)
 
         if in_inference_mode or not self.use_mem_eff_path:
             # TODO(ksanthanam): Consider deprecating this path for training
@@ -585,10 +589,12 @@ class MambaMixer(MegatronModule):
                 "Training with packed sequences is not supported "
                 "in the non-memory-efficient code path."
             )
-            y = self._ssm_prefill(zxBCdt, conv_state=conv_state, ssm_state=ssm_state)
+            y = self._ssm_prefill(
+                zxBCdt, conv_state=conv_state, ssm_state=ssm_state, cp=cp
+            )
         else:
             assert ssm_state is None
-            y = self._ssm_training(zxBCdt, packed_seq_params)
+            y = self._ssm_training(zxBCdt, packed_seq_params, cp=cp)
 
         out, out_bias = self.out_proj(y)
 
@@ -804,7 +810,11 @@ class MambaMixer(MegatronModule):
         return out, out_bias
 
     def _ssm_training(
-        self, zxBCdt: torch.Tensor, packed_seq_params: Optional[PackedSeqParams] = None
+        self,
+        zxBCdt: torch.Tensor,
+        packed_seq_params: Optional[PackedSeqParams] = None,
+        *,
+        cp: Optional[MambaContextParallel] = None,
     ) -> torch.Tensor:
         """
         Performs SSM computation for training step.
@@ -814,11 +824,13 @@ class MambaMixer(MegatronModule):
         training.
         """
 
+        cp = self.cp if cp is None else cp
+
         # transpose: l b pd --> b l pd
         zxBCdt = rearrange(zxBCdt, "l b d -> b l d").contiguous()
 
         # (nheads_local_tpcp)
-        A = -torch.exp(self.cp.get_A_log().float())
+        A = -torch.exp(cp.get_A_log().float())
 
         # TODO(duncan): Can this code be removed?
         if self.conv1d.bias is not None:
@@ -840,7 +852,7 @@ class MambaMixer(MegatronModule):
                     tp_rank=parallel_state.get_tensor_model_parallel_rank(),
                     tp_size=parallel_state.get_tensor_model_parallel_world_size(),
                     target_tokens=_mamba_target_tokens_for_static_graph(
-                        self.config, self.cp.cp_size
+                        self.config, cp.cp_size
                     ),
                     allow_short_metadata=(
                         packed_seq_params.local_cp_size is not None
@@ -851,25 +863,25 @@ class MambaMixer(MegatronModule):
 
         y = mamba_split_conv1d_scan_combined(
             zxBCdt,
-            rearrange(self.cp.get_conv1d_weight(), "d 1 w -> d w"),
-            self.cp.get_conv1d_bias(),
-            self.cp.get_dt_bias().float(),
+            rearrange(cp.get_conv1d_weight(), "d 1 w -> d w"),
+            cp.get_conv1d_bias(),
+            cp.get_dt_bias().float(),
             A,
             D=(
-                rearrange(self.cp.get_D().float(), "(h p) -> h p", p=self.headdim)
+                rearrange(cp.get_D().float(), "(h p) -> h p", p=self.headdim)
                 if self.D_has_hdim
-                else self.cp.get_D()
+                else cp.get_D()
             ),
             chunk_size=self.chunk_size,
             activation=self.activation,
             headdim=None if self.D_has_hdim else self.headdim,
-            ngroups=self.cp.ngroups_local_tpcp,
+            ngroups=cp.ngroups_local_tpcp,
             norm_before_gate=self.norm_before_gate,
             seq_idx=seq_idx,
         )
 
         y = rearrange(y, "b l d -> l b d").contiguous()
-        y = self.cp.post_conv_ssm(y, packed_seq_params)
+        y = cp.post_conv_ssm(y, packed_seq_params)
 
         if self.rmsnorm:
             y = self.norm(y)
@@ -881,6 +893,8 @@ class MambaMixer(MegatronModule):
         zxBCdt: torch.Tensor,
         conv_state: Optional[torch.Tensor],
         ssm_state: Optional[torch.Tensor],
+        *,
+        cp: Optional[MambaContextParallel] = None,
         seq_idx: Optional[torch.Tensor] = None,
         cu_seqlens: Optional[torch.Tensor] = None,
         batch_indices: Optional[torch.Tensor] = None,
@@ -931,20 +945,21 @@ class MambaMixer(MegatronModule):
             Output tensor of shape (l, b, d). Intermediate states (if any) are
             written directly to intermediate_ssm_out and intermediate_conv_out.
         """
+        cp = self.cp if cp is None else cp
         is_dynamic_batching = seq_idx is not None
 
         # transpose: l b pd --> b l pd
         zxBCdt = rearrange(zxBCdt, "l b d -> b l d").contiguous()
 
         # (nheads_local_tpcp)
-        A = -torch.exp(self.cp.get_A_log().float())
+        A = -torch.exp(cp.get_A_log().float())
 
         z, xBC, dt = torch.split(
             zxBCdt,
             [
-                self.cp.d_inner_local_tpcp,
-                self.cp.d_inner_local_tpcp + 2 * self.cp.ngroups_local_tpcp * self.d_state,
-                self.cp.nheads_local_tpcp,
+                cp.d_inner_local_tpcp,
+                cp.d_inner_local_tpcp + 2 * cp.ngroups_local_tpcp * self.d_state,
+                cp.nheads_local_tpcp,
             ],
             dim=-1,
         )
@@ -975,10 +990,10 @@ class MambaMixer(MegatronModule):
             conv_state_dtype = conv_state.dtype
 
             xBC = xBC.to(conv_state_dtype)
-            conv_weight = rearrange(self.cp.get_conv1d_weight(), "d 1 w -> d w").to(
+            conv_weight = rearrange(cp.get_conv1d_weight(), "d 1 w -> d w").to(
                 conv_state_dtype
             )
-            conv_bias = self.cp.get_conv1d_bias().to(conv_state_dtype)
+            conv_bias = cp.get_conv1d_bias().to(conv_state_dtype)
 
             xBC_pre_conv = xBC if intermediate_conv_out is not None else None
             from megatron.core.ssm.ops.causal_conv1d_varlen import causal_conv1d_varlen_fn
@@ -1006,13 +1021,13 @@ class MambaMixer(MegatronModule):
 
             seqlen = xBC.size(2)
             if causal_conv1d_fn is None:
-                xBC = self.act(self.cp.conv1d(xBC)[..., :seqlen])
+                xBC = self.act(cp.conv1d(xBC)[..., :seqlen])
             else:
                 assert self.activation in ["silu", "swish"]
                 xBC = causal_conv1d_fn(
                     x=xBC,
-                    weight=rearrange(self.cp.get_conv1d_weight(), "d 1 w -> d w"),
-                    bias=self.cp.get_conv1d_bias(),
+                    weight=rearrange(cp.get_conv1d_weight(), "d 1 w -> d w"),
+                    bias=cp.get_conv1d_bias(),
                     activation=self.activation,
                     seq_idx=seq_idx,
                 )
@@ -1021,9 +1036,9 @@ class MambaMixer(MegatronModule):
         x, B, C = torch.split(
             xBC,
             [
-                self.cp.d_inner_local_tpcp,
-                self.cp.ngroups_local_tpcp * self.d_state,
-                self.cp.ngroups_local_tpcp * self.d_state,
+                cp.d_inner_local_tpcp,
+                cp.ngroups_local_tpcp * self.d_state,
+                cp.ngroups_local_tpcp * self.d_state,
             ],
             dim=-1,
         )
@@ -1040,7 +1055,7 @@ class MambaMixer(MegatronModule):
         # `cp_size == 1` (groups of heads can be sharded across CP ranks), which would be
         # mathematically incorrect, and potentially arithmetically unstable.
         assert (
-            self.cp.cp_size == 1 or self.rmsnorm
+            cp.cp_size == 1 or self.rmsnorm
         ), "Context parallel not supported for use_mem_eff_path==False and rmsnorm==False"
 
         if is_dynamic_batching:
@@ -1095,12 +1110,12 @@ class MambaMixer(MegatronModule):
                 seq_idx=seq_idx_for_varlen,
                 out=y,
                 D=(
-                    rearrange(self.cp.get_D().float(), "(h p) -> h p", p=self.headdim)
+                    rearrange(cp.get_D().float(), "(h p) -> h p", p=self.headdim)
                     if self.D_has_hdim
-                    else self.cp.get_D()
+                    else cp.get_D()
                 ),
                 z=z if not self.rmsnorm else None,
-                dt_bias=self.cp.get_dt_bias().float(),
+                dt_bias=cp.get_dt_bias().float(),
                 initial_states=initial_ssm_state,
                 return_intermediate_states=False,
                 intermediate_chunk_indices=intermediate_chunk_indices,
@@ -1150,12 +1165,12 @@ class MambaMixer(MegatronModule):
                 C,
                 self.chunk_size,
                 D=(
-                    rearrange(self.cp.get_D().float(), "(h p) -> h p", p=self.headdim)
+                    rearrange(cp.get_D().float(), "(h p) -> h p", p=self.headdim)
                     if self.D_has_hdim
-                    else self.cp.get_D()
+                    else cp.get_D()
                 ),
                 z=z if not self.rmsnorm else None,
-                dt_bias=self.cp.get_dt_bias().float(),
+                dt_bias=cp.get_dt_bias().float(),
                 dt_softplus=True,
                 return_final_states=ssm_state is not None,
                 initial_states=initial_ssm_state,
@@ -1166,11 +1181,11 @@ class MambaMixer(MegatronModule):
                 ssm_state.copy_(last_state)
 
         y = rearrange(y, "b l h p -> l b (h p)").contiguous()
-        y = self.cp.post_conv_ssm(y)
+        y = cp.post_conv_ssm(y)
 
         if self.rmsnorm:
             z = rearrange(z, "b l h p -> l b (h p)").contiguous()
-            z = self.cp.post_conv_ssm(z)
+            z = cp.post_conv_ssm(z)
             y = self.norm(y, z)
 
         return y
