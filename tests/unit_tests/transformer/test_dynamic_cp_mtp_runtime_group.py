@@ -27,6 +27,13 @@ class DynamicCPMTPRuntimeGroupTest(unittest.TestCase):
         )
         self.assertIs(resolve_cp_group(self.static_cp_group, None), self.static_cp_group)
 
+    def test_resolver_preserves_a_dynamic_cp_singleton(self) -> None:
+        resolve_cp_group = getattr(packed_seq_module, "resolve_cp_group", None)
+        singleton_params = PackedSeqParams(local_cp_size=1, cp_group=None)
+
+        self.assertIsNotNone(resolve_cp_group)
+        self.assertIsNone(resolve_cp_group(self.static_cp_group, singleton_params))
+
     def test_mtp_embedding_roll_uses_the_runtime_group(self) -> None:
         observed_groups = []
 
