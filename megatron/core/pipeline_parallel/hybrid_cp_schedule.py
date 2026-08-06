@@ -1,9 +1,9 @@
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 
+import os
 from collections import deque
 from functools import lru_cache
 from math import ceil, log2
-import os
 from typing import Callable, List, Optional, Tuple
 
 import torch
@@ -113,6 +113,22 @@ class BalancedCPScheduler:
 
         return buckets
 
+    def _available_group_ids(
+        self,
+        needed: int,
+        group_members: dict[int, List[int]],
+        group_size: dict[int, int],
+        sample_ids_per_gpu: List[List[int]],
+    ) -> List[int]:
+        """Return compatible subgroups whose ranks have no work in this wave."""
+
+        return [
+            gid
+            for gid, size in group_size.items()
+            if size == needed
+            and all(not sample_ids_per_gpu[rank] for rank in group_members[gid])
+        ]
+
     def next_hdp_group(
         self,
         sample_seqlens: List[Tuple[int, int]],  # List of (sample_id, sequence_length) tuples
@@ -187,7 +203,9 @@ class BalancedCPScheduler:
                 needed = self.gpus_needed(cand_seq_len)
 
                 # (a) Do we have an *existing* group of size `needed`?
-                candidate_gids = [gid for gid, sz in group_size.items() if sz == needed]
+                candidate_gids = self._available_group_ids(
+                    needed, group_members, group_size, sample_ids_per_gpu
+                )
 
                 # (b) Or enough completely free GPUs to start a new group?
                 free_ranks = [r for r, gid in enumerate(gpu_group_id) if gid is None]
@@ -209,7 +227,9 @@ class BalancedCPScheduler:
                 prev_needed = needed
 
             # (a)  Existing groups of exactly this size
-            candidate_gids = [gid for gid, sz in group_size.items() if sz == needed]
+            candidate_gids = self._available_group_ids(
+                needed, group_members, group_size, sample_ids_per_gpu
+            )
             if candidate_gids:
                 best_gid, best_load = min(
                     (
@@ -465,6 +485,55 @@ class BalancedCPScheduler:
 
         return micro_batches, leftovers, exec_times, sample_ids_per_gpu
 
+    def validate_collective_safe_groups(
+        self,
+        sample_id_seqlens: List[Tuple[int, int]],
+        sample_id_groups: List[List[List[int]]],
+    ) -> None:
+        """Validate that every DynamicCP wave keeps model collectives in lockstep."""
+
+        expected_lengths = dict(sample_id_seqlens)
+        seen = {}
+        for wave_index, wave in enumerate(sample_id_groups):
+            counts = [len(rank_ids) for rank_ids in wave]
+            if len(wave) != self.total_hdp_gpus or any(count != 1 for count in counts):
+                raise RuntimeError(
+                    "DynamicCP collective-unsafe schedule: "
+                    f"wave={wave_index} counts={counts} expected_one_invocation_per_rank"
+                )
+
+            participants = {}
+            for rank, rank_ids in enumerate(wave):
+                participants.setdefault(rank_ids[0], []).append(rank)
+
+            for sample_id, ranks in participants.items():
+                if sample_id not in expected_lengths:
+                    raise RuntimeError(
+                        f"DynamicCP schedule contains unknown sample_id={sample_id} "
+                        f"wave={wave_index}"
+                    )
+                if sample_id in seen:
+                    raise RuntimeError(
+                        f"DynamicCP sample_id={sample_id} appears in waves "
+                        f"{seen[sample_id]} and {wave_index}"
+                    )
+
+                cp_size = len(ranks)
+                required = self.gpus_needed(expected_lengths[sample_id])
+                contiguous = ranks == list(range(ranks[0], ranks[0] + cp_size))
+                power_of_two = cp_size > 0 and cp_size & (cp_size - 1) == 0
+                if not contiguous or not power_of_two or cp_size < required:
+                    raise RuntimeError(
+                        "DynamicCP invalid subgroup: "
+                        f"wave={wave_index} sample_id={sample_id} ranks={ranks} "
+                        f"cp_size={cp_size} required={required}"
+                    )
+                seen[sample_id] = wave_index
+
+        missing = sorted(set(expected_lengths) - set(seen))
+        if missing:
+            raise RuntimeError(f"DynamicCP schedule omitted sample_ids={missing}")
+
     def get_groups_and_subsamples(self, sample_id_seqlens, config):
         """
         This function recursively forms groups of sub-samples such that all DPxCP ranks
@@ -472,6 +541,7 @@ class BalancedCPScheduler:
         """
         groups = []
         sample_id_groups = []
+        all_sample_id_seqlens = list(sample_id_seqlens)
         # We assign a sample_id to each sub-sample in order to track assignment to each GPU.
         sample_id_seqlens = sorted(sample_id_seqlens, key=lambda x: x[1], reverse=True)
         while sample_id_seqlens:
@@ -483,6 +553,7 @@ class BalancedCPScheduler:
                 sample_ids.extend([] * (self.total_hdp_gpus - len(sample_ids)))
             sample_id_groups.append(sample_ids)
 
+        self.validate_collective_safe_groups(all_sample_id_seqlens, sample_id_groups)
         return groups, sample_id_groups
 
 
@@ -587,9 +658,7 @@ def hybrid_context_parallel_forward_backward(
                 # Energon multimodal samples are routed in a tensor-only wire
                 # format. Restore the batch-shaped dict expected by
                 # examples/multimodal/train.py only after scheduling/routing.
-                from megatron.core.datasets.data_schedule import (
-                    restore_multimodal_hybrid_cp_sample,
-                )
+                from megatron.core.datasets.data_schedule import restore_multimodal_hybrid_cp_sample
 
                 sample = restore_multimodal_hybrid_cp_sample(sample, partner_cp_size)
             else:
