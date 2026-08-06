@@ -31,6 +31,23 @@ def _participant_counts(sample_id_groups: list[list[list[int]]]) -> Counter[int]
 
 
 class HybridCPScheduleTest(unittest.TestCase):
+    def test_minimum_cp_size_prevents_cp1_samples(self) -> None:
+        scheduler = BalancedCPScheduler(65_536, _Group(4), min_cp_size=2)
+        samples = [(0, 41_184), (1, 9_952)]
+
+        _, waves = scheduler.get_groups_and_subsamples(samples, config=None)
+        stats = summarize_hybrid_cp_schedule(samples, waves)
+
+        self.assertEqual(scheduler.gpus_needed(9_952), 2)
+        self.assertEqual(stats["hybrid_cp/cp1_samples"], 0)
+        self.assertEqual(stats["hybrid_cp/cp2_samples"], 2)
+
+    def test_minimum_cp_size_must_be_a_supported_power_of_two(self) -> None:
+        with self.assertRaisesRegex(ValueError, "power of two"):
+            BalancedCPScheduler(65_536, _Group(4), min_cp_size=3)
+        with self.assertRaisesRegex(ValueError, "exceeds"):
+            BalancedCPScheduler(65_536, _Group(4), min_cp_size=8)
+
     def test_schedule_summary_counts_unique_work_instead_of_participants(self) -> None:
         scheduler = BalancedCPScheduler(65_536, _Group(4))
         samples = [(0, 71_264), (1, 41_184), (2, 9_952), (3, 8_000)]

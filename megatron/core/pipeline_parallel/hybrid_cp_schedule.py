@@ -143,12 +143,25 @@ class BalancedCPScheduler:
     such that all DPxCP ranks have a roughly balanced workload in the group.
     """
 
-    def __init__(self, max_seq_len_per_rank: int, dp_cp_group: torch.distributed.ProcessGroup):
+    def __init__(
+        self,
+        max_seq_len_per_rank: int,
+        dp_cp_group: torch.distributed.ProcessGroup,
+        min_cp_size: int = 1,
+    ):
         self.max_seq_len_per_rank = max_seq_len_per_rank
         self.num_subsamples = 0
         self.num_subsamples_processed = 0
         self.free_resources = []
         self.total_hdp_gpus = dp_cp_group.size()
+        if min_cp_size < 1 or min_cp_size & (min_cp_size - 1):
+            raise ValueError("DynamicCP minimum CP size must be a positive power of two")
+        if min_cp_size > self.total_hdp_gpus:
+            raise ValueError(
+                f"DynamicCP minimum CP size {min_cp_size} exceeds "
+                f"DPxCP capacity {self.total_hdp_gpus}"
+            )
+        self.min_cp_size = min_cp_size
 
     @lru_cache(maxsize=128)
     def get_total_workload(self, seq_length: int, cp_size: Optional[int] = None):
@@ -176,7 +189,10 @@ class BalancedCPScheduler:
         The number is rounded up to the next power of 2 to match the available
         hybrid context parallel process group sizes.
         """
-        return max(1, 2 ** ceil(log2((seq_len / self.max_seq_len_per_rank))))
+        return max(
+            self.min_cp_size,
+            2 ** ceil(log2((seq_len / self.max_seq_len_per_rank))),
+        )
 
     def make_buckets_equal(
         self,

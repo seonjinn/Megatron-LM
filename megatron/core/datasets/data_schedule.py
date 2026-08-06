@@ -373,7 +373,9 @@ class HybridCPDataLoaderWrapper:
         ), "dp_cp_group, dp_group, tp_group must not be None when using hybrid context parallel"
 
         self.cp_balancing_scheduler = BalancedCPScheduler(
-            max_seq_len_per_rank=self.config.max_seqlen_per_dp_cp_rank, dp_cp_group=self.dp_cp_group
+            max_seq_len_per_rank=self.config.max_seqlen_per_dp_cp_rank,
+            dp_cp_group=self.dp_cp_group,
+            min_cp_size=self.config.dynamic_context_parallel_min_size,
         )
 
         self.total_hdp_gpus = self.dp_cp_group.size()

@@ -77,6 +77,14 @@ class ModelParallelConfig:
     each rank when using hybrid_context_parallel.
     """
 
+    dynamic_context_parallel_min_size: int = field(
+        default=1,
+        metadata={
+            "argparse_meta": {"arg_names": ["--dynamic-context-parallel-min-size"]}
+        },
+    )
+    """Minimum scheduler-selected local CP size for DynamicCP samples."""
+
     pad_packed_seq_alignment: Optional[Union[int, Literal["max"]]] = field(
         default=None,
         metadata={
@@ -441,6 +449,13 @@ class ModelParallelConfig:
         See https://docs.python.org/3/library/dataclasses.html#post-init-processing for more
         details.
         """
+        if (
+            self.dynamic_context_parallel_min_size < 1
+            or self.dynamic_context_parallel_min_size
+            & (self.dynamic_context_parallel_min_size - 1)
+        ):
+            raise ValueError("--dynamic-context-parallel-min-size must be a positive power of two")
+
         if self.thd_tail_padding_policy not in (None, "append_dummy_seq", "extend_last"):
             raise ValueError(
                 "--thd-tail-padding-policy must be 'append_dummy_seq' or 'extend_last', "
