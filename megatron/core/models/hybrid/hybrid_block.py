@@ -5,6 +5,7 @@
 # This source code is licensed under the Apache license found in the
 # LICENSE file in the root directory of this source tree.
 
+import os
 from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Optional, Tuple, Union
@@ -31,6 +32,12 @@ from megatron.core.transformer.spec_utils import ModuleSpec, build_module
 from megatron.core.transformer.transformer_layer import TransformerLayer
 from megatron.core.transformer.utils import sharded_state_dict_default
 from megatron.core.utils import WrappedTensor, deprecate_inference_params, make_viewless_tensor
+
+
+def _hybrid_cp_layer_debug(message: str) -> None:
+    """Emit opt-in per-layer markers while debugging dynamic-CP hangs."""
+    if os.getenv("MEGATRON_HYBRID_CP_LAYER_DEBUG") == "1":
+        print(f"[HYBRID_CP_LAYER_DEBUG] {message}", flush=True)
 
 
 @dataclass
@@ -325,6 +332,15 @@ class HybridStack(MegatronModule):
                     inner_quant_context = get_inner_quant_context(
                         self.config, layer.layer_number - 1
                     )
+                    layer_name = getattr(layer, "layer_number", "?")
+                    layer_kind = (
+                        self.layer_type_list[int(layer_name) - 1]
+                        if layer_name != "?"
+                        else type(layer).__name__
+                    )
+                    _hybrid_cp_layer_debug(
+                        f"before layer={layer_name} kind={layer_kind} input={tuple(hidden_states.shape)}"
+                    )
                     with inner_quant_context:
                         if isinstance(layer, TransformerLayer):
                             hidden_states, _ = layer(
@@ -349,6 +365,9 @@ class HybridStack(MegatronModule):
                     # for cross-attention, and is not needed in our model.
                     if isinstance(hidden_states, tuple):
                         hidden_states = hidden_states[0]
+                    _hybrid_cp_layer_debug(
+                        f"after layer={layer_name} kind={layer_kind} output={tuple(hidden_states.shape)}"
+                    )
 
         # Final layer norm.
         if self.post_process and self.post_layer_norm:
