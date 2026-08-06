@@ -10,6 +10,7 @@ from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.process_groups_config import ProcessGroupCollection
 from megatron.core.ssm.mamba_layer import MambaLayer, MambaLayerSubmodules
 from megatron.core.ssm.mamba_mixer import (
+    MambaMixer,
     _mamba_target_tokens_for_static_graph,
     _slice_packed_seq_idx_for_sequence_parallel,
 )
