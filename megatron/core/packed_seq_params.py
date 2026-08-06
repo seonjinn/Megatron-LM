@@ -79,10 +79,12 @@ def resolve_cp_group(
     static_cp_group: Optional[dist.ProcessGroup],
     packed_seq_params: Optional[PackedSeqParams] = None,
 ) -> Optional[dist.ProcessGroup]:
-    """Prefer the per-sample DynamicCP group over the construction-time group."""
+    """Prefer per-sample DynamicCP metadata over the construction-time group."""
 
     if packed_seq_params is not None and packed_seq_params.cp_group is not None:
         return packed_seq_params.cp_group
+    if packed_seq_params is not None and packed_seq_params.local_cp_size == 1:
+        return None
     return static_cp_group
 
 
