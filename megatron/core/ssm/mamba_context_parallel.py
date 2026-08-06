@@ -60,7 +60,7 @@ class MambaContextParallel:
 
     def __init__(
         self,
-        cp_group: torch.distributed.ProcessGroup,
+        cp_group: Optional[torch.distributed.ProcessGroup],
         d_inner_local_tp: int,
         nheads_local_tp: int,
         ngroups_local_tp: int,
@@ -85,15 +85,14 @@ class MambaContextParallel:
         self.D_cp1 = D_cp1
         self.D_has_hdim = D_has_hdim
 
-        self.cp_size = self.cp_group.size()
+        self.cp_size = 1 if self.cp_group is None else self.cp_group.size()
+        self.cp_rank = 0 if self.cp_group is None else self.cp_group.rank()
 
         if self.cp_size == 1:
             self.d_inner_local_tpcp = self.d_inner_local_tp
             self.nheads_local_tpcp = self.nheads_local_tp
             self.ngroups_local_tpcp = self.ngroups_local_tp
             return
-
-        self.cp_rank = self.cp_group.rank()
 
         # Ensure that each CP rank gets at least one head:
         assert (
@@ -129,6 +128,25 @@ class MambaContextParallel:
         # because `nheads % ngroups == 0`, and therefore `nheads_local_tp % ngroups_local_tp == 0`,
         # and also `nheads_local_tpcp = nheads_local_tp // cp_size` whilst ngroups_local_tpcp is
         # either 1 or `ngroups_local_tp // cp_size`
+
+    def for_group(
+        self, cp_group: Optional[torch.distributed.ProcessGroup]
+    ) -> "MambaContextParallel":
+        """Return a CP-sharded view for one scheduler-selected sample group."""
+        if cp_group is self.cp_group:
+            return self
+        return type(self)(
+            cp_group=cp_group,
+            d_inner_local_tp=self.d_inner_local_tp,
+            nheads_local_tp=self.nheads_local_tp,
+            ngroups_local_tp=self.ngroups_local_tp,
+            d_state=self.d_state,
+            conv1d_cp1=self.conv1d_cp1,
+            dt_bias_cp1=self.dt_bias_cp1,
+            A_log_cp1=self.A_log_cp1,
+            D_cp1=self.D_cp1,
+            D_has_hdim=self.D_has_hdim,
+        )
 
     def pre_conv_ssm(
         self, input_: torch.Tensor, packed_seq_params: Optional[PackedSeqParams] = None
