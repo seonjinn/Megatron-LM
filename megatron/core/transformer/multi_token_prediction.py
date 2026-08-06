@@ -17,7 +17,7 @@ from megatron.core.extensions.transformer_engine import HAVE_TE
 from megatron.core.fp8_utils import get_fp8_context
 from megatron.core.inference.utils import InferenceMode
 from megatron.core.models.backends import BackendSpecProvider, LocalSpecProvider
-from megatron.core.packed_seq_params import PackedSeqParams
+from megatron.core.packed_seq_params import PackedSeqParams, resolve_cp_group
 from megatron.core.pipeline_parallel.utils import is_vp_last_stage
 from megatron.core.process_groups_config import ProcessGroupCollection
 from megatron.core.tensor_parallel import (
@@ -725,6 +725,7 @@ def process_mtp_loss(
     if labels is None:
         return hidden_states
 
+    cp_group = resolve_cp_group(cp_group, packed_seq_params)
     mtp_labels = labels.clone()
     if loss_mask is None:
         loss_mask = torch.ones_like(mtp_labels)
@@ -969,19 +970,19 @@ class MultiTokenPredictionLayer(MegatronModule):
                 sequence length, b is the batch size, and h is the hidden size.
             packed_seq_params (PackedSeqParams): Parameters for packed sequence processing.
         """
-        # Calc logits for the current Multi-Token Prediction (MTP) layers.
+        cp_group = resolve_cp_group(self.cp_group, packed_seq_params)
         input_ids, _ = roll_tensor(
             input_ids,
             shifts=-1,
             dims=-1,
-            cp_group=self.cp_group,
+            cp_group=cp_group,
             packed_seq_params=packed_seq_params,
         )
         position_ids, _ = roll_tensor(
             position_ids,
             shifts=-1,
             dims=-1,
-            cp_group=self.cp_group,
+            cp_group=cp_group,
             packed_seq_params=packed_seq_params,
         )
         if padding_mask is not None:
@@ -989,7 +990,7 @@ class MultiTokenPredictionLayer(MegatronModule):
                 padding_mask,
                 shifts=-1,
                 dims=-1,
-                cp_group=self.cp_group,
+                cp_group=cp_group,
                 packed_seq_params=packed_seq_params,
             )
         # embedding
@@ -1005,12 +1006,13 @@ class MultiTokenPredictionLayer(MegatronModule):
         hidden_states: torch.Tensor,
         packed_seq_params: Optional[PackedSeqParams] = None,
     ):
+        cp_group = resolve_cp_group(self.cp_group, packed_seq_params)
         decoder_input, _ = roll_tensor_precomputed_embeddings(
             decoder_input,
             shifts=-1,
             dims=0,
             sp_group=self.tp_group if self.sequence_parallel else None,
-            cp_group=self.cp_group,
+            cp_group=cp_group,
             packed_seq_params=packed_seq_params,
         )
 

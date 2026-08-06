@@ -75,6 +75,17 @@ class PackedSeqParams:
             )
 
 
+def resolve_cp_group(
+    static_cp_group: Optional[dist.ProcessGroup],
+    packed_seq_params: Optional[PackedSeqParams] = None,
+) -> Optional[dist.ProcessGroup]:
+    """Prefer the per-sample DynamicCP group over the construction-time group."""
+
+    if packed_seq_params is not None and packed_seq_params.cp_group is not None:
+        return packed_seq_params.cp_group
+    return static_cp_group
+
+
 def _pad_seq_tensor(tensor: Optional[Tensor], target_len: int) -> Optional[Tensor]:
     """Pad a token-like tensor to a fixed final-dimension length."""
     if tensor is None:
