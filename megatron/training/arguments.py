@@ -45,6 +45,7 @@ from megatron.core.utils import (
     is_torch_min_version,
 )
 from megatron.training.argument_utils import ArgumentGroupFactory, core_transformer_config_from_args
+from megatron.training.dynamic_context_parallel import normalize_dynamic_context_parallel_args
 from megatron.training.global_vars import set_global_variables
 from megatron.training.utils import (
     get_device_arch_version,
@@ -1387,6 +1388,8 @@ def validate_args(args, defaults={}):
 
     if args.tp_comm_overlap:
         assert args.sequence_parallel == True, 'Tensor parallel communication/GEMM overlap can happen only when sequence parallelism is enabled'
+
+    normalize_dynamic_context_parallel_args(args)
 
     if args.hybrid_context_parallel:
         assert not args.pipeline_model_parallel_size > 1, 'Hybrid context parallelism not supported with pipeline parallelism'
@@ -2897,6 +2900,16 @@ def _add_distributed_args(parser):
                        'all layers will share the same communication type. Users can also '
                        'specify separated types for each layer like '
                        '--cp-comm-type p2p p2p a2a a2a a2a+p2p a2a+p2p')
+    group.add_argument(
+        '--dynamic-context-parallel',
+        action='store_true',
+        default=False,
+        help=(
+            'Enable the DynamicCP spelling for packed multimodal data. On the pinned '
+            'VLM2 branch this is a compatibility alias for the custom Energon HybridCP '
+            'scheduler; the generic upstream DynamicCP dataloader is not selected.'
+        ),
+    )
     group.add_argument('--fake-process-group', action='store_true', default=False,
                        help='If set, initialize with fake distributed process group and all distributed communication operations will be skipped. \
                        This is quite useful for profiling memory usage of distributed training with just one GPU. \
