@@ -17,6 +17,7 @@ from packaging.version import Version as PkgVersion
 from megatron.core.activations import squared_relu
 from megatron.core.dist_checkpointing.validation import StrictHandling
 from megatron.core.fusions.fused_bias_geglu import quick_gelu
+from megatron.core.model_parallel_config import _parse_pad_packed_seq_alignment
 from megatron.core.msc_utils import MultiStorageClientFeature
 from megatron.core.quantization.utils import (
     kitchen_quantization_recipe_config,
@@ -44,6 +45,7 @@ from megatron.core.utils import (
     is_torch_min_version,
 )
 from megatron.training.argument_utils import ArgumentGroupFactory, core_transformer_config_from_args
+from megatron.training.dynamic_context_parallel import normalize_dynamic_context_parallel_args
 from megatron.training.global_vars import set_global_variables
 from megatron.training.utils import (
     get_device_arch_version,
@@ -1387,11 +1389,21 @@ def validate_args(args, defaults={}):
     if args.tp_comm_overlap:
         assert args.sequence_parallel == True, 'Tensor parallel communication/GEMM overlap can happen only when sequence parallelism is enabled'
 
+    normalize_dynamic_context_parallel_args(args)
+
     if args.hybrid_context_parallel:
         assert not args.pipeline_model_parallel_size > 1, 'Hybrid context parallelism not supported with pipeline parallelism'
         assert not args.enable_cuda_graph, 'Hybrid context parallelism not supported with CUDA Graph'
         assert not args.use_megatron_fsdp, 'Hybrid context parallelism not supported with Megatron FSDP'
-        assert args.dataloader_type == 'single', 'Hybrid context parallelism only supported with single dataloader type'
+        # HybridCPDataLoaderWrapper performs the sample scheduling after the
+        # training iterator has been built.  It therefore works with the
+        # external (Energon) iterator used by multimodal SFT as well as the
+        # indexed Megatron ``single`` dataloader.  Keeping ``external`` here
+        # avoids forcing an Energon iterator through the indexed sampler,
+        # which requires ``len(dataset)`` and ``dataset[index]``.
+        assert args.dataloader_type in ('single', 'external'), (
+            'Hybrid context parallelism only supported with single or external dataloader type'
+        )
         assert args.calculate_per_token_loss, 'Hybrid context parallelism must be used with --calculate-per-token-loss'
 
     # disable async_tensor_model_parallel_allreduce when
@@ -1732,6 +1744,62 @@ def validate_args(args, defaults={}):
         args.cpu_offloading = True
 
     # CUDA Graphs
+    if args.pad_packed_seq_alignment is not None:
+        args.pad_packed_seq_alignment = _parse_pad_packed_seq_alignment(
+            args.pad_packed_seq_alignment
+        )
+        if args.max_seqlen_per_dp_cp_rank is None:
+            raise ValueError(
+                '--max-seqlen-per-dp-cp-rank must be set when '
+                '--pad-packed-seq-alignment is enabled.'
+            )
+        if (
+            args.pad_packed_seq_alignment != 'max'
+            and args.pad_packed_seq_alignment > args.max_seqlen_per_dp_cp_rank
+        ):
+            raise ValueError(
+                '--pad-packed-seq-alignment must not exceed '
+                f'--max-seqlen-per-dp-cp-rank ({args.max_seqlen_per_dp_cp_rank}), '
+                f'got {args.pad_packed_seq_alignment}.'
+            )
+
+    if args.thd_max_packed_sequences is not None and args.thd_max_packed_sequences <= 0:
+        raise ValueError(
+            '--thd-max-packed-sequences must be positive, '
+            f'got {args.thd_max_packed_sequences}.'
+        )
+
+    static_thd_requested = any(
+        value is not None
+        for value in (
+            args.pad_packed_seq_alignment,
+            args.thd_max_packed_sequences,
+            args.thd_tail_padding_policy,
+        )
+    )
+    if args.cuda_graph_impl != 'none' and static_thd_requested:
+        missing_bounds = []
+        if args.max_seqlen_per_dp_cp_rank is None:
+            missing_bounds.append('--max-seqlen-per-dp-cp-rank')
+        if args.pad_packed_seq_alignment is None:
+            missing_bounds.append('--pad-packed-seq-alignment')
+        if args.thd_max_packed_sequences is None:
+            missing_bounds.append('--thd-max-packed-sequences')
+        if missing_bounds:
+            raise ValueError(
+                'Static THD CUDA Graph configuration requires fixed bounds: '
+                + ', '.join(missing_bounds)
+                + '.'
+            )
+        if args.pad_packed_seq_alignment not in (
+            'max',
+            args.max_seqlen_per_dp_cp_rank,
+        ):
+            raise ValueError(
+                'Static THD CUDA Graph requires --pad-packed-seq-alignment=max or the '
+                'exact --max-seqlen-per-dp-cp-rank value.'
+            )
+
     if args.cuda_graph_impl != "none":
         if (
             "transformer_engine" in (args.transformer_impl, args.cuda_graph_impl)
@@ -2832,6 +2900,16 @@ def _add_distributed_args(parser):
                        'all layers will share the same communication type. Users can also '
                        'specify separated types for each layer like '
                        '--cp-comm-type p2p p2p a2a a2a a2a+p2p a2a+p2p')
+    group.add_argument(
+        '--dynamic-context-parallel',
+        action='store_true',
+        default=False,
+        help=(
+            'Enable the DynamicCP spelling for packed multimodal data. On the pinned '
+            'VLM2 branch this is a compatibility alias for the custom Energon HybridCP '
+            'scheduler; the generic upstream DynamicCP dataloader is not selected.'
+        ),
+    )
     group.add_argument('--fake-process-group', action='store_true', default=False,
                        help='If set, initialize with fake distributed process group and all distributed communication operations will be skipped. \
                        This is quite useful for profiling memory usage of distributed training with just one GPU. \
@@ -3139,6 +3217,13 @@ def _add_moe_args(parser):
                        help='Determines the load balancing strategy for the router. "aux_loss" corresponds to the load balancing loss used in GShard and SwitchTransformer; "seq_aux_loss" corresponds to the load balancing loss used in DeepSeekV2, which computes the loss for each individual sample; "sinkhorn" corresponds to the balancing algorithm used in S-BASE, and "none" implies no load balancing. The default is "aux_loss".')
     group.add_argument('--moe-aux-loss-coeff', type=float, nargs='+', default=0.0,
                        help='Scaling coefficient for the aux loss: a starting value of 1e-2 is recommended.')
+    group.add_argument(
+        '--no-moe-shared-expert-overlap',
+        action='store_false',
+        dest='moe_shared_expert_overlap',
+        default=argparse.SUPPRESS,
+        help='Disable shared-expert communication overlap after the transformer default flag.',
+    )
     # Token dispatcher arguments
     # MoE communication overlap arguments
 

@@ -1,6 +1,7 @@
 # Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
 import copy
 import logging
+import os
 from collections import namedtuple
 from copy import deepcopy
 from functools import partial
@@ -61,6 +62,136 @@ DEFAULT_SOUND_TOKEN_INDEX = -300
 IMAGE_TOKEN = "<image>"
 VIDEO_TOKEN = "<video>"
 SOUND_TOKEN = "<so_embedding>"
+
+
+def _hybrid_cp_debug(message: str) -> None:
+    """Emit rank-local LLaVA diagnostics when explicitly enabled."""
+
+    if os.environ.get("MEGATRON_HYBRID_CP_DEBUG") != "1":
+        return
+    rank = "?"
+    if torch.distributed.is_available() and torch.distributed.is_initialized():
+        rank = str(torch.distributed.get_rank())
+    print(f"[HYBRID_CP_DEBUG][rank={rank}] {message}", flush=True)
+
+
+def _hybrid_cp_packed_metadata(packed_seq_params) -> str:
+    """Format the small THD metadata surface used by the DynamicCP probe."""
+
+    if packed_seq_params is None:
+        return "packed=None"
+    cu_q = getattr(packed_seq_params, "cu_seqlens_q", None)
+    cu_q_padded = getattr(packed_seq_params, "cu_seqlens_q_padded", None)
+    cp_group = getattr(packed_seq_params, "cp_group", None)
+    cp_group_size = cp_group.size() if cp_group is not None else None
+    cp_group_rank = cp_group.rank() if cp_group is not None else None
+    def _values(tensor):
+        return tensor.detach().cpu().tolist() if isinstance(tensor, torch.Tensor) else None
+    return (
+        f"qkv={getattr(packed_seq_params, 'qkv_format', None)} "
+        f"cu_q={_values(cu_q)} cu_q_padded={_values(cu_q_padded)} "
+        f"max_q={getattr(packed_seq_params, 'max_seqlen_q', None)} "
+        f"total_tokens={getattr(packed_seq_params, 'total_tokens', None)} "
+        f"local_cp={getattr(packed_seq_params, 'local_cp_size', None)} "
+        f"cp_group={cp_group_size}/{cp_group_rank}"
+    )
+
+
+def pad_sequence_lengths_for_context_parallel(
+    sequence_lengths: torch.Tensor, shard_factor: int | None
+) -> torch.Tensor:
+    """Round each routed multimodal sample up to its CP shard alignment.
+
+    Hybrid context parallelism routes variable-length packed samples to a
+    dynamically selected CP group.  The multimodal embedding surface must be
+    divisible by the active group's CP/SP shard factor before the sequence is
+    partitioned.  The appended positions are represented as zero-loss padding
+    by the caller.
+    """
+    if shard_factor is None:
+        return sequence_lengths
+    if shard_factor <= 0:
+        raise ValueError(f"context-parallel shard factor must be positive, got {shard_factor}")
+    if sequence_lengths.ndim != 1:
+        raise ValueError(
+            "context-parallel sequence lengths must be a one-dimensional tensor, "
+            f"got shape {tuple(sequence_lengths.shape)}"
+        )
+    if torch.any(sequence_lengths < 0):
+        raise ValueError("context-parallel sequence lengths must be non-negative")
+    return ((sequence_lengths + shard_factor - 1) // shard_factor) * shard_factor
+
+
+def update_multimodal_packed_seq_params(
+    packed_seq_params: Optional[PackedSeqParams], sequence_lengths: torch.Tensor
+) -> Optional[PackedSeqParams]:
+    """Rebuild THD boundaries after text tokens are expanded with media tokens.
+
+    The multimodal dataloader creates packed metadata for the text-only
+    boundaries.  LLaVA later replaces image/audio placeholders with their
+    embedding spans, so Mamba's ``seq_idx`` and TE's THD boundaries must be
+    rebuilt from the expanded sample lengths before sequence parallelism.
+    HybridCP relies on this metadata being local to the routed sample.
+    """
+    if packed_seq_params is None or packed_seq_params.qkv_format != "thd":
+        return packed_seq_params
+    # The text-derived THD boundaries are already authoritative for the
+    # normal eager/graph path.  Only HybridCP attaches ``local_cp_size`` and
+    # routes a sample whose media-expanded boundaries must be rebuilt here.
+    # Keeping this updater scoped prevents a singleton ``seq_lens`` tensor from
+    # being applied to an ordinary multi-sample packed batch.
+    if getattr(packed_seq_params, "local_cp_size", None) is None:
+        return packed_seq_params
+    if sequence_lengths.ndim != 1 or sequence_lengths.numel() == 0:
+        raise ValueError("multimodal packed sequence lengths must be a non-empty 1D tensor")
+
+    cu_seqlens = packed_seq_params.cu_seqlens_q
+    if cu_seqlens is None:
+        raise ValueError("THD packed metadata requires cu_seqlens_q")
+    if sequence_lengths.numel() != cu_seqlens.numel() - 1:
+        raise ValueError(
+            "multimodal packed sequence count does not match cu_seqlens_q: "
+            f"{sequence_lengths.numel()} != {cu_seqlens.numel() - 1}"
+        )
+
+    # Transformer Engine requires every THD boundary tensor (including the
+    # padded graph-capture surface) to use int32.  Some multimodal packing
+    # paths materialize the padded boundaries as int64, so normalize the
+    # complete metadata set here instead of preserving a mixed dtype.
+    cu_dtype = torch.int32
+    sequence_lengths = sequence_lengths.to(device=cu_seqlens.device, dtype=cu_dtype)
+    new_cu_seqlens = torch.cat(
+        [
+            torch.zeros(1, dtype=cu_dtype, device=cu_seqlens.device),
+            sequence_lengths.cumsum(0).to(dtype=cu_dtype),
+        ]
+    )
+
+    old_padded = packed_seq_params.cu_seqlens_q_padded
+    new_padded = None
+    if old_padded is not None:
+        # Preserve the fixed THD surface selected by the dataloader/graph
+        # capture, while never truncating a media-expanded sample.
+        padded_total = max(int(old_padded[-1].item()), int(new_cu_seqlens[-1].item()))
+        new_padded = new_cu_seqlens.clone()
+        new_padded[-1] += padded_total - int(new_cu_seqlens[-1].item())
+
+    packed_seq_params.cu_seqlens_q = new_cu_seqlens
+    packed_seq_params.cu_seqlens_kv = new_cu_seqlens.clone()
+    packed_seq_params.cu_seqlens_q_padded = new_padded
+    packed_seq_params.cu_seqlens_kv_padded = new_padded.clone() if new_padded is not None else None
+    packed_seq_params.max_seqlen_q = int(
+        (new_padded[1:] - new_padded[:-1]).max().item()
+        if new_padded is not None
+        else sequence_lengths.max().item()
+    )
+    packed_seq_params.max_seqlen_kv = packed_seq_params.max_seqlen_q
+    packed_seq_params.total_tokens = int(
+        new_padded[-1].item() if new_padded is not None else new_cu_seqlens[-1].item()
+    )
+    packed_seq_params.seq_idx = None
+    packed_seq_params.__post_init__()
+    return packed_seq_params
 
 
 # Note: This is under development and may be missing features.
@@ -599,6 +730,28 @@ class LLaVAModel(MegatronModule):
                     continue
                 param.requires_grad = False
 
+    def _get_thd_graph_token_capacity(
+        self, packed_seq_params: Optional[PackedSeqParams]
+    ) -> Optional[int]:
+        """Return the fixed language token capacity required by a TE THD graph."""
+        if packed_seq_params is None or packed_seq_params.qkv_format != "thd":
+            return None
+        if getattr(packed_seq_params, "cuda_graph_eligible", None) is False:
+            return None
+
+        language_config = self.language_model.config
+        cuda_graph_impl = getattr(language_config, "cuda_graph_impl", "none")
+        pad_alignment = getattr(language_config, "pad_packed_seq_alignment", None)
+        max_tokens_per_rank = getattr(language_config, "max_seqlen_per_dp_cp_rank", None)
+        if (
+            cuda_graph_impl == "none"
+            or max_tokens_per_rank is None
+            or pad_alignment not in ("max", max_tokens_per_rank)
+        ):
+            return None
+
+        return int(max_tokens_per_rank) * max(1, int(getattr(self, "context_parallel_lm", 1) or 1))
+
     def _preprocess_data(
         self,
         image_embeddings,
@@ -659,7 +812,6 @@ class LLaVAModel(MegatronModule):
         """
 
         inference_context = deprecate_inference_params(inference_context, inference_params)
-
         assert self.add_decoder, "input text preprocessing is only needed for the language model"
 
         # No pre- or postprocessing needed.
@@ -693,6 +845,14 @@ class LLaVAModel(MegatronModule):
             img_seq_len = img_seq_len.to("cuda")
 
         batch_size, text_seq_len = input_ids.shape
+
+        hybrid_cp_shard_factor = None
+        if packed_seq_params is not None:
+            local_cp_size = getattr(packed_seq_params, "local_cp_size", None)
+            if local_cp_size is not None:
+                hybrid_cp_shard_factor = self._calc_shard_factor_for_cp_size(
+                    int(local_cp_size)
+                )
 
         has_labels = labels is not None
         if has_labels:
@@ -731,7 +891,16 @@ class LLaVAModel(MegatronModule):
                 seq_lens = (
                     num_image_tiles_batch * img_seq_len - num_images_per_sample + text_seq_len
                 )
-            max_seq_len = seq_lens.max()
+            # HybridCP routes each packed sample independently.  Its active
+            # CP group may be smaller than the global model group, so the
+            # media-expanded length must be aligned per sample before the
+            # dynamic CP partition is applied.  Keep ``seq_lens`` unchanged
+            # for label placement and use the rounded lengths only for the
+            # physical padded embedding/THD surface.
+            padded_seq_lens = pad_sequence_lengths_for_context_parallel(
+                seq_lens, hybrid_cp_shard_factor
+            )
+            max_seq_len = padded_seq_lens.max()
             #TODO: should remove this code and force people to us dataloader-seq-length when using pipeline parallelism?
             # Pipeline parallel expects fixed input size. Check if we need to pad.
             if (
@@ -740,6 +909,28 @@ class LLaVAModel(MegatronModule):
                 and inference_context is None
             ):
                 max_seq_len = self._language_max_sequence_length
+
+            # TE CUDA graphs use a fixed THD token surface. The input batch is padded to this
+            # capacity before entering LLaVA, but multimodal replacement above derives
+            # ``max_seq_len`` from the real expanded samples and would otherwise discard that
+            # tail padding. Preserve the graph capacity so the language decoder receives the
+            # same hidden-state shape used during graph capture. The padding mask and padded
+            # cu-seqlens metadata make the appended slots invisible to attention and loss.
+            graph_token_capacity = self._get_thd_graph_token_capacity(packed_seq_params)
+            if graph_token_capacity is not None:
+                current_seq_len = (
+                    int(max_seq_len.item())
+                    if isinstance(max_seq_len, torch.Tensor)
+                    else int(max_seq_len)
+                )
+                if current_seq_len > graph_token_capacity:
+                    raise ValueError(
+                        "Packed multimodal CUDA Graph token capacity exceeded after "
+                        f"media expansion: required {current_seq_len}, configured "
+                        f"{graph_token_capacity}. Increase the global packing length or "
+                        "--max-seqlen-per-dp-cp-rank."
+                    )
+                max_seq_len = graph_token_capacity
 
             batch_indices, non_image_indices = torch.where(image_token_mask != True)
 
@@ -970,8 +1161,25 @@ class LLaVAModel(MegatronModule):
                 final_labels, final_loss_mask = self.efficient_video_sampler.mask_labels_and_loss_mask(
                     labels=final_labels, loss_mask=final_loss_mask, evs_mask=final_retention_mask, packed_seq_params=initial_packed_seq_params,
                     per_sample_pad_to_divisibility=shard_factor, sequence_pad_to_divisibility=sequence_pad_to_divisibility,
-                    labels_padding_value=IGNORE_INDEX, loss_padding_value=0
+                labels_padding_value=IGNORE_INDEX, loss_padding_value=0
                 )
+
+        if packed_seq_params is not None and packed_seq_params.qkv_format == "thd":
+            expanded_lengths = pad_sequence_lengths_for_context_parallel(
+                seq_lens, hybrid_cp_shard_factor
+            )
+            if final_embedding is not None and expanded_lengths.numel() == 1:
+                # Mamba sees the actual language embedding surface after CP/TP
+                # preprocessing; use that surface rather than the pre-media
+                # length estimate when the model duplicates a CP shard.
+                expanded_tokens = (
+                    final_embedding.shape[1]
+                    if final_embedding.dim() == 3
+                    else final_embedding.shape[0]
+                )
+                expanded_lengths = expanded_lengths.new_tensor([expanded_tokens])
+            update_multimodal_packed_seq_params(packed_seq_params, expanded_lengths)
+
 
         if final_embedding is not None and final_labels is not None:
             assert (
@@ -1022,21 +1230,48 @@ class LLaVAModel(MegatronModule):
         return shard_factor, seq_dim
 
     def _calc_shard_factor(self, *, validate_with_combined_embeddings=None):
+        return self._calc_shard_factor_for_cp_size(
+            self.context_parallel_lm,
+            validate_with_combined_embeddings=validate_with_combined_embeddings,
+        )
+
+    def _calc_shard_factor_for_cp_size(
+        self, context_parallel_lm, *, validate_with_combined_embeddings=None
+    ):
         shard_factor = seq_dim = None
         if not self.pre_process:
             return None
 
         shard_factor, seq_dim = self.calc_shard_factor_and_seq_dim_for_preprocessing(
-            context_parallel_lm=self.context_parallel_lm,
+            context_parallel_lm=context_parallel_lm,
             sequence_parallel_lm=self.sequence_parallel_lm,
             tensor_model_parallel_size_lm=self.tensor_model_parallel_size_lm,
         )
 
+        # HybridCP can route a packed sample to a singleton local CP group
+        # while the model remains globally CP-enabled.  In that case the
+        # multimodal preprocessing surface is still batch-first ([B, S, H])
+        # until this function transposes it below; the generic SP path's
+        # sequence dimension (0) would incorrectly validate the batch size.
+        if (
+            validate_with_combined_embeddings is not None
+            and context_parallel_lm == 1
+            and self.context_parallel_lm > 1
+            and self.sequence_parallel_lm
+            and validate_with_combined_embeddings.dim() == 3
+        ):
+            seq_dim = 1
+
         if validate_with_combined_embeddings is not None and shard_factor is not None:
             assert (
                     validate_with_combined_embeddings.shape[seq_dim] % shard_factor == 0
-            ), f"Sequence length should be divisible by {shard_factor} for \
-                        Sequence/Context parallelism"
+            ), (
+                f"Sequence length should be divisible by {shard_factor} for Sequence/Context "
+                f"parallelism; shape={tuple(validate_with_combined_embeddings.shape)}, "
+                f"seq_dim={seq_dim}, cp_size={context_parallel_lm}, "
+                f"sequence_parallel={self.sequence_parallel_lm}, "
+                f"tp_size={self.tensor_model_parallel_size_lm}"
+            )
             if self.sequence_parallel_lm and self.tp_comm_overlap_lm:
                 assert (
                         validate_with_combined_embeddings.shape[seq_dim] == self._language_max_sequence_length
@@ -1044,6 +1279,15 @@ class LLaVAModel(MegatronModule):
                         == language_max_sequence_length"
 
         return shard_factor
+
+    @staticmethod
+    def _get_active_cp_metadata(packed_seq_params, default_cp_size, default_cp_group):
+        """Return the CP size/group selected for the current packed sample."""
+        local_cp_size = getattr(packed_seq_params, "local_cp_size", None)
+        if local_cp_size is None:
+            return default_cp_size, default_cp_group
+        local_cp_size = int(local_cp_size)
+        return local_cp_size, getattr(packed_seq_params, "cp_group", None)
 
     def _process_embedding_token_parallel(
         self, combined_embeddings, new_labels, new_loss_mask, loss_weight, position_ids: Optional[torch.Tensor], packed_seq_params
@@ -1074,9 +1318,15 @@ class LLaVAModel(MegatronModule):
         if not self.pre_process and not self.post_process:
             return combined_embeddings, new_labels, new_loss_mask, position_ids, packed_seq_params
 
-        _ = self._calc_shard_factor(validate_with_combined_embeddings=combined_embeddings)  # used just to assert we're good
+        active_cp_size, active_cp_group = self._get_active_cp_metadata(
+            packed_seq_params, self.context_parallel_lm, self.cp_group
+        )
+        _ = self._calc_shard_factor_for_cp_size(
+            active_cp_size, validate_with_combined_embeddings=combined_embeddings
+        )  # used just to assert we're good
 
-        if self.context_parallel_lm > 1:
+        if active_cp_size > 1:
+            assert active_cp_group is not None, "HybridCP requires a process group for CP samples"
             batch = dict()
             if self.pre_process:
                 batch["combined_embeddings"] = combined_embeddings
@@ -1098,8 +1348,8 @@ class LLaVAModel(MegatronModule):
                     "1.10.0"
                 ), "Please update Transformer Engine to >= 1.10 to use \
                     Context Parallel with THD format data"
-                cp_size = self.cp_group.size()
-                cp_rank = self.cp_group.rank()
+                cp_size = active_cp_group.size()
+                cp_rank = active_cp_group.rank()
                 for key, data in batch.items():
                     index = tex.thd_get_partitioned_indices(
                         packed_seq_params.cu_seqlens_q_padded, data.size(1), cp_size, cp_rank
@@ -1119,6 +1369,19 @@ class LLaVAModel(MegatronModule):
                 new_loss_mask = batch["new_loss_mask"]
                 if "loss_weight" in batch:
                     new_loss_mask = new_loss_mask * batch["loss_weight"]
+
+        elif self.pre_process and self.context_parallel_lm > 1:
+            # A HybridCP sample may be assigned to one rank even though the
+            # model is configured with a larger global CP size.  In that case
+            # no CP partitioning is needed, but multimodal preprocessing kept
+            # the input batch-first ([B, S, H]), so the language model still
+            # needs [S, B, H] (and SP may still be enabled).  For ordinary
+            # global CP1, _preprocess_data already transposed the input to
+            # [S, B, H]; transposing it here would turn the batch dimension
+            # into the sequence dimension and make TP scatter validate B.
+            combined_embeddings = combined_embeddings.transpose(1, 0).contiguous()
+            if position_ids is not None and position_ids.dim() == 2:
+                position_ids = position_ids.transpose(1, 0).contiguous()
 
         if self.sequence_parallel_lm and self.pre_process:
             combined_embeddings = tensor_parallel.scatter_to_sequence_parallel_region(
@@ -1322,6 +1585,11 @@ class LLaVAModel(MegatronModule):
             loss_mask (torch.Tensor): Loss mask expanded to combined sequence length. Shape [b, s].
         """
         inference_context = deprecate_inference_params(inference_context, inference_params)
+        _hybrid_cp_debug(
+            f"llava_forward_enter input={tuple(input_ids.shape) if input_ids is not None else None} "
+            f"images={tuple(images.shape) if images is not None else None} "
+            f"packed={'yes' if packed_seq_params is not None else 'none'}"
+        )
 
         # Keep a copy of the original imgs_sizes and num_frames in case we split to context parallel ranks later.
         global_imgs_sizes = imgs_sizes.clone() if imgs_sizes is not None else None
@@ -1340,6 +1608,10 @@ class LLaVAModel(MegatronModule):
             )
         )
         has_images = images is not None and images.shape[0] > 0
+        hybrid_cp_sample = (
+            packed_seq_params is not None
+            and getattr(packed_seq_params, "local_cp_size", None) is not None
+        )
 
         has_sounds = (sound_clips is not None and
                       sound_clips.numel() > 1 and  # Not just a single element
@@ -1360,7 +1632,7 @@ class LLaVAModel(MegatronModule):
         elif self.add_encoder and has_images:
             pad = None
             if self._dynamic_resolution:
-                if self.context_parallel_lm > 1:
+                if self.context_parallel_lm > 1 and not hybrid_cp_sample:
                     # This will split the images and imgs_sizes to context parallel ranks. Each rank will have a different imgs_sizes.
                     # If there are fewer images than CP ranks, dummy images are added to keep all ranks active.
                     dummy_img_size = self.vision_model.patch_dim
@@ -1409,7 +1681,7 @@ class LLaVAModel(MegatronModule):
 
             else:
                 assert self._video_temporal_patch_size == 1, "Temporal compression is not supported for tiling"
-                if self.context_parallel_lm > 1 and images.shape[0] >= 2:
+                if self.context_parallel_lm > 1 and not hybrid_cp_sample and images.shape[0] >= 2:
                     cp_images, pad = split_to_context_parallel_ranks(images)
                     image_embeddings = self.vision_model(cp_images)
                 else:
@@ -1510,7 +1782,7 @@ class LLaVAModel(MegatronModule):
             if vision_projection_padding_needed > 0:
                 image_embeddings = image_embeddings[:-vision_projection_padding_needed, :, :]
 
-            if self.context_parallel_lm > 1 and self._dynamic_resolution:
+            if self.context_parallel_lm > 1 and not hybrid_cp_sample and self._dynamic_resolution:
                 image_embeddings = gather_from_context_parallel_ranks_dynamic_res(image_embeddings, num_padded_imgs)
                 # For temporal compression, gather the post-compression imgs_sizes and num_frames
                 # For non-temporal, use the saved global values for backwards compatibility
@@ -1552,7 +1824,7 @@ class LLaVAModel(MegatronModule):
                     raise NotImplementedError  # TODO: must rearrange `masks_seqlen` as well
                 image_embeddings = self._apply_tile_tagging(image_embeddings, num_image_tiles)
 
-            if self.context_parallel_lm > 1 and pad is not None and not self._dynamic_resolution:
+            if self.context_parallel_lm > 1 and not hybrid_cp_sample and pad is not None and not self._dynamic_resolution:
                 image_embeddings = gather_from_context_parallel_ranks(image_embeddings, pad)
 
             # Here, `image_embeddings` and `images` represent entire batch (not cp chunk).
@@ -1602,7 +1874,7 @@ class LLaVAModel(MegatronModule):
             sound_pad = None
             is_parakeet = "parakeet" in self.sound_model.config.sound_model_type.lower()
 
-            if self.context_parallel_lm > 1 and sound_clips.shape[0] > self.context_parallel_lm:
+            if self.context_parallel_lm > 1 and not hybrid_cp_sample and sound_clips.shape[0] > self.context_parallel_lm:
                 sound_clips, sound_pad = split_to_context_parallel_ranks(sound_clips)
                 if is_parakeet:
                     # Parakeet needs sound lengths. Minimum sound length is the hop length.
@@ -1643,7 +1915,7 @@ class LLaVAModel(MegatronModule):
                 sound_embeddings
             ).contiguous()  # [sound_seq_len, num_clips, h_language]
 
-            if self.context_parallel_lm > 1 and sound_pad is not None:
+            if self.context_parallel_lm > 1 and not hybrid_cp_sample and sound_pad is not None:
                 sound_embeddings = gather_from_context_parallel_ranks(sound_embeddings, sound_pad)
                 if sound_embeddings_len is not None:
                     # Gather sound_embeddings_len along the clips dimension (unsqueeze to 2D, gather, squeeze back)
@@ -1696,7 +1968,16 @@ class LLaVAModel(MegatronModule):
             sound_timestamps=sound_timestamps,
         )  # [combined_seq_len, b, h_language], [b, combined_seq_len], [b, combined_seq_len]
 
-        if self.context_parallel_lm > 1 or self.sequence_parallel_lm:
+        active_cp_size, _ = self._get_active_cp_metadata(
+            packed_seq_params, self.context_parallel_lm, self.cp_group
+        )
+        _hybrid_cp_debug(
+            f"llava_preprocess_done embedding={tuple(combined_embeddings.shape) if combined_embeddings is not None else None} "
+            f"labels={tuple(new_labels.shape) if new_labels is not None else None} "
+            f"active_cp={active_cp_size} "
+            f"cu_padded={tuple(packed_seq_params.cu_seqlens_q_padded.shape) if packed_seq_params is not None else None}"
+        )
+        if active_cp_size > 1 or self.sequence_parallel_lm:
             loss_weight = None
             if new_labels is not None:
                 acc_lengths = (
@@ -1712,12 +1993,23 @@ class LLaVAModel(MegatronModule):
                     loss_weight[new_labels[0]==IGNORE_INDEX] = 0
                 loss_weight = loss_weight.unsqueeze(0)
 
+            _hybrid_cp_debug("before_token_parallel")
             combined_embeddings, new_labels, new_loss_mask, position_ids, packed_seq_params = (
                 self._process_embedding_token_parallel(
                     combined_embeddings, new_labels, new_loss_mask, loss_weight, position_ids, packed_seq_params
                 )
             )
+            _hybrid_cp_debug(
+                f"after_token_parallel embedding={tuple(combined_embeddings.shape) if combined_embeddings is not None else None} "
+                f"labels={tuple(new_labels.shape) if new_labels is not None else None} "
+                f"{_hybrid_cp_packed_metadata(packed_seq_params)}"
+            )
 
+        _hybrid_cp_debug(
+            f"before_language_model embedding={tuple(combined_embeddings.shape) if combined_embeddings is not None else None} "
+            f"labels={tuple(new_labels.shape) if new_labels is not None else None} "
+            f"{_hybrid_cp_packed_metadata(packed_seq_params)}"
+        )
         output = self.language_model(
             input_ids=None,
             position_ids=position_ids,
@@ -1728,6 +2020,9 @@ class LLaVAModel(MegatronModule):
             runtime_gather_output=runtime_gather_output,
             packed_seq_params=packed_seq_params,
             loss_mask=new_loss_mask,
+        )
+        _hybrid_cp_debug(
+            f"after_language_model output={tuple(output.shape) if isinstance(output, torch.Tensor) else type(output).__name__}"
         )
         # Track norms for language_model output
         if self.log_model_act_norms and self.training:

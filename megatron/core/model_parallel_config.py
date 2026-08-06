@@ -2,9 +2,24 @@
 
 import warnings
 from dataclasses import dataclass, field
-from typing import Callable, ContextManager, Literal, Optional
+from typing import Callable, ContextManager, Literal, Optional, Union
 
 import torch
+
+
+def _parse_pad_packed_seq_alignment(value: Union[str, int]) -> Union[int, Literal["max"]]:
+    """Parse ``max`` or a positive integer THD padding alignment."""
+    if value == "max":
+        return "max"
+    try:
+        alignment = int(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            "--pad-packed-seq-alignment must be 'max' or a positive integer."
+        ) from error
+    if alignment <= 0:
+        raise ValueError("--pad-packed-seq-alignment must be 'max' or a positive integer.")
+    return alignment
 
 
 @dataclass
@@ -61,6 +76,20 @@ class ModelParallelConfig:
     This is used to calculate the number and length of sub-samples assigned to 
     each rank when using hybrid_context_parallel.
     """
+
+    pad_packed_seq_alignment: Optional[Union[int, Literal["max"]]] = field(
+        default=None,
+        metadata={
+            "argparse_meta": {
+                "arg_names": ["--pad-packed-seq-alignment"],
+                "type": _parse_pad_packed_seq_alignment,
+            }
+        },
+    )
+    """Pad packed THD token tensors to ``max_seqlen_per_dp_cp_rank`` or an alignment."""
+
+    thd_tail_padding_policy: Optional[Literal["append_dummy_seq", "extend_last"]] = None
+    """Represent tail padding with a dummy sequence or extend the final padded boundary."""
 
     hybrid_context_parallel: bool = False
     """
@@ -412,6 +441,31 @@ class ModelParallelConfig:
         See https://docs.python.org/3/library/dataclasses.html#post-init-processing for more
         details.
         """
+        if self.thd_tail_padding_policy not in (None, "append_dummy_seq", "extend_last"):
+            raise ValueError(
+                "--thd-tail-padding-policy must be 'append_dummy_seq' or 'extend_last', "
+                f"got {self.thd_tail_padding_policy!r}."
+            )
+
+        if self.pad_packed_seq_alignment is not None:
+            self.pad_packed_seq_alignment = _parse_pad_packed_seq_alignment(
+                self.pad_packed_seq_alignment
+            )
+            if self.max_seqlen_per_dp_cp_rank is None:
+                raise ValueError(
+                    "--max-seqlen-per-dp-cp-rank must be set when "
+                    "--pad-packed-seq-alignment is enabled."
+                )
+            if (
+                self.pad_packed_seq_alignment != "max"
+                and self.pad_packed_seq_alignment > self.max_seqlen_per_dp_cp_rank
+            ):
+                raise ValueError(
+                    "--pad-packed-seq-alignment must not exceed "
+                    f"--max-seqlen-per-dp-cp-rank ({self.max_seqlen_per_dp_cp_rank}), "
+                    f"got {self.pad_packed_seq_alignment}."
+                )
+
         if self.sequence_parallel:
             if self.tensor_model_parallel_size <= 1:
                 raise ValueError("Cannot use sequence parallelism without tensor parallelism")

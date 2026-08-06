@@ -68,6 +68,15 @@ def add_multimodal_extra_args(parser):
         help="Make dataloader to produce sequences of specific length.",
     )
     group.add_argument(
+        "--skip-no-trainable-tokens",
+        action="store_true",
+        default=False,
+        help=(
+            "Skip samples whose decoder-length truncation removes every trainable "
+            "label instead of failing the dataloader worker."
+        ),
+    )
+    group.add_argument(
         "--dataloader-seed",
         type=int,
         default=0,

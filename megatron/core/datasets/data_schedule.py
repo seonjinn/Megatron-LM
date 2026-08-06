@@ -1,5 +1,7 @@
 # Copyright (c) 2025 NVIDIA CORPORATION.  All rights reserved.
 
+from collections.abc import Mapping, Sequence
+import os
 from typing import Any, List, Optional
 
 import torch
@@ -7,6 +9,285 @@ import torch
 from megatron.core import parallel_state
 from megatron.core.pipeline_parallel.hybrid_cp_schedule import BalancedCPScheduler
 from megatron.core.process_groups_config import ProcessGroupCollection
+
+
+def _hybrid_cp_debug(message: str) -> None:
+    """Emit rank-local HybridCP scheduling diagnostics when explicitly enabled."""
+
+    if os.environ.get("MEGATRON_HYBRID_CP_DEBUG") != "1":
+        return
+    rank = "?"
+    if torch.distributed.is_available() and torch.distributed.is_initialized():
+        rank = str(torch.distributed.get_rank())
+    print(f"[HYBRID_CP_DEBUG][rank={rank}] {message}", flush=True)
+
+
+def collect_hybrid_cp_microbatches(data_iterator, num_microbatches: int) -> list[Any]:
+    """Consume exactly one global batch from an underlying data iterator.
+
+    The legacy multimodal HybridCP wrapper was called once per optimizer step
+    but consumed only one item from the external iterator.  That silently
+    dropped the remaining global-batch microbatches whenever
+    ``global_batch_size > micro_batch_size * data_parallel_size``.  Keep the
+    consumption contract explicit and testable so the scheduler can route the
+    complete global batch before forming its CP groups.
+    """
+
+    if num_microbatches < 1:
+        raise ValueError(f"num_microbatches must be positive, got {num_microbatches}")
+    return [next(data_iterator) for _ in range(num_microbatches)]
+
+
+def _require_tensor(batch: Mapping[str, Any], key: str) -> torch.Tensor:
+    value = batch.get(key)
+    if not isinstance(value, torch.Tensor):
+        raise ValueError(f"multimodal HybridCP batch key {key!r} must be a tensor")
+    return value
+
+
+def _nested_int_metadata(batch: Mapping[str, Any], key: str, batch_size: int) -> list[list[list[int]]]:
+    value = batch.get(key)
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        raise ValueError(f"multimodal HybridCP batch key {key!r} must be nested metadata")
+    if len(value) != batch_size:
+        raise ValueError(
+            f"multimodal HybridCP batch key {key!r} has {len(value)} rows, "
+            f"expected {batch_size}"
+        )
+    result: list[list[list[int]]] = []
+    for row in value:
+        if not isinstance(row, Sequence) or isinstance(row, (str, bytes, bytearray)):
+            raise ValueError(f"multimodal HybridCP batch key {key!r} has an invalid row")
+        result.append(
+            [
+                [int(item) for item in sample]
+                for sample in row
+            ]
+        )
+    return result
+
+
+def _sample_image_offsets(
+    sample_image_counts: Sequence[int], sample_index: int
+) -> tuple[int, int]:
+    start = sum(int(count) for count in sample_image_counts[:sample_index])
+    end = start + int(sample_image_counts[sample_index])
+    return start, end
+
+
+def _sample_media_offsets(
+    sample_media: Sequence[Sequence[int]], sample_index: int
+) -> tuple[int, int]:
+    start = sum(len(media) for media in sample_media[:sample_index])
+    end = start + len(sample_media[sample_index])
+    return start, end
+
+
+def _slice_optional_tensor(
+    batch: Mapping[str, Any], key: str, batch_index: int, start: int, end: int
+) -> torch.Tensor | None:
+    value = batch.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, torch.Tensor):
+        raise ValueError(f"multimodal HybridCP batch key {key!r} must be a tensor")
+    if value.dim() == 0:
+        return value.clone()
+    if value.dim() >= 1 and value.shape[0] > batch_index and key in {"tokens", "labels", "position_ids", "loss_mask"}:
+        return value[batch_index, start:end].contiguous()
+    return value[start:end].contiguous()
+
+
+def unpack_multimodal_batch(batch: Mapping[str, Any]) -> list[dict[str, torch.Tensor]]:
+    """Split one Energon packed dict into wire-format sub-samples.
+
+    HybridCP schedules individual packed sub-samples, while the Omni external
+    dataloader emits a dict containing a batch dimension and media tensors
+    concatenated across all sub-samples.  The returned tensors deliberately use
+    their variable dimension as dimension zero so the all-to-all route can send
+    each key with its own split sizes.  ``restore_multimodal_hybrid_cp_sample``
+    rebuilds the batch-shaped dict consumed by ``examples/multimodal/train.py``.
+    """
+
+    cu_lengths = _require_tensor(batch, "cu_lengths")
+    cu_lengths_padded = _require_tensor(batch, "cu_lengths_padded")
+    tokens = _require_tensor(batch, "tokens")
+    labels = _require_tensor(batch, "labels")
+    if cu_lengths.dim() != 2 or cu_lengths_padded.dim() != 2:
+        raise ValueError("multimodal HybridCP cu_lengths tensors must be 2-D")
+    if tokens.dim() != 2 or labels.dim() != 2:
+        raise ValueError("multimodal HybridCP tokens and labels tensors must be 2-D")
+    if cu_lengths.shape != cu_lengths_padded.shape or cu_lengths.shape[0] != tokens.shape[0]:
+        raise ValueError("multimodal HybridCP batch dimensions are inconsistent")
+
+    batch_size = int(cu_lengths.shape[0])
+    if batch_size != 1:
+        raise ValueError(
+            "multimodal HybridCP currently requires micro-batch-size 1; "
+            f"received {batch_size} packed rows"
+        )
+
+    sample_image_counts_raw = batch.get("sample_image_counts")
+    if not isinstance(sample_image_counts_raw, Sequence) or isinstance(
+        sample_image_counts_raw, (str, bytes, bytearray)
+    ):
+        raise ValueError(
+            "multimodal HybridCP requires sample_image_counts metadata from the task encoder"
+        )
+    sample_image_counts = [int(count) for count in sample_image_counts_raw[0]]
+    sample_num_tiles = _nested_int_metadata(batch, "sample_num_tiles", batch_size)[0]
+    sample_num_frames = _nested_int_metadata(batch, "sample_num_frames", batch_size)[0]
+    if len(sample_image_counts) != cu_lengths.shape[1] - 1:
+        raise ValueError("sample_image_counts does not match cu_lengths")
+    if len(sample_num_tiles) != len(sample_image_counts) or len(sample_num_frames) != len(sample_image_counts):
+        raise ValueError("per-sample media metadata does not match cu_lengths")
+
+    sample_num_sound_clips = batch.get("sample_num_sound_clips")
+    if sample_num_sound_clips is None:
+        sample_num_sound_clips_rows = [[] for _ in sample_image_counts]
+    else:
+        sample_num_sound_clips_rows = _nested_int_metadata(
+            batch, "sample_num_sound_clips", batch_size
+        )[0]
+        if len(sample_num_sound_clips_rows) != len(sample_image_counts):
+            raise ValueError("per-sample audio metadata does not match cu_lengths")
+
+    vision_cu_lengths = batch.get("vision_cu_lengths")
+    if vision_cu_lengths is not None and not isinstance(vision_cu_lengths, torch.Tensor):
+        raise ValueError("multimodal HybridCP vision_cu_lengths must be a tensor")
+    if isinstance(vision_cu_lengths, torch.Tensor):
+        if vision_cu_lengths.dim() != 2 or vision_cu_lengths.shape[0] != 1:
+            raise ValueError("multimodal HybridCP vision_cu_lengths must have shape [1, N]")
+        vision_offsets = vision_cu_lengths[0]
+    else:
+        vision_offsets = None
+
+    imgs = batch.get("imgs")
+    if imgs is not None and not isinstance(imgs, torch.Tensor):
+        raise ValueError("multimodal HybridCP imgs must be a tensor")
+    imgs_sizes = batch.get("imgs_sizes")
+    if imgs_sizes is not None and not isinstance(imgs_sizes, torch.Tensor):
+        raise ValueError("multimodal HybridCP imgs_sizes must be a tensor")
+
+    has_pad_img = batch.get("has_pad_img")
+    if has_pad_img is None:
+        # Older task encoders did not emit this optional FP8 image-padding flag.
+        has_pad_img = torch.tensor(False, dtype=torch.bool)
+    elif not isinstance(has_pad_img, torch.Tensor) or has_pad_img.numel() != 1:
+        raise ValueError("multimodal HybridCP batch key 'has_pad_img' must be a scalar tensor")
+    else:
+        has_pad_img = has_pad_img.reshape(()).to(dtype=torch.bool)
+
+    sound_clips = batch.get("sound_clips")
+    sound_length = batch.get("sound_length")
+    sound_timestamps = batch.get("sound_timestamps")
+    num_sound_clips = batch.get("num_sound_clips")
+    tensor_sound_keys = (sound_clips, sound_length, sound_timestamps, num_sound_clips)
+    if any(value is not None and not isinstance(value, torch.Tensor) for value in tensor_sound_keys):
+        raise ValueError("multimodal HybridCP audio fields must be tensors")
+
+    samples: list[dict[str, torch.Tensor]] = []
+    for sample_index in range(len(sample_image_counts)):
+        start = int(cu_lengths[0, sample_index].item())
+        end = int(cu_lengths[0, sample_index + 1].item())
+        padded_end = int(cu_lengths_padded[0, sample_index + 1].item())
+        if end < start or padded_end < end:
+            raise ValueError("multimodal HybridCP cu_lengths are not monotonic")
+
+        sample: dict[str, torch.Tensor] = {
+            "tokens": tokens[0, start:padded_end].contiguous(),
+            "labels": labels[0, start : padded_end + 1].contiguous(),
+            "cu_seqlens": torch.tensor([0, end - start], dtype=cu_lengths.dtype),
+            "cu_seqlens_padded": torch.tensor(
+                [0, padded_end - start], dtype=cu_lengths_padded.dtype
+            ),
+            "max_seqlen": torch.tensor(padded_end - start, dtype=torch.int32),
+            "sample_lengths": torch.tensor([end - start], dtype=torch.int32),
+            "samples_seen": torch.tensor(1, dtype=torch.int32),
+            # Preserve the scalar expected by examples/multimodal/train.py.
+            "has_pad_img": has_pad_img.clone(),
+        }
+
+        for key in ("position_ids", "loss_mask", "attention_mask"):
+            value = _slice_optional_tensor(batch, key, 0, start, padded_end)
+            if value is not None:
+                sample[key] = value
+
+        image_start, image_end = _sample_image_offsets(sample_image_counts, sample_index)
+        if vision_offsets is not None and image_end > image_start:
+            vision_start = int(vision_offsets[image_start].item())
+            vision_end = int(vision_offsets[image_end].item())
+            if imgs is not None:
+                if imgs.dim() >= 3 and imgs.shape[0] == 1:
+                    sample["imgs"] = imgs[0, vision_start:vision_end].contiguous()
+                else:
+                    sample["imgs"] = imgs[vision_start:vision_end].contiguous()
+            if imgs_sizes is not None:
+                sample["imgs_sizes"] = imgs_sizes[image_start:image_end].contiguous()
+            sample["vision_cu_lengths"] = (
+                vision_offsets[image_start : image_end + 1] - vision_offsets[image_start]
+            ).contiguous()
+            sample["vision_max_lengths"] = torch.tensor(
+                int((vision_offsets[image_start + 1 : image_end + 1] - vision_offsets[image_start:image_end]).max().item()),
+                dtype=torch.int32,
+            )
+        else:
+            sample["imgs"] = torch.tensor([[0]], dtype=torch.float32)
+            sample["imgs_sizes"] = torch.tensor([[0, 0]], dtype=torch.int32)
+            sample["vision_cu_lengths"] = torch.tensor([0], dtype=torch.int32)
+            sample["vision_max_lengths"] = torch.tensor([0], dtype=torch.int32)
+
+        media_start, media_end = _sample_media_offsets(sample_num_tiles, sample_index)
+        sample["num_tiles"] = torch.tensor(
+            sample_num_tiles[sample_index] or [0], dtype=torch.int32
+        )
+        sample["num_frames"] = torch.tensor(
+            sample_num_frames[sample_index] or [0], dtype=torch.int32
+        )
+
+        clip_start = sum(
+            sum(int(value) for value in row) for row in sample_num_sound_clips_rows[:sample_index]
+        )
+        clip_end = clip_start + sum(
+            int(value) for value in sample_num_sound_clips_rows[sample_index]
+        )
+        if sound_clips is not None and sample_num_sound_clips_rows[sample_index]:
+            sample["sound_clips"] = sound_clips[clip_start:clip_end].contiguous()
+            sample["sound_length"] = sound_length[clip_start:clip_end].contiguous()
+            sample["sound_timestamps"] = sound_timestamps[clip_start:clip_end].contiguous()
+            sample["num_sound_clips"] = num_sound_clips[media_start:media_end].contiguous()
+        else:
+            sample["sound_clips"] = torch.tensor([[0]], dtype=torch.float32)
+            sample["sound_length"] = torch.tensor([[0]], dtype=torch.int64)
+            sample["sound_timestamps"] = torch.tensor([[0]], dtype=torch.float32)
+            sample["num_sound_clips"] = torch.tensor([[0]], dtype=torch.int64)
+
+        samples.append(sample)
+    return samples
+
+
+def restore_multimodal_hybrid_cp_sample(
+    sample: Mapping[str, torch.Tensor], local_cp_size: int | None = None
+) -> dict[str, torch.Tensor]:
+    """Restore one wire-format sample to the multimodal ``get_batch`` schema."""
+
+    restored = dict(sample)
+    restored["tokens"] = sample["tokens"].unsqueeze(0)
+    restored["labels"] = sample["labels"].unsqueeze(0)
+    restored["cu_lengths"] = sample["cu_seqlens"].unsqueeze(0)
+    restored["cu_lengths_padded"] = sample["cu_seqlens_padded"].unsqueeze(0)
+    restored["max_lengths"] = sample["max_seqlen"].reshape(1)
+    restored["sample_lengths"] = sample["sample_lengths"].reshape(1, -1)
+    if sample["imgs"].dim() == 2 and sample["imgs"].shape != torch.Size([1, 1]):
+        restored["imgs"] = sample["imgs"].unsqueeze(0)
+    restored["vision_cu_lengths"] = sample["vision_cu_lengths"].unsqueeze(0)
+    restored["vision_max_lengths"] = sample["vision_max_lengths"].reshape(1)
+    if local_cp_size is not None:
+        restored["local_cp_size"] = torch.tensor(local_cp_size, dtype=torch.int32)
+    restored.pop("cu_seqlens", None)
+    restored.pop("cu_seqlens_padded", None)
+    restored.pop("max_seqlen", None)
+    return restored
 
 
 class HybridCPDataLoaderWrapper:
@@ -134,7 +415,13 @@ class HybridCPDataLoaderWrapper:
         return hdp_rank
 
     def reroute_samples_to_hdp_ranks(
-        self, batch, global_ids_this_rank, global_id_seqlens, sample_id_groups, offsets
+        self,
+        batch,
+        global_ids_this_rank,
+        global_id_seqlens,
+        sample_id_groups,
+        offsets,
+        multimodal: bool = False,
     ):
         """
         Reroutes the sub-samples to the correct rank after scheduling.
@@ -144,6 +431,15 @@ class HybridCPDataLoaderWrapper:
         Since all CP ranks within a DP group have the same data, we only need
         to transfer data between matching CP ranks.
         """
+        if multimodal:
+            return self._reroute_multimodal_samples(
+                batch,
+                global_ids_this_rank,
+                global_id_seqlens,
+                sample_id_groups,
+                offsets,
+            )
+
         gid2local_id = {int(gid): i for i, gid in enumerate(global_ids_this_rank)}
         hdp_rank = self.dp_cp_group.rank()
         dp_ranks = torch.distributed.get_process_group_ranks(self.dp_group)
@@ -242,6 +538,143 @@ class HybridCPDataLoaderWrapper:
         }
         return recv_sample_with_id
 
+    def _gather_multimodal_shapes(self, batch, global_ids_this_rank):
+        local_shapes = {
+            int(global_id): {
+                key: tuple(int(dim) for dim in value.shape)
+                for key, value in sample.items()
+                if isinstance(value, torch.Tensor)
+            }
+            for global_id, sample in zip(global_ids_this_rank.tolist(), batch)
+        }
+        gathered_shapes = [None for _ in range(self.dp_group.size())]
+        torch.distributed.all_gather_object(
+            gathered_shapes, local_shapes, group=self.dp_group
+        )
+        global_shapes = {}
+        for rank_shapes in gathered_shapes:
+            if rank_shapes is None:
+                continue
+            global_shapes.update(rank_shapes)
+        return global_shapes
+
+    def _reroute_multimodal_samples(
+        self, batch, global_ids_this_rank, global_id_seqlens, sample_id_groups, offsets
+    ):
+        """Route variable-shaped multimodal tensors with per-key split sizes.
+
+        The original HybridCP implementation assumes every field has the same
+        first dimension as the text sequence.  Energon batches violate that
+        assumption: image patch tokens, image metadata, and audio clips each
+        have independent lengths.  Gather the small shape metadata once, then
+        route every tensor flattened with its own all-to-all split sizes.
+        """
+
+        gid2local_id = {int(gid): i for i, gid in enumerate(global_ids_this_rank.tolist())}
+        hdp_rank = self.dp_cp_group.rank()
+        dp_ranks = torch.distributed.get_process_group_ranks(self.dp_group)
+        dp_ranks = [r // self.tp_group.size() for r in dp_ranks]
+
+        combined_sample_id_groups: List[List[int]] = [
+            [] for _ in range(self.total_hdp_gpus)
+        ]
+        for dest_rank in range(self.total_hdp_gpus):
+            for sample_id_group in sample_id_groups:
+                combined_sample_id_groups[dest_rank].extend(sample_id_group[dest_rank])
+            combined_sample_id_groups[dest_rank].sort()
+
+        send_ids_sorted = [
+            gid
+            for dest_rank in dp_ranks
+            for gid in combined_sample_id_groups[dest_rank]
+            if gid in gid2local_id
+        ]
+
+        recv_sample_id_groups = [[] for _ in range(self.total_hdp_gpus)]
+        for gid in combined_sample_id_groups[hdp_rank]:
+            src_rank = self._gid_to_src_rank(gid, offsets)
+            recv_sample_id_groups[src_rank].append(gid)
+        recv_ids_sorted = [
+            gid
+            for source_rank in range(self.total_hdp_gpus)
+            for gid in recv_sample_id_groups[source_rank]
+        ]
+        recv_samples = [{} for _ in recv_ids_sorted]
+
+        global_shapes = self._gather_multimodal_shapes(batch, global_ids_this_rank)
+        data_keys = tuple(batch[0].keys())
+
+        def _numel(global_id: int, key: str) -> int:
+            try:
+                shape = global_shapes[global_id][key]
+            except KeyError as error:
+                raise ValueError(
+                    f"missing multimodal shape metadata for global sample {global_id}, key {key!r}"
+                ) from error
+            result = 1
+            for dimension in shape:
+                result *= dimension
+            return result
+
+        for key in data_keys:
+            if not all(isinstance(sample[key], torch.Tensor) for sample in batch):
+                raise ValueError(f"multimodal HybridCP field {key!r} must be a tensor")
+
+            send_lens_split = [0] * self.total_hdp_gpus
+            for dest_rank in range(self.total_hdp_gpus):
+                if dest_rank not in dp_ranks:
+                    continue
+                send_lens_split[dest_rank] = sum(
+                    _numel(gid, key)
+                    for gid in combined_sample_id_groups[dest_rank]
+                    if gid in gid2local_id
+                )
+
+            recv_lens_split = [
+                sum(_numel(gid, key) for gid in recv_sample_id_groups[source_rank])
+                for source_rank in range(self.total_hdp_gpus)
+            ]
+
+            device = torch.cuda.current_device()
+            if send_ids_sorted:
+                send_tensor = torch.cat(
+                    [
+                        batch[gid2local_id[gid]][key]
+                        .to(device, non_blocking=True)
+                        .reshape(-1)
+                        for gid in send_ids_sorted
+                    ],
+                    dim=0,
+                )
+            else:
+                send_tensor = torch.empty(
+                    0,
+                    device=device,
+                    dtype=batch[0][key].dtype,
+                )
+            recv_tensor = torch.empty(
+                sum(recv_lens_split), device=device, dtype=send_tensor.dtype
+            )
+            torch.distributed.all_to_all_single(
+                recv_tensor,
+                send_tensor,
+                output_split_sizes=recv_lens_split,
+                input_split_sizes=send_lens_split,
+                group=self.dp_cp_group,
+            )
+
+            cursor = 0
+            for index, global_id in enumerate(recv_ids_sorted):
+                shape = global_shapes[global_id][key]
+                numel = _numel(global_id, key)
+                recv_samples[index][key] = recv_tensor[cursor : cursor + numel].reshape(shape)
+                cursor += numel
+
+        return {
+            recv_id: recv_samples[index]
+            for index, recv_id in enumerate(recv_ids_sorted)
+        }
+
     def unpack_batch(self, batch):
         """
         Unpacks the packed samples into a list of sub-samples.
@@ -266,13 +699,40 @@ class HybridCPDataLoaderWrapper:
 
     def __next__(self) -> Any:
         """
-        Get the next item from the dataset, pull scheduling metadata and return it.
+        Get one scheduled global batch from the dataset.
+
+        The external loader yields one packed item per microbatch.  Consume the
+        full global batch before scheduling so dynamic CP can distribute all
+        microbatches participating in the optimizer step.  The returned third
+        field is the number of unique routed samples and is used by the
+        HybridCP training path for global ``samples_seen`` accounting.
         """
         if self.data_iterator is None:
             # TP0 reads from data_iterator, others receive via broadcast.
-            return None, None
-        else:
-            batch = next(self.data_iterator)
+            return None, None, None
+
+        from megatron.core.num_microbatches_calculator import get_num_microbatches
+
+        num_microbatches = get_num_microbatches()
+        if num_microbatches is None:
+            num_microbatches = 1
+        raw_batches = collect_hybrid_cp_microbatches(self.data_iterator, num_microbatches)
+        _hybrid_cp_debug(
+            f"loader raw_batches={len(raw_batches)} num_microbatches={num_microbatches}"
+        )
+
+        batch = []
+        is_multimodal = False
+        for raw_batch in raw_batches:
+            raw_is_multimodal = isinstance(raw_batch, Mapping) and "cu_lengths" in raw_batch
+            is_multimodal = is_multimodal or raw_is_multimodal
+            if raw_is_multimodal:
+                batch.extend(unpack_multimodal_batch(raw_batch))
+            elif isinstance(raw_batch, Mapping):
+                batch.append(raw_batch)
+            else:
+                batch.extend(raw_batch)
+
         subsample_seqlens = []
         for sample in batch:
             subsample_seqlens.extend(
@@ -283,6 +743,10 @@ class HybridCPDataLoaderWrapper:
             )
         subsample_seqlens = torch.tensor(subsample_seqlens, dtype=torch.int32).cuda()
         subsample_seqlens = subsample_seqlens[subsample_seqlens != 0]
+        _hybrid_cp_debug(
+            f"loader local_samples={len(batch)} local_nonzero_samples={subsample_seqlens.numel()} "
+            f"local_seqlens={subsample_seqlens.detach().cpu().tolist()} multimodal={is_multimodal}"
+        )
 
         seqlens_gathered, offsets = self.get_global_seqlens(subsample_seqlens)
 
@@ -293,9 +757,23 @@ class HybridCPDataLoaderWrapper:
         groups, sample_id_groups = self.cp_balancing_scheduler.get_groups_and_subsamples(
             global_id_seqlens, self.config
         )
-
-        batch = self.unpack_batch(batch)
-        samples_this_rank_with_id = self.reroute_samples_to_hdp_ranks(
-            batch, global_ids_this_rank, global_id_seqlens, sample_id_groups, offsets
+        _hybrid_cp_debug(
+            f"loader schedule hdp_rank={self.dp_cp_group.rank()} global_samples={len(global_id_seqlens)} "
+            f"groups={len(groups)} per_group_counts="
+            f"{[[len(ids) for ids in group] for group in sample_id_groups]}"
         )
-        return samples_this_rank_with_id, sample_id_groups
+
+        if not is_multimodal:
+            batch = self.unpack_batch(batch)
+        samples_this_rank_with_id = self.reroute_samples_to_hdp_ranks(
+            batch,
+            global_ids_this_rank,
+            global_id_seqlens,
+            sample_id_groups,
+            offsets,
+            multimodal=is_multimodal,
+        )
+        _hybrid_cp_debug(
+            f"loader reroute received_ids={sorted(int(gid) for gid in samples_this_rank_with_id)}"
+        )
+        return samples_this_rank_with_id, sample_id_groups, len(global_id_seqlens)

@@ -2,6 +2,8 @@
 
 """Megatron Module."""
 from functools import partial
+import logging
+import os
 from typing import Optional, Tuple
 
 import torch
@@ -10,12 +12,18 @@ from torch.nn.parameter import Parameter
 
 from megatron.core import parallel_state
 from megatron.core.dist_checkpointing.mapping import ShardedStateDict
+from megatron.core.packed_seq_params import (
+    packed_thd_matches_static_bounds,
+    resolve_thd_tail_padding_policy,
+)
 from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.transformer.utils import (
     ensure_metadata_has_dp_cp_group,
     make_sharded_tensors_for_checkpoint,
     sharded_state_dict_default,
 )
+
+logger = logging.getLogger(__name__)
 
 _FLOAT_TYPES = (torch.FloatTensor, torch.cuda.FloatTensor)
 _HALF_TYPES = (torch.HalfTensor, torch.cuda.HalfTensor)
@@ -222,7 +230,18 @@ class GraphableMegatronModule(MegatronModule):
             return
         self.cuda_graphs[cg_index].backward_dw()
 
-    def get_layer_static_inputs(self, seq_length, micro_batch_size):
+    def _is_thd_cuda_graph(self) -> bool:
+        """Return whether explicit fixed THD bounds define this graph's inputs."""
+        return (
+            self.config.cuda_graph_impl != "none"
+            and self.config.max_seqlen_per_dp_cp_rank is not None
+            and self.config.pad_packed_seq_alignment is not None
+            and self.config.thd_max_packed_sequences is not None
+        )
+
+    def get_layer_static_inputs(
+        self, seq_length: int, micro_batch_size: int
+    ) -> dict[str, torch.Tensor]:
         """
         Get the static inputs for the layer.
         We assume that the module has one hidden_states input, whose shape is inferred
@@ -232,23 +251,34 @@ class GraphableMegatronModule(MegatronModule):
         Returns:
             Dict[str, torch.Tensor]: A dictionary containing the static inputs for the layer.
         """
-        # Calculate data shape related values.
         context_parallel_size = self.config.context_parallel_size
-        slen_per_cp = seq_length // context_parallel_size
         sequence_parallel = self.config.sequence_parallel
         tensor_model_parallel_size = self.config.tensor_model_parallel_size
+        if self._is_thd_cuda_graph():
+            slen_per_cp = self.config.max_seqlen_per_dp_cp_rank
+            batch_size = 1
+        else:
+            slen_per_cp = seq_length // context_parallel_size
+            batch_size = micro_batch_size
         slen_per_cptp = (
             slen_per_cp // tensor_model_parallel_size if sequence_parallel else slen_per_cp
         )
 
-        static_inputs = {}
-        static_inputs["hidden_states"] = torch.ones(
-            (slen_per_cptp, micro_batch_size, self.config.hidden_size),
-            dtype=torch.bfloat16,
-            requires_grad=True,
-            device=torch.cuda.current_device(),
-        )
-        return static_inputs
+        if self.config.bf16:
+            dtype = torch.bfloat16
+        elif self.config.fp16:
+            dtype = torch.float16
+        else:
+            dtype = torch.float32
+
+        return {
+            "hidden_states": torch.ones(
+                (slen_per_cptp, batch_size, self.config.hidden_size),
+                dtype=dtype,
+                requires_grad=True,
+                device=torch.cuda.current_device(),
+            )
+        }
 
     def setup_manual_hooks(self, make_hook_func):
         """
@@ -332,11 +362,79 @@ class GraphableMegatronModule(MegatronModule):
         """
         from megatron.core.transformer.cuda_graphs import is_graph_capturing
 
-        return (
+        should_call = (
             self.config.cuda_graph_impl == "transformer_engine"
             and self.training
             and (is_graph_capturing() or self.cuda_graphs)
         )
+        if not should_call:
+            return False
+
+        packed_seq_params = kwargs.get("packed_seq_params")
+        if (
+            packed_seq_params is not None
+            and getattr(packed_seq_params, "cuda_graph_eligible", None) is False
+        ):
+            if not getattr(self, "_te_cudagraph_overflow_warned", False):
+                logger.warning(
+                    "TE CUDA Graph fallback to eager for a packed THD overflow batch."
+                )
+                self._te_cudagraph_overflow_warned = True
+            return False
+        if (
+            packed_seq_params is not None
+            and getattr(packed_seq_params, "qkv_format", None) == "thd"
+            and not self._is_thd_cuda_graph()
+        ):
+            # A TE graph cannot safely capture an unbounded THD metadata
+            # surface.  Without this guard, the first packed batch could be
+            # captured with one cu_seqlens shape and a later batch would fail
+            # during replay (or silently fall back inside TE).  Keep the
+            # fallback explicit and one-time per layer; fixed-bound THD is
+            # handled by TransformerLayer's tensor decomposition below.
+            if not getattr(self, "_te_cudagraph_unbounded_thd_warned", False):
+                logger.warning(
+                    "TE CUDA Graph fallback to eager for packed THD input: "
+                    "configure --max-seqlen-per-dp-cp-rank, "
+                    "--pad-packed-seq-alignment, and --thd-max-packed-sequences "
+                    "to provide a fixed graph metadata surface."
+                )
+                self._te_cudagraph_unbounded_thd_warned = True
+            return False
+
+        if (
+            packed_seq_params is not None
+            and getattr(packed_seq_params, "qkv_format", None) == "thd"
+            and self._is_thd_cuda_graph()
+            and not packed_thd_matches_static_bounds(
+                packed_seq_params,
+                self.config.max_seqlen_per_dp_cp_rank,
+                self.config.thd_max_packed_sequences,
+                resolve_thd_tail_padding_policy(self.config),
+                cp_size=getattr(self.config, "context_parallel_size", 1),
+            )
+        ):
+            if not getattr(self, "_te_cudagraph_overflow_warned", False):
+                logger.warning(
+                    "TE CUDA Graph fallback to eager for packed THD batch outside "
+                    "the configured token/sequence capacity."
+                )
+                self._te_cudagraph_overflow_warned = True
+            return False
+
+        # TE's graph callable accepts Tensor arguments only. Multimodal SFT
+        # supplies PackedSeqParams on every packed batch, including during the
+        # initial capture. Opt-in profiles skip the TE graph path entirely for
+        # these inputs so capture cannot hang and the layer runs eagerly.
+        packed_input_fallback = os.getenv(
+            "MEGATRON_TE_CUDAGRAPH_PACKED_FALLBACK", "0"
+        ).strip().lower() in {"1", "true", "yes", "on"}
+        if packed_input_fallback and (
+            kwargs.get("inference_context") is not None
+            or kwargs.get("packed_seq_params") is not None
+        ):
+            return False
+        return True
 
     def __call__(self, *args, **kwargs):
         if self._should_call_local_cudagraph(*args, **kwargs):

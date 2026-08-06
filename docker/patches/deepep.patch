@@ -1,13 +1,23 @@
 diff --git a/setup.py b/setup.py
-index 63ce332..4e13462 100644
+index 63ce332..8ee54e5 100644
 --- a/setup.py
 +++ b/setup.py
-@@ -37,7 +37,7 @@ if __name__ == '__main__':
+@@ -75,7 +75,7 @@ def get_extension_hybrid_ep_cpp():
+         os.path.join(current_dir, "csrc/hybrid_ep/"),
+         os.path.join(current_dir, "csrc/hybrid_ep/backend/"),
+     ]
+-    library_dirs = []
++    library_dirs = ['/usr/local/cuda/targets/sbsa-linux/lib/stubs']
+     libraries = ["cuda", "nvtx3interop"]
+     extra_objects = []
+     runtime_library_dirs = []
+@@ -191,7 +191,7 @@ def get_extension_deep_ep_cpp():
                   '-Wno-sign-compare', '-Wno-reorder', '-Wno-attributes']
      nvcc_flags = ['-O3', '-Xcompiler', '-O3']
      sources = ['csrc/deep_ep.cpp', 'csrc/kernels/runtime.cu', 'csrc/kernels/layout.cu', 'csrc/kernels/intranode.cu']
 -    include_dirs = ['csrc/']
+-    library_dirs = []
 +    include_dirs = ['csrc/', '/usr/local/cuda/include/cccl/']
-     library_dirs = []
++    library_dirs = ['/usr/local/cuda/targets/sbsa-linux/lib/stubs']
      nvcc_dlink = []
-     extra_link_args = []
+     extra_link_args = ['-lcuda']

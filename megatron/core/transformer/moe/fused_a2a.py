@@ -273,8 +273,10 @@ try:
     from deep_ep import HybridEPBuffer
 
     HAVE_HYBRIDEP = True
-except ImportError:
+except ImportError as exc:
     HAVE_HYBRIDEP = False
+    if os.getenv("MEGATRON_HYBRIDEP_DEBUG", "0").strip().lower() in {"1", "true", "yes", "on"}:
+        print(f"[hybridep-debug] import failed: {exc!r}", flush=True)
 
 _hybrid_ep_buffer = None
 _HYBRID_EP_TOKEN_ALIGNMENT = 16
@@ -333,6 +335,10 @@ def _validate_hybrid_ep_ib_tx_depth(num_tokens: int, group: torch.distributed.Pr
         f"increase Tensor Parallelism (TP) / Context Parallelism (CP), so tokens per rank "
         f"are at most {max_supported_tokens} for multi-node HybridEP."
     )
+
+
+# HybridEP dispatch/combine kernels use 64-token chunks for their public APIs.
+HYBRIDEP_TOKEN_ALIGNMENT = 64
 
 
 def init_hybrid_ep_buffer(

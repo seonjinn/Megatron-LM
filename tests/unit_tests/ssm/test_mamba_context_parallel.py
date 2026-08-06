@@ -178,7 +178,6 @@ def _make_fake_cp() -> MambaContextParallel:
 
 def test_dynamic_group_view_recomputes_mamba_shards_without_mutating_static_view():
     static_cp = _make_fake_cp()
-
     dynamic_cp = static_cp.for_group(_FakeProcessGroup(2, group_rank=1))
 
     assert dynamic_cp is not static_cp
@@ -195,7 +194,6 @@ def test_dynamic_group_view_recomputes_mamba_shards_without_mutating_static_view
 
 def test_dynamic_group_view_supports_single_rank_sample():
     static_cp = _make_fake_cp()
-
     dynamic_cp = static_cp.for_group(None)
 
     assert dynamic_cp.cp_size == 1

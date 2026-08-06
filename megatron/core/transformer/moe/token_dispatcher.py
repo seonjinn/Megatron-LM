@@ -16,8 +16,19 @@ from megatron.core.tensor_parallel import (
     gather_from_sequence_parallel_region,
     reduce_scatter_to_sequence_parallel_region,
 )
+from megatron.core.transformer.cuda_graphs import is_graph_capturing
 from megatron.core.transformer.enums import CudaGraphModule
+from megatron.core.transformer.moe.cuda_graph_replay import (
+    AlltoAllCudaGraphState,
+    HybridEPCudaGraphState,
+    MoECudaGraphReplayState,
+    get_flattened_input_shape,
+    get_tensor_replay_signature,
+    to_optional_int,
+    validate_tensor_replay_signature,
+)
 from megatron.core.transformer.moe.fused_a2a import (
+    HYBRIDEP_TOKEN_ALIGNMENT,
     fused_combine,
     fused_dispatch,
     hybrid_ep_combine,
@@ -208,6 +219,117 @@ class MoETokenDispatcher:
         self.shared_experts = shared_experts
         self.use_nccl_stream = True
 
+    def get_expert_zero_copy_buffers(self):
+        """Buffers the experts should write their output / grad input into, if any.
+
+        Returns:
+            A ``(output_buffer, grad_input_buffer)`` tuple. ``(None, None)`` unless the
+            dispatcher supports zero-copy, in which case the experts write straight into
+            the communication buffers instead of into fresh allocations.
+        """
+        return None, None
+
+    def validate_cudagraph_replay_capability(self) -> None:
+        """Validate support before partial CUDA graph capture starts."""
+
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement partial CUDA graph replay state."
+        )
+
+    def snapshot_cudagraph_replay_state(
+        self, graph_input: torch.Tensor, preprocessed_hidden_states: torch.Tensor
+    ) -> MoECudaGraphReplayState:
+        """Snapshot immutable non-Tensor state after dispatch preprocessing."""
+
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement partial CUDA graph replay state."
+        )
+
+    def restore_cudagraph_replay_state(
+        self,
+        state: MoECudaGraphReplayState,
+        graph_input: torch.Tensor,
+        preprocessed_hidden_states: torch.Tensor,
+    ) -> None:
+        """Restore the state paired with the selected captured graph."""
+
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement partial CUDA graph replay state."
+        )
+
+    def validate_cudagraph_continuation(
+        self, state: MoECudaGraphReplayState, output: torch.Tensor
+    ) -> None:
+        """Validate the eager continuation output without repairing its geometry."""
+
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement partial CUDA graph replay state."
+        )
+
+    def _cudagraph_topology_fingerprint(
+        self, dispatcher_kind: str
+    ) -> tuple[tuple[str, object], ...]:
+        """Return immutable configuration that must not change between capture and replay."""
+
+        backend_identity = dispatcher_kind
+        if dispatcher_kind == "flex-hybridep":
+            backend_identity = f"flex-{self.config.moe_flex_dispatcher_backend}"
+        return (
+            ("backend", backend_identity),
+            ("tp_size", self.tp_size),
+            ("ep_size", self.ep_size),
+            (
+                "router_topk",
+                getattr(self, "router_topk", getattr(self.config, "moe_router_topk", None)),
+            ),
+            (
+                "num_experts",
+                getattr(self, "num_experts", getattr(self.config, "num_moe_experts", None)),
+            ),
+            ("num_local_experts", self.num_local_experts),
+            (
+                "drop_and_pad",
+                getattr(
+                    self,
+                    "drop_and_pad",
+                    getattr(getattr(self, "_comm_manager", None), "drop_and_pad", False),
+                ),
+            ),
+            ("expert_capacity_factor", getattr(self.config, "moe_expert_capacity_factor", None)),
+            ("rank_capacity_factor", getattr(self.config, "moe_expert_rank_capacity_factor", None)),
+            (
+                "hybridep_pad_uneven_dispatch_inputs",
+                getattr(self.config, "moe_hybridep_pad_uneven_dispatch_inputs", False),
+            ),
+        )
+
+    def _validate_cudagraph_replay_state(
+        self,
+        state: MoECudaGraphReplayState,
+        *,
+        dispatcher_kind: str,
+        graph_input: torch.Tensor,
+        preprocessed_hidden_states: torch.Tensor,
+    ) -> None:
+        if state.dispatcher_kind != dispatcher_kind:
+            raise RuntimeError(
+                "MoE CUDA graph dispatcher mismatch: "
+                f"expected {dispatcher_kind}, got {state.dispatcher_kind}."
+            )
+        topology_fingerprint = self._cudagraph_topology_fingerprint(dispatcher_kind)
+        if state.topology_fingerprint != topology_fingerprint:
+            raise RuntimeError(
+                "MoE CUDA graph topology fingerprint mismatch: "
+                f"expected {state.topology_fingerprint}, got {topology_fingerprint}."
+            )
+        validate_tensor_replay_signature(graph_input, state.input_signature, boundary="input")
+        flattened_input_shape = get_flattened_input_shape(graph_input)
+        if flattened_input_shape != state.flattened_input_shape:
+            raise RuntimeError(
+                "MoE CUDA graph flattened input shape mismatch: "
+                f"expected {state.flattened_input_shape}, got {flattened_input_shape}."
+            )
+
 
 class MoEAllGatherTokenDispatcher(MoETokenDispatcher):
     """
@@ -350,6 +472,14 @@ class MoEAllGatherTokenDispatcher(MoETokenDispatcher):
         """Restores the original tensor shape."""
         return hidden_states.view(self.hidden_shape)
 
+    def validate_cudagraph_replay_capability(self) -> None:
+        """Reject AllGather because sparse padding routes narrow the eager expert input."""
+
+        raise RuntimeError(
+            "MoE AllGather partial CUDA graph capture is unsupported: packed padding routes "
+            "can be cleared before eager permutation, which narrows the expert input."
+        )
+
 
 class MoEAlltoAllTokenDispatcher(MoETokenDispatcher):
     """
@@ -471,6 +601,90 @@ class MoEAlltoAllTokenDispatcher(MoETokenDispatcher):
         if shared_experts.use_shared_expert_gate:
             self.cudagraph_attrs.append('shared_experts.gate_score')
         self.cudagraph_attrs.append('shared_experts.cached_fc1_input')
+
+    def validate_cudagraph_replay_capability(self) -> None:
+        """AlltoAll structural metadata can be restored for partial replay."""
+
+    def snapshot_cudagraph_replay_state(
+        self, graph_input: torch.Tensor, preprocessed_hidden_states: torch.Tensor
+    ) -> MoECudaGraphReplayState:
+        """Snapshot AlltoAll structural metadata after dispatch preprocessing."""
+
+        self.validate_cudagraph_replay_capability()
+        flattened_input_shape = get_flattened_input_shape(graph_input)
+        if self.hidden_shape != graph_input.shape:
+            raise RuntimeError(
+                "AlltoAll CUDA graph hidden_shape does not match the physical graph input: "
+                f"{self.hidden_shape} != {graph_input.shape}."
+            )
+        if self.hidden_shape_before_permute != flattened_input_shape:
+            raise RuntimeError(
+                "AlltoAll CUDA graph flattened input shape mismatch: "
+                f"{self.hidden_shape_before_permute} != {flattened_input_shape}."
+            )
+        num_out_tokens = to_optional_int(self.num_out_tokens, field_name="num_out_tokens")
+        if num_out_tokens is None:
+            raise RuntimeError(
+                "AlltoAll CUDA graph replay state requires num_out_tokens after preprocessing."
+            )
+        expected_preprocessed_shape = torch.Size((num_out_tokens, flattened_input_shape[-1]))
+        if preprocessed_hidden_states.shape != expected_preprocessed_shape:
+            raise RuntimeError(
+                "AlltoAll CUDA graph preprocessed hidden-state shape mismatch: "
+                f"expected {expected_preprocessed_shape}, got {preprocessed_hidden_states.shape}."
+            )
+        return MoECudaGraphReplayState(
+            dispatcher_kind="alltoall",
+            input_signature=get_tensor_replay_signature(graph_input),
+            flattened_input_shape=flattened_input_shape,
+            topology_fingerprint=self._cudagraph_topology_fingerprint("alltoall"),
+            backend_state=AlltoAllCudaGraphState(
+                hidden_shape=self.hidden_shape,
+                hidden_shape_before_permute=self.hidden_shape_before_permute,
+                capacity=to_optional_int(self.capacity, field_name="capacity"),
+                num_out_tokens=num_out_tokens,
+            ),
+        )
+
+    def restore_cudagraph_replay_state(
+        self,
+        state: MoECudaGraphReplayState,
+        graph_input: torch.Tensor,
+        preprocessed_hidden_states: torch.Tensor,
+    ) -> None:
+        """Restore AlltoAll structural metadata for one exact graph entry."""
+
+        self._validate_cudagraph_replay_state(
+            state,
+            dispatcher_kind="alltoall",
+            graph_input=graph_input,
+            preprocessed_hidden_states=preprocessed_hidden_states,
+        )
+        if not isinstance(state.backend_state, AlltoAllCudaGraphState):
+            raise RuntimeError("MoE CUDA graph AlltoAll state has the wrong backend payload.")
+        if state.backend_state.num_out_tokens is None:
+            raise RuntimeError(
+                "AlltoAll CUDA graph replay state is missing required num_out_tokens."
+            )
+        expected_preprocessed_shape = torch.Size(
+            (state.backend_state.num_out_tokens, state.flattened_input_shape[-1])
+        )
+        if preprocessed_hidden_states.shape != expected_preprocessed_shape:
+            raise RuntimeError(
+                "AlltoAll CUDA graph preprocessed hidden-state shape mismatch: "
+                f"expected {expected_preprocessed_shape}, got {preprocessed_hidden_states.shape}."
+            )
+        self.hidden_shape = state.backend_state.hidden_shape
+        self.hidden_shape_before_permute = state.backend_state.hidden_shape_before_permute
+        self.capacity = state.backend_state.capacity
+        self.num_out_tokens = state.backend_state.num_out_tokens
+
+    def validate_cudagraph_continuation(
+        self, state: MoECudaGraphReplayState, output: torch.Tensor
+    ) -> None:
+        """Require the AlltoAll eager tail to preserve the physical input signature."""
+
+        validate_tensor_replay_signature(output, state.input_signature, boundary="continuation")
 
     def preprocess(self, routing_map: torch.Tensor) -> torch.Tensor:
         """
@@ -1032,11 +1246,51 @@ class _HybridEPManager(_DispatchManager):
 
         self.moe_expert_rank_capacity_factor = self.config.moe_expert_rank_capacity_factor
         self.over_budget = torch.zeros(1, dtype=torch.bool, device='cuda')
+        # HybridEP dispatch expects equal per-rank input sizes. When requested,
+        # variable token counts are padded to the group-wide max and trimmed in combine.
+        self._original_num_tokens: Optional[int] = None
+        self._padded_num_tokens: Optional[int] = None
 
     def setup_metadata(self, routing_map: torch.Tensor, probs: torch.Tensor):
         num_tokens = routing_map.shape[0]
-        self.routing_map = routing_map.reshape(num_tokens, self.num_experts)
-        self.token_probs = probs.reshape(num_tokens, self.num_experts)
+        self._original_num_tokens = num_tokens
+
+        padded_num_tokens = num_tokens
+        if self.config.moe_hybridep_pad_uneven_dispatch_inputs:
+            has_fixed_thd_graph_bounds = (
+                self.config.cuda_graph_impl == "transformer_engine"
+                and self.config.max_seqlen_per_dp_cp_rank is not None
+                and self.config.pad_packed_seq_alignment is not None
+                and self.config.thd_max_packed_sequences is not None
+            )
+            if has_fixed_thd_graph_bounds and is_graph_capturing():
+                # Static THD capture pads every participating rank to the same bound.
+                # Avoid the dynamic reduction and device-to-host conversion in the graph.
+                padded_num_tokens = num_tokens
+            else:
+                # Use the actual tp_ep max so all ranks in the MoE communication
+                # group pass the same token count to HybridEP.
+                max_num_tokens_across_ep = torch.tensor(
+                    [num_tokens], device=routing_map.device, dtype=torch.long
+                )
+                torch.distributed.all_reduce(
+                    max_num_tokens_across_ep, op=torch.distributed.ReduceOp.MAX, group=self.group
+                )
+                padded_num_tokens = int(max_num_tokens_across_ep.item())
+            padded_num_tokens += -padded_num_tokens % HYBRIDEP_TOKEN_ALIGNMENT
+        self._padded_num_tokens = padded_num_tokens
+
+        routing_map = routing_map.reshape(num_tokens, self.num_experts)
+        probs = probs.reshape(num_tokens, self.num_experts)
+        if padded_num_tokens > num_tokens:
+            pad_rows = padded_num_tokens - num_tokens
+            routing_map = torch.cat(
+                [routing_map, routing_map.new_zeros((pad_rows, self.num_experts))], dim=0
+            )
+            probs = torch.cat([probs, probs.new_zeros((pad_rows, self.num_experts))], dim=0)
+
+        self.routing_map = routing_map
+        self.token_probs = probs
 
         if self.moe_expert_rank_capacity_factor is not None:
             pad_multiple = get_align_size_for_quantization(self.config)
@@ -1044,7 +1298,7 @@ class _HybridEPManager(_DispatchManager):
             # budget). Tokens above this budget are dropped inside HybridEP; dispatch then
             # sets overflow_flag on the handle (accumulated in over_budget in dispatch()).
             budget = int(
-                routing_map.shape[0]
+                padded_num_tokens
                 * self.config.moe_router_topk
                 * self.moe_expert_rank_capacity_factor
             )
@@ -1055,7 +1309,7 @@ class _HybridEPManager(_DispatchManager):
         # in dispatch) and does not drop tokens or report overflow.
         # Compute the capacity for each expert at the drop_and_pad mode
         if self.drop_and_pad:
-            num_out_tokens = num_tokens * self.config.moe_router_topk
+            num_out_tokens = padded_num_tokens * self.config.moe_router_topk
             # Drop and pad the input to capacity.
             self.capacity = get_capacity(
                 num_tokens=num_out_tokens,
@@ -1084,6 +1338,11 @@ class _HybridEPManager(_DispatchManager):
             self.token_probs = self.token_probs.float()  # downcast or upcast
         if self.config.fp8 or self.config.fp4:
             self.pad_multiple = get_align_size_for_quantization(self.config)
+        if self._padded_num_tokens is not None and hidden_states.shape[0] < self._padded_num_tokens:
+            pad_rows = self._padded_num_tokens - hidden_states.shape[0]
+            hidden_states = torch.cat(
+                [hidden_states, hidden_states.new_zeros((pad_rows, hidden_states.shape[-1]))], dim=0
+            )
         dispatched_hidden, self.dispatched_probs, _, tokens_per_expert, self.handle = (
             hybrid_ep_dispatch(
                 x=hidden_states,
@@ -1130,12 +1389,20 @@ class _HybridEPManager(_DispatchManager):
             pad_multiple=self.pad_multiple,
             fused=self.config.moe_permute_fusion_into_hybridep,
         )
+        if (
+            self._padded_num_tokens is not None
+            and self._original_num_tokens is not None
+            and hidden_states.shape[0] > self._original_num_tokens
+        ):
+            hidden_states = hidden_states[: self._original_num_tokens]
         # Release the used handle/num_permuted_tokens which could change in each iteration.
         # For drop_and_pad mode, we don't need to reset the num_permuted_tokens and
         # num_dispatched_tokens, because their values never change.
         self.handle = None
         if not self.drop_and_pad:
             self.num_permuted_tokens = None
+        self._original_num_tokens = None
+        self._padded_num_tokens = None
         return hidden_states
 
     def get_permuted_hidden_states_by_experts(self, hidden_states: torch.Tensor) -> torch.Tensor:
@@ -1442,6 +1709,135 @@ class MoEFlexTokenDispatcher(MoETokenDispatcher):
                 "Please set --moe-flex-dispatcher-backend=deepep or "
                 "--moe-flex-dispatcher-backend=hybridep"
             )
+
+    def get_expert_zero_copy_buffers(self):
+        """NCCL-EP zero-copy: ``(output_buffer, grad_input_buffer)`` — the shared symm buffers the
+        experts write the fc2 output / fc1 dgrad into, so combine (fwd) and dispatch (bwd) read and
+        scatter them one-sided. ``(None, None)`` for every other backend/mode.
+
+        Returned detached: the op-fuser calls requires_grad_() on its output and returns it,
+        so handing it the persistent buffer would permanently mark the shared classvar as requiring
+        grad and break the next layer's reuse. The detached view shares storage (zero-copy intact).
+        """
+
+        def _detached(name):
+            buf = getattr(self._comm_manager, name, None)
+            return buf.detach() if buf is not None else None
+
+        # output_buffer (fc2 out / combine in) = _zc_fwd_token_buf; grad_input_buffer (fc1 dgrad /
+        # dispatch-bwd scatter) = _zc_bwd_token_buf.
+        # Under 1F1B overlap, feeding a symm grad_input_buffer is wasted: the overlap schedule's
+        # AccumulateGrad clones the fc1 dgrad into a plain buffer anyway. Return None so the
+        # op-fuser writes a plain dgrad;
+        dispatch_grad_input = (
+            None if self.config.overlap_moe_expert_parallel_comm else _detached("_zc_bwd_token_buf")
+        )
+        return _detached("_zc_fwd_token_buf"), dispatch_grad_input
+
+    def validate_cudagraph_replay_capability(self) -> None:
+        """Allow HybridEP preprocessing metadata in partial CUDA graph replay."""
+
+        backend = self.config.moe_flex_dispatcher_backend
+        if backend == "deepep":
+            raise RuntimeError(
+                "Flex/DeepEP is unsupported for partial CUDA graph capture because eager "
+                "permutation narrows the expert input using routing-dependent counts."
+            )
+        if backend == "ncclep":
+            raise RuntimeError(
+                "Flex/NCCL-EP is unsupported for partial CUDA graph capture, including static "
+                "shape mode, until graph-bank activation owns external-buffer bootstrap/reset."
+            )
+        if backend != "hybridep":
+            raise RuntimeError(f"Unknown Flex dispatcher backend {backend!r}.")
+
+    def snapshot_cudagraph_replay_state(
+        self, graph_input: torch.Tensor, preprocessed_hidden_states: torch.Tensor
+    ) -> MoECudaGraphReplayState:
+        """Snapshot HybridEP metadata owned by dispatch preprocessing."""
+
+        self.validate_cudagraph_replay_capability()
+        manager = self._comm_manager
+        if manager._original_num_tokens is None or manager._padded_num_tokens is None:
+            raise RuntimeError("HybridEP CUDA graph state is missing input token geometry.")
+        num_permuted_tokens = to_optional_int(
+            manager.num_permuted_tokens, field_name="num_permuted_tokens"
+        )
+        tokens_per_expert = None
+        if manager.drop_and_pad:
+            tokens_per_expert = tuple(int(value) for value in manager.tokens_per_expert.tolist())
+        flattened_input_shape = get_flattened_input_shape(graph_input)
+        if preprocessed_hidden_states.shape != flattened_input_shape:
+            raise RuntimeError(
+                "HybridEP CUDA graph flattened input shape mismatch: "
+                f"expected {flattened_input_shape}, got {preprocessed_hidden_states.shape}."
+            )
+        return MoECudaGraphReplayState(
+            dispatcher_kind="flex-hybridep",
+            input_signature=get_tensor_replay_signature(graph_input),
+            flattened_input_shape=flattened_input_shape,
+            topology_fingerprint=self._cudagraph_topology_fingerprint("flex-hybridep"),
+            backend_state=HybridEPCudaGraphState(
+                original_num_tokens=int(manager._original_num_tokens),
+                padded_num_tokens=int(manager._padded_num_tokens),
+                capacity=to_optional_int(manager.capacity, field_name="capacity"),
+                num_permuted_tokens=num_permuted_tokens,
+                tokens_per_expert=tokens_per_expert,
+            ),
+        )
+
+    def restore_cudagraph_replay_state(
+        self,
+        state: MoECudaGraphReplayState,
+        graph_input: torch.Tensor,
+        preprocessed_hidden_states: torch.Tensor,
+    ) -> None:
+        """Restore pre-dispatch HybridEP metadata for one exact graph entry."""
+
+        self._validate_cudagraph_replay_state(
+            state,
+            dispatcher_kind="flex-hybridep",
+            graph_input=graph_input,
+            preprocessed_hidden_states=preprocessed_hidden_states,
+        )
+        if not isinstance(state.backend_state, HybridEPCudaGraphState):
+            raise RuntimeError("MoE CUDA graph HybridEP state has the wrong backend payload.")
+        if preprocessed_hidden_states.shape != state.flattened_input_shape:
+            raise RuntimeError(
+                "HybridEP CUDA graph flattened input shape mismatch: "
+                f"expected {state.flattened_input_shape}, got {preprocessed_hidden_states.shape}."
+            )
+        manager = self._comm_manager
+        manager._original_num_tokens = state.backend_state.original_num_tokens
+        manager._padded_num_tokens = state.backend_state.padded_num_tokens
+        manager.capacity = state.backend_state.capacity
+        manager.num_permuted_tokens = state.backend_state.num_permuted_tokens
+        if state.backend_state.tokens_per_expert is not None:
+            manager.tokens_per_expert = torch.tensor(
+                state.backend_state.tokens_per_expert, dtype=torch.long, device="cpu"
+            )
+        self.hidden_shape = state.input_signature.shape
+
+    def validate_cudagraph_continuation(
+        self, state: MoECudaGraphReplayState, output: torch.Tensor
+    ) -> None:
+        """Require HybridEP to return the restored physical input capacity exactly."""
+
+        if not isinstance(state.backend_state, HybridEPCudaGraphState):
+            raise RuntimeError("MoE CUDA graph HybridEP state has the wrong backend payload.")
+        physical_rows = state.input_signature.shape.numel() // state.input_signature.shape[-1]
+        if state.backend_state.original_num_tokens != physical_rows:
+            raise RuntimeError(
+                "HybridEP CUDA graph original_num_tokens mismatch: "
+                f"expected {physical_rows}, got {state.backend_state.original_num_tokens}."
+            )
+        output_rows = output.shape.numel() // output.shape[-1]
+        if output_rows != state.backend_state.original_num_tokens:
+            raise RuntimeError(
+                "HybridEP CUDA graph continuation returned the wrong number of rows: "
+                f"expected {state.backend_state.original_num_tokens}, got {output_rows}."
+            )
+        validate_tensor_replay_signature(output, state.input_signature, boundary="continuation")
 
     def _initialize_metadata(self, routing_map: torch.Tensor, probs: torch.Tensor) -> torch.Tensor:
         """

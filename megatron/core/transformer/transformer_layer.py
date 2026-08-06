@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import functools
 import logging
+import os
 import warnings
 from abc import ABC
 from dataclasses import dataclass, field
@@ -23,6 +24,7 @@ from megatron.core.transformer.enums import CudaGraphModule, InferenceCudaGraphS
 from megatron.core.transformer.identity_op import IdentityFuncOp, IdentityOp
 from megatron.core.transformer.mlp import MLP
 from megatron.core.transformer.module import GraphableMegatronModule
+from megatron.core.transformer.moe.cuda_graph_replay import MoECudaGraphReplayState
 from megatron.core.transformer.spec_utils import ModuleSpec, build_module
 from megatron.core.transformer.torch_norm import LayerNormBuilder
 from megatron.core.transformer.transformer_config import TransformerConfig
@@ -1035,7 +1037,9 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
         """
         return self.self_attention.linear_qkv.layer_norm_weight.data
 
-    def get_layer_static_inputs(self, seq_length, micro_batch_size):
+    def get_layer_static_inputs(
+        self, seq_length: int, micro_batch_size: int
+    ) -> Dict[str, torch.Tensor]:
         """
         Get the static inputs for the transformer layer. Besides the hidden_states that is
         generated in GraphableMegatronModule, we also add the attention_mask.
@@ -1044,15 +1048,41 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             Dict[str, torch.Tensor]: A dictionary containing the static inputs for the layer.
         """
         static_inputs = super().get_layer_static_inputs(seq_length, micro_batch_size)
-
-        if not isinstance(self.self_attention, IdentityOp) and (
+        device = torch.cuda.current_device()
+        attn_in_graph = not isinstance(self.self_attention, IdentityOp) and (
             not self.config.cuda_graph_modules
             or CudaGraphModule.attn in self.config.cuda_graph_modules
-        ):
+        )
+
+        if self._is_thd_cuda_graph():
+            max_tokens = self.config.max_seqlen_per_dp_cp_rank
+            max_real_sequences = self.config.thd_max_packed_sequences
+            assert max_tokens is not None
+            assert max_real_sequences is not None
+            if attn_in_graph:
+                global_token_capacity = max_tokens * self.config.context_parallel_size
+                reserve_dummy_slot = self.config.thd_tail_padding_policy != "extend_last"
+                cu_entries = max_real_sequences + 1 + int(reserve_dummy_slot)
+                cu_seqlens = torch.full(
+                    (cu_entries,), global_token_capacity, dtype=torch.int32, device=device
+                )
+                cu_seqlens[0] = 0
+                static_inputs["cu_seqlens_q"] = cu_seqlens
+                static_inputs["cu_seqlens_kv"] = cu_seqlens.clone()
+                static_inputs["cu_seqlens_q_padded"] = cu_seqlens.clone()
+                static_inputs["cu_seqlens_kv_padded"] = cu_seqlens.clone()
+
+            mask_tokens = max_tokens
+            if self.config.sequence_parallel:
+                mask_tokens //= self.config.tensor_model_parallel_size
+            static_inputs["padding_mask"] = torch.zeros(
+                (1, mask_tokens), dtype=torch.bool, device=device
+            )
+        elif attn_in_graph:
             slen_per_cp = seq_length // self.config.context_parallel_size
             static_inputs["attention_mask"] = (
                 ~(torch.tril(torch.ones((slen_per_cp, seq_length))).bool())
-                .to(torch.cuda.current_device())
+                .to(device)
                 .reshape(1, 1, slen_per_cp, seq_length)
                 .tile(micro_batch_size, 1, 1, 1)
             )
@@ -1086,6 +1116,46 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                 submodules += [self.mlp.shared_experts]
         return submodules
 
+    @staticmethod
+    def _decompose_packed_seq_params_to_kwargs(kwargs: Dict[str, Any]) -> None:
+        """Replace packed metadata with its tensor fields for a TE graph call."""
+        packed_seq_params = kwargs.pop("packed_seq_params", None)
+        if packed_seq_params is None:
+            return
+        kwargs["cu_seqlens_q"] = packed_seq_params.cu_seqlens_q
+        kwargs["cu_seqlens_kv"] = packed_seq_params.cu_seqlens_kv
+        kwargs["cu_seqlens_q_padded"] = packed_seq_params.cu_seqlens_q_padded
+        kwargs["cu_seqlens_kv_padded"] = packed_seq_params.cu_seqlens_kv_padded
+
+    def _reconstruct_packed_seq_params_from_kwargs(self, kwargs: Dict[str, Any]) -> None:
+        """Rebuild static Python metadata around the graph's tensor inputs."""
+        if "cu_seqlens_q" not in kwargs:
+            return
+        max_tokens = self.config.max_seqlen_per_dp_cp_rank
+        assert max_tokens is not None
+        max_seqlen = max_tokens * self.config.context_parallel_size
+        kwargs["packed_seq_params"] = PackedSeqParams(
+            qkv_format="thd",
+            cu_seqlens_q=kwargs.pop("cu_seqlens_q"),
+            cu_seqlens_kv=kwargs.pop("cu_seqlens_kv"),
+            cu_seqlens_q_padded=kwargs.pop("cu_seqlens_q_padded"),
+            cu_seqlens_kv_padded=kwargs.pop("cu_seqlens_kv_padded"),
+            max_seqlen_q=max_seqlen,
+            max_seqlen_kv=max_seqlen,
+            pad_between_seqs=True,
+            cp_partition_mode=getattr(self.config, "cp_partition_mode", "zigzag"),
+        )
+
+    def _rebuild_te_cuda_graph_packed_seq_params(self, kwargs: Dict[str, Any]) -> None:
+        """Restore the eager packed metadata used by a partial TE graph continuation.
+
+        The graph boundary receives only Tensor fields.  The eager MoE continuation still
+        expects a ``PackedSeqParams`` object, so rebuild it on the private kwargs copy used
+        after replay.  This compatibility shim keeps the dispatcher-state fix usable on the
+        pinned branch, whose packed-THD implementation predates the newer MoE ownership API.
+        """
+        self._reconstruct_packed_seq_params_from_kwargs(kwargs)
+
     def _te_cuda_graph_capture(self, *args, **kwargs):
         """
         CUDA Graph capture for this layer using TE interface.
@@ -1094,6 +1164,7 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
            attribute can be set to control the scope of the CUDA graph.
         2. If context is None, it cannot be returned as output.
         """
+        self._reconstruct_packed_seq_params_from_kwargs(kwargs)
         context = None
         if (
             not self.config.cuda_graph_modules
@@ -1117,7 +1188,9 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                 )
             )
         ):
-            hidden_states = self._forward_mlp(hidden_states)
+            hidden_states = self._forward_mlp(
+                hidden_states, padding_mask=kwargs.get("padding_mask")
+            )
         if not isinstance(hidden_states, list) and not isinstance(hidden_states, tuple):
             cuda_graph_outputs = [hidden_states]
         else:
@@ -1134,6 +1207,23 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
         Hence, `inference_context` and `packed_seq_params` are excluded from input list.
         """
         context = None
+        padding_mask = kwargs.get("padding_mask")
+        if (
+            os.getenv("MEGATRON_TE_CUDAGRAPH_PACKED_FALLBACK", "0").strip().lower()
+            in {"1", "true", "yes", "on"}
+            and (
+                kwargs.get("inference_context") is not None
+                or kwargs.get("packed_seq_params") is not None
+            )
+        ):
+            if not getattr(self, "_te_cudagraph_packed_fallback_warned", False):
+                logger.warning(
+                    "TE CUDA Graph fallback to eager for non-Tensor graph inputs "
+                    "(inference_context or packed_seq_params); graph replay is skipped "
+                    "for this layer/input shape."
+                )
+                self._te_cudagraph_packed_fallback_warned = True
+            return self.forward(*args, **kwargs)
         if (
             self.config.cuda_graph_modules
             and CudaGraphModule.attn not in self.config.cuda_graph_modules
@@ -1141,6 +1231,10 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             hidden_states, context = self._forward_attention(*args, **kwargs)
             args = (hidden_states,)
             kwargs = {}
+            if padding_mask is not None:
+                kwargs["padding_mask"] = padding_mask
+        else:
+            self._decompose_packed_seq_params_to_kwargs(kwargs)
 
         assert (kwargs.get('inference_context') is None) and (
             kwargs.get('packed_seq_params') is None
@@ -1150,6 +1244,29 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             "For inference cuda graph, please use cuda_graph_impl=local instead."
         )
 
+        # This option was added after the pinned `vlm2_rebase_super_vlm`
+        # branch.  Keep the upstream replay path compatible with that branch
+        # (and older TransformerConfig instances) by treating the absent
+        # option as disabled.
+        delay_offload_until_cuda_graph = getattr(
+            self.config, "delay_offload_until_cuda_graph", False
+        )
+        if delay_offload_until_cuda_graph:
+            self.off_interface.enter_replay()
+
+        try:
+            return self._te_cuda_graph_replay_impl(args, kwargs, context)
+        finally:
+            if delay_offload_until_cuda_graph:
+                self.off_interface.exit_replay()
+
+    def _te_cuda_graph_replay_impl(self, args, kwargs, context):
+        """Implementation of _te_cuda_graph_replay, separated for replay mode cleanup."""
+        graph_index = getattr(self, 'current_microbatch', 0) % len(self.cuda_graphs)
+        eager_mlp_kwargs = dict(kwargs)
+        self._rebuild_te_cuda_graph_packed_seq_params(eager_mlp_kwargs)
+        padding_mask = eager_mlp_kwargs.get("padding_mask")
+        packed_seq_params = eager_mlp_kwargs.get("packed_seq_params")
         cuda_graph_output = list(super()._te_cuda_graph_replay(*args, **kwargs))
 
         if kwargs.get('context') is not None:
@@ -1193,6 +1310,9 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                     for name in hier_attr_name[:-1]:
                         attr = getattr(attr, name)
                     setattr(attr, hier_attr_name[-1], attr_outputs[i])
+                dispatcher_replay_state = self._restore_te_cuda_graph_dispatcher_replay_state(
+                    graph_index, residual, hidden_states
+                )
             else:
                 # CUDA graph output is [hidden_states, probs, routing_map].
                 assert len(cuda_graph_output) == 3, (
@@ -1200,6 +1320,7 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                     f"but got {len(cuda_graph_output)} elements"
                 )
                 hidden_states, probs, routing_map = cuda_graph_output
+                dispatcher_replay_state = None
 
             # Resume the MoELayer forward pass from the end of the CUDA graph scope.
             # The MoE layer will skip redundant computations when we pass in the calculated values
@@ -1219,6 +1340,10 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                 nvtx_range_pop(suffix="mlp")
                 return residual, hidden_states, probs, shared_expert_output
             mlp_output_with_bias = apply_module(self.mlp)(hidden_states)
+            if dispatcher_replay_state is not None:
+                self.mlp.token_dispatcher.validate_cudagraph_continuation(
+                    dispatcher_replay_state, mlp_output_with_bias[0]
+                )
             self.mlp.cudagraph_tensor_store.clear()
             nvtx_range_pop(suffix="mlp")
 
@@ -1251,7 +1376,7 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                 return residual, hidden_states, probs, shared_expert_output
 
             # CUDA Graph does not capture the MLP/MoE part at all.
-            output = self._forward_mlp(*cuda_graph_output)
+            output = self._forward_mlp(*cuda_graph_output, padding_mask=padding_mask)
         return output, context
 
     def _get_te_cuda_graph_replay_args(self, *args, **kwargs):
@@ -1262,6 +1387,15 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             len(cudagraph_args) == 1
         ), "Exactly one positional argument `hidden_states` is expected."
         hidden_states = cudagraph_args[0]
+
+        # The static THD graph surface includes a local padding mask even when
+        # eager multimodal callers do not expose one.  TE still requires the
+        # same tensor slot during replay; synthesize the capture-equivalent
+        # zero mask instead of passing ``None`` into its input surface.
+        if self._is_thd_cuda_graph() and cudagraph_kwargs.get("padding_mask") is None:
+            cudagraph_kwargs["padding_mask"] = torch.zeros(
+                (1, hidden_states.shape[0]), dtype=torch.bool, device=hidden_states.device
+            )
 
         try:
             import transformer_engine.pytorch as te  # pylint: disable=unused-import
@@ -1365,8 +1499,65 @@ class MoETransformerLayer(TransformerLayer):
         self.use_partial_cudagraphs = False
         self.moe_layer_recompute = False
         self.token_dispatcher_attrs = {}
+        self._local_cudagraph_attr_names = None
+        self._te_cuda_graph_dispatcher_replay_states = ()
 
         super().__init__(*args, **kwargs)
+
+        if (
+            self.config.cuda_graph_impl == "transformer_engine"
+            and CudaGraphModule.moe_preprocess in self.config.cuda_graph_modules
+        ):
+            self._validate_te_cuda_graph_dispatcher_replay_capability()
+
+    def _validate_te_cuda_graph_dispatcher_replay_capability(self) -> None:
+        """Fail before capture when Task 5 cannot validate the eager continuation."""
+
+        self.mlp.token_dispatcher.validate_cudagraph_replay_capability()
+        if self.config.overlap_moe_expert_parallel_comm:
+            raise RuntimeError(
+                "overlap_moe_expert_parallel_comm is unsupported with partial TE MoE preprocess "
+                "CUDA graphs until the fine-grained schedule carries exact-index dispatcher "
+                "state through combine and validates the continuation there."
+            )
+
+    def _record_te_cuda_graph_dispatcher_replay_state(
+        self, graph_index: int, graph_input: torch.Tensor, preprocessed_hidden_states: torch.Tensor
+    ) -> MoECudaGraphReplayState:
+        """Pair one immutable dispatcher snapshot with an exact TE graph index."""
+
+        if graph_index < 0 or graph_index > len(self._te_cuda_graph_dispatcher_replay_states):
+            raise RuntimeError(
+                "TE CUDA graph capture did not provide contiguous dispatcher graph ownership: "
+                f"received index {graph_index} with "
+                f"{len(self._te_cuda_graph_dispatcher_replay_states)} recorded states."
+            )
+        state = self.mlp.token_dispatcher.snapshot_cudagraph_replay_state(
+            graph_input, preprocessed_hidden_states
+        )
+        if graph_index == len(self._te_cuda_graph_dispatcher_replay_states):
+            self._te_cuda_graph_dispatcher_replay_states += (state,)
+        elif self._te_cuda_graph_dispatcher_replay_states[graph_index] != state:
+            raise RuntimeError(
+                f"TE CUDA graph index {graph_index} produced conflicting dispatcher replay state."
+            )
+        return self._te_cuda_graph_dispatcher_replay_states[graph_index]
+
+    def _restore_te_cuda_graph_dispatcher_replay_state(
+        self, graph_index: int, graph_input: torch.Tensor, preprocessed_hidden_states: torch.Tensor
+    ) -> MoECudaGraphReplayState:
+        """Restore the dispatcher state paired with ``graph_index`` without fallback."""
+
+        if graph_index < 0 or graph_index >= len(self._te_cuda_graph_dispatcher_replay_states):
+            raise RuntimeError(
+                "No dispatcher replay state is paired with TE CUDA graph index "
+                f"{graph_index}; capture and graph-bank activation must install it explicitly."
+            )
+        state = self._te_cuda_graph_dispatcher_replay_states[graph_index]
+        self.mlp.token_dispatcher.restore_cudagraph_replay_state(
+            state, graph_input, preprocessed_hidden_states
+        )
+        return state
 
     def _should_call_local_cudagraph(self, *args, **kwargs):
         """

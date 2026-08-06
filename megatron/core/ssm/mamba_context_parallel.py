@@ -132,7 +132,15 @@ class MambaContextParallel:
     def for_group(
         self, cp_group: Optional[torch.distributed.ProcessGroup]
     ) -> "MambaContextParallel":
-        """Return a CP-sharded view for one scheduler-selected sample group."""
+        """Return a CP-sharded view for one scheduler-selected sample group.
+
+        HybridCP can route each packed sample to a different CP subgroup while
+        the Mamba module itself is initialized once with the static global CP
+        group. Constructing a lightweight view keeps the per-group channel and
+        head shards local to the forward/recompute call, avoiding mutable module
+        state that could leak between scheduled samples.
+        """
+
         if cp_group is self.cp_group:
             return self
         return type(self)(

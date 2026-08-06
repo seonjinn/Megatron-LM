@@ -1,9 +1,13 @@
 # Copyright (c) 2023, NVIDIA CORPORATION. All rights reserved.
 
+import dataclasses
+from types import SimpleNamespace
+
 import pytest
 import torch
 
 from megatron.core import config
+from megatron.core.transformer.moe.token_dispatcher import MoEAlltoAllTokenDispatcher
 from megatron.core.utils import is_te_min_version
 from tests.unit_tests.test_utilities import Utils
 from tests.unit_tests.transformer.moe.test_token_dispatcher import (
@@ -16,6 +20,124 @@ def test_placeholder():
     """This is here because otherwise there's no other test in this module (all disabled)
     and pytest would fail."""
     pass
+
+
+def _make_replay_state_dispatcher() -> MoEAlltoAllTokenDispatcher:
+    dispatcher = MoEAlltoAllTokenDispatcher.__new__(MoEAlltoAllTokenDispatcher)
+    dispatcher.config = SimpleNamespace(
+        moe_expert_capacity_factor=1.25,
+        moe_expert_rank_capacity_factor=None,
+        moe_hybridep_pad_uneven_dispatch_inputs=False,
+    )
+    dispatcher.tp_size = 2
+    dispatcher.ep_size = 4
+    dispatcher.router_topk = 2
+    dispatcher.num_experts = 8
+    dispatcher.num_local_experts = 2
+    dispatcher.drop_and_pad = True
+    dispatcher.hidden_shape = torch.Size((2, 3, 4))
+    dispatcher.hidden_shape_before_permute = torch.Size((6, 4))
+    dispatcher.capacity = 5
+    dispatcher.num_out_tokens = torch.tensor(40)
+    return dispatcher
+
+
+def test_alltoall_cudagraph_replay_state_restores_structural_geometry() -> None:
+    dispatcher = _make_replay_state_dispatcher()
+    graph_input = torch.empty((2, 3, 4), dtype=torch.float32)
+    preprocessed = torch.empty((40, 4), dtype=torch.float32)
+
+    state = dispatcher.snapshot_cudagraph_replay_state(graph_input, preprocessed)
+    dispatcher.hidden_shape = torch.Size((3, 2, 4))
+    dispatcher.hidden_shape_before_permute = torch.Size((4, 6))
+    dispatcher.capacity = 99
+    dispatcher.num_out_tokens = 3
+
+    dispatcher.restore_cudagraph_replay_state(state, graph_input, preprocessed)
+
+    assert dispatcher.hidden_shape == torch.Size((2, 3, 4))
+    assert dispatcher.hidden_shape_before_permute == torch.Size((6, 4))
+    assert dispatcher.capacity == 5
+    assert dispatcher.num_out_tokens == 40
+
+
+@pytest.mark.parametrize(
+    "changed_input",
+    [
+        torch.empty((3, 2, 4), dtype=torch.float32),
+        torch.empty((2, 3, 4), dtype=torch.float64),
+        torch.empty_strided((2, 3, 4), (1, 2, 6), dtype=torch.float32),
+        torch.empty((2, 3, 4), device="meta", dtype=torch.float32),
+        torch.empty((2, 3, 4), dtype=torch.float32).to_sparse(),
+    ],
+    ids=["shape", "dtype", "stride", "device", "layout"],
+)
+def test_alltoall_cudagraph_replay_state_rejects_exact_input_signature_changes(
+    changed_input: torch.Tensor,
+) -> None:
+    dispatcher = _make_replay_state_dispatcher()
+    graph_input = torch.empty((2, 3, 4), dtype=torch.float32)
+    preprocessed = torch.empty((40, 4), dtype=torch.float32)
+    state = dispatcher.snapshot_cudagraph_replay_state(graph_input, preprocessed)
+
+    with pytest.raises(RuntimeError, match="input signature"):
+        dispatcher.restore_cudagraph_replay_state(state, changed_input, preprocessed)
+
+
+def test_alltoall_cudagraph_replay_state_rejects_flattened_shape_change() -> None:
+    dispatcher = _make_replay_state_dispatcher()
+    graph_input = torch.empty((2, 3, 4), dtype=torch.float32)
+    dispatcher.hidden_shape_before_permute = torch.Size((3, 8))
+
+    with pytest.raises(RuntimeError, match="flattened input shape"):
+        dispatcher.snapshot_cudagraph_replay_state(
+            graph_input, torch.empty((40, 4), dtype=torch.float32)
+        )
+
+
+def test_alltoall_cudagraph_continuation_rejects_same_numel_wrong_shape() -> None:
+    dispatcher = _make_replay_state_dispatcher()
+    graph_input = torch.empty((2, 3, 4), dtype=torch.float32)
+    state = dispatcher.snapshot_cudagraph_replay_state(
+        graph_input, torch.empty((40, 4), dtype=torch.float32)
+    )
+
+    with pytest.raises(RuntimeError, match="continuation signature"):
+        dispatcher.validate_cudagraph_continuation(
+            state, torch.empty((3, 2, 4), dtype=torch.float32)
+        )
+
+
+def test_alltoall_cudagraph_replay_state_rejects_topology_change() -> None:
+    dispatcher = _make_replay_state_dispatcher()
+    graph_input = torch.empty((2, 3, 4), dtype=torch.float32)
+    preprocessed = torch.empty((40, 4), dtype=torch.float32)
+    state = dispatcher.snapshot_cudagraph_replay_state(graph_input, preprocessed)
+    dispatcher.router_topk = 4
+
+    with pytest.raises(RuntimeError, match="topology fingerprint"):
+        dispatcher.restore_cudagraph_replay_state(state, graph_input, preprocessed)
+
+
+def test_alltoall_cudagraph_replay_state_requires_output_geometry_at_snapshot() -> None:
+    dispatcher = _make_replay_state_dispatcher()
+    dispatcher.num_out_tokens = None
+
+    with pytest.raises(RuntimeError, match="num_out_tokens"):
+        dispatcher.snapshot_cudagraph_replay_state(torch.empty((2, 3, 4)), torch.empty((40, 4)))
+
+
+def test_alltoall_cudagraph_replay_state_requires_output_geometry_at_restore() -> None:
+    dispatcher = _make_replay_state_dispatcher()
+    graph_input = torch.empty((2, 3, 4))
+    preprocessed = torch.empty((40, 4))
+    state = dispatcher.snapshot_cudagraph_replay_state(graph_input, preprocessed)
+    state = dataclasses.replace(
+        state, backend_state=dataclasses.replace(state.backend_state, num_out_tokens=None)
+    )
+
+    with pytest.raises(RuntimeError, match="num_out_tokens"):
+        dispatcher.restore_cudagraph_replay_state(state, graph_input, preprocessed)
 
 
 class TestAlltoAllDispatcher:

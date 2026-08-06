@@ -814,6 +814,13 @@ class TransformerConfig(ModelParallelConfig):
     moe_permute_fusion_into_hybridep: bool = False
     """Fuse token rearrangement ops during token dispatching for HybridEP."""
 
+    moe_hybridep_pad_uneven_dispatch_inputs: bool = False
+    """Pad uneven HybridEP dispatch inputs to the group maximum before dispatch.
+    Enable when local HybridEP input token counts can differ across ranks, for example
+    with dynamically packed THD inputs. Leave disabled when dispatcher inputs are
+    already padded to equal token counts.
+    """
+
     moe_per_layer_logging: bool = False
     """Enable per-layer logging for MoE, currently supports auxiliary loss and z loss."""
 
@@ -966,6 +973,36 @@ class TransformerConfig(ModelParallelConfig):
     Backward compatibility: "full" is deprecated but kept for backward compatibility; it is
     transformed to an empty list in __post_init__. The deprecated values "full_iteration" and
     "full_iteration_inference" are also accepted and migrated to the new API in __post_init__."""
+
+    thd_max_packed_sequences: Optional[int] = None
+    """Fixed maximum number of real THD sequences in a graph-replayed microbatch.
+
+    The padding helper reserves a separate cumulative-length slot for an ordinary dummy tail.
+    The four int32 ``cu_seqlens`` surfaces therefore cost only
+    ``4 * 4 * (thd_max_packed_sequences + 1)`` bytes per graph input; this bound
+    may be set to the loader's maximum sample count without enumerating or
+    storing every possible boundary vector. Token/activation capacity remains
+    the dominant memory trade-off.
+    """
+
+    thd_overflow_policy: Literal["error", "eager"] = field(
+        default="error",
+        metadata={
+            "argparse_meta": {
+                "arg_names": ["--thd-overflow-policy"],
+                "type": str,
+                "choices": ["error", "eager"],
+            }
+        },
+    )
+    """Handling for packed batches beyond the fixed CUDA Graph THD bounds.
+
+    ``error`` preserves strict validation. ``eager`` leaves an overflow batch
+    unpadded and lets the transformer layer bypass the TE graph for that step.
+    """
+
+    cuda_graph_memory_report: bool = False
+    """Emit CUDA Graph memory lifecycle telemetry when reporting hooks are installed."""
 
     inference_cuda_graph_scope: Optional[InferenceCudaGraphScope] = field(
         default=None,
@@ -2226,6 +2263,53 @@ class TransformerConfig(ModelParallelConfig):
             "local",
             "full_iteration",
         ], f"Invalid cuda graph implementation: {self.cuda_graph_impl}"
+
+        if self.thd_max_packed_sequences is not None and self.thd_max_packed_sequences <= 0:
+            raise ValueError(
+                "--thd-max-packed-sequences must be positive, "
+                f"got {self.thd_max_packed_sequences}."
+            )
+
+        if self.thd_overflow_policy not in ("error", "eager"):
+            raise ValueError(
+                "--thd-overflow-policy must be 'error' or 'eager', "
+                f"got {self.thd_overflow_policy!r}."
+            )
+
+        static_thd_requested = any(
+            value is not None
+            for value in (
+                self.pad_packed_seq_alignment,
+                self.thd_max_packed_sequences,
+                self.thd_tail_padding_policy,
+            )
+        )
+        if self.cuda_graph_impl != "none" and static_thd_requested:
+            missing_bounds = []
+            if self.max_seqlen_per_dp_cp_rank is None:
+                missing_bounds.append("--max-seqlen-per-dp-cp-rank")
+            if self.pad_packed_seq_alignment is None:
+                missing_bounds.append("--pad-packed-seq-alignment")
+            if self.thd_max_packed_sequences is None:
+                missing_bounds.append("--thd-max-packed-sequences")
+            if missing_bounds:
+                raise ValueError(
+                    "Static THD CUDA Graph configuration requires fixed bounds: "
+                    + ", ".join(missing_bounds)
+                    + "."
+                )
+            global_thd_capacity = self.max_seqlen_per_dp_cp_rank * max(
+                1, self.context_parallel_size
+            )
+            if self.pad_packed_seq_alignment not in (
+                "max",
+                self.max_seqlen_per_dp_cp_rank,
+                global_thd_capacity,
+            ):
+                raise ValueError(
+                    "Static THD CUDA Graph requires --pad-packed-seq-alignment=max or the "
+                    "exact per-rank capacity or its global CP capacity."
+                )
 
         self.inference_cuda_graph_scope = normalize_inference_cuda_graph_scope(
             self.inference_cuda_graph_scope, self.cuda_graph_impl

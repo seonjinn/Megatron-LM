@@ -8,6 +8,7 @@ import os
 import random
 import re
 import threading
+import time
 from collections import defaultdict
 from functools import partial
 from typing import List, Literal, Tuple, TypedDict, Union
@@ -258,6 +259,14 @@ class PackedTaskSample(Sample):
     # Real lengths of the original samples before they were packed.
     sample_lengths: torch.Tensor
 
+    # Per-sub-sample media boundaries retained for HybridCP/DynamicCP routing.
+    # ``imgs`` and audio tensors are concatenated across packed sub-samples, so
+    # the generic scheduler cannot recover these boundaries from cu_lengths.
+    sample_image_counts: list[int]
+    sample_num_tiles: list[list[int]]
+    sample_num_frames: list[list[int]]
+    sample_num_sound_clips: list[list[int]]
+
     # Sound
     sound_clips: list[torch.Tensor]
     sound_length: list[int]
@@ -302,6 +311,12 @@ class BatchedPackedTaskSample(Batch):
     samples_seen: int
     # Real lengths of the original samples in each packed sample, padded with 0s.
     sample_lengths: torch.Tensor
+
+    # Per-packed-row media boundaries used by HybridCP/DynamicCP.
+    sample_image_counts: list[list[int]]
+    sample_num_tiles: list[list[list[int]]]
+    sample_num_frames: list[list[list[int]]]
+    sample_num_sound_clips: list[list[list[int]]]
 
     # Whether the batch has a padded image
     has_pad_img: bool
@@ -1083,7 +1098,16 @@ class MultiModalTaskEncoder(
 
     @stateless(restore_seeds=True)
     def preencode_sample_for_packing(self, sample: ConversationSample):
-        encoded_sample = self.preencode_sample(sample)
+        try:
+            encoded_sample = self.preencode_sample(sample)
+        except NoTrainableTokensError:
+            if not getattr(self.args, "skip_no_trainable_tokens", False):
+                raise
+            # A short diagnostic packing horizon can truncate a valid sample
+            # before its first assistant label.  Such a sample cannot
+            # contribute to SFT loss and must not abort every worker in the
+            # batch; omit it from the packed stream instead.
+            return
         samples = getattr(encoded_sample, "samples", None)
         if samples is not None:
             yield from samples
@@ -1132,9 +1156,27 @@ class MultiModalTaskEncoder(
                 num_sound_clips=[],
                 samples_seen=sample.samples_seen,
                 sample_lengths=sample.sample_lengths,
+                sample_image_counts=[0 for _ in range(len(sample.cu_lengths) - 1)],
+                sample_num_tiles=[[] for _ in range(len(sample.cu_lengths) - 1)],
+                sample_num_frames=[[] for _ in range(len(sample.cu_lengths) - 1)],
+                sample_num_sound_clips=[[] for _ in range(len(sample.cu_lengths) - 1)],
             )
 
+        media_debug = os.environ.get("MEGATRON_MEDIA_DEBUG", "0") == "1"
+        media_debug_started = time.monotonic()
+        if media_debug:
+            print(
+                f"[media-debug] load-start key={sample.__key__!r} "
+                f"images={len(sample.images)} audio={len(sample.audio)}",
+                flush=True,
+            )
         self._load_media(sample)
+        if media_debug:
+            print(
+                f"[media-debug] load-done key={sample.__key__!r} "
+                f"elapsed={time.monotonic() - media_debug_started:.3f}s",
+                flush=True,
+            )
 
         data_augment = sample.__subflavors__.get("data_augment", False) and not self.is_val
 
@@ -1181,6 +1223,10 @@ class MultiModalTaskEncoder(
             num_sound_clips=num_sound_clips,
             samples_seen=torch.tensor(1, dtype=torch.int32),
             sample_lengths=torch.tensor([sample.total_len], dtype=torch.int32),
+            sample_image_counts=[len(image_tiles)],
+            sample_num_tiles=[[media.num_tiles for media in sample.images]],
+            sample_num_frames=[list(sample.num_frames)],
+            sample_num_sound_clips=[list(num_sound_clips)],
         )
 
     def _debug_save_image(self, media, media_idx, sample_key, data_augment):
@@ -1399,6 +1445,18 @@ class MultiModalTaskEncoder(
             num_sound_clips=[ns for sample in samples for ns in sample.num_sound_clips],
             samples_seen=sum(s.samples_seen for s in samples),
             sample_lengths=torch.cat([s.sample_lengths for s in samples], dim=0),
+            sample_image_counts=[
+                count for sample in samples for count in sample.sample_image_counts
+            ],
+            sample_num_tiles=[
+                media for sample in samples for media in sample.sample_num_tiles
+            ],
+            sample_num_frames=[
+                frames for sample in samples for frames in sample.sample_num_frames
+            ],
+            sample_num_sound_clips=[
+                clips for sample in samples for clips in sample.sample_num_sound_clips
+            ],
         )
 
     def batch(self, samples: List[PackedTaskSample]) -> BatchedPackedTaskSample:
@@ -1561,6 +1619,10 @@ class MultiModalTaskEncoder(
             num_sound_clips=num_sound_clips,
             samples_seen=sum(s.samples_seen for s in samples),
             sample_lengths=sample_lengths,
+            sample_image_counts=[s.sample_image_counts for s in samples],
+            sample_num_tiles=[s.sample_num_tiles for s in samples],
+            sample_num_frames=[s.sample_num_frames for s in samples],
+            sample_num_sound_clips=[s.sample_num_sound_clips for s in samples],
         )
 
     def encode_batch(self, batch: BatchedPackedTaskSample) -> dict:

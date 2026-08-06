@@ -27,6 +27,20 @@ from megatron.core.transformer.moe.router_replay import RouterReplay
 from megatron.core.transformer.transformer_config import TransformerConfig
 
 
+def _prepare_padding_mask_for_routing(
+    padding_mask: torch.Tensor, routing_map: torch.Tensor
+) -> torch.Tensor:
+    """Make a token padding mask broadcastable over the expert dimension."""
+    flattened_mask = padding_mask.reshape(-1)
+    token_count = routing_map.shape[0]
+    if flattened_mask.numel() != token_count:
+        raise ValueError(
+            f"padding_mask has {flattened_mask.numel()} tokens, "
+            f"but routing_map has {token_count}"
+        )
+    return flattened_mask.unsqueeze(-1)
+
+
 class Router(ABC, MegatronModule):
     """Base Router class"""
 
@@ -580,6 +594,9 @@ class TopKRouter(Router):
         if self.enable_expert_bias and torch.is_grad_enabled():
             with torch.no_grad():
                 if padding_mask is not None:
+                    padding_mask = _prepare_padding_mask_for_routing(
+                        padding_mask, routing_map
+                    )
                     routing_map = routing_map & (~padding_mask)
                 self.local_tokens_per_expert += routing_map.sum(dim=0)
 
@@ -623,6 +640,20 @@ class TopKRouter(Router):
                 fused=self.config.moe_router_fusion,
                 router_replay=self.router_replay,
             )
+
+        # Dropless HybridEP consumes the sparse routing map directly, so exclude padding
+        # rows before dispatch. Other dispatchers retain their existing fixed-route
+        # assumptions until they support sparse routing maps end to end.
+        use_dropless_hybridep = (
+            self.config.moe_token_dispatcher_type == "flex"
+            and self.config.moe_flex_dispatcher_backend == "hybridep"
+            and self.config.moe_expert_capacity_factor is None
+            and self.config.moe_expert_rank_capacity_factor is None
+        )
+        if padding_mask is not None and use_dropless_hybridep:
+            valid_tokens = (~padding_mask).unsqueeze(-1)
+            probs = probs * valid_tokens
+            routing_map = routing_map & valid_tokens
 
         # Apply token dropping to probs and routing_map.
         if self.config.moe_expert_capacity_factor is not None:

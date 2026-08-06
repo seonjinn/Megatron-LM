@@ -20,13 +20,26 @@ from megatron.core import mpu, parallel_state, tensor_parallel
 from megatron.core.enums import ModelType
 from megatron.core.models.multimodal import context_parallel
 from megatron.core.models.multimodal.llava_model import IGNORE_INDEX, LLaVAModel
-from megatron.core.packed_seq_params import PackedSeqParams
+from megatron.core.packed_seq_params import (
+    PackedSeqParams,
+    get_thd_padding_kwargs,
+    pad_sequence_for_thd,
+    packed_thd_exceeds_capacity,
+    resolve_thd_tail_padding_policy,
+)
 from megatron.core.parallel_state import (
+    get_hybrid_data_context_parallel_groups,
     get_pipeline_model_parallel_world_size,
     get_tensor_model_parallel_rank,
     is_pipeline_last_stage,
 )
-from megatron.core.utils import get_batch_on_this_cp_rank, nvtx_range_pop, nvtx_range_push
+from megatron.core.utils import (
+    get_batch_on_this_cp_rank,
+    nvtx_range_pop,
+    nvtx_range_push,
+    set_hybrid_cp_metadata,
+    use_global_context_parallel_loss_reduction,
+)
 from megatron.training import get_args, get_timers, get_tokenizer, pretrain
 from megatron.training.argument_utils import pretrain_cfg_container_from_args
 from megatron.training.arguments import parse_and_validate_args
@@ -39,6 +52,17 @@ from megatron.training.utils import is_last_rank
 _BROADCAST_DATA_SUPPORTS_OPTIMIZE = "optimize" in inspect.signature(
     tensor_parallel.broadcast_data
 ).parameters
+
+
+def _hybrid_cp_debug(message: str) -> None:
+    """Emit rank-local multimodal forward diagnostics when explicitly enabled."""
+
+    if os.environ.get("MEGATRON_HYBRID_CP_DEBUG") != "1":
+        return
+    rank = "?"
+    if torch.distributed.is_available() and torch.distributed.is_initialized():
+        rank = str(torch.distributed.get_rank())
+    print(f"[HYBRID_CP_DEBUG][rank={rank}] {message}", flush=True)
 
 
 def _broadcast_data(keys, data, datatype, optimize):
@@ -71,6 +95,7 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
     num_sound_clips = None
     sound_length = None
     sample_lengths = None
+    local_cp_size = None
 
     args = get_args()
 
@@ -138,6 +163,14 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
         data['samples_seen'] = torch.tensor(1, dtype=torch.int32, device=data_text.device)
 
     samples_seen = _broadcast_data(["samples_seen"], data, torch.int32, args.optimize_broadcast)["samples_seen"]
+
+    # HybridCP routes each packed sample to a subset of the global CP ranks.
+    # Keep that choice on the TP source and broadcast it with the batch so the
+    # multimodal model can attach the matching process group to PackedSeqParams.
+    if getattr(args, "hybrid_context_parallel", False):
+        local_cp_size = _broadcast_data(
+            ["local_cp_size"], data, torch.int32, args.optimize_broadcast
+        )["local_cp_size"]
 
     if getattr(args, "log_packed_sequence_stats", False):
         if get_tensor_model_parallel_rank() == 0 and data is not None and "sample_lengths" not in data:
@@ -224,6 +257,18 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
             max_seqlen_kv=max_lengths,
             total_tokens=int(cu_lengths_for_params[-1].item()),
         )
+        if getattr(args, "hybrid_context_parallel", False):
+            local_cp_size_value = int(local_cp_size.reshape(-1)[0].item())
+            hybrid_cp_group = (
+                get_hybrid_data_context_parallel_groups(group_size=local_cp_size_value)
+                if local_cp_size_value > 1
+                else None
+            )
+            set_hybrid_cp_metadata(
+                packed_seq_params,
+                local_cp_size=local_cp_size_value,
+                cp_group=hybrid_cp_group,
+            )
 
     # If cu_lengths and max_lengths are non-dummy, construct PackedSeqParams. Otherwise, leave it at None.
     vision_packed_seq_params = None
@@ -264,6 +309,66 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
             packed_seq_params.cu_seqlens_q_padded,
         )
     nvtx_range_pop("get_ltor_masks_and_position_ids")
+
+    # TE CUDA Graphs require every replay to pass the same THD metadata shapes
+    # that were used during capture. The multimodal entrypoint historically
+    # constructed PackedSeqParams directly from compact dataloader boundaries,
+    # so a batch with two or three packed samples replayed into the graph's
+    # fixed ``thd_max_packed_sequences + 1`` surface and failed inside TE's
+    # static-input copy. Apply the fixed token/sequence padding before LLaVA
+    # expands the packed samples.
+    if packed_seq_params is not None and getattr(args, "pad_packed_seq_alignment", None) is not None:
+        alignment, target_len, max_num_seqs = get_thd_padding_kwargs(
+            args.pad_packed_seq_alignment,
+            getattr(args, "max_seqlen_per_dp_cp_rank", None),
+            getattr(args, "thd_max_packed_sequences", None),
+            getattr(args, "cuda_graph_impl", "none") != "none",
+            cp_size=getattr(args, "context_parallel_size", 1),
+        )
+        overflow = packed_thd_exceeds_capacity(
+            packed_seq_params,
+            (tokens, labels, loss_mask, position_ids),
+            target_len,
+            max_num_seqs,
+        )
+        if not (
+            overflow
+            and getattr(args, "cuda_graph_impl", "none") != "none"
+            and getattr(args, "thd_overflow_policy", "error") == "eager"
+        ):
+            (
+                tokens,
+                labels,
+                loss_mask,
+                position_ids,
+                packed_seq_params,
+                padding_mask,
+            ) = pad_sequence_for_thd(
+                tokens,
+                labels,
+                loss_mask,
+                position_ids,
+                packed_seq_params,
+                alignment=alignment,
+                target_len=target_len,
+                max_num_seqs=max_num_seqs,
+                tail_padding_policy=resolve_thd_tail_padding_policy(args),
+                # Padding is applied to the global batch before LLaVA expands
+                # multimodal tokens and before CP partitions the language input.
+                cp_size=1,
+            )
+            if tokens is not None:
+                tokens = tokens.masked_fill(padding_mask, tokenizer.pad)
+            if labels is not None:
+                labels = labels.masked_fill(padding_mask, IGNORE_INDEX)
+            if loss_mask is not None:
+                loss_mask = loss_mask.masked_fill(padding_mask, 0)
+            packed_seq_params.tokens_per_sample = packed_seq_params.total_tokens
+        elif overflow:
+            # Keep the original dynamic metadata and make the graph bypass
+            # explicit so LLaVA does not force the fixed token surface after
+            # media expansion.
+            packed_seq_params.cuda_graph_eligible = False
 
     if getattr(args, "log_packed_sequence_stats", False) and packed_seq_params is not None:
         update_packed_sequence_stats(sample_lengths, loss_mask)
@@ -432,7 +537,7 @@ def loss_func(loss_mask, output_tensor, samples_seen):
     reporting_loss_sum = loss.clone().detach()
     global_num_tokens = num_tokens.clone()
     global_loss = reporting_loss_sum.clone()
-    if torch.distributed.is_initialized() and args.context_parallel_size > 1:
+    if torch.distributed.is_initialized() and use_global_context_parallel_loss_reduction(args):
         torch.distributed.all_reduce(
             global_loss,
             op=torch.distributed.ReduceOp.SUM,
@@ -490,6 +595,21 @@ def forward_step(data_iterator, model: LLaVAModel):
         samples_seen,
     ) = get_batch(data_iterator, model.module.module.image_token_index, model.module.module.img_seq_len)
     timers('batch-generator').stop()
+    packed_metadata = "none"
+    if packed_seq_params is not None:
+        packed_metadata = (
+            f"q={tuple(packed_seq_params.cu_seqlens_q.shape)} "
+            f"qp={tuple(packed_seq_params.cu_seqlens_q_padded.shape)} "
+            f"total={packed_seq_params.total_tokens} "
+            f"local_cp={getattr(packed_seq_params, 'local_cp_size', None)}"
+        )
+    _hybrid_cp_debug(
+        f"get_batch_done tokens={tuple(tokens.shape) if tokens is not None else None} "
+        f"labels={tuple(labels.shape) if labels is not None else None} "
+        f"images={tuple(images.shape) if images is not None else None} "
+        f"packed={packed_metadata}"
+    )
+    _hybrid_cp_debug("before_model_forward")
 
     output_tensor, loss_mask = model(
         images,
@@ -508,6 +628,9 @@ def forward_step(data_iterator, model: LLaVAModel):
         sound_length=sound_length,
         sound_timestamps=sound_timestamps,
         num_sound_clips=num_sound_clips,
+    )
+    _hybrid_cp_debug(
+        f"after_model_forward output={tuple(output_tensor.shape) if output_tensor is not None else None}"
     )
     args = get_args()
     if args.use_loss_scaling and args.context_parallel_size <= 1:

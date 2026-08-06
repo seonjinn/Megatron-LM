@@ -6,13 +6,17 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from megatron.core import tensor_parallel
 from megatron.core.inference.contexts import StaticInferenceContext
 from megatron.core.inference.utils import InferenceMode
 from megatron.core.models.gpt.gpt_layer_specs import (
     get_gpt_layer_with_transformer_engine_submodules,
 )
 from megatron.core.models.multimodal import context_parallel
-from megatron.core.models.multimodal.llava_model import LLaVAModel
+from megatron.core.models.multimodal.llava_model import (
+    LLaVAModel,
+    pad_sequence_lengths_for_context_parallel,
+)
 from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.tensor_parallel.random import model_parallel_cuda_manual_seed
 from megatron.core.transformer.enums import AttnMaskType
@@ -23,6 +27,49 @@ from megatron.core.transformer.transformer_layer import TransformerLayer
 from megatron.core.utils import is_te_min_version
 from megatron.training.global_vars import set_args
 from tests.unit_tests.test_utilities import Utils
+
+
+@pytest.mark.internal
+def test_pad_sequence_lengths_for_context_parallel_rounds_each_sample():
+    """HybridCP must pad every routed sample to the CP shard requirement."""
+    lengths = torch.tensor([13, 16, 17], dtype=torch.int32)
+
+    padded = pad_sequence_lengths_for_context_parallel(lengths, shard_factor=8)
+
+    assert torch.equal(padded, torch.tensor([16, 16, 24], dtype=torch.int32))
+    assert padded.dtype == lengths.dtype
+    assert padded.device == lengths.device
+
+
+@pytest.mark.internal
+def test_process_embedding_token_parallel_keeps_standard_cp1_layout(monkeypatch):
+    """CP1 preprocessing must not transpose the already sequence-first input again."""
+    model = LLaVAModel.__new__(LLaVAModel)
+    model.pre_process = True
+    model.post_process = False
+    model.context_parallel_lm = 1
+    model.sequence_parallel_lm = True
+    model.tensor_model_parallel_size_lm = 8
+    model.tp_comm_overlap_lm = False
+    model.cp_group = None
+
+    combined_embeddings = torch.ones(8, 2, 4)
+    monkeypatch.setattr(
+        tensor_parallel,
+        "scatter_to_sequence_parallel_region",
+        lambda tensor: tensor,
+    )
+
+    result = model._process_embedding_token_parallel(
+        combined_embeddings,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+
+    assert result[0].shape == (8, 2, 4)
 
 
 class TestLLaVAModel:
@@ -92,6 +139,35 @@ class TestLLaVAModel:
 
         num_weights = sum([p.numel() for p in self.model.parameters()])
         assert num_weights == 1488736
+
+    @pytest.mark.internal
+    def test_thd_graph_token_capacity(self):
+        """Static TE THD graphs retain the full language token surface."""
+        original_language_model = self.model.language_model
+        self.model.language_model = SimpleNamespace(
+            config=SimpleNamespace(
+                cuda_graph_impl="transformer_engine",
+                pad_packed_seq_alignment="max",
+                max_seqlen_per_dp_cp_rank=1024,
+            )
+        )
+        self.model.context_parallel_lm = 2
+
+        assert (
+            self.model._get_thd_graph_token_capacity(PackedSeqParams(qkv_format="thd")) == 2048
+        )
+        assert (
+            self.model._get_thd_graph_token_capacity(
+                PackedSeqParams(qkv_format="thd", cuda_graph_eligible=False)
+            )
+            is None
+        )
+        assert self.model._get_thd_graph_token_capacity(PackedSeqParams(qkv_format="sbhd")) is None
+
+        self.model.language_model.config.pad_packed_seq_alignment = 128
+        assert self.model._get_thd_graph_token_capacity(PackedSeqParams(qkv_format="thd")) is None
+
+        self.model.language_model = original_language_model
 
     @pytest.mark.internal
     def test_set_input_tensor(self):

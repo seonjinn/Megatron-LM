@@ -7,6 +7,7 @@
 
 import logging
 import math
+import os
 from dataclasses import dataclass, replace
 from typing import List, Optional, Tuple, Union
 
@@ -90,6 +91,96 @@ except ImportError:
     HAVE_EINOPS = False
 
 logger = logging.getLogger(__name__)
+
+
+def _mamba_cp_debug(message: str) -> None:
+    """Emit optional Mamba/HybridCP metadata diagnostics."""
+
+    if os.environ.get("MEGATRON_MAMBA_CP_DEBUG") != "1":
+        return
+    rank = "?"
+    if torch.distributed.is_available() and torch.distributed.is_initialized():
+        rank = str(torch.distributed.get_rank())
+    print(f"[MAMBA_CP_DEBUG][rank={rank}] {message}", flush=True)
+
+
+def _mamba_target_tokens_for_static_graph(config: TransformerConfig, cp_size: int) -> int | None:
+    """Return the fixed Mamba token capacity only for static CUDA Graph runs.
+
+    Eager HybridCP routes variable-length samples and must derive ``seq_idx``
+    from the actual sample metadata.  Applying the configured per-rank graph
+    capacity in that path creates a synthetic 262K-token map for a shorter
+    sample, which cannot be reconciled with sequence-parallel Mamba input.
+    """
+    if getattr(config, "cuda_graph_impl", "none") == "none":
+        return None
+    max_seqlen_per_dp_cp_rank = getattr(config, "max_seqlen_per_dp_cp_rank", None)
+    if max_seqlen_per_dp_cp_rank is None:
+        return None
+    return int(max_seqlen_per_dp_cp_rank) * max(1, int(cp_size))
+
+
+def _slice_packed_seq_idx_for_sequence_parallel(
+    seq_idx: torch.Tensor,
+    local_tokens: int,
+    tp_rank: int,
+    tp_size: int,
+    target_tokens: Optional[int] = None,
+    allow_short_metadata: bool = False,
+) -> torch.Tensor:
+    """Return packed sequence IDs matching one Mamba input shard.
+
+    ``PackedSeqParams`` is shared with THD attention and therefore describes the
+    full packed token bound.  A static THD graph may add a tail after the
+    metadata was created, while sequence parallelism may make Mamba see only a
+    contiguous token shard.  First extend a short map using the final sequence
+    ID (the configured ``extend_last`` policy), then slice the shared map at
+    this boundary without mutating caller-owned metadata.
+    """
+    if seq_idx.ndim != 2 or seq_idx.shape[0] != 1:
+        raise ValueError(
+            "Packed Mamba seq_idx must have shape [1, tokens], "
+            f"got {list(seq_idx.shape)}."
+        )
+
+    global_tokens = seq_idx.shape[1]
+    if global_tokens == 0:
+        raise ValueError("Packed Mamba seq_idx cannot be empty.")
+
+    if target_tokens is not None:
+        if target_tokens < local_tokens:
+            raise ValueError(
+                "Packed Mamba seq_idx target token capacity cannot be smaller than "
+                f"the local Mamba input: {target_tokens} < {local_tokens}."
+            )
+        global_tokens = max(global_tokens, target_tokens)
+
+    if seq_idx.shape[1] < global_tokens:
+        tail = seq_idx[:, -1:].expand(1, global_tokens - seq_idx.shape[1])
+        seq_idx = torch.cat((seq_idx, tail), dim=1).contiguous()
+
+    if allow_short_metadata and seq_idx.shape[1] < local_tokens:
+        # HybridCP routes one packed sample at a time.  Media replacement can
+        # make the language embedding surface longer than the text-derived
+        # ``seq_idx`` map; all expanded tokens still belong to that one sample.
+        seq_idx = seq_idx[:, :1].expand(1, local_tokens).contiguous()
+        return seq_idx
+
+    if global_tokens == local_tokens:
+        return seq_idx
+
+    expected_global_tokens = local_tokens * tp_size
+    if global_tokens != expected_global_tokens:
+        raise ValueError(
+            "cannot map packed Mamba seq_idx to sequence-parallel input: "
+            f"metadata has {global_tokens} tokens, input has {local_tokens}, "
+            f"and tensor parallel size is {tp_size}."
+        )
+    if not 0 <= tp_rank < tp_size:
+        raise ValueError(f"Invalid tensor-parallel rank {tp_rank} for size {tp_size}.")
+
+    start = tp_rank * local_tokens
+    return seq_idx[:, start : start + local_tokens].contiguous()
 
 
 class ExtendedRMSNorm(RMSNormGated):
@@ -430,6 +521,9 @@ class MambaMixer(MegatronModule):
         total_tokens_tensor = torch.tensor(
             [total_tokens], dtype=cu_seqlens.dtype, device=cu_seqlens.device
         )
+        # Dynamic local-CP can leave padded sequence boundaries beyond the
+        # actual Mamba tensor length. Those boundaries represent no local tokens.
+        cu_seqlens = torch.minimum(cu_seqlens, total_tokens_tensor)
         cu_seqlens_with_max = torch.cat([cu_seqlens, total_tokens_tensor])
         seq_lengths = cu_seqlens_with_max[1:] - cu_seqlens_with_max[:-1]
         return (
@@ -474,7 +568,23 @@ class MambaMixer(MegatronModule):
 
         zxBCdt, _ = self.in_proj(hidden_states)
 
-        zxBCdt = self.cp.pre_conv_ssm(zxBCdt, packed_seq_params)
+        cp = self.cp
+        if packed_seq_params is not None and getattr(packed_seq_params, "local_cp_size", None) is not None:
+            cp = self.cp.for_group(getattr(packed_seq_params, "cp_group", None))
+
+        if packed_seq_params is not None:
+            metadata_cp_group = getattr(packed_seq_params, "cp_group", None)
+            metadata_cp_size = (
+                1 if metadata_cp_group is None else metadata_cp_group.size()
+            )
+            _mamba_cp_debug(
+                f"layer={self.layer_number} input={tuple(hidden_states.shape)} "
+                f"packed_local_cp={getattr(packed_seq_params, 'local_cp_size', None)} "
+                f"metadata_cp_size={metadata_cp_size} static_cp_size={self.cp.cp_size} "
+                f"active_cp_size={cp.cp_size} active_cp_rank={getattr(cp, 'cp_rank', 0)}"
+            )
+
+        zxBCdt = cp.pre_conv_ssm(zxBCdt, packed_seq_params)
 
         if in_inference_mode or not self.use_mem_eff_path:
             # TODO(ksanthanam): Consider deprecating this path for training
@@ -482,10 +592,12 @@ class MambaMixer(MegatronModule):
                 "Training with packed sequences is not supported "
                 "in the non-memory-efficient code path."
             )
-            y = self._ssm_prefill(zxBCdt, conv_state=conv_state, ssm_state=ssm_state)
+            y = self._ssm_prefill(
+                zxBCdt, conv_state=conv_state, ssm_state=ssm_state, cp=cp
+            )
         else:
             assert ssm_state is None
-            y = self._ssm_training(zxBCdt, packed_seq_params)
+            y = self._ssm_training(zxBCdt, packed_seq_params, cp=cp)
 
         out, out_bias = self.out_proj(y)
 
@@ -701,7 +813,11 @@ class MambaMixer(MegatronModule):
         return out, out_bias
 
     def _ssm_training(
-        self, zxBCdt: torch.Tensor, packed_seq_params: Optional[PackedSeqParams] = None
+        self,
+        zxBCdt: torch.Tensor,
+        packed_seq_params: Optional[PackedSeqParams] = None,
+        *,
+        cp: Optional[MambaContextParallel] = None,
     ) -> torch.Tensor:
         """
         Performs SSM computation for training step.
@@ -711,11 +827,13 @@ class MambaMixer(MegatronModule):
         training.
         """
 
+        cp = self.cp if cp is None else cp
+
         # transpose: l b pd --> b l pd
         zxBCdt = rearrange(zxBCdt, "l b d -> b l d").contiguous()
 
         # (nheads_local_tpcp)
-        A = -torch.exp(self.cp.get_A_log().float())
+        A = -torch.exp(cp.get_A_log().float())
 
         # TODO(duncan): Can this code be removed?
         if self.conv1d.bias is not None:
@@ -730,28 +848,43 @@ class MambaMixer(MegatronModule):
             seq_idx = packed_seq_params.seq_idx
             if seq_idx is None:
                 seq_idx = self._create_packed_seq_idx(packed_seq_params, zxBCdt.shape[1])
+            elif self.config.sequence_parallel:
+                seq_idx = _slice_packed_seq_idx_for_sequence_parallel(
+                    seq_idx,
+                    local_tokens=zxBCdt.shape[1],
+                    tp_rank=parallel_state.get_tensor_model_parallel_rank(),
+                    tp_size=parallel_state.get_tensor_model_parallel_world_size(),
+                    target_tokens=_mamba_target_tokens_for_static_graph(
+                        self.config, cp.cp_size
+                    ),
+                    allow_short_metadata=(
+                        packed_seq_params.local_cp_size is not None
+                        and packed_seq_params.cu_seqlens_q is not None
+                        and packed_seq_params.cu_seqlens_q.numel() == 2
+                    ),
+                )
 
         y = mamba_split_conv1d_scan_combined(
             zxBCdt,
-            rearrange(self.cp.get_conv1d_weight(), "d 1 w -> d w"),
-            self.cp.get_conv1d_bias(),
-            self.cp.get_dt_bias().float(),
+            rearrange(cp.get_conv1d_weight(), "d 1 w -> d w"),
+            cp.get_conv1d_bias(),
+            cp.get_dt_bias().float(),
             A,
             D=(
-                rearrange(self.cp.get_D().float(), "(h p) -> h p", p=self.headdim)
+                rearrange(cp.get_D().float(), "(h p) -> h p", p=self.headdim)
                 if self.D_has_hdim
-                else self.cp.get_D()
+                else cp.get_D()
             ),
             chunk_size=self.chunk_size,
             activation=self.activation,
             headdim=None if self.D_has_hdim else self.headdim,
-            ngroups=self.cp.ngroups_local_tpcp,
+            ngroups=cp.ngroups_local_tpcp,
             norm_before_gate=self.norm_before_gate,
             seq_idx=seq_idx,
         )
 
         y = rearrange(y, "b l d -> l b d").contiguous()
-        y = self.cp.post_conv_ssm(y, packed_seq_params)
+        y = cp.post_conv_ssm(y, packed_seq_params)
 
         if self.rmsnorm:
             y = self.norm(y)
@@ -763,6 +896,8 @@ class MambaMixer(MegatronModule):
         zxBCdt: torch.Tensor,
         conv_state: Optional[torch.Tensor],
         ssm_state: Optional[torch.Tensor],
+        *,
+        cp: Optional[MambaContextParallel] = None,
         seq_idx: Optional[torch.Tensor] = None,
         cu_seqlens: Optional[torch.Tensor] = None,
         batch_indices: Optional[torch.Tensor] = None,
@@ -813,20 +948,21 @@ class MambaMixer(MegatronModule):
             Output tensor of shape (l, b, d). Intermediate states (if any) are
             written directly to intermediate_ssm_out and intermediate_conv_out.
         """
+        cp = self.cp if cp is None else cp
         is_dynamic_batching = seq_idx is not None
 
         # transpose: l b pd --> b l pd
         zxBCdt = rearrange(zxBCdt, "l b d -> b l d").contiguous()
 
         # (nheads_local_tpcp)
-        A = -torch.exp(self.cp.get_A_log().float())
+        A = -torch.exp(cp.get_A_log().float())
 
         z, xBC, dt = torch.split(
             zxBCdt,
             [
-                self.cp.d_inner_local_tpcp,
-                self.cp.d_inner_local_tpcp + 2 * self.cp.ngroups_local_tpcp * self.d_state,
-                self.cp.nheads_local_tpcp,
+                cp.d_inner_local_tpcp,
+                cp.d_inner_local_tpcp + 2 * cp.ngroups_local_tpcp * self.d_state,
+                cp.nheads_local_tpcp,
             ],
             dim=-1,
         )
@@ -857,10 +993,10 @@ class MambaMixer(MegatronModule):
             conv_state_dtype = conv_state.dtype
 
             xBC = xBC.to(conv_state_dtype)
-            conv_weight = rearrange(self.cp.get_conv1d_weight(), "d 1 w -> d w").to(
+            conv_weight = rearrange(cp.get_conv1d_weight(), "d 1 w -> d w").to(
                 conv_state_dtype
             )
-            conv_bias = self.cp.get_conv1d_bias().to(conv_state_dtype)
+            conv_bias = cp.get_conv1d_bias().to(conv_state_dtype)
 
             xBC_pre_conv = xBC if intermediate_conv_out is not None else None
             from megatron.core.ssm.ops.causal_conv1d_varlen import causal_conv1d_varlen_fn
@@ -888,13 +1024,13 @@ class MambaMixer(MegatronModule):
 
             seqlen = xBC.size(2)
             if causal_conv1d_fn is None:
-                xBC = self.act(self.cp.conv1d(xBC)[..., :seqlen])
+                xBC = self.act(cp.conv1d(xBC)[..., :seqlen])
             else:
                 assert self.activation in ["silu", "swish"]
                 xBC = causal_conv1d_fn(
                     x=xBC,
-                    weight=rearrange(self.cp.get_conv1d_weight(), "d 1 w -> d w"),
-                    bias=self.cp.get_conv1d_bias(),
+                    weight=rearrange(cp.get_conv1d_weight(), "d 1 w -> d w"),
+                    bias=cp.get_conv1d_bias(),
                     activation=self.activation,
                     seq_idx=seq_idx,
                 )
@@ -903,9 +1039,9 @@ class MambaMixer(MegatronModule):
         x, B, C = torch.split(
             xBC,
             [
-                self.cp.d_inner_local_tpcp,
-                self.cp.ngroups_local_tpcp * self.d_state,
-                self.cp.ngroups_local_tpcp * self.d_state,
+                cp.d_inner_local_tpcp,
+                cp.ngroups_local_tpcp * self.d_state,
+                cp.ngroups_local_tpcp * self.d_state,
             ],
             dim=-1,
         )
@@ -922,7 +1058,7 @@ class MambaMixer(MegatronModule):
         # `cp_size == 1` (groups of heads can be sharded across CP ranks), which would be
         # mathematically incorrect, and potentially arithmetically unstable.
         assert (
-            self.cp.cp_size == 1 or self.rmsnorm
+            cp.cp_size == 1 or self.rmsnorm
         ), "Context parallel not supported for use_mem_eff_path==False and rmsnorm==False"
 
         if is_dynamic_batching:
@@ -977,12 +1113,12 @@ class MambaMixer(MegatronModule):
                 seq_idx=seq_idx_for_varlen,
                 out=y,
                 D=(
-                    rearrange(self.cp.get_D().float(), "(h p) -> h p", p=self.headdim)
+                    rearrange(cp.get_D().float(), "(h p) -> h p", p=self.headdim)
                     if self.D_has_hdim
-                    else self.cp.get_D()
+                    else cp.get_D()
                 ),
                 z=z if not self.rmsnorm else None,
-                dt_bias=self.cp.get_dt_bias().float(),
+                dt_bias=cp.get_dt_bias().float(),
                 initial_states=initial_ssm_state,
                 return_intermediate_states=False,
                 intermediate_chunk_indices=intermediate_chunk_indices,
@@ -1032,12 +1168,12 @@ class MambaMixer(MegatronModule):
                 C,
                 self.chunk_size,
                 D=(
-                    rearrange(self.cp.get_D().float(), "(h p) -> h p", p=self.headdim)
+                    rearrange(cp.get_D().float(), "(h p) -> h p", p=self.headdim)
                     if self.D_has_hdim
-                    else self.cp.get_D()
+                    else cp.get_D()
                 ),
                 z=z if not self.rmsnorm else None,
-                dt_bias=self.cp.get_dt_bias().float(),
+                dt_bias=cp.get_dt_bias().float(),
                 dt_softplus=True,
                 return_final_states=ssm_state is not None,
                 initial_states=initial_ssm_state,
@@ -1048,11 +1184,11 @@ class MambaMixer(MegatronModule):
                 ssm_state.copy_(last_state)
 
         y = rearrange(y, "b l h p -> l b (h p)").contiguous()
-        y = self.cp.post_conv_ssm(y)
+        y = cp.post_conv_ssm(y)
 
         if self.rmsnorm:
             z = rearrange(z, "b l h p -> l b (h p)").contiguous()
-            z = self.cp.post_conv_ssm(z)
+            z = cp.post_conv_ssm(z)
             y = self.norm(y, z)
 
         return y

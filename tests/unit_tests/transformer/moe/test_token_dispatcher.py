@@ -1,14 +1,21 @@
 # Copyright (c) 2023, NVIDIA CORPORATION. All rights reserved.
 
 import dataclasses
+from types import SimpleNamespace
 
 import pytest
 import torch
 
 from megatron.core import config, parallel_state
 from megatron.core.models.gpt.gpt_layer_specs import get_gpt_layer_local_submodules
+from megatron.core.transformer.moe.fused_a2a import HYBRIDEP_TOKEN_ALIGNMENT, reset_hybrid_ep_buffer
 from megatron.core.transformer.moe.moe_layer import MoELayer, MoESubmodules
 from megatron.core.transformer.moe.moe_utils import get_capacity
+from megatron.core.transformer.moe.token_dispatcher import (
+    MoEAllGatherTokenDispatcher,
+    MoEFlexTokenDispatcher,
+    _HybridEPManager,
+)
 from megatron.core.transformer.spec_utils import get_submodules
 from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.typed_torch import apply_module
@@ -418,6 +425,274 @@ def is_hybrid_ep_available():
     return HAVE_HYBRIDEP
 
 
+def test_hybridep_pad_uneven_dispatch_inputs_metadata(monkeypatch):
+    manager = _HybridEPManager.__new__(_HybridEPManager)
+    manager.group = object()
+    manager.num_local_experts = 2
+    manager.num_experts = 4
+    manager.config = TransformerConfig(
+        num_layers=1,
+        hidden_size=16,
+        num_attention_heads=4,
+        num_moe_experts=4,
+        moe_router_topk=2,
+        moe_hybridep_pad_uneven_dispatch_inputs=True,
+    )
+    manager.moe_expert_rank_capacity_factor = None
+    manager.drop_and_pad = False
+
+    local_num_tokens = 17
+    max_num_tokens_across_ep = 70
+    padded_num_tokens = (
+        max_num_tokens_across_ep + -max_num_tokens_across_ep % HYBRIDEP_TOKEN_ALIGNMENT
+    )
+    routing_map = torch.ones((local_num_tokens, manager.num_experts), dtype=torch.bool)
+    probs = torch.ones((local_num_tokens, manager.num_experts), dtype=torch.float32)
+
+    def fake_all_reduce(tensor, op=None, group=None):
+        assert op == torch.distributed.ReduceOp.MAX
+        assert group is manager.group
+        tensor.fill_(max_num_tokens_across_ep)
+
+    monkeypatch.setattr(torch.distributed, "all_reduce", fake_all_reduce)
+
+    manager.setup_metadata(routing_map, probs)
+
+    assert manager._original_num_tokens == local_num_tokens
+    assert manager._padded_num_tokens == padded_num_tokens
+    assert manager.routing_map.shape == (padded_num_tokens, manager.num_experts)
+    assert manager.token_probs.shape == (padded_num_tokens, manager.num_experts)
+    torch.testing.assert_close(manager.routing_map[:local_num_tokens], routing_map)
+    torch.testing.assert_close(manager.token_probs[:local_num_tokens], probs)
+    assert not manager.routing_map[local_num_tokens:].any()
+    assert not manager.token_probs[local_num_tokens:].any()
+
+
+def _make_hybridep_replay_state_dispatcher(
+    *, drop_and_pad: bool = True, rank_capacity: float | None = None
+) -> MoEFlexTokenDispatcher:
+    dispatcher = MoEFlexTokenDispatcher.__new__(MoEFlexTokenDispatcher)
+    dispatcher.config = SimpleNamespace(
+        moe_flex_dispatcher_backend="hybridep",
+        moe_expert_capacity_factor=1.0 if drop_and_pad else None,
+        moe_expert_rank_capacity_factor=rank_capacity,
+        moe_hybridep_pad_uneven_dispatch_inputs=False,
+    )
+    dispatcher.tp_size = 2
+    dispatcher.ep_size = 4
+    dispatcher.num_local_experts = 2
+    dispatcher.hidden_shape = torch.Size((2, 3, 4))
+
+    manager = _HybridEPManager.__new__(_HybridEPManager)
+    manager.drop_and_pad = drop_and_pad
+    manager._original_num_tokens = 6
+    manager._padded_num_tokens = 8
+    manager.capacity = 5 if drop_and_pad else None
+    manager.num_permuted_tokens = 40
+    manager.tokens_per_expert = torch.tensor([20, 20], dtype=torch.long)
+    manager.handle = object()
+    manager.pad_multiple = 16
+    dispatcher._comm_manager = manager
+    return dispatcher
+
+
+def test_hybridep_cudagraph_replay_state_restores_fixed_capacity_metadata() -> None:
+    dispatcher = _make_hybridep_replay_state_dispatcher()
+    graph_input = torch.empty((2, 3, 4), dtype=torch.bfloat16)
+    preprocessed = torch.empty((6, 4), dtype=torch.bfloat16)
+
+    state = dispatcher.snapshot_cudagraph_replay_state(graph_input, preprocessed)
+    manager = dispatcher._comm_manager
+    manager._original_num_tokens = 3
+    manager._padded_num_tokens = 4
+    manager.capacity = 99
+    manager.num_permuted_tokens = 7
+    manager.tokens_per_expert = torch.tensor([3, 4])
+
+    dispatcher.restore_cudagraph_replay_state(state, graph_input, preprocessed)
+
+    assert manager._original_num_tokens == 6
+    assert manager._padded_num_tokens == 8
+    assert manager.capacity == 5
+    assert manager.num_permuted_tokens == 40
+    assert tuple(manager.tokens_per_expert.tolist()) == (20, 20)
+    assert manager.tokens_per_expert.device.type == "cpu"
+    assert state.backend_state.tokens_per_expert == (20, 20)
+    assert manager.handle is not None
+    assert manager.pad_multiple == 16
+
+
+def test_hybridep_cudagraph_replay_state_restores_fixed_rank_capacity_metadata() -> None:
+    dispatcher = _make_hybridep_replay_state_dispatcher(drop_and_pad=False, rank_capacity=1.0)
+    graph_input = torch.empty((2, 3, 4), dtype=torch.bfloat16)
+    preprocessed = torch.empty((6, 4), dtype=torch.bfloat16)
+
+    state = dispatcher.snapshot_cudagraph_replay_state(graph_input, preprocessed)
+    dispatcher._comm_manager.num_permuted_tokens = 7
+
+    dispatcher.restore_cudagraph_replay_state(state, graph_input, preprocessed)
+
+    assert dispatcher._comm_manager.num_permuted_tokens == 40
+    assert state.backend_state.tokens_per_expert is None
+
+
+def test_hybridep_cudagraph_dropless_replay_preserves_eager_dispatch_ownership(
+    monkeypatch,
+) -> None:
+    dispatcher = MoEFlexTokenDispatcher.__new__(MoEFlexTokenDispatcher)
+    dispatcher.config = SimpleNamespace(
+        moe_flex_dispatcher_backend="hybridep",
+        moe_expert_capacity_factor=None,
+        moe_expert_rank_capacity_factor=None,
+        moe_hybridep_pad_uneven_dispatch_inputs=False,
+        moe_router_topk=2,
+    )
+    dispatcher.tp_size = 1
+    dispatcher.ep_size = 1
+    dispatcher.num_local_experts = 2
+    dispatcher.num_experts = 2
+    dispatcher.shared_experts = None
+
+    manager = _HybridEPManager.__new__(_HybridEPManager)
+    manager.group = SimpleNamespace(size=lambda: 1)
+    manager.num_local_experts = 2
+    manager.num_experts = 2
+    manager.config = SimpleNamespace(
+        moe_hybridep_pad_uneven_dispatch_inputs=False,
+        moe_router_topk=2,
+        fp8=False,
+        fp4=False,
+        moe_flex_dispatcher_num_sms=20,
+        moe_hybridep_num_blocks_permute=4,
+        moe_hybridep_num_blocks_unpermute=4,
+        moe_permute_fusion_into_hybridep=False,
+        moe_hybridep_num_sms_preprocessing=4,
+    )
+    manager.moe_expert_rank_capacity_factor = None
+    manager.drop_and_pad = False
+    manager.capacity = None
+    manager.num_permuted_tokens = None
+    manager.handle = None
+    manager.pad_multiple = None
+    dispatcher._comm_manager = manager
+
+    graph_input = torch.arange(24, dtype=torch.float32).reshape(2, 3, 4)
+    capture_routing_map = torch.tensor(
+        [
+            [True, False],
+            [True, True],
+            [False, True],
+            [True, False],
+            [False, True],
+            [True, True],
+        ]
+    )
+    replay_routing_map = torch.tensor(
+        [
+            [True, False],
+            [False, True],
+            [True, False],
+            [False, True],
+            [True, False],
+            [False, True],
+        ]
+    )
+    observed_dispatch_bound = []
+    observed_combine_bound = []
+
+    def fake_hybrid_ep_dispatch(**kwargs):
+        observed_dispatch_bound.append(kwargs["num_permuted_tokens"])
+        tokens_per_expert = kwargs["routing_map"].sum(dim=(0, 1), dtype=torch.int64)
+        num_dispatched_tokens = int(tokens_per_expert.sum().item())
+        dispatched_hidden = kwargs["x"].new_zeros((num_dispatched_tokens, kwargs["x"].shape[-1]))
+        dispatched_probs = kwargs["probs"].new_ones((num_dispatched_tokens,))
+        return dispatched_hidden, dispatched_probs, None, tokens_per_expert, object()
+
+    def fake_hybrid_ep_combine(**kwargs):
+        observed_combine_bound.append(kwargs["num_permuted_tokens"])
+        return kwargs["x"].new_zeros((graph_input.numel() // graph_input.shape[-1], 4))
+
+    monkeypatch.setattr(
+        "megatron.core.transformer.moe.token_dispatcher.hybrid_ep_dispatch",
+        fake_hybrid_ep_dispatch,
+    )
+    monkeypatch.setattr(
+        "megatron.core.transformer.moe.token_dispatcher.hybrid_ep_combine",
+        fake_hybrid_ep_combine,
+    )
+
+    capture_preprocessed, _ = dispatcher.dispatch_preprocess(
+        graph_input, capture_routing_map, capture_routing_map.to(dtype=torch.float32)
+    )
+    state = dispatcher.snapshot_cudagraph_replay_state(graph_input, capture_preprocessed)
+    assert state.backend_state.num_permuted_tokens is None
+
+    preprocessed, probs = dispatcher.dispatch_preprocess(
+        graph_input, replay_routing_map, replay_routing_map.to(dtype=torch.float32)
+    )
+    manager.num_permuted_tokens = 999
+    dispatcher.restore_cudagraph_replay_state(state, graph_input, preprocessed)
+    assert manager.num_permuted_tokens is None
+
+    dispatched_hidden, _ = dispatcher.token_dispatch(preprocessed, probs)
+    assert observed_dispatch_bound == [None]
+    assert manager.num_permuted_tokens.item() == 6
+
+    combined = dispatcher.token_combine(dispatched_hidden)
+    assert len(observed_combine_bound) == 1
+    assert observed_combine_bound[0].item() == 6
+    assert manager.num_permuted_tokens is None
+    dispatcher.validate_cudagraph_continuation(state, combined.view(graph_input.shape))
+
+
+def test_hybridep_cudagraph_continuation_requires_restored_physical_rows() -> None:
+    dispatcher = _make_hybridep_replay_state_dispatcher()
+    graph_input = torch.empty((2, 3, 4), dtype=torch.bfloat16)
+    preprocessed = torch.empty((6, 4), dtype=torch.bfloat16)
+    state = dispatcher.snapshot_cudagraph_replay_state(graph_input, preprocessed)
+
+    with pytest.raises(RuntimeError, match="original_num_tokens"):
+        dispatcher.validate_cudagraph_continuation(
+            dataclasses.replace(
+                state, backend_state=dataclasses.replace(state.backend_state, original_num_tokens=5)
+            ),
+            graph_input,
+        )
+
+
+@pytest.mark.parametrize("backend", ["deepep", "ncclep"])
+@pytest.mark.parametrize("static_shape", [False, True])
+def test_flex_cudagraph_replay_state_rejects_unsupported_backends_before_capture(
+    backend: str, static_shape: bool
+) -> None:
+    dispatcher = MoEFlexTokenDispatcher.__new__(MoEFlexTokenDispatcher)
+    dispatcher.config = SimpleNamespace(
+        moe_flex_dispatcher_backend=backend, moe_ncclep_static_shape=static_shape
+    )
+
+    with pytest.raises(RuntimeError, match="CUDA graph capture"):
+        dispatcher.validate_cudagraph_replay_capability()
+
+
+def test_hybridep_cudagraph_replay_state_rejects_backend_mutation() -> None:
+    dispatcher = _make_hybridep_replay_state_dispatcher()
+    graph_input = torch.empty((2, 3, 4), dtype=torch.bfloat16)
+    preprocessed = torch.empty((6, 4), dtype=torch.bfloat16)
+    state = dispatcher.snapshot_cudagraph_replay_state(graph_input, preprocessed)
+    dispatcher.config.moe_flex_dispatcher_backend = "deepep"
+
+    with pytest.raises(RuntimeError, match="topology fingerprint"):
+        dispatcher.restore_cudagraph_replay_state(state, graph_input, preprocessed)
+
+
+def test_allgather_cudagraph_replay_state_rejects_packed_sparse_routes() -> None:
+    dispatcher = MoEAllGatherTokenDispatcher.__new__(MoEAllGatherTokenDispatcher)
+    dispatcher.config = SimpleNamespace(thd_max_packed_sequences=8)
+
+    with pytest.raises(RuntimeError, match="AllGather"):
+        dispatcher.validate_cudagraph_replay_capability()
+
+
 @pytest.mark.skipif(
     not is_deep_ep_available() and not is_hybrid_ep_available(),
     reason="Deep EP and Hybrid EP are not available",
@@ -427,6 +702,7 @@ class TestFlexDispatcher:
         pass
 
     def teardown_method(self, method):
+        reset_hybrid_ep_buffer()
         Utils.destroy_model_parallel()
 
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
