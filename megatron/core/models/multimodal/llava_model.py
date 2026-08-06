@@ -75,6 +75,28 @@ def _hybrid_cp_debug(message: str) -> None:
     print(f"[HYBRID_CP_DEBUG][rank={rank}] {message}", flush=True)
 
 
+def _hybrid_cp_packed_metadata(packed_seq_params) -> str:
+    """Format the small THD metadata surface used by the DynamicCP probe."""
+
+    if packed_seq_params is None:
+        return "packed=None"
+    cu_q = getattr(packed_seq_params, "cu_seqlens_q", None)
+    cu_q_padded = getattr(packed_seq_params, "cu_seqlens_q_padded", None)
+    cp_group = getattr(packed_seq_params, "cp_group", None)
+    cp_group_size = cp_group.size() if cp_group is not None else None
+    cp_group_rank = cp_group.rank() if cp_group is not None else None
+    def _values(tensor):
+        return tensor.detach().cpu().tolist() if isinstance(tensor, torch.Tensor) else None
+    return (
+        f"qkv={getattr(packed_seq_params, 'qkv_format', None)} "
+        f"cu_q={_values(cu_q)} cu_q_padded={_values(cu_q_padded)} "
+        f"max_q={getattr(packed_seq_params, 'max_seqlen_q', None)} "
+        f"total_tokens={getattr(packed_seq_params, 'total_tokens', None)} "
+        f"local_cp={getattr(packed_seq_params, 'local_cp_size', None)} "
+        f"cp_group={cp_group_size}/{cp_group_rank}"
+    )
+
+
 def pad_sequence_lengths_for_context_parallel(
     sequence_lengths: torch.Tensor, shard_factor: int | None
 ) -> torch.Tensor:
@@ -1975,10 +1997,15 @@ class LLaVAModel(MegatronModule):
             )
             _hybrid_cp_debug(
                 f"after_token_parallel embedding={tuple(combined_embeddings.shape) if combined_embeddings is not None else None} "
-                f"labels={tuple(new_labels.shape) if new_labels is not None else None}"
+                f"labels={tuple(new_labels.shape) if new_labels is not None else None} "
+                f"{_hybrid_cp_packed_metadata(packed_seq_params)}"
             )
 
-        _hybrid_cp_debug("before_language_model")
+        _hybrid_cp_debug(
+            f"before_language_model embedding={tuple(combined_embeddings.shape) if combined_embeddings is not None else None} "
+            f"labels={tuple(new_labels.shape) if new_labels is not None else None} "
+            f"{_hybrid_cp_packed_metadata(packed_seq_params)}"
+        )
         output = self.language_model(
             input_ids=None,
             position_ids=position_ids,
