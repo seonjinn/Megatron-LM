@@ -1244,13 +1244,20 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             "For inference cuda graph, please use cuda_graph_impl=local instead."
         )
 
-        if self.config.delay_offload_until_cuda_graph:
+        # This option was added after the pinned `vlm2_rebase_super_vlm`
+        # branch.  Keep the upstream replay path compatible with that branch
+        # (and older TransformerConfig instances) by treating the absent
+        # option as disabled.
+        delay_offload_until_cuda_graph = getattr(
+            self.config, "delay_offload_until_cuda_graph", False
+        )
+        if delay_offload_until_cuda_graph:
             self.off_interface.enter_replay()
 
         try:
             return self._te_cuda_graph_replay_impl(args, kwargs, context)
         finally:
-            if self.config.delay_offload_until_cuda_graph:
+            if delay_offload_until_cuda_graph:
                 self.off_interface.exit_replay()
 
     def _te_cuda_graph_replay_impl(self, args, kwargs, context):
