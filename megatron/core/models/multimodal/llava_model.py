@@ -1370,11 +1370,15 @@ class LLaVAModel(MegatronModule):
                 if "loss_weight" in batch:
                     new_loss_mask = new_loss_mask * batch["loss_weight"]
 
-        elif self.pre_process:
+        elif self.pre_process and self.context_parallel_lm > 1:
             # A HybridCP sample may be assigned to one rank even though the
             # model is configured with a larger global CP size.  In that case
-            # no CP partitioning is needed, but the language model still
-            # expects [S, B, H] (and SP may still be enabled).
+            # no CP partitioning is needed, but multimodal preprocessing kept
+            # the input batch-first ([B, S, H]), so the language model still
+            # needs [S, B, H] (and SP may still be enabled).  For ordinary
+            # global CP1, _preprocess_data already transposed the input to
+            # [S, B, H]; transposing it here would turn the batch dimension
+            # into the sequence dimension and make TP scatter validate B.
             combined_embeddings = combined_embeddings.transpose(1, 0).contiguous()
             if position_ids is not None and position_ids.dim() == 2:
                 position_ids = position_ids.transpose(1, 0).contiguous()

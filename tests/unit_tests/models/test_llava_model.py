@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from megatron.core import tensor_parallel
 from megatron.core.inference.contexts import StaticInferenceContext
 from megatron.core.inference.utils import InferenceMode
 from megatron.core.models.gpt.gpt_layer_specs import (
@@ -38,6 +39,37 @@ def test_pad_sequence_lengths_for_context_parallel_rounds_each_sample():
     assert torch.equal(padded, torch.tensor([16, 16, 24], dtype=torch.int32))
     assert padded.dtype == lengths.dtype
     assert padded.device == lengths.device
+
+
+@pytest.mark.internal
+def test_process_embedding_token_parallel_keeps_standard_cp1_layout(monkeypatch):
+    """CP1 preprocessing must not transpose the already sequence-first input again."""
+    model = LLaVAModel.__new__(LLaVAModel)
+    model.pre_process = True
+    model.post_process = False
+    model.context_parallel_lm = 1
+    model.sequence_parallel_lm = True
+    model.tensor_model_parallel_size_lm = 8
+    model.tp_comm_overlap_lm = False
+    model.cp_group = None
+
+    combined_embeddings = torch.ones(8, 2, 4)
+    monkeypatch.setattr(
+        tensor_parallel,
+        "scatter_to_sequence_parallel_region",
+        lambda tensor: tensor,
+    )
+
+    result = model._process_embedding_token_parallel(
+        combined_embeddings,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+
+    assert result[0].shape == (8, 2, 4)
 
 
 class TestLLaVAModel:
