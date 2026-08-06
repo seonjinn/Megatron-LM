@@ -1146,6 +1146,16 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             cp_partition_mode=getattr(self.config, "cp_partition_mode", "zigzag"),
         )
 
+    def _rebuild_te_cuda_graph_packed_seq_params(self, kwargs: Dict[str, Any]) -> None:
+        """Restore the eager packed metadata used by a partial TE graph continuation.
+
+        The graph boundary receives only Tensor fields.  The eager MoE continuation still
+        expects a ``PackedSeqParams`` object, so rebuild it on the private kwargs copy used
+        after replay.  This compatibility shim keeps the dispatcher-state fix usable on the
+        pinned branch, whose packed-THD implementation predates the newer MoE ownership API.
+        """
+        self._reconstruct_packed_seq_params_from_kwargs(kwargs)
+
     def _te_cuda_graph_capture(self, *args, **kwargs):
         """
         CUDA Graph capture for this layer using TE interface.
@@ -1359,7 +1369,7 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                 return residual, hidden_states, probs, shared_expert_output
 
             # CUDA Graph does not capture the MLP/MoE part at all.
-            output = self._forward_mlp(*cuda_graph_output, padding_mask=kwargs.get("padding_mask"))
+            output = self._forward_mlp(*cuda_graph_output, padding_mask=padding_mask)
         return output, context
 
     def _get_te_cuda_graph_replay_args(self, *args, **kwargs):
