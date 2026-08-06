@@ -7,6 +7,7 @@
 
 import logging
 import math
+import os
 from dataclasses import dataclass, replace
 from typing import List, Optional, Tuple, Union
 
@@ -90,6 +91,17 @@ except ImportError:
     HAVE_EINOPS = False
 
 logger = logging.getLogger(__name__)
+
+
+def _mamba_cp_debug(message: str) -> None:
+    """Emit optional Mamba/HybridCP metadata diagnostics."""
+
+    if os.environ.get("MEGATRON_MAMBA_CP_DEBUG") != "1":
+        return
+    rank = "?"
+    if torch.distributed.is_available() and torch.distributed.is_initialized():
+        rank = str(torch.distributed.get_rank())
+    print(f"[MAMBA_CP_DEBUG][rank={rank}] {message}", flush=True)
 
 
 def _mamba_target_tokens_for_static_graph(config: TransformerConfig, cp_size: int) -> int | None:
@@ -552,6 +564,18 @@ class MambaMixer(MegatronModule):
                     return out, out_bias
 
         zxBCdt, _ = self.in_proj(hidden_states)
+
+        if packed_seq_params is not None:
+            metadata_cp_group = getattr(packed_seq_params, "cp_group", None)
+            metadata_cp_size = (
+                1 if metadata_cp_group is None else metadata_cp_group.size()
+            )
+            _mamba_cp_debug(
+                f"layer={self.layer_number} input={tuple(hidden_states.shape)} "
+                f"packed_local_cp={getattr(packed_seq_params, 'local_cp_size', None)} "
+                f"metadata_cp_size={metadata_cp_size} static_cp_size={self.cp.cp_size} "
+                f"static_cp_rank={getattr(self.cp, 'cp_rank', 0)}"
+            )
 
         zxBCdt = self.cp.pre_conv_ssm(zxBCdt, packed_seq_params)
 
