@@ -134,7 +134,7 @@ class TestMambaContextParallel:
     def test_error_check(self, nheads_tp, ngroups_tp, cp_size, expected_error_message):
         Utils.initialize_model_parallel(context_parallel_size=cp_size)
         with pytest.raises(AssertionError, match=expected_error_message):
-            cp = MambaContextParallel(
+            MambaContextParallel(
                 cp_group=parallel_state.get_context_parallel_group(),
                 d_inner_local_tp=nheads_tp,
                 nheads_local_tp=nheads_tp,
@@ -147,3 +147,59 @@ class TestMambaContextParallel:
                 D_has_hdim=False,
             )
         Utils.destroy_model_parallel()
+
+
+class _FakeProcessGroup:
+    def __init__(self, group_size: int, group_rank: int = 0):
+        self.group_size = group_size
+        self.group_rank = group_rank
+
+    def size(self) -> int:
+        return self.group_size
+
+    def rank(self) -> int:
+        return self.group_rank
+
+
+def _make_fake_cp() -> MambaContextParallel:
+    return MambaContextParallel(
+        cp_group=_FakeProcessGroup(4),
+        d_inner_local_tp=8,
+        nheads_local_tp=8,
+        ngroups_local_tp=4,
+        d_state=2,
+        conv1d_cp1=None,
+        dt_bias_cp1=None,
+        A_log_cp1=None,
+        D_cp1=None,
+        D_has_hdim=False,
+    )
+
+
+def test_dynamic_group_view_recomputes_mamba_shards_without_mutating_static_view():
+    static_cp = _make_fake_cp()
+
+    dynamic_cp = static_cp.for_group(_FakeProcessGroup(2, group_rank=1))
+
+    assert dynamic_cp is not static_cp
+    assert dynamic_cp.cp_size == 2
+    assert dynamic_cp.cp_rank == 1
+    assert dynamic_cp.d_inner_local_tpcp == 4
+    assert dynamic_cp.nheads_local_tpcp == 4
+    assert dynamic_cp.ngroups_local_tpcp == 2
+    assert static_cp.cp_size == 4
+    assert static_cp.cp_rank == 0
+    assert static_cp.d_inner_local_tpcp == 2
+    assert static_cp.ngroups_local_tpcp == 1
+
+
+def test_dynamic_group_view_supports_single_rank_sample():
+    static_cp = _make_fake_cp()
+
+    dynamic_cp = static_cp.for_group(None)
+
+    assert dynamic_cp.cp_size == 1
+    assert dynamic_cp.cp_rank == 0
+    assert dynamic_cp.d_inner_local_tpcp == 8
+    assert dynamic_cp.nheads_local_tpcp == 8
+    assert dynamic_cp.ngroups_local_tpcp == 4
