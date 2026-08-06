@@ -53,6 +53,7 @@ class PackedSeqParams:
             total_tokens_tensor = torch.tensor(
                 [self.total_tokens], dtype=cu_seqlens.dtype, device=cu_seqlens.device
             )
+            cu_seqlens = torch.minimum(cu_seqlens, total_tokens_tensor)
             # Example: [0, 5, 7, 11] -> [0, 5, 7, 11, 16]
             cu_seqlens_with_max = torch.cat([cu_seqlens, total_tokens_tensor])
             # Example: [0, 5, 7, 11, 16] -> [5, 2, 4, 5]
