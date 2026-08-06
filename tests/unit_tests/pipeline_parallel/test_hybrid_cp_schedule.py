@@ -64,6 +64,17 @@ class HybridCPScheduleTest(unittest.TestCase):
 
         self.assertEqual(seen, set(expected_lengths))
 
+    def test_validator_rejects_rank_with_two_invocations(self) -> None:
+        scheduler = BalancedCPScheduler(65_536, _Group(4))
+        malformed = [[[0], [0], [1], [2, 3]]]
+
+        with self.assertRaisesRegex(
+            RuntimeError, r"wave=0.*counts=\[1, 1, 1, 2\]"
+        ):
+            scheduler.validate_collective_safe_groups(
+                [(0, 71_264), (1, 41_184), (2, 9_952), (3, 8_000)], malformed
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
