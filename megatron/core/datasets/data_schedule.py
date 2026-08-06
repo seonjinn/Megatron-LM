@@ -1,13 +1,16 @@
 # Copyright (c) 2025 NVIDIA CORPORATION.  All rights reserved.
 
-from collections.abc import Mapping, Sequence
 import os
+from collections.abc import Mapping, Sequence
 from typing import Any, List, Optional
 
 import torch
 
 from megatron.core import parallel_state
-from megatron.core.pipeline_parallel.hybrid_cp_schedule import BalancedCPScheduler
+from megatron.core.pipeline_parallel.hybrid_cp_schedule import (
+    BalancedCPScheduler,
+    summarize_hybrid_cp_schedule,
+)
 from megatron.core.process_groups_config import ProcessGroupCollection
 
 
@@ -36,6 +39,52 @@ def collect_hybrid_cp_microbatches(data_iterator, num_microbatches: int) -> list
     if num_microbatches < 1:
         raise ValueError(f"num_microbatches must be positive, got {num_microbatches}")
     return [next(data_iterator) for _ in range(num_microbatches)]
+
+
+def summarize_hybrid_cp_multimodal_samples(
+    samples: Sequence[Mapping[str, Any]],
+) -> dict[str, float]:
+    """Summarize media work represented by routed multimodal samples."""
+
+    stats = {
+        "hybrid_cp/samples_with_vision": 0,
+        "hybrid_cp/samples_with_video": 0,
+        "hybrid_cp/samples_with_audio": 0,
+        "hybrid_cp/vision_tiles": 0,
+        "hybrid_cp/video_frames": 0,
+        "hybrid_cp/audio_clips": 0,
+    }
+    for sample in samples:
+        num_tiles = sample.get("num_tiles")
+        tiles = (
+            [int(value) for value in num_tiles.detach().cpu().reshape(-1).tolist()]
+            if isinstance(num_tiles, torch.Tensor)
+            else []
+        )
+        num_frames = sample.get("num_frames")
+        frames = (
+            [int(value) for value in num_frames.detach().cpu().reshape(-1).tolist()]
+            if isinstance(num_frames, torch.Tensor)
+            else []
+        )
+        num_sound_clips = sample.get("num_sound_clips")
+        sound_clips = (
+            [int(value) for value in num_sound_clips.detach().cpu().reshape(-1).tolist()]
+            if isinstance(num_sound_clips, torch.Tensor)
+            else []
+        )
+
+        if any(tile > 0 for tile in tiles):
+            stats["hybrid_cp/samples_with_vision"] += 1
+        if any(frame > 1 for frame in frames):
+            stats["hybrid_cp/samples_with_video"] += 1
+        if any(count > 0 for count in sound_clips):
+            stats["hybrid_cp/samples_with_audio"] += 1
+        stats["hybrid_cp/vision_tiles"] += sum(max(0, tile) for tile in tiles)
+        stats["hybrid_cp/video_frames"] += sum(frame for frame in frames if frame > 1)
+        stats["hybrid_cp/audio_clips"] += sum(max(0, count) for count in sound_clips)
+
+    return {key: float(value) for key, value in stats.items()}
 
 
 def _require_tensor(batch: Mapping[str, Any], key: str) -> torch.Tensor:
@@ -704,12 +753,12 @@ class HybridCPDataLoaderWrapper:
         The external loader yields one packed item per microbatch.  Consume the
         full global batch before scheduling so dynamic CP can distribute all
         microbatches participating in the optimizer step.  The returned third
-        field is the number of unique routed samples and is used by the
-        HybridCP training path for global ``samples_seen`` accounting.
+        field is the number of unique routed samples for global ``samples_seen``
+        accounting; the fourth contains scheduler and modality diagnostics.
         """
         if self.data_iterator is None:
             # TP0 reads from data_iterator, others receive via broadcast.
-            return None, None, None
+            return None, None, None, None
 
         from megatron.core.num_microbatches_calculator import get_num_microbatches
 
@@ -757,6 +806,21 @@ class HybridCPDataLoaderWrapper:
         groups, sample_id_groups = self.cp_balancing_scheduler.get_groups_and_subsamples(
             global_id_seqlens, self.config
         )
+        schedule_stats = summarize_hybrid_cp_schedule(global_id_seqlens, sample_id_groups)
+        multimodal_stats = summarize_hybrid_cp_multimodal_samples(batch if is_multimodal else [])
+        multimodal_keys = tuple(multimodal_stats)
+        multimodal_values = torch.tensor(
+            [multimodal_stats[key] for key in multimodal_keys],
+            dtype=torch.float64,
+            device=torch.cuda.current_device(),
+        )
+        torch.distributed.all_reduce(multimodal_values, group=self.dp_group)
+        schedule_stats.update(
+            {
+                key: float(multimodal_values[index].item())
+                for index, key in enumerate(multimodal_keys)
+            }
+        )
         _hybrid_cp_debug(
             f"loader schedule hdp_rank={self.dp_cp_group.rank()} global_samples={len(global_id_seqlens)} "
             f"groups={len(groups)} per_group_counts="
@@ -776,4 +840,9 @@ class HybridCPDataLoaderWrapper:
         _hybrid_cp_debug(
             f"loader reroute received_ids={sorted(int(gid) for gid in samples_this_rank_with_id)}"
         )
-        return samples_this_rank_with_id, sample_id_groups, len(global_id_seqlens)
+        return (
+            samples_this_rank_with_id,
+            sample_id_groups,
+            len(global_id_seqlens),
+            schedule_stats,
+        )

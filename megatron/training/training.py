@@ -199,6 +199,7 @@ from megatron.core.parallel_state import (
     get_hybrid_data_context_parallel_groups,
     update_pg_timeout,
 )
+from megatron.core.pipeline_parallel.hybrid_cp_schedule import consume_hybrid_cp_iteration_stats
 from megatron.core.rerun_state_machine import (
     RerunDataIterator,
     RerunMode,
@@ -4036,9 +4037,13 @@ def train(
         total_real_tokens_in_batch, seqlen_squared_sum_in_batch = (
             consume_seqlen_stats_in_iteration()
         )
+        hybrid_cp_iteration_stats = consume_hybrid_cp_iteration_stats()
         packed_sequence_stats = None
         if getattr(args, 'log_packed_sequence_stats', False):
             packed_sequence_stats = consume_packed_sequence_stats_in_iteration()
+            if hybrid_cp_iteration_stats:
+                packed_sequence_stats = packed_sequence_stats or {}
+                packed_sequence_stats.update(hybrid_cp_iteration_stats)
         num_floating_point_operations_in_batch = num_floating_point_operations(
             args,
             batch_size,

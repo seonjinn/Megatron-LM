@@ -11,6 +11,35 @@ import torch
 from megatron.core import parallel_state
 from megatron.core.rerun_state_machine import RerunDataIterator
 
+HYBRID_CP_LOG_STAT_KEYS = (
+    "hybrid_cp/unique_samples",
+    "hybrid_cp/total_real_tokens",
+    "hybrid_cp/waves",
+    "hybrid_cp/cp_size_min",
+    "hybrid_cp/cp_size_mean",
+    "hybrid_cp/cp_size_max",
+    "hybrid_cp/cp1_samples",
+    "hybrid_cp/cp2_samples",
+    "hybrid_cp/cp4_samples",
+    "hybrid_cp/cp8_samples",
+    "hybrid_cp/cp16_samples",
+    "hybrid_cp/cp32_samples",
+    "hybrid_cp/cp64_samples",
+    "hybrid_cp/estimated_sample_work",
+    "hybrid_cp/estimated_rank_work_min",
+    "hybrid_cp/estimated_rank_work_mean",
+    "hybrid_cp/estimated_rank_work_max",
+    "hybrid_cp/estimated_rank_work_imbalance",
+    "hybrid_cp/samples_with_vision",
+    "hybrid_cp/samples_with_video",
+    "hybrid_cp/samples_with_audio",
+    "hybrid_cp/vision_tiles",
+    "hybrid_cp/video_frames",
+    "hybrid_cp/audio_clips",
+)
+
+_hybrid_cp_iteration_stats: Optional[dict[str, float]] = None
+
 
 def _hybrid_cp_debug(message: str) -> None:
     """Emit rank-local HybridCP execution diagnostics when explicitly enabled."""
@@ -21,6 +50,91 @@ def _hybrid_cp_debug(message: str) -> None:
     if torch.distributed.is_available() and torch.distributed.is_initialized():
         rank = str(torch.distributed.get_rank())
     print(f"[HYBRID_CP_DEBUG][rank={rank}] {message}", flush=True)
+
+
+def summarize_hybrid_cp_schedule(
+    sample_id_seqlens: List[Tuple[int, int]],
+    sample_id_groups: List[List[List[int]]],
+) -> dict[str, float]:
+    """Summarize unique DynamicCP work without counting CP participants as samples."""
+
+    expected_lengths = dict(sample_id_seqlens)
+    cp_sizes: dict[int, int] = {}
+    rank_work = [0.0 for _ in sample_id_groups[0]] if sample_id_groups else []
+
+    for wave_index, wave in enumerate(sample_id_groups):
+        if len(wave) != len(rank_work):
+            raise RuntimeError(
+                f"DynamicCP wave {wave_index} has {len(wave)} ranks, expected {len(rank_work)}"
+            )
+        participants: dict[int, list[int]] = {}
+        for rank, sample_ids in enumerate(wave):
+            for sample_id in sample_ids:
+                participants.setdefault(sample_id, []).append(rank)
+
+        for sample_id, ranks in participants.items():
+            if sample_id not in expected_lengths:
+                raise RuntimeError(f"DynamicCP schedule contains unknown sample_id={sample_id}")
+            if sample_id in cp_sizes:
+                raise RuntimeError(f"DynamicCP sample_id={sample_id} appears in multiple waves")
+            cp_size = len(ranks)
+            cp_sizes[sample_id] = cp_size
+            estimated_work = expected_lengths[sample_id] ** 2 / cp_size
+            for rank in ranks:
+                rank_work[rank] += estimated_work
+
+    missing = sorted(set(expected_lengths) - set(cp_sizes))
+    if missing:
+        raise RuntimeError(f"DynamicCP schedule omitted sample_ids={missing}")
+
+    cp_histogram = {
+        cp_size: sum(value == cp_size for value in cp_sizes.values())
+        for cp_size in (1, 2, 4, 8, 16, 32, 64)
+    }
+    local_cp_sizes = list(cp_sizes.values())
+    rank_work_mean = sum(rank_work) / len(rank_work) if rank_work else 0.0
+    stats = {
+        "hybrid_cp/unique_samples": float(len(expected_lengths)),
+        "hybrid_cp/total_real_tokens": float(sum(expected_lengths.values())),
+        "hybrid_cp/waves": float(len(sample_id_groups)),
+        "hybrid_cp/cp_size_min": float(min(local_cp_sizes, default=0)),
+        "hybrid_cp/cp_size_mean": (
+            float(sum(local_cp_sizes) / len(local_cp_sizes)) if local_cp_sizes else 0.0
+        ),
+        "hybrid_cp/cp_size_max": float(max(local_cp_sizes, default=0)),
+        "hybrid_cp/estimated_sample_work": float(
+            sum(expected_lengths[sample_id] ** 2 / cp_size for sample_id, cp_size in cp_sizes.items())
+        ),
+        "hybrid_cp/estimated_rank_work_min": float(min(rank_work, default=0.0)),
+        "hybrid_cp/estimated_rank_work_mean": float(rank_work_mean),
+        "hybrid_cp/estimated_rank_work_max": float(max(rank_work, default=0.0)),
+        "hybrid_cp/estimated_rank_work_imbalance": (
+            float(max(rank_work) / rank_work_mean) if rank_work_mean else 0.0
+        ),
+    }
+    stats.update(
+        {
+            f"hybrid_cp/cp{cp_size}_samples": float(count)
+            for cp_size, count in cp_histogram.items()
+        }
+    )
+    return stats
+
+
+def record_hybrid_cp_iteration_stats(stats: dict[str, float]) -> None:
+    """Record rank-local DynamicCP stats for the current optimizer iteration."""
+
+    global _hybrid_cp_iteration_stats
+    _hybrid_cp_iteration_stats = dict(stats)
+
+
+def consume_hybrid_cp_iteration_stats() -> Optional[dict[str, float]]:
+    """Return and reset rank-local DynamicCP stats for the current iteration."""
+
+    global _hybrid_cp_iteration_stats
+    stats = _hybrid_cp_iteration_stats
+    _hybrid_cp_iteration_stats = None
+    return stats
 
 
 class BalancedCPScheduler:
@@ -647,6 +761,23 @@ def hybrid_context_parallel_forward_backward(
             raise RuntimeError("HybridCP scheduled global batch contains no samples")
         return int(count.item())
 
+    def _broadcast_iteration_stats(iteration_stats):
+        """Broadcast scheduler and modality diagnostics to every TP rank."""
+
+        values = torch.tensor(
+            [
+                0.0 if iteration_stats is None else iteration_stats.get(key, 0.0)
+                for key in HYBRID_CP_LOG_STAT_KEYS
+            ],
+            dtype=torch.float64,
+            device=torch.cuda.current_device(),
+        )
+        _broadcast(values)
+        return {
+            key: float(values[index].item())
+            for index, key in enumerate(HYBRID_CP_LOG_STAT_KEYS)
+        }
+
     def _get_new_data_iterator(sample_id_in_group, group_id):
         if is_first_tp_rank:
             sub_sample_id = sample_ids_this_group[sample_id_in_group]
@@ -678,15 +809,23 @@ def hybrid_context_parallel_forward_backward(
         sample_id_groups = data[1]
         batch = data[0]
         global_sample_count = data[2]
+        iteration_stats = data[3] if len(data) > 3 else None
         _hybrid_cp_debug(
             f"schedule input hdp_rank={hdp_rank} global_sample_count={global_sample_count} "
             f"received_ids={sorted(int(gid) for gid in batch)} "
             f"groups={[[len(ids) for ids in group] for group in sample_id_groups]}"
         )
     else:
-        data, sample_id_groups, batch, global_sample_count = None, None, None, None
+        data, sample_id_groups, batch, global_sample_count, iteration_stats = (
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
 
     global_sample_count = _broadcast_global_sample_count(global_sample_count)
+    record_hybrid_cp_iteration_stats(_broadcast_iteration_stats(iteration_stats))
 
     num_samples_this_group = None
     if is_first_tp_rank:

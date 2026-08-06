@@ -4,6 +4,7 @@ import torch
 from megatron.core.datasets.data_schedule import (
     collect_hybrid_cp_microbatches,
     restore_multimodal_hybrid_cp_sample,
+    summarize_hybrid_cp_multimodal_samples,
     unpack_multimodal_batch,
 )
 from megatron.core.packed_seq_params import PackedSeqParams
@@ -43,6 +44,24 @@ def test_unpack_multimodal_batch_preserves_text_and_vision_boundaries():
     assert samples[1]["tokens"].tolist() == [12, 13, 14, 15]
     assert samples[1]["imgs"].squeeze(-1).tolist() == [3.0, 4.0]
     assert samples[1]["vision_cu_lengths"].tolist() == [0, 2]
+
+
+def test_multimodal_summary_counts_media_without_dummy_placeholders():
+    samples = unpack_multimodal_batch(_packed_batch())
+    samples[0]["num_frames"] = torch.tensor([1, 8], dtype=torch.int32)
+    samples[0]["num_tiles"] = torch.tensor([2, 3], dtype=torch.int32)
+    samples[0]["num_sound_clips"] = torch.tensor([2], dtype=torch.int32)
+
+    stats = summarize_hybrid_cp_multimodal_samples(samples)
+
+    assert stats == {
+        "hybrid_cp/samples_with_vision": 2,
+        "hybrid_cp/samples_with_video": 1,
+        "hybrid_cp/samples_with_audio": 1,
+        "hybrid_cp/vision_tiles": 6,
+        "hybrid_cp/video_frames": 8,
+        "hybrid_cp/audio_clips": 2,
+    }
 
 
 def test_restore_multimodal_hybrid_cp_sample_rebuilds_get_batch_contract():
