@@ -311,7 +311,7 @@ Expected: both scripts fail because the wrapper rejects the new profile names or
 ```bash
 git add tests/meeting/test_profiles.sh tests/meeting/test_wrapper.sh
 git -c gpg.format=ssh -c user.signingkey=/Users/sna/.ssh/id_ed25519_seonjinn commit -S -s -m "test: define collective-safe DynamicCP profiles"
-git push origin HEAD:sna/nemotron-3p5-unified-sft
+git push fork HEAD:sna/nemotron-3p5-unified-sft
 ```
 
 ### Task 4: Implement the matched smoke and performance profiles
@@ -396,7 +396,7 @@ git add \
   experiments/nemotron_3p5_sft/meeting/run_meeting_unified_sft.sh \
   experiments/nemotron_3p5_sft/meeting/source_contract.env
 git -c gpg.format=ssh -c user.signingkey=/Users/sna/.ssh/id_ed25519_seonjinn commit -S -s -m "perf: add collective-safe DynamicCP profiles"
-git push origin HEAD:sna/nemotron-3p5-unified-sft
+git push fork HEAD:sna/nemotron-3p5-unified-sft
 ```
 
 ### Task 5: Verify source parity and run the Nano eager gates
@@ -505,7 +505,7 @@ If the eager 20-step run passes, write the next design around fixed THD shape bu
 ```bash
 git add experiments/nemotron_3p5_sft public tests/nemotron_3p5_sft/test_render_report.py
 git -c gpg.format=ssh -c user.signingkey=/Users/sna/.ssh/id_ed25519_seonjinn commit -S -s -m "docs: record collective-safe DynamicCP results"
-git push origin HEAD:sna/nemotron-3p5-sft-tuning
+git push fork HEAD:sna/nemotron-3p5-sft-tuning
 curl --fail --silent http://127.0.0.1:8787/status.html | rg 'collective-safe|DynamicCP|5917477'
 ```
 
