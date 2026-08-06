@@ -1055,6 +1055,13 @@ class Attention(MegatronModule, ABC):
 
         inference_context = deprecate_inference_params(inference_context, inference_params)
 
+        # HybridCP may attach a scheduler-selected subgroup to packed THD
+        # metadata. RoPE must use that same subgroup as attention/TE rather
+        # than the model's static global CP group.
+        cp_group = self.pg_collection.cp
+        if packed_seq_params is not None:
+            cp_group = getattr(packed_seq_params, "cp_group", None) or cp_group
+
         if inference_context and inference_context.is_dynamic_batching():
             assert (
                 HAVE_FA4 or HAVE_FA3 or is_fa_min_version("2.7.3")
@@ -1237,12 +1244,12 @@ class Attention(MegatronModule, ABC):
                             config=self.config,
                             cu_seqlens=cu_seqlens_q,
                             mscale=_yarn_get_concentration_factor_from_config(self.config),
-                            cp_group=self.pg_collection.cp,
+                            cp_group=cp_group,
                             max_seqlen=rope_max_seqlen_q,
                         )
                     else:
                         query = inference_context.apply_rotary_emb_query(
-                            query, q_pos_emb, self.config, cu_seqlens_q, self.pg_collection.cp
+                            query, q_pos_emb, self.config, cu_seqlens_q, cp_group
                         )
                 if k_pos_emb is not None:
                     key = apply_rotary_pos_emb(
@@ -1251,7 +1258,7 @@ class Attention(MegatronModule, ABC):
                         config=self.config,
                         cu_seqlens=cu_seqlens_kv,
                         mscale=_yarn_get_concentration_factor_from_config(self.config),
-                        cp_group=self.pg_collection.cp,
+                        cp_group=cp_group,
                         max_seqlen=rope_max_seqlen_kv,
                     )
             else:

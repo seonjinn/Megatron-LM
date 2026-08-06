@@ -521,6 +521,9 @@ class MambaMixer(MegatronModule):
         total_tokens_tensor = torch.tensor(
             [total_tokens], dtype=cu_seqlens.dtype, device=cu_seqlens.device
         )
+        # Dynamic local-CP can leave padded sequence boundaries beyond the
+        # actual Mamba tensor length. Those boundaries represent no local tokens.
+        cu_seqlens = torch.minimum(cu_seqlens, total_tokens_tensor)
         cu_seqlens_with_max = torch.cat([cu_seqlens, total_tokens_tensor])
         seq_lengths = cu_seqlens_with_max[1:] - cu_seqlens_with_max[:-1]
         return (

@@ -21,6 +21,24 @@ from tests.unit_tests.test_utilities import Utils
 
 
 @pytest.mark.internal
+def test_mamba_packed_seq_idx_clamps_dynamic_cp_tail() -> None:
+    """DynamicCP padding must not create a negative final sequence length."""
+    cu_seqlens = torch.tensor([0, 8, 16], dtype=torch.int32)
+    packed_seq_params = PackedSeqParams(
+        qkv_format="thd",
+        cu_seqlens_q=cu_seqlens,
+        cu_seqlens_kv=cu_seqlens,
+        cu_seqlens_q_padded=cu_seqlens,
+        cu_seqlens_kv_padded=cu_seqlens,
+    )
+
+    seq_idx = MambaMixer._create_packed_seq_idx(packed_seq_params, total_tokens=10)
+
+    expected = torch.tensor([[0] * 8 + [1] * 2], dtype=torch.int32)
+    assert torch.equal(seq_idx, expected)
+
+
+@pytest.mark.internal
 @pytest.mark.parametrize("tp_rank", [0, 1], ids=["first_tp_rank", "second_tp_rank"])
 def test_slice_packed_seq_idx_for_sequence_parallel(tp_rank: int) -> None:
     """Sequence-parallel Mamba receives the metadata slice matching its local tokens."""
