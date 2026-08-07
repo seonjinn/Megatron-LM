@@ -555,6 +555,64 @@ class TestPackedSequenceStatsAccumulator:
         )
         assert consume_packed_sequence_stats_in_iteration() is None
 
+    @pytest.mark.parametrize(
+        ("local_cp_size", "active_group_rank"),
+        ((1, None), (4, 0)),
+    )
+    def test_hybrid_cp_active_group_representative_contributes(
+        self, local_cp_size, active_group_rank
+    ):
+        """CP1 and active-group rank zero contribute even when static CP rank is nonzero."""
+        sample_lengths = torch.tensor([[100, 25, 0]], dtype=torch.int32)
+        loss_mask = torch.tensor([[1, 1, 0, 1]], dtype=torch.float32)
+        cp_group = None if local_cp_size == 1 else object()
+
+        with (
+            patch.object(torch.distributed, "is_initialized", return_value=True),
+            patch.object(
+                torch.distributed,
+                "get_rank",
+                return_value=active_group_rank,
+            ),
+            patch.object(training_module.mpu, "model_parallel_is_initialized", return_value=True),
+            patch.object(training_module.mpu, "is_pipeline_last_stage", return_value=True),
+            patch.object(training_module.mpu, "get_tensor_model_parallel_rank", return_value=0),
+            patch.object(training_module.mpu, "get_context_parallel_rank", return_value=6),
+        ):
+            update_packed_sequence_stats(
+                sample_lengths,
+                loss_mask,
+                local_cp_size=local_cp_size,
+                cp_group=cp_group,
+            )
+
+        stats = consume_packed_sequence_stats_in_iteration()
+        assert stats["packed_sequence/total_tokens"] == 125.0
+        assert stats["packed_sequence/trained_tokens"] == 3.0
+        assert stats["packed_sequence/original_samples"] == 2.0
+
+    def test_hybrid_cp_nonrepresentative_rank_does_not_duplicate_stats(self):
+        sample_lengths = torch.tensor([[100, 25, 0]], dtype=torch.int32)
+        loss_mask = torch.tensor([[1, 1, 0, 1]], dtype=torch.float32)
+        cp_group = object()
+
+        with (
+            patch.object(torch.distributed, "is_initialized", return_value=True),
+            patch.object(torch.distributed, "get_rank", return_value=1),
+            patch.object(training_module.mpu, "model_parallel_is_initialized", return_value=True),
+            patch.object(training_module.mpu, "is_pipeline_last_stage", return_value=True),
+            patch.object(training_module.mpu, "get_tensor_model_parallel_rank", return_value=0),
+            patch.object(training_module.mpu, "get_context_parallel_rank", return_value=6),
+        ):
+            update_packed_sequence_stats(
+                sample_lengths,
+                loss_mask,
+                local_cp_size=4,
+                cp_group=cp_group,
+            )
+
+        assert consume_packed_sequence_stats_in_iteration() is None
+
 
 class TestAccumulatorDistributed:
     """All-reduce + ``TP*CP*PP`` deduplication.
