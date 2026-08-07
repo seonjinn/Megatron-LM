@@ -246,7 +246,11 @@ def _patch_forward_dependencies(
     )
     monkeypatch.setattr(pretrain_hybrid, "core_transformer_config_from_args", lambda _args: config)
     monkeypatch.setattr(pretrain_hybrid, "get_tokenizer", lambda: SimpleNamespace(pad=91))
-    monkeypatch.setattr(pretrain_hybrid, "update_seqlen_stats_from_cu_seqlens", lambda _cu: None)
+    monkeypatch.setattr(
+        pretrain_hybrid,
+        "update_seqlen_stats_from_cu_seqlens",
+        lambda _cu, local_cp_size=None: None,
+    )
     monkeypatch.setattr(pretrain_hybrid, "stimer", _NoOpStragglerTimer())
 
 
@@ -303,3 +307,35 @@ def test_forward_step_preserves_non_packed_model_inputs(monkeypatch: pytest.Monk
     assert model.kwargs["packed_seq_params"] is None
     assert model.kwargs["padding_mask"] is None
     assert torch.equal(model.kwargs["loss_mask"], loss_mask)
+
+
+def test_forward_step_weights_flop_stats_by_active_cp_size(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inputs = _packed_inputs()
+    active_cp_size = torch.tensor([4], dtype=torch.int32)
+    batch = (
+        None,
+        inputs["cu_seqlens"].unsqueeze(0),
+        inputs["cu_seqlens_padded"].unsqueeze(0),
+        object(),
+        inputs["labels"],
+        active_cp_size,
+        inputs["loss_mask"],
+        inputs["max_seqlen"],
+        inputs["position_ids"],
+        inputs["tokens"],
+    )
+    _patch_forward_dependencies(monkeypatch, batch, _static_config())
+    observed: list[tuple[torch.Tensor, int | None]] = []
+    monkeypatch.setattr(
+        pretrain_hybrid,
+        "update_seqlen_stats_from_cu_seqlens",
+        lambda cu, local_cp_size=None: observed.append((cu, local_cp_size)),
+    )
+
+    pretrain_hybrid.forward_step(iter(()), _RecordingModel())
+
+    assert len(observed) == 1
+    assert torch.equal(observed[0][0], inputs["cu_seqlens"])
+    assert observed[0][1] == 4

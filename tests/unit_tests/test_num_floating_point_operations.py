@@ -32,6 +32,7 @@ def _reset_seqlen_accumulator():
     """Tear down the per-iteration accumulator between tests."""
     training_module._seqlen_stats_in_iteration = None
     training_module._seqlen_stats_active = False
+    training_module._seqlen_stats_weighted_in_iteration = None
 
 
 def _reset_packed_sequence_stats_accumulator():
@@ -439,6 +440,27 @@ class TestAccumulator:
         assert seqlen_squared_sum == (3**2 + 5**2) + (2**2 + 7**2) + (
             1**2 + 4**2 + 5**2
         )
+
+    def test_hybrid_consume_rejects_unweighted_updates(self):
+        cu = torch.tensor([0, 3, 8], dtype=torch.int32)
+        update_seqlen_stats_from_cu_seqlens(cu)
+
+        with pytest.raises(RuntimeError, match="HybridCP.*local_cp_size"):
+            consume_seqlen_stats_in_iteration(is_hybrid_cp=True)
+
+    def test_static_consume_rejects_weighted_updates(self):
+        cu = torch.tensor([0, 3, 8], dtype=torch.int32)
+        update_seqlen_stats_from_cu_seqlens(cu, local_cp_size=4)
+
+        with pytest.raises(RuntimeError, match="static CP.*weighted"):
+            consume_seqlen_stats_in_iteration(is_hybrid_cp=False)
+
+    def test_update_rejects_mixed_weighting_modes(self):
+        cu = torch.tensor([0, 3, 8], dtype=torch.int32)
+        update_seqlen_stats_from_cu_seqlens(cu, local_cp_size=4)
+
+        with pytest.raises(RuntimeError, match="mix weighted and unweighted"):
+            update_seqlen_stats_from_cu_seqlens(cu)
 
     def test_consume_resets_accumulator(self):
         cu = torch.tensor([0, 100, 200], dtype=torch.int32)
