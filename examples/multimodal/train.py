@@ -23,8 +23,8 @@ from megatron.core.models.multimodal.llava_model import IGNORE_INDEX, LLaVAModel
 from megatron.core.packed_seq_params import (
     PackedSeqParams,
     get_thd_padding_kwargs,
-    pad_sequence_for_thd,
     packed_thd_exceeds_capacity,
+    pad_sequence_for_thd,
     resolve_thd_tail_padding_policy,
 )
 from megatron.core.parallel_state import (

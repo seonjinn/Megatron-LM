@@ -107,9 +107,12 @@ def test_static_cp_local_numeric_alignment_resolves_global_token_capacity() -> N
 
 
 def _prepare(
-    config: SimpleNamespace | None = None, context_parallel_size: int = 1
+    config: SimpleNamespace | None = None,
+    context_parallel_size: int = 1,
+    inputs: dict[str, torch.Tensor] | None = None,
 ) -> tuple[dict[str, torch.Tensor], tuple[Any, ...]]:
-    inputs = _packed_inputs()
+    if inputs is None:
+        inputs = _packed_inputs()
     result = pretrain_hybrid._prepare_packed_thd_batch(
         tokens=inputs["tokens"],
         labels=inputs["labels"],
@@ -189,7 +192,9 @@ def test_static_thd_overflow_policy_eager_preserves_unpadded_batch() -> None:
     config = _static_config()
     config.thd_overflow_policy = "eager"
 
-    _, (tokens, labels, loss_mask, position_ids, packed, padding_mask) = _prepare(config=config)
+    _, (tokens, labels, loss_mask, position_ids, packed, padding_mask) = _prepare(
+        config=config, inputs=inputs
+    )
 
     assert torch.equal(tokens, inputs["tokens"])
     assert torch.equal(labels, inputs["labels"])
