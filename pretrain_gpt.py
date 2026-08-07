@@ -218,7 +218,14 @@ def forward_step(data_iterator, model: GPTModel, return_schedule_plan: bool = Fa
             cu_seqlens_padded = cu_seqlens_padded[0]
         # Use real (unpadded) cu_seqlens to feed the FLOPs accounting: varlen
         # attention only computes work for real tokens within each chunk.
-        update_seqlen_stats_from_cu_seqlens(cu_seqlens)
+        local_cp_size_value = (
+            int(local_cp_size.reshape(-1)[0].item())
+            if local_cp_size is not None
+            else None
+        )
+        update_seqlen_stats_from_cu_seqlens(
+            cu_seqlens, local_cp_size=local_cp_size_value
+        )
         cu_seqlens_for_params = cu_seqlens_padded if cu_seqlens_padded is not None else cu_seqlens # TODO(asolergi-nv): Currently there is a bug forcing cu_seqlens to be cu_seqlens_padded
         packed_seq_params = PackedSeqParams(
             qkv_format="thd",

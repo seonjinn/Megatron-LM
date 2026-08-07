@@ -231,9 +231,25 @@ def get_batch(data_iterator, vp_stage=None):
         for key in DATALOADER_BATCH_KEYS:
             batch[key] = batch[key].cuda(non_blocking=True) if key in batch and batch[key] is not None else None
         if is_sft and getattr(args, "log_packed_sequence_stats", False):
+            packed_stats_local_cp_size = None
+            packed_stats_cp_group = None
+            if is_hybrid_cp:
+                if batch.get("local_cp_size") is None:
+                    raise RuntimeError(
+                        "HybridCP packed statistics require local_cp_size metadata"
+                    )
+                packed_stats_local_cp_size = int(
+                    batch["local_cp_size"].reshape(-1)[0].item()
+                )
+                if packed_stats_local_cp_size > 1:
+                    packed_stats_cp_group = get_hybrid_data_context_parallel_groups(
+                        group_size=packed_stats_local_cp_size
+                    )
             update_packed_sequence_stats(
                 _sample_lengths_for_packed_stats(batch),
                 batch.get("loss_mask"),
+                local_cp_size=packed_stats_local_cp_size,
+                cp_group=packed_stats_cp_group,
             )
         batch = {key: batch[key] for key in BATCH_KEYS}
 
@@ -354,7 +370,14 @@ def forward_step(data_iterator, model: HybridModel):
             cu_seqlens_padded = cu_seqlens_padded[0]
         # Use real (unpadded) cu_seqlens to feed the FLOPs accounting: varlen
         # attention only computes work for real tokens within each chunk.
-        update_seqlen_stats_from_cu_seqlens(cu_seqlens)
+        local_cp_size_value = (
+            int(local_cp_size.reshape(-1)[0].item())
+            if local_cp_size is not None
+            else None
+        )
+        update_seqlen_stats_from_cu_seqlens(
+            cu_seqlens, local_cp_size=local_cp_size_value
+        )
         args = get_args()
         config = core_transformer_config_from_args(args)
         (tokens, labels, loss_mask, position_ids, packed_seq_params, padding_mask) = (

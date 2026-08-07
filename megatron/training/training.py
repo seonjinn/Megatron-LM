@@ -313,6 +313,7 @@ def print_datetime(string, override_timestamp=None):
 # never call ``update_*`` so the flag stays ``False`` and no collective fires.
 _seqlen_stats_in_iteration: Optional[torch.Tensor] = None
 _seqlen_stats_active: bool = False
+_seqlen_stats_weighted_in_iteration: Optional[bool] = None
 
 # Optional per-iteration packed SFT stats accumulator. Unlike the FLOPs
 # accumulator above, this keeps the individual original-sample lengths so the
@@ -344,10 +345,22 @@ def update_seqlen_stats_from_cu_seqlens(cu_seqlens, local_cp_size: Optional[int]
     flag at ``False`` and pay zero collective cost.
     """
     global _seqlen_stats_in_iteration, _seqlen_stats_active
+    global _seqlen_stats_weighted_in_iteration
     if cu_seqlens is None or cu_seqlens.numel() < 2:
         return
-    if local_cp_size is not None and local_cp_size < 1:
-        raise ValueError(f"local_cp_size must be positive, got {local_cp_size}")
+    weighted_update = local_cp_size is not None
+    if local_cp_size is not None:
+        local_cp_size = int(local_cp_size)
+        if local_cp_size < 1:
+            raise ValueError(f"local_cp_size must be positive, got {local_cp_size}")
+    if (
+        _seqlen_stats_weighted_in_iteration is not None
+        and _seqlen_stats_weighted_in_iteration != weighted_update
+    ):
+        raise RuntimeError(
+            "sequence statistics cannot mix weighted and unweighted updates in one iteration"
+        )
+    _seqlen_stats_weighted_in_iteration = weighted_update
     # Pin the accumulator to the current CUDA device when available so the
     # eventual all-reduce can use NCCL even if a caller passed a CPU tensor
     # (e.g. unit tests). Production always supplies a CUDA tensor.
@@ -395,10 +408,19 @@ def consume_seqlen_stats_in_iteration(
     by their active CP replication factor and therefore de-duplicate only TP/PP.
     """
     global _seqlen_stats_in_iteration, _seqlen_stats_active
+    global _seqlen_stats_weighted_in_iteration
     if not _seqlen_stats_active:
         # BSHD path: never allocated the tensor; tell the caller to use the
         # closed-form defaults.
         return None, None
+    if is_hybrid_cp and _seqlen_stats_weighted_in_iteration is not True:
+        raise RuntimeError(
+            "HybridCP sequence statistics require every update to pass local_cp_size"
+        )
+    if not is_hybrid_cp and _seqlen_stats_weighted_in_iteration is True:
+        raise RuntimeError(
+            "static CP sequence statistics cannot consume weighted DynamicCP updates"
+        )
     t = _seqlen_stats_in_iteration
     if torch.distributed.is_initialized() and mpu.model_parallel_is_initialized():
         torch.distributed.all_reduce(t)
@@ -416,6 +438,7 @@ def consume_seqlen_stats_in_iteration(
     # iterations reuse it without reallocating.
     t.zero_()
     _seqlen_stats_active = False
+    _seqlen_stats_weighted_in_iteration = None
     return total_real_tokens / dedup, seqlen_squared_sum / dedup
 
 

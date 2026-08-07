@@ -96,6 +96,8 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
     sound_length = None
     sample_lengths = None
     local_cp_size = None
+    local_cp_size_value = None
+    hybrid_cp_group = None
 
     args = get_args()
 
@@ -238,7 +240,6 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
         max_lengths = max_lengths[0]
         cu_lengths_for_params = cu_lengths_padded if cu_lengths_padded is not None else cu_lengths
 
-        local_cp_size_value = None
         if getattr(args, "hybrid_context_parallel", False):
             local_cp_size_value = int(local_cp_size.reshape(-1)[0].item())
 
@@ -379,8 +380,8 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
         update_packed_sequence_stats(
             sample_lengths,
             loss_mask,
-            local_cp_size=getattr(packed_seq_params, "local_cp_size", None),
-            cp_group=getattr(packed_seq_params, "cp_group", None),
+            local_cp_size=local_cp_size_value,
+            cp_group=hybrid_cp_group,
         )
 
     return (
