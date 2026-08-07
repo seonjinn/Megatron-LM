@@ -238,6 +238,10 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
         max_lengths = max_lengths[0]
         cu_lengths_for_params = cu_lengths_padded if cu_lengths_padded is not None else cu_lengths
 
+        local_cp_size_value = None
+        if getattr(args, "hybrid_context_parallel", False):
+            local_cp_size_value = int(local_cp_size.reshape(-1)[0].item())
+
         # Multimodal SFT uses args.seq_length for the vision encoder length and
         # args.decoder_seq_length for language tokens. For PP=1, feed packed
         # language boundaries into the common FLOP accumulator so throughput is
@@ -245,7 +249,9 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
         # ranks do not all run the multimodal dataloader, so leave them on the
         # previous fallback path until the accumulator has all-rank participation.
         if pp_size == 1:
-            update_seqlen_stats_from_cu_seqlens(cu_lengths)
+            update_seqlen_stats_from_cu_seqlens(
+                cu_lengths, local_cp_size=local_cp_size_value
+            )
 
         packed_seq_params = PackedSeqParams(
             qkv_format="thd",
@@ -258,7 +264,6 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
             total_tokens=int(cu_lengths_for_params[-1].item()),
         )
         if getattr(args, "hybrid_context_parallel", False):
-            local_cp_size_value = int(local_cp_size.reshape(-1)[0].item())
             hybrid_cp_group = (
                 get_hybrid_data_context_parallel_groups(group_size=local_cp_size_value)
                 if local_cp_size_value > 1

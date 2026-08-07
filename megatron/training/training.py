@@ -322,7 +322,7 @@ _packed_sequence_trained_tokens_in_iteration: Optional[torch.Tensor] = None
 _packed_sequence_stats_active: bool = False
 
 
-def update_seqlen_stats_from_cu_seqlens(cu_seqlens):
+def update_seqlen_stats_from_cu_seqlens(cu_seqlens, local_cp_size: Optional[int] = None):
     """Add ``sum(L_i)`` and ``sum(L_i ** 2)`` from one micro-batch's REAL ``cu_seqlens``.
 
     Args:
@@ -331,6 +331,10 @@ def update_seqlen_stats_from_cu_seqlens(cu_seqlens):
             ``cu_seqlens`` rather than ``cu_seqlens_padded`` so the FLOPs
             metric reports useful work only, not work on CP-alignment or
             end-of-sequence padding tokens.
+        local_cp_size: Active DynamicCP replication factor for this payload.
+            Every active rank observes the same ``cu_seqlens``, so its additive
+            contribution is divided by this value before the world reduction.
+            Leave unset for static context parallelism.
 
     Every rank in the same data-parallel group sees the same ``cu_seqlens`` (it is
     broadcast across TP/CP/PP). The per-micro-batch reduction stays on device --
@@ -342,6 +346,8 @@ def update_seqlen_stats_from_cu_seqlens(cu_seqlens):
     global _seqlen_stats_in_iteration, _seqlen_stats_active
     if cu_seqlens is None or cu_seqlens.numel() < 2:
         return
+    if local_cp_size is not None and local_cp_size < 1:
+        raise ValueError(f"local_cp_size must be positive, got {local_cp_size}")
     # Pin the accumulator to the current CUDA device when available so the
     # eventual all-reduce can use NCCL even if a caller passed a CPU tensor
     # (e.g. unit tests). Production always supplies a CUDA tensor.
@@ -355,12 +361,15 @@ def update_seqlen_stats_from_cu_seqlens(cu_seqlens):
     seqlens = (cu_seqlens[1:] - cu_seqlens[:-1]).to(
         device=_seqlen_stats_in_iteration.device, dtype=torch.float64
     )
-    _seqlen_stats_in_iteration[0] += seqlens.sum()
-    _seqlen_stats_in_iteration[1] += (seqlens * seqlens).sum()
+    replication_factor = 1 if local_cp_size is None else local_cp_size
+    _seqlen_stats_in_iteration[0] += seqlens.sum() / replication_factor
+    _seqlen_stats_in_iteration[1] += (seqlens * seqlens).sum() / replication_factor
     _seqlen_stats_active = True
 
 
-def consume_seqlen_stats_in_iteration() -> Tuple[Optional[float], Optional[float]]:
+def consume_seqlen_stats_in_iteration(
+    is_hybrid_cp: bool = False,
+) -> Tuple[Optional[float], Optional[float]]:
     """Read, reset and globally reduce the per-iteration packed-sequence stats.
 
     Returns:
@@ -381,9 +390,9 @@ def consume_seqlen_stats_in_iteration() -> Tuple[Optional[float], Optional[float
     Sync cost: exactly ONE all-reduce of a 2-element ``float64`` tensor and ONE
     host sync (``tolist()``). Skipped entirely when the flag is ``False``.
 
-    All ranks within one DP group accumulated identical values (``cu_seqlens`` is
-    replicated across TP/CP/PP); the world all-reduce therefore overcounts by a
-    factor of ``TP * CP * PP``, which we divide out.
+    Static CP replicates ``cu_seqlens`` across TP/CP/PP, so its world reduction
+    is de-duplicated by ``TP * CP * PP``. HybridCP updates are already weighted
+    by their active CP replication factor and therefore de-duplicate only TP/PP.
     """
     global _seqlen_stats_in_iteration, _seqlen_stats_active
     if not _seqlen_stats_active:
@@ -394,8 +403,8 @@ def consume_seqlen_stats_in_iteration() -> Tuple[Optional[float], Optional[float
     if torch.distributed.is_initialized() and mpu.model_parallel_is_initialized():
         torch.distributed.all_reduce(t)
         tp_size = max(mpu.get_tensor_model_parallel_world_size(), 1)
-        cp_size = max(mpu.get_context_parallel_world_size(), 1)
         pp_size = max(mpu.get_pipeline_model_parallel_world_size(), 1)
+        cp_size = 1 if is_hybrid_cp else max(mpu.get_context_parallel_world_size(), 1)
         dedup = tp_size * cp_size * pp_size
     else:
         # No model-parallel state -> treat as a single rank, no reduction.
@@ -4035,7 +4044,7 @@ def train(
         # runs (no collective issued), letting ``num_floating_point_operations``
         # fall back to its closed-form defaults.
         total_real_tokens_in_batch, seqlen_squared_sum_in_batch = (
-            consume_seqlen_stats_in_iteration()
+            consume_seqlen_stats_in_iteration(is_hybrid_cp=args.hybrid_context_parallel)
         )
         hybrid_cp_iteration_stats = consume_hybrid_cp_iteration_stats()
         packed_sequence_stats = None
