@@ -419,14 +419,20 @@ def consume_seqlen_stats_in_iteration(
     return total_real_tokens / dedup, seqlen_squared_sum / dedup
 
 
-def update_packed_sequence_stats(sample_lengths, loss_mask):
+def update_packed_sequence_stats(
+    sample_lengths,
+    loss_mask,
+    local_cp_size: Optional[int] = None,
+    cp_group: Optional[torch.distributed.ProcessGroup] = None,
+):
     """Accumulate packed SFT sequence statistics for one local microbatch.
 
     ``sample_lengths`` contains the real lengths of the original samples inside
     each packed sample, padded with zeros. ``loss_mask`` is used to count trained
-    tokens. Only one model-parallel replica per DP rank contributes so the
-    global gather in ``consume_packed_sequence_stats_in_iteration`` does not need
-    TP/CP/PP de-duplication.
+    tokens. Only one model-parallel replica per logical payload contributes so
+    the global gather in ``consume_packed_sequence_stats_in_iteration`` does not
+    need TP/CP/PP de-duplication. Static CP selects static CP rank zero; DynamicCP
+    selects rank zero inside each active group, including every CP1 payload.
     """
     global _packed_sequence_lengths_in_iteration
     global _packed_sequence_trained_tokens_in_iteration
@@ -434,13 +440,23 @@ def update_packed_sequence_stats(sample_lengths, loss_mask):
 
     if sample_lengths is None or loss_mask is None:
         return
+    if local_cp_size is not None:
+        local_cp_size = int(local_cp_size)
+        if local_cp_size < 1:
+            raise ValueError(f"local_cp_size must be positive, got {local_cp_size}")
+        if local_cp_size > 1 and cp_group is None:
+            raise ValueError("cp_group is required when local_cp_size is greater than one")
 
     if torch.distributed.is_initialized() and mpu.model_parallel_is_initialized():
         if (
             not mpu.is_pipeline_last_stage(ignore_virtual=True)
             or mpu.get_tensor_model_parallel_rank() != 0
-            or mpu.get_context_parallel_rank() != 0
         ):
+            return
+        if local_cp_size is None:
+            if mpu.get_context_parallel_rank() != 0:
+                return
+        elif local_cp_size > 1 and torch.distributed.get_rank(group=cp_group) != 0:
             return
 
     device = (

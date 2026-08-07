@@ -376,7 +376,12 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
             packed_seq_params.cuda_graph_eligible = False
 
     if getattr(args, "log_packed_sequence_stats", False) and packed_seq_params is not None:
-        update_packed_sequence_stats(sample_lengths, loss_mask)
+        update_packed_sequence_stats(
+            sample_lengths,
+            loss_mask,
+            local_cp_size=getattr(packed_seq_params, "local_cp_size", None),
+            cp_group=getattr(packed_seq_params, "cp_group", None),
+        )
 
     return (
         tokens,
