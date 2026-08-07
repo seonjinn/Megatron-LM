@@ -27,6 +27,7 @@ class AlltoAllCudaGraphState:
     hidden_shape_before_permute: torch.Size
     capacity: int | None
     num_out_tokens: int | None
+    preprocessed_signature: TensorReplaySignature | None = None
 
 
 @dataclass(frozen=True)

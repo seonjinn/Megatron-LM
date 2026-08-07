@@ -7,6 +7,10 @@ import pytest
 import torch
 
 from megatron.core.models.gpt.gpt_layer_specs import get_gpt_layer_local_submodules
+from megatron.core.transformer.moe.capacity_tracker import (
+    destroy_moe_capacity_tracker,
+    get_moe_capacity_tracker,
+)
 from megatron.core.transformer.moe.moe_layer import MoELayer, MoESubmodules
 from megatron.core.transformer.moe.moe_utils import (
     get_updated_expert_bias,
@@ -57,6 +61,7 @@ class TestTop2Router:
         self.router = cast(Router, self.sequential_mlp.router)
 
     def teardown_method(self, method):
+        destroy_moe_capacity_tracker()
         Utils.destroy_model_parallel()
 
     @pytest.mark.internal
@@ -328,6 +333,94 @@ class TestTop2Router:
         self.router.config.moe_expert_capacity_factor = None
         self.router.config.moe_token_drop_policy = "probs"
         self.router.config.moe_pad_expert_input_to_capacity = False
+
+    @pytest.mark.internal
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+    @pytest.mark.parametrize("pad_to_capacity", [False, True])
+    def test_capacity_tracker_counts_valid_router_drops(
+        self, monkeypatch, pad_to_capacity: bool
+    ) -> None:
+        routing_map = torch.tensor(
+            [
+                [True, True, False, False],
+                [True, True, False, False],
+                [True, False, True, False],
+                [True, True, False, False],
+                [False, False, True, True],
+            ],
+            device="cuda",
+        )
+        probs = torch.tensor(
+            [
+                [0.90, 0.90, 0.00, 0.00],
+                [0.80, 0.80, 0.00, 0.00],
+                [0.70, 0.00, 0.70, 0.00],
+                [0.60, 0.60, 0.00, 0.00],
+                [0.00, 0.00, 0.95, 0.95],
+            ],
+            device="cuda",
+        )
+
+        def fixed_topk_routing(*args, **kwargs):
+            return probs.clone(), routing_map.clone()
+
+        monkeypatch.setattr(
+            "megatron.core.transformer.moe.router.topk_routing_with_score_function",
+            fixed_topk_routing,
+        )
+        tracker = get_moe_capacity_tracker()
+        tracker.initialize(torch.device("cuda", torch.cuda.current_device()))
+        self.router = self.router.cuda()
+        self.router.eval()
+        self.router.config.moe_token_dispatcher_type = "alltoall"
+        self.router.config.moe_expert_capacity_factor = 0.5
+        self.router.config.moe_token_drop_policy = "probs"
+        self.router.config.moe_pad_expert_input_to_capacity = pad_to_capacity
+        logits = torch.zeros((5, 1, 4), device="cuda")
+        padding_mask = torch.tensor([[False], [False], [False], [False], [True]], device="cuda")
+
+        self.router.routing(logits, padding_mask=padding_mask)
+
+        snapshot = tracker.snapshot()
+        assert snapshot.selected_assignments == 8
+        assert snapshot.dropped_assignments == 3
+        assert snapshot.valid_token_drops == 1
+        assert snapshot.rank_overflow_events == 0
+
+    @pytest.mark.internal
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+    def test_capacity_tracker_ignores_dropless_router(self, monkeypatch) -> None:
+        routing_map = torch.tensor(
+            [[True, True, False, False], [False, False, True, True]], device="cuda"
+        )
+        probs = routing_map.to(dtype=torch.float32)
+
+        def fixed_topk_routing(*args, **kwargs):
+            return probs.clone(), routing_map.clone()
+
+        monkeypatch.setattr(
+            "megatron.core.transformer.moe.router.topk_routing_with_score_function",
+            fixed_topk_routing,
+        )
+        tracker = get_moe_capacity_tracker()
+        tracker.initialize(torch.device("cuda", torch.cuda.current_device()))
+        self.router = self.router.cuda()
+        self.router.eval()
+        self.router.config.moe_token_dispatcher_type = "flex"
+        self.router.config.moe_flex_dispatcher_backend = "hybridep"
+        self.router.config.moe_expert_capacity_factor = None
+        self.router.config.moe_expert_rank_capacity_factor = None
+        self.router.config.moe_pad_expert_input_to_capacity = False
+        logits = torch.zeros((2, 1, 4), device="cuda")
+
+        _, observed_routing_map = self.router.routing(logits)
+
+        torch.testing.assert_close(observed_routing_map, routing_map)
+        snapshot = tracker.snapshot()
+        assert snapshot.selected_assignments == 0
+        assert snapshot.dropped_assignments == 0
+        assert snapshot.valid_token_drops == 0
+        assert snapshot.rank_overflow_events == 0
 
 
 class TestGroupLimitedRouter:

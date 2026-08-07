@@ -19,6 +19,7 @@ from megatron.core.tensor_parallel import (
     reduce_scatter_to_sequence_parallel_region,
 )
 from megatron.core.transformer.enums import CudaGraphModule
+from megatron.core.transformer.moe.capacity_tracker import get_moe_capacity_tracker
 from megatron.core.transformer.moe.cuda_graph_replay import (
     AlltoAllCudaGraphState,
     HybridEPCudaGraphState,
@@ -303,6 +304,7 @@ class MoETokenDispatcher:
             ),
             ("expert_capacity_factor", getattr(self.config, "moe_expert_capacity_factor", None)),
             ("rank_capacity_factor", getattr(self.config, "moe_expert_rank_capacity_factor", None)),
+            ("latent_size", getattr(self.config, "moe_latent_size", None)),
             (
                 "hybridep_pad_uneven_dispatch_inputs",
                 getattr(self.config, "moe_hybridep_pad_uneven_dispatch_inputs", False),
@@ -623,22 +625,39 @@ class MoEAlltoAllTokenDispatcher(MoETokenDispatcher):
 
         self.validate_cudagraph_replay_capability()
         flattened_input_shape = get_flattened_input_shape(graph_input)
-        if self.hidden_shape != graph_input.shape:
+        preprocessed_hidden_size = preprocessed_hidden_states.shape[-1]
+        expected_preprocessed_hidden_size = (
+            getattr(self.config, "moe_latent_size", None) or flattened_input_shape[-1]
+        )
+        if preprocessed_hidden_size != expected_preprocessed_hidden_size:
+            raise RuntimeError(
+                "AlltoAll CUDA graph preprocessed hidden size mismatch: "
+                f"{preprocessed_hidden_size} != {expected_preprocessed_hidden_size}."
+            )
+        expected_hidden_shape = torch.Size(
+            (*graph_input.shape[:-1], preprocessed_hidden_size)
+        )
+        if self.hidden_shape != expected_hidden_shape:
             raise RuntimeError(
                 "AlltoAll CUDA graph hidden_shape does not match the physical graph input: "
-                f"{self.hidden_shape} != {graph_input.shape}."
+                f"{self.hidden_shape} != {expected_hidden_shape}."
             )
-        if self.hidden_shape_before_permute != flattened_input_shape:
+        expected_flattened_shape = torch.Size(
+            (flattened_input_shape[0], preprocessed_hidden_size)
+        )
+        if self.hidden_shape_before_permute != expected_flattened_shape:
             raise RuntimeError(
                 "AlltoAll CUDA graph flattened input shape mismatch: "
-                f"{self.hidden_shape_before_permute} != {flattened_input_shape}."
+                f"{self.hidden_shape_before_permute} != {expected_flattened_shape}."
             )
         num_out_tokens = to_optional_int(self.num_out_tokens, field_name="num_out_tokens")
         if num_out_tokens is None:
             raise RuntimeError(
                 "AlltoAll CUDA graph replay state requires num_out_tokens after preprocessing."
             )
-        expected_preprocessed_shape = torch.Size((num_out_tokens, flattened_input_shape[-1]))
+        expected_preprocessed_shape = torch.Size(
+            (num_out_tokens, preprocessed_hidden_states.shape[-1])
+        )
         if preprocessed_hidden_states.shape != expected_preprocessed_shape:
             raise RuntimeError(
                 "AlltoAll CUDA graph preprocessed hidden-state shape mismatch: "
@@ -654,6 +673,9 @@ class MoEAlltoAllTokenDispatcher(MoETokenDispatcher):
                 hidden_shape_before_permute=self.hidden_shape_before_permute,
                 capacity=to_optional_int(self.capacity, field_name="capacity"),
                 num_out_tokens=num_out_tokens,
+                preprocessed_signature=get_tensor_replay_signature(
+                    preprocessed_hidden_states
+                ),
             ),
         )
 
@@ -677,13 +699,22 @@ class MoEAlltoAllTokenDispatcher(MoETokenDispatcher):
             raise RuntimeError(
                 "AlltoAll CUDA graph replay state is missing required num_out_tokens."
             )
-        expected_preprocessed_shape = torch.Size(
-            (state.backend_state.num_out_tokens, state.flattened_input_shape[-1])
-        )
-        if preprocessed_hidden_states.shape != expected_preprocessed_shape:
-            raise RuntimeError(
-                "AlltoAll CUDA graph preprocessed hidden-state shape mismatch: "
-                f"expected {expected_preprocessed_shape}, got {preprocessed_hidden_states.shape}."
+        preprocessed_signature = state.backend_state.preprocessed_signature
+        if preprocessed_signature is None:
+            expected_preprocessed_shape = torch.Size(
+                (state.backend_state.num_out_tokens, state.flattened_input_shape[-1])
+            )
+            if preprocessed_hidden_states.shape != expected_preprocessed_shape:
+                raise RuntimeError(
+                    "AlltoAll CUDA graph preprocessed hidden-state shape mismatch: "
+                    f"expected {expected_preprocessed_shape}, "
+                    f"got {preprocessed_hidden_states.shape}."
+                )
+        else:
+            validate_tensor_replay_signature(
+                preprocessed_hidden_states,
+                preprocessed_signature,
+                boundary="preprocessed continuation",
             )
         self.hidden_shape = state.backend_state.hidden_shape
         self.hidden_shape_before_permute = state.backend_state.hidden_shape_before_permute
@@ -1367,6 +1398,9 @@ class _HybridEPManager(_DispatchManager):
             # dropped because permuted count exceeded num_permuted_tokens from setup_metadata.
             over_budget = self.handle[-1] != 0
             self.over_budget |= over_budget
+            tracker = get_moe_capacity_tracker()
+            if tracker.initialized:
+                tracker.record_rank_overflow(over_budget)
         # When capacity factor is None, skip overflow tracking (no token drops). Actual
         # permuted size is resolved below via tokens_per_expert.sum() (CPU sync).
 

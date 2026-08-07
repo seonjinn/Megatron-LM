@@ -1,12 +1,15 @@
 # Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 import gc
+import json
 import os
 import sys
 
 import pytest
 import torch
+import transformer_engine.pytorch as te
 from transformer_engine.pytorch.fp8 import check_fp8_support
+from transformer_engine.pytorch.graph import make_graphed_callables
 
 from megatron.core.enums import ModelType
 from megatron.core.models.gpt.gpt_layer_specs import (
@@ -62,7 +65,194 @@ from megatron.training.global_vars import (
 from megatron.training.training import setup_model_and_optimizer
 from tests.unit_tests.test_utilities import Utils
 
+
+def _bind_local_rank_before_cuda_query() -> None:
+    raw_local_rank = os.environ.get("LOCAL_RANK")
+    if raw_local_rank is None:
+        return
+    local_rank = int(raw_local_rank)
+    local_world_size = int(os.environ["LOCAL_WORLD_SIZE"])
+    if local_rank not in range(local_world_size):
+        raise ValueError("LOCAL_RANK is outside LOCAL_WORLD_SIZE")
+    torch.cuda.set_device(local_rank)
+
+
+_bind_local_rank_before_cuda_query()
 fp8_available, _ = check_fp8_support()
+
+
+def test_local_rank_binding_uses_worker_cuda_device(monkeypatch) -> None:
+    selected_devices: list[int] = []
+    monkeypatch.setenv("LOCAL_RANK", "3")
+    monkeypatch.setenv("LOCAL_WORLD_SIZE", "4")
+    monkeypatch.setattr(torch.cuda, "set_device", selected_devices.append)
+
+    _bind_local_rank_before_cuda_query()
+
+    assert selected_devices == [3]
+
+
+class _CountingEvalTELinear(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.linear = te.Linear(
+            16,
+            16,
+            bias=True,
+            params_dtype=torch.bfloat16,
+            device="cuda",
+        )
+        self.forward_invocations = 0
+
+    def forward(self, value: torch.Tensor) -> torch.Tensor:
+        self.forward_invocations += 1
+        return self.linear(value)
+
+
+def _te_eval_probe() -> tuple[_CountingEvalTELinear, torch.Tensor, dict[str, int]]:
+    local_rank = int(os.environ["LOCAL_RANK"])
+    local_world_size = int(os.environ["LOCAL_WORLD_SIZE"])
+    node_rank = int(os.environ.get("GROUP_RANK", "0"))
+    assert local_world_size > 0
+    assert 0 <= local_rank < local_world_size
+    assert node_rank >= 0
+    torch.cuda.set_device(local_rank)
+    assert torch.cuda.is_available(), "direct TE CUDA Graph capability requires a CUDA worker"
+    assert torch.cuda.current_device() == local_rank
+    assert local_world_size == torch.cuda.device_count()
+    torch.manual_seed(1234)
+    module = _CountingEvalTELinear().eval()
+    sample = torch.full((4, 16), 0.25, dtype=torch.bfloat16, device="cuda")
+    return module, sample, {
+        "node_rank": node_rank,
+        "local_rank": local_rank,
+        "cuda_device_index": torch.cuda.current_device(),
+    }
+
+
+def test_te_make_graphed_callables_supports_eval_no_grad() -> None:
+    module, sample, device_binding = _te_eval_probe()
+    first_actual = torch.full_like(sample, 0.5)
+    second_actual = torch.full_like(sample, 1.5)
+
+    with torch.no_grad():
+        (graphed,) = make_graphed_callables(
+            (module,),
+            ((sample,),),
+            _order=[1, -1],
+            _num_layers_per_chunk=[1],
+            _reuse_graph_input_output_buffers=False,
+        )
+        invocations_after_capture = module.forward_invocations
+        first_expected = module(first_actual).clone()
+        before_first_replay = module.forward_invocations
+        first_replayed = graphed(first_actual).clone()
+        assert module.forward_invocations == before_first_replay
+        second_expected = module(second_actual).clone()
+        before_second_replay = module.forward_invocations
+        second_replayed = graphed(second_actual).clone()
+        assert module.forward_invocations == before_second_replay
+        torch.testing.assert_close(first_replayed, first_expected)
+        torch.testing.assert_close(second_replayed, second_expected)
+        assert not torch.equal(first_replayed, second_replayed)
+
+        module.train()
+        before_fallback = module.forward_invocations
+        fallback = graphed(second_actual).clone()
+        assert module.forward_invocations == before_fallback + 1
+        torch.testing.assert_close(fallback, second_expected)
+        module.eval()
+
+    no_parameter_grads = all(parameter.grad is None for parameter in module.parameters())
+    assert invocations_after_capture > 0
+    assert no_parameter_grads
+    print(
+        "TE_CAPABILITY_JSON="
+        + json.dumps(
+            {
+                **device_binding,
+                "all_eval_callables_supported": True,
+                "backward_executed": False,
+                "fallback_forward_counter_increment": 1,
+                "forward_invocations_after_capture": invocations_after_capture,
+                "no_parameter_grads": no_parameter_grads,
+                "outputs_changed": True,
+                "replay_forward_counter_increment": 0,
+            },
+            sort_keys=True,
+        )
+    )
+
+
+def test_te_eval_graph_input_output_buffer_reuse_capability() -> None:
+    module, sample, device_binding = _te_eval_probe()
+    accepted = False
+    rejection = None
+    reuse_evidence = {
+        "raw_te_eval_reuse_eager_parity": None,
+        "raw_te_eval_reuse_fallback_forward_counter_increment": None,
+        "raw_te_eval_reuse_outputs_changed": None,
+        "raw_te_eval_reuse_replay_forward_counter_increment": None,
+    }
+    with torch.no_grad():
+        try:
+            (graphed,) = make_graphed_callables(
+                (module,),
+                ((sample,),),
+                _order=[1, -1],
+                _num_layers_per_chunk=[1],
+                _reuse_graph_input_output_buffers=True,
+            )
+        except RuntimeError as error:
+            rejection = str(error)
+        else:
+            accepted = True
+            invocations_after_capture = module.forward_invocations
+            first_actual = torch.full_like(sample, 0.5)
+            second_actual = torch.full_like(sample, 1.5)
+            first_expected = module(first_actual).clone()
+            before_first_replay = module.forward_invocations
+            first_replayed = graphed(first_actual).clone()
+            assert module.forward_invocations == before_first_replay
+            second_expected = module(second_actual).clone()
+            before_second_replay = module.forward_invocations
+            second_replayed = graphed(second_actual).clone()
+            assert module.forward_invocations == before_second_replay
+            torch.testing.assert_close(first_replayed, first_expected)
+            torch.testing.assert_close(second_replayed, second_expected)
+            assert not torch.equal(first_replayed, second_replayed)
+
+            module.train()
+            before_fallback = module.forward_invocations
+            fallback = graphed(second_actual).clone()
+            assert module.forward_invocations == before_fallback + 1
+            torch.testing.assert_close(fallback, second_expected)
+            module.eval()
+            assert invocations_after_capture > 0
+            reuse_evidence = {
+                "raw_te_eval_reuse_eager_parity": True,
+                "raw_te_eval_reuse_fallback_forward_counter_increment": 1,
+                "raw_te_eval_reuse_outputs_changed": True,
+                "raw_te_eval_reuse_replay_forward_counter_increment": 0,
+            }
+
+    assert accepted or "only available in training mode" in (rejection or "")
+    no_parameter_grads = all(parameter.grad is None for parameter in module.parameters())
+    assert no_parameter_grads
+    print(
+        "TE_CAPABILITY_JSON="
+        + json.dumps(
+            {
+                **device_binding,
+                "mcore_eval_reuse_graph_io": "not_implemented",
+                "raw_te_eval_reuse_graph_io": accepted,
+                "raw_te_eval_reuse_rejection": rejection,
+                "raw_te_eval_reuse_no_parameter_grads": no_parameter_grads,
+                **reuse_evidence,
+            },
+            sort_keys=True,
+        )
+    )
 
 
 def _base_cuda_graph_config(**kwargs) -> TransformerConfig:
