@@ -1,6 +1,7 @@
 import unittest
 from collections import Counter
-from contextlib import nullcontext
+from contextlib import nullcontext, redirect_stdout
+from io import StringIO
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -8,6 +9,7 @@ import torch
 
 from megatron.core.pipeline_parallel.hybrid_cp_schedule import (
     BalancedCPScheduler,
+    _validate_hybrid_cp_runtime_model_calls,
     consume_hybrid_cp_iteration_stats,
     hybrid_context_parallel_forward_backward,
     iter_hybrid_cp_rank_waves,
@@ -61,6 +63,95 @@ def _wire_sample(token: int) -> dict[str, torch.Tensor]:
 
 
 class HybridCPScheduleTest(unittest.TestCase):
+    def test_runtime_model_calls_validator_is_disabled_by_default(self) -> None:
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch(
+                "megatron.core.pipeline_parallel.hybrid_cp_schedule.torch.tensor"
+            ) as tensor,
+            patch(
+                "megatron.core.pipeline_parallel.hybrid_cp_schedule.torch.distributed.all_reduce"
+            ) as all_reduce,
+        ):
+            _validate_hybrid_cp_runtime_model_calls(2, 2)
+
+        tensor.assert_not_called()
+        all_reduce.assert_not_called()
+
+    def test_runtime_model_calls_validator_logs_matching_world_counts(self) -> None:
+        output = StringIO()
+        with (
+            patch.dict(
+                "os.environ", {"MEGATRON_HYBRID_CP_VALIDATE_MODEL_CALLS": "1"}
+            ),
+            patch(
+                "megatron.core.pipeline_parallel.hybrid_cp_schedule.torch.cuda.current_device",
+                return_value="cpu",
+            ),
+            patch(
+                "megatron.core.pipeline_parallel.hybrid_cp_schedule.torch.distributed.all_reduce"
+            ) as all_reduce,
+            patch(
+                "megatron.core.pipeline_parallel.hybrid_cp_schedule.torch.distributed.get_rank",
+                return_value=0,
+            ),
+            redirect_stdout(output),
+        ):
+            _validate_hybrid_cp_runtime_model_calls(2, 2)
+
+        self.assertEqual(all_reduce.call_count, 2)
+        self.assertEqual(
+            output.getvalue().strip(),
+            "[HYBRID_CP_VALIDATOR] passed model_calls=2 world_min=2 world_max=2",
+        )
+
+    def test_runtime_model_calls_validator_rejects_world_mismatch(self) -> None:
+        def fake_all_reduce(value, op):
+            if op == torch.distributed.ReduceOp.MIN:
+                value.fill_(1)
+            elif op == torch.distributed.ReduceOp.MAX:
+                value.fill_(2)
+
+        with (
+            patch.dict(
+                "os.environ", {"MEGATRON_HYBRID_CP_VALIDATE_MODEL_CALLS": "1"}
+            ),
+            patch(
+                "megatron.core.pipeline_parallel.hybrid_cp_schedule.torch.cuda.current_device",
+                return_value="cpu",
+            ),
+            patch(
+                "megatron.core.pipeline_parallel.hybrid_cp_schedule.torch.distributed.all_reduce",
+                side_effect=fake_all_reduce,
+            ) as all_reduce,
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "world_min=1.*world_max=2.*expected=2"
+            ):
+                _validate_hybrid_cp_runtime_model_calls(2, 2)
+
+        self.assertEqual(all_reduce.call_count, 2)
+
+    def test_runtime_model_calls_validator_rejects_expected_mismatch(self) -> None:
+        with (
+            patch.dict(
+                "os.environ", {"MEGATRON_HYBRID_CP_VALIDATE_MODEL_CALLS": "1"}
+            ),
+            patch(
+                "megatron.core.pipeline_parallel.hybrid_cp_schedule.torch.cuda.current_device",
+                return_value="cpu",
+            ),
+            patch(
+                "megatron.core.pipeline_parallel.hybrid_cp_schedule.torch.distributed.all_reduce"
+            ) as all_reduce,
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "world_min=2.*world_max=2.*expected=3"
+            ):
+                _validate_hybrid_cp_runtime_model_calls(2, 3)
+
+        self.assertEqual(all_reduce.call_count, 2)
+
     def test_minimum_cp_size_prevents_cp1_samples(self) -> None:
         scheduler = BalancedCPScheduler(65_536, _Group(4), min_cp_size=2)
         samples = [(0, 41_184), (1, 9_952)]
@@ -344,6 +435,9 @@ class HybridCPScheduleTest(unittest.TestCase):
                 "megatron.core.pipeline_parallel.hybrid_cp_schedule.torch.cuda.current_device",
                 return_value="cpu",
             ),
+            patch(
+                "megatron.core.pipeline_parallel.hybrid_cp_schedule._validate_hybrid_cp_runtime_model_calls"
+            ) as validate_model_calls,
         ):
             _, total_num_tokens = hybrid_context_parallel_forward_backward(
                 forward_step_func=None,
@@ -367,6 +461,7 @@ class HybridCPScheduleTest(unittest.TestCase):
         self.assertEqual(backward_calls, 2)
         self.assertEqual(barrier_calls, 1)
         self.assertEqual(total_num_tokens, 4)
+        validate_model_calls.assert_called_once_with(2, 2)
         self.assertEqual(
             forward_data_store[-1]["_hybrid_cp_global_samples_seen"].item(), 4
         )

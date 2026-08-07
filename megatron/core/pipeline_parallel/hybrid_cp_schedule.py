@@ -58,6 +58,37 @@ def _hybrid_cp_debug(message: str) -> None:
     print(f"[HYBRID_CP_DEBUG][rank={rank}] {message}", flush=True)
 
 
+def _validate_hybrid_cp_runtime_model_calls(
+    local_model_calls: int, expected_model_calls: int
+) -> None:
+    """Validate rank-uniform HybridCP model-call counts when explicitly enabled."""
+
+    if os.environ.get("MEGATRON_HYBRID_CP_VALIDATE_MODEL_CALLS") != "1":
+        return
+
+    device = torch.cuda.current_device()
+    world_min_tensor = torch.tensor(local_model_calls, dtype=torch.int64, device=device)
+    world_max_tensor = torch.tensor(local_model_calls, dtype=torch.int64, device=device)
+    torch.distributed.all_reduce(world_min_tensor, op=torch.distributed.ReduceOp.MIN)
+    torch.distributed.all_reduce(world_max_tensor, op=torch.distributed.ReduceOp.MAX)
+
+    world_min = int(world_min_tensor.item())
+    world_max = int(world_max_tensor.item())
+    if world_min != world_max or world_min != expected_model_calls:
+        raise RuntimeError(
+            "HybridCP runtime model-call count mismatch: "
+            f"local={local_model_calls} world_min={world_min} "
+            f"world_max={world_max} expected={expected_model_calls}"
+        )
+
+    if torch.distributed.get_rank() == 0:
+        print(
+            "[HYBRID_CP_VALIDATOR] passed "
+            f"model_calls={local_model_calls} world_min={world_min} world_max={world_max}",
+            flush=True,
+        )
+
+
 def summarize_hybrid_cp_schedule(
     sample_id_seqlens: List[Tuple[int, int]],
     sample_id_groups: List[List[List[int]]],
@@ -1027,9 +1058,11 @@ def hybrid_context_parallel_forward_backward(
         return num_tokens
 
     current_microbatch = 0
+    local_model_calls = 0
     with no_sync_func():
         for wave_index in range(num_total_waves - 1):
             num_tokens = _run_wave(wave_index, current_microbatch)
+            local_model_calls += 1
             current_microbatch += 1
             total_num_tokens += num_tokens.item()
             _hybrid_cp_debug(f"before_barrier wave={wave_index}")
@@ -1039,7 +1072,9 @@ def hybrid_context_parallel_forward_backward(
             _hybrid_cp_debug(f"after_barrier wave={wave_index}")
 
     num_tokens = _run_wave(num_total_waves - 1, current_microbatch)
+    local_model_calls += 1
     total_num_tokens += num_tokens.item()
+    _validate_hybrid_cp_runtime_model_calls(local_model_calls, num_total_waves)
 
     # Every rank may execute a different CP group's sample, so the local
     # ``_samples_seen`` list is not a reliable global-batch count.  Preserve
