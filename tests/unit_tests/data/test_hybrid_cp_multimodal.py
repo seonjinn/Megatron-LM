@@ -3,6 +3,7 @@ import torch
 
 from megatron.core.datasets.data_schedule import (
     collect_hybrid_cp_microbatches,
+    pack_multimodal_hybrid_cp_samples,
     restore_multimodal_hybrid_cp_sample,
     summarize_hybrid_cp_multimodal_samples,
     unpack_multimodal_batch,
@@ -78,6 +79,137 @@ def test_restore_multimodal_hybrid_cp_sample_rebuilds_get_batch_contract():
     assert restored["vision_cu_lengths"].tolist() == [[0, 2]]
     assert restored["has_pad_img"].item() is False
     assert restored["local_cp_size"].item() == 2
+
+
+def test_pack_multimodal_hybrid_cp_samples_preserves_text_boundaries():
+    samples = unpack_multimodal_batch(_packed_batch())
+
+    packed = pack_multimodal_hybrid_cp_samples(samples, local_cp_size=2)
+
+    assert packed["tokens"].tolist() == [[10, 11, 12, 13, 14, 15]]
+    assert packed["labels"].tolist() == [[99, 20, 21, 22, 23, 24, 25]]
+    assert packed["cu_lengths"].tolist() == [[0, 2, 5]]
+    assert packed["cu_lengths_padded"].tolist() == [[0, 2, 6]]
+    assert packed["sample_lengths"].tolist() == [[2, 3]]
+    assert packed["max_lengths"].tolist() == [3]
+    assert packed["samples_seen"].item() == 2
+    assert packed["local_cp_size"].item() == 2
+
+
+def test_packed_payload_rebuilds_vision_boundaries():
+    samples = unpack_multimodal_batch(_packed_batch())
+
+    packed = pack_multimodal_hybrid_cp_samples(samples, local_cp_size=2)
+
+    assert packed["imgs"].shape == (1, 4, 1)
+    assert packed["imgs"].flatten().tolist() == [1.0, 2.0, 3.0, 4.0]
+    assert packed["imgs_sizes"].tolist() == [[16, 16], [32, 32]]
+    assert packed["vision_cu_lengths"].tolist() == [[0, 2, 4]]
+    assert packed["vision_max_lengths"].tolist() == [2]
+    assert packed["num_tiles"].tolist() == [1, 1]
+    assert packed["num_frames"].tolist() == [1, 1]
+
+
+def test_packed_payload_drops_text_only_vision_dummy():
+    samples = unpack_multimodal_batch(_packed_batch())
+    samples[0].update(
+        {
+            "imgs": torch.tensor([[0.0]]),
+            "imgs_sizes": torch.tensor([[0, 0]], dtype=torch.int32),
+            "vision_cu_lengths": torch.tensor([0], dtype=torch.int32),
+            "vision_max_lengths": torch.tensor([0], dtype=torch.int32),
+            "num_tiles": torch.tensor([0], dtype=torch.int32),
+            "num_frames": torch.tensor([0], dtype=torch.int32),
+        }
+    )
+
+    packed = pack_multimodal_hybrid_cp_samples(samples, local_cp_size=2)
+
+    assert packed["imgs"].shape == (1, 2, 1)
+    assert packed["imgs"].flatten().tolist() == [3.0, 4.0]
+    assert packed["imgs_sizes"].tolist() == [[32, 32]]
+    assert packed["vision_cu_lengths"].tolist() == [[0, 2]]
+    assert packed["num_tiles"].tolist() == [1]
+    assert packed["num_frames"].tolist() == [1]
+
+
+def test_packed_payload_restores_one_vision_dummy_for_all_text():
+    samples = unpack_multimodal_batch(_packed_batch())
+    for sample in samples:
+        sample.update(
+            {
+                "imgs": torch.tensor([[0.0]]),
+                "imgs_sizes": torch.tensor([[0, 0]], dtype=torch.int32),
+                "vision_cu_lengths": torch.tensor([0], dtype=torch.int32),
+                "vision_max_lengths": torch.tensor([0], dtype=torch.int32),
+                "num_tiles": torch.tensor([0], dtype=torch.int32),
+                "num_frames": torch.tensor([0], dtype=torch.int32),
+            }
+        )
+
+    packed = pack_multimodal_hybrid_cp_samples(samples, local_cp_size=2)
+
+    assert packed["imgs"].shape == (1, 1)
+    assert packed["imgs_sizes"].tolist() == [[0, 0]]
+    assert packed["vision_cu_lengths"].tolist() == [[0]]
+    assert packed["vision_max_lengths"].tolist() == [0]
+    assert packed["num_tiles"].tolist() == [0]
+    assert packed["num_frames"].tolist() == [0]
+
+
+def test_packed_payload_drops_text_only_audio_dummy():
+    samples = unpack_multimodal_batch(_packed_batch())
+    samples[1].update(
+        {
+            "sound_clips": torch.tensor([[1.0, 2.0]], dtype=torch.float32),
+            "sound_length": torch.tensor([2], dtype=torch.int64),
+            "sound_timestamps": torch.tensor([[0.25]], dtype=torch.float32),
+            "num_sound_clips": torch.tensor([1], dtype=torch.int64),
+        }
+    )
+
+    packed = pack_multimodal_hybrid_cp_samples(samples, local_cp_size=2)
+
+    assert packed["sound_clips"].tolist() == [[1.0, 2.0]]
+    assert packed["sound_length"].tolist() == [2]
+    assert packed["sound_timestamps"].tolist() == [[0.25]]
+    assert packed["num_sound_clips"].tolist() == [1]
+
+
+def test_packed_payload_ors_image_padding_flag():
+    samples = unpack_multimodal_batch(_packed_batch())
+    samples[1]["has_pad_img"] = torch.tensor(True)
+
+    packed = pack_multimodal_hybrid_cp_samples(samples, local_cp_size=2)
+
+    assert packed["has_pad_img"].item() is True
+
+
+def test_packed_payload_concatenates_optional_token_fields():
+    samples = unpack_multimodal_batch(_packed_batch())
+    samples[0]["loss_mask"] = torch.tensor([1.0, 0.0])
+    samples[1]["loss_mask"] = torch.tensor([1.0, 1.0, 0.0, 0.0])
+
+    packed = pack_multimodal_hybrid_cp_samples(samples, local_cp_size=2)
+
+    assert packed["loss_mask"].tolist() == [1.0, 0.0, 1.0, 1.0, 0.0, 0.0]
+
+
+def test_packed_payload_rejects_inconsistent_optional_token_fields():
+    samples = unpack_multimodal_batch(_packed_batch())
+    samples[0]["loss_mask"] = torch.tensor([1.0, 0.0])
+
+    with pytest.raises(ValueError, match="inconsistent optional key 'loss_mask'"):
+        pack_multimodal_hybrid_cp_samples(samples, local_cp_size=2)
+
+
+def test_packed_payload_rejects_padded_token_capacity_overflow():
+    samples = unpack_multimodal_batch(_packed_batch())
+
+    with pytest.raises(ValueError, match="6 padded tokens, capacity is 5"):
+        pack_multimodal_hybrid_cp_samples(
+            samples, local_cp_size=2, max_padded_tokens=5
+        )
 
 
 def test_unpack_multimodal_batch_requires_per_sample_media_metadata():

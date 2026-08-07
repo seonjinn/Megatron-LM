@@ -2,6 +2,7 @@
 
 import os
 from collections.abc import Mapping, Sequence
+from itertools import accumulate
 from typing import Any, List, Optional
 
 import torch
@@ -315,28 +316,140 @@ def unpack_multimodal_batch(batch: Mapping[str, Any]) -> list[dict[str, torch.Te
     return samples
 
 
+def pack_multimodal_hybrid_cp_samples(
+    samples: Sequence[Mapping[str, torch.Tensor]],
+    local_cp_size: int,
+    max_padded_tokens: int | None = None,
+) -> dict[str, torch.Tensor]:
+    """Pack routed multimodal samples into one batch-shaped DynamicCP payload."""
+
+    if not samples:
+        raise ValueError("multimodal HybridCP payload must contain at least one sample")
+    if local_cp_size < 1:
+        raise ValueError(f"local_cp_size must be positive, got {local_cp_size}")
+
+    real_lengths = [int(sample["cu_seqlens"][-1].item()) for sample in samples]
+    padded_lengths = [int(sample["cu_seqlens_padded"][-1].item()) for sample in samples]
+    total_padded_tokens = sum(padded_lengths)
+    if max_padded_tokens is not None and total_padded_tokens > max_padded_tokens:
+        raise ValueError(
+            f"multimodal HybridCP payload has {total_padded_tokens} padded tokens, "
+            f"capacity is {max_padded_tokens}"
+        )
+
+    restored = dict(samples[0])
+    restored["tokens"] = torch.cat([sample["tokens"] for sample in samples]).unsqueeze(0)
+    restored["labels"] = torch.cat(
+        [samples[0]["labels"][:1], *[sample["labels"][1:] for sample in samples]]
+    ).unsqueeze(0)
+    restored["cu_lengths"] = torch.tensor(
+        [0, *accumulate(real_lengths)],
+        dtype=samples[0]["cu_seqlens"].dtype,
+        device=samples[0]["cu_seqlens"].device,
+    ).unsqueeze(0)
+    restored["cu_lengths_padded"] = torch.tensor(
+        [0, *accumulate(padded_lengths)],
+        dtype=samples[0]["cu_seqlens_padded"].dtype,
+        device=samples[0]["cu_seqlens_padded"].device,
+    ).unsqueeze(0)
+    restored["max_lengths"] = torch.tensor(
+        [max(real_lengths)], dtype=torch.int32, device=samples[0]["tokens"].device
+    )
+    restored["sample_lengths"] = torch.tensor(
+        [real_lengths], dtype=torch.int32, device=samples[0]["tokens"].device
+    )
+    restored["samples_seen"] = torch.tensor(
+        sum(int(sample["samples_seen"].item()) for sample in samples),
+        dtype=torch.int32,
+        device=samples[0]["tokens"].device,
+    )
+    restored["local_cp_size"] = torch.tensor(local_cp_size, dtype=torch.int32)
+
+    for key in ("position_ids", "loss_mask", "attention_mask"):
+        present = [key in sample for sample in samples]
+        if any(present) and not all(present):
+            raise ValueError(
+                f"multimodal HybridCP payload has inconsistent optional key {key!r}"
+            )
+        if all(present):
+            restored[key] = torch.cat([sample[key] for sample in samples], dim=0)
+
+    vision_samples = [
+        sample for sample in samples if sample["vision_cu_lengths"].numel() > 1
+    ]
+    if vision_samples:
+        packed_imgs = torch.cat([sample["imgs"] for sample in vision_samples], dim=0)
+        restored["imgs"] = packed_imgs.unsqueeze(0) if packed_imgs.dim() == 2 else packed_imgs
+        restored["imgs_sizes"] = torch.cat(
+            [sample["imgs_sizes"] for sample in vision_samples], dim=0
+        )
+        vision_offsets = [0]
+        vision_total = 0
+        for sample in vision_samples:
+            boundaries = [
+                int(value)
+                for value in sample["vision_cu_lengths"].detach().cpu().tolist()[1:]
+            ]
+            vision_offsets.extend(vision_total + boundary for boundary in boundaries)
+            vision_total = vision_offsets[-1]
+        restored["vision_cu_lengths"] = torch.tensor(
+            [vision_offsets],
+            dtype=vision_samples[0]["vision_cu_lengths"].dtype,
+            device=vision_samples[0]["vision_cu_lengths"].device,
+        )
+        restored["vision_max_lengths"] = torch.stack(
+            [sample["vision_max_lengths"].reshape(()) for sample in vision_samples]
+        ).max().reshape(1)
+        restored["num_tiles"] = torch.cat(
+            [sample["num_tiles"] for sample in vision_samples], dim=0
+        )
+        restored["num_frames"] = torch.cat(
+            [sample["num_frames"] for sample in vision_samples], dim=0
+        )
+    else:
+        for key in (
+            "imgs",
+            "imgs_sizes",
+            "vision_cu_lengths",
+            "vision_max_lengths",
+            "num_tiles",
+            "num_frames",
+        ):
+            restored[key] = samples[0][key].clone()
+        restored["vision_cu_lengths"] = restored["vision_cu_lengths"].unsqueeze(0)
+        restored["vision_max_lengths"] = restored["vision_max_lengths"].reshape(1)
+
+    restored["has_pad_img"] = torch.stack(
+        [sample["has_pad_img"].reshape(()) for sample in samples]
+    ).any()
+
+    audio_samples = [
+        sample
+        for sample in samples
+        if bool(torch.any(sample["num_sound_clips"] > 0).item())
+    ]
+    audio_keys = ("sound_clips", "sound_length", "sound_timestamps", "num_sound_clips")
+    if audio_samples:
+        for key in audio_keys:
+            restored[key] = torch.cat([sample[key] for sample in audio_samples], dim=0)
+    else:
+        for key in audio_keys:
+            restored[key] = samples[0][key].clone()
+
+    restored.pop("cu_seqlens", None)
+    restored.pop("cu_seqlens_padded", None)
+    restored.pop("max_seqlen", None)
+    return restored
+
+
 def restore_multimodal_hybrid_cp_sample(
     sample: Mapping[str, torch.Tensor], local_cp_size: int | None = None
 ) -> dict[str, torch.Tensor]:
     """Restore one wire-format sample to the multimodal ``get_batch`` schema."""
 
-    restored = dict(sample)
-    restored["tokens"] = sample["tokens"].unsqueeze(0)
-    restored["labels"] = sample["labels"].unsqueeze(0)
-    restored["cu_lengths"] = sample["cu_seqlens"].unsqueeze(0)
-    restored["cu_lengths_padded"] = sample["cu_seqlens_padded"].unsqueeze(0)
-    restored["max_lengths"] = sample["max_seqlen"].reshape(1)
-    restored["sample_lengths"] = sample["sample_lengths"].reshape(1, -1)
-    if sample["imgs"].dim() == 2 and sample["imgs"].shape != torch.Size([1, 1]):
-        restored["imgs"] = sample["imgs"].unsqueeze(0)
-    restored["vision_cu_lengths"] = sample["vision_cu_lengths"].unsqueeze(0)
-    restored["vision_max_lengths"] = sample["vision_max_lengths"].reshape(1)
-    if local_cp_size is not None:
-        restored["local_cp_size"] = torch.tensor(local_cp_size, dtype=torch.int32)
-    restored.pop("cu_seqlens", None)
-    restored.pop("cu_seqlens_padded", None)
-    restored.pop("max_seqlen", None)
-    return restored
+    return pack_multimodal_hybrid_cp_samples(
+        [sample], local_cp_size=1 if local_cp_size is None else local_cp_size
+    )
 
 
 class HybridCPDataLoaderWrapper:
