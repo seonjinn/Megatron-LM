@@ -13,6 +13,7 @@ These tests pin both code paths and the accumulator math.
 """
 
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 import torch
@@ -405,6 +406,39 @@ class TestAccumulator:
         total_real_tokens, seqlen_squared_sum = consume_seqlen_stats_in_iteration()
         assert total_real_tokens == 200 + 250
         assert seqlen_squared_sum == 20000 + 42500
+
+    def test_hybrid_cp_mixed_groups_count_each_payload_once(self):
+        """Active CP4/8/16 replicas must collapse to one logical copy each."""
+        payloads = (
+            (4, torch.tensor([0, 3, 8], dtype=torch.int32)),
+            (8, torch.tensor([0, 2, 9], dtype=torch.int32)),
+            (16, torch.tensor([0, 1, 5, 10], dtype=torch.int32)),
+        )
+        for local_cp_size, cu_seqlens in payloads:
+            for _ in range(local_cp_size):
+                update_seqlen_stats_from_cu_seqlens(
+                    cu_seqlens, local_cp_size=local_cp_size
+                )
+
+        def simulate_tp_all_reduce(tensor):
+            tensor.mul_(2)
+
+        with (
+            patch.object(torch.distributed, "is_initialized", return_value=True),
+            patch.object(torch.distributed, "all_reduce", side_effect=simulate_tp_all_reduce),
+            patch.object(training_module.mpu, "model_parallel_is_initialized", return_value=True),
+            patch.object(training_module.mpu, "get_tensor_model_parallel_world_size", return_value=2),
+            patch.object(training_module.mpu, "get_context_parallel_world_size", return_value=16),
+            patch.object(training_module.mpu, "get_pipeline_model_parallel_world_size", return_value=1),
+        ):
+            total_real_tokens, seqlen_squared_sum = consume_seqlen_stats_in_iteration(
+                is_hybrid_cp=True
+            )
+
+        assert total_real_tokens == 8 + 9 + 10
+        assert seqlen_squared_sum == (3**2 + 5**2) + (2**2 + 7**2) + (
+            1**2 + 4**2 + 5**2
+        )
 
     def test_consume_resets_accumulator(self):
         cu = torch.tensor([0, 100, 200], dtype=torch.int32)
