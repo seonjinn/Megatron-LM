@@ -130,6 +130,100 @@ class HybridCPScheduleTest(unittest.TestCase):
                 [(0, 71_264), (1, 41_184), (2, 9_952), (3, 8_000)], malformed
             )
 
+    def test_packed_mode_reuses_same_cp_subgroup_within_capacity(self) -> None:
+        scheduler = BalancedCPScheduler(10, _Group(4), min_cp_size=2)
+        samples = [(0, 6), (1, 6), (2, 6), (3, 6)]
+
+        _, waves = scheduler.get_groups_and_subsamples(
+            samples,
+            config=None,
+            padded_seqlens={0: 6, 1: 6, 2: 6, 3: 6},
+            pack_payloads=True,
+        )
+
+        self.assertEqual(waves, [[[0, 2], [0, 2], [1, 3], [1, 3]]])
+
+    def test_packed_mode_starts_new_wave_when_padded_capacity_is_full(self) -> None:
+        scheduler = BalancedCPScheduler(10, _Group(2), min_cp_size=2)
+        samples = [(0, 6), (1, 6)]
+
+        _, waves = scheduler.get_groups_and_subsamples(
+            samples,
+            config=None,
+            padded_seqlens={0: 12, 1: 12},
+            pack_payloads=True,
+        )
+
+        self.assertEqual(waves, [[[0], [0]], [[1], [1]]])
+
+    def test_default_mode_preserves_one_sample_per_rank_payload(self) -> None:
+        scheduler = BalancedCPScheduler(10, _Group(4), min_cp_size=2)
+        samples = [(0, 6), (1, 6), (2, 6), (3, 6)]
+
+        _, waves = scheduler.get_groups_and_subsamples(samples, config=None)
+
+        self.assertEqual(
+            waves,
+            [[[0], [0], [1], [1]], [[2], [2], [3], [3]]],
+        )
+
+    def test_packed_mode_does_not_mix_different_required_cp_sizes(self) -> None:
+        scheduler = BalancedCPScheduler(10, _Group(4), min_cp_size=2)
+        samples = [(0, 6), (1, 21)]
+
+        _, waves = scheduler.get_groups_and_subsamples(
+            samples,
+            config=None,
+            padded_seqlens={0: 6, 1: 21},
+            pack_payloads=True,
+        )
+
+        self.assertEqual(waves, [[[1], [1], [1], [1]], [[0], [0], [0], [0]]])
+
+    def test_packed_validator_rejects_payload_over_capacity(self) -> None:
+        scheduler = BalancedCPScheduler(10, _Group(2), min_cp_size=2)
+
+        with self.assertRaisesRegex(RuntimeError, "padded_tokens=24"):
+            scheduler.validate_collective_safe_groups(
+                [(0, 6), (1, 6)],
+                [[[0, 1], [0, 1]]],
+                padded_seqlens={0: 12, 1: 12},
+                pack_payloads=True,
+            )
+
+    def test_packed_validator_rejects_payload_with_mixed_cp_requirements(self) -> None:
+        scheduler = BalancedCPScheduler(10, _Group(4), min_cp_size=2)
+
+        with self.assertRaisesRegex(RuntimeError, r"required=\[2, 4\]"):
+            scheduler.validate_collective_safe_groups(
+                [(0, 6), (1, 21)],
+                [[[0, 1], [0, 1], [0, 1], [0, 1]]],
+                padded_seqlens={0: 6, 1: 21},
+                pack_payloads=True,
+            )
+
+    def test_packed_validator_reports_unknown_sample_id(self) -> None:
+        scheduler = BalancedCPScheduler(10, _Group(2), min_cp_size=2)
+
+        with self.assertRaisesRegex(RuntimeError, "unknown sample_id=9"):
+            scheduler.validate_collective_safe_groups(
+                [(0, 6)],
+                [[[9], [9]]],
+                padded_seqlens={0: 6},
+                pack_payloads=True,
+            )
+
+    def test_packed_mode_rejects_missing_padded_length(self) -> None:
+        scheduler = BalancedCPScheduler(10, _Group(2), min_cp_size=2)
+
+        with self.assertRaisesRegex(ValueError, r"missing sample_ids=\[1\]"):
+            scheduler.get_groups_and_subsamples(
+                [(0, 6), (1, 6)],
+                config=None,
+                padded_seqlens={0: 6},
+                pack_payloads=True,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

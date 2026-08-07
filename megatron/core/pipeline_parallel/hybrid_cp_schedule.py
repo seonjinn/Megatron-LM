@@ -2,6 +2,7 @@
 
 import os
 from collections import deque
+from collections.abc import Mapping
 from functools import lru_cache
 from math import ceil, log2
 from typing import Callable, List, Optional, Tuple
@@ -246,17 +247,35 @@ class BalancedCPScheduler:
     def _available_group_ids(
         self,
         needed: int,
+        candidate_sample_id: int,
         group_members: dict[int, List[int]],
         group_size: dict[int, int],
         sample_ids_per_gpu: List[List[int]],
+        sample_seqlens: Mapping[int, int],
+        padded_seqlens: Mapping[int, int],
+        pack_payloads: bool,
     ) -> List[int]:
-        """Return compatible subgroups whose ranks have no work in this wave."""
+        """Return compatible subgroups with capacity for the candidate sample."""
+
+        def group_is_available(group_id: int) -> bool:
+            members = group_members[group_id]
+            existing_sample_ids = sample_ids_per_gpu[members[0]]
+            if not pack_payloads:
+                return all(not sample_ids_per_gpu[rank] for rank in members)
+
+            same_required_cp = all(
+                self.gpus_needed(sample_seqlens[sample_id]) == needed
+                for sample_id in existing_sample_ids
+            )
+            padded_tokens = sum(
+                padded_seqlens[sample_id] for sample_id in existing_sample_ids
+            ) + padded_seqlens[candidate_sample_id]
+            return same_required_cp and padded_tokens <= needed * self.max_seq_len_per_rank
 
         return [
             gid
             for gid, size in group_size.items()
-            if size == needed
-            and all(not sample_ids_per_gpu[rank] for rank in group_members[gid])
+            if size == needed and group_is_available(gid)
         ]
 
     def next_hdp_group(
@@ -267,6 +286,8 @@ class BalancedCPScheduler:
         delta: float = 0.05,  # balance slack (e.g. 5 %)
         strategy: str = "dp",  # "dp" or "pp"
         eps_bucket: float = 0.10,  # ε target for bucket balance
+        padded_seqlens: Mapping[int, int] | None = None,
+        pack_payloads: bool = False,
     ) -> Tuple[List[List[int]], List[Tuple[int, int]], List[float], List[List[int]]]:
         """
         Given a list of (sample_id, sequence_length) tuples, this function aims to assign
@@ -296,6 +317,11 @@ class BalancedCPScheduler:
                 [0.0 for _ in range(total_gpus)],
                 [[] for _ in range(total_gpus)],
             )
+
+        sample_seqlens_by_id = dict(sample_seqlens)
+        padded_seqlens = (
+            sample_seqlens_by_id if padded_seqlens is None else dict(padded_seqlens)
+        )
 
         # Get buckets of sequences with balanced work
         buckets = self.make_buckets_equal(sample_seqlens, compute_estimator)
@@ -334,7 +360,14 @@ class BalancedCPScheduler:
 
                 # (a) Do we have an *existing* group of size `needed`?
                 candidate_gids = self._available_group_ids(
-                    needed, group_members, group_size, sample_ids_per_gpu
+                    needed,
+                    cand_tuple[0],
+                    group_members,
+                    group_size,
+                    sample_ids_per_gpu,
+                    sample_seqlens_by_id,
+                    padded_seqlens,
+                    pack_payloads,
                 )
 
                 # (b) Or enough completely free GPUs to start a new group?
@@ -358,7 +391,14 @@ class BalancedCPScheduler:
 
             # (a)  Existing groups of exactly this size
             candidate_gids = self._available_group_ids(
-                needed, group_members, group_size, sample_ids_per_gpu
+                needed,
+                sample_id,
+                group_members,
+                group_size,
+                sample_ids_per_gpu,
+                sample_seqlens_by_id,
+                padded_seqlens,
+                pack_payloads,
             )
             if candidate_gids:
                 best_gid, best_load = min(
@@ -619,52 +659,86 @@ class BalancedCPScheduler:
         self,
         sample_id_seqlens: List[Tuple[int, int]],
         sample_id_groups: List[List[List[int]]],
+        padded_seqlens: Mapping[int, int] | None = None,
+        pack_payloads: bool = False,
     ) -> None:
         """Validate that every DynamicCP wave keeps model collectives in lockstep."""
 
         expected_lengths = dict(sample_id_seqlens)
+        padded_seqlens = expected_lengths if padded_seqlens is None else dict(padded_seqlens)
         seen = {}
         for wave_index, wave in enumerate(sample_id_groups):
             counts = [len(rank_ids) for rank_ids in wave]
-            if len(wave) != self.total_hdp_gpus or any(count != 1 for count in counts):
+            invalid_counts = (
+                any(count < 1 for count in counts)
+                if pack_payloads
+                else any(count != 1 for count in counts)
+            )
+            if len(wave) != self.total_hdp_gpus or invalid_counts:
                 raise RuntimeError(
                     "DynamicCP collective-unsafe schedule: "
-                    f"wave={wave_index} counts={counts} expected_one_invocation_per_rank"
+                    f"wave={wave_index} counts={counts} expected_one_payload_per_rank"
                 )
 
-            participants = {}
+            participants: dict[tuple[int, ...], list[int]] = {}
             for rank, rank_ids in enumerate(wave):
-                participants.setdefault(rank_ids[0], []).append(rank)
+                participants.setdefault(tuple(rank_ids), []).append(rank)
 
-            for sample_id, ranks in participants.items():
-                if sample_id not in expected_lengths:
+            for payload, ranks in participants.items():
+                unknown_sample_ids = [
+                    sample_id for sample_id in payload if sample_id not in expected_lengths
+                ]
+                if unknown_sample_ids:
                     raise RuntimeError(
-                        f"DynamicCP schedule contains unknown sample_id={sample_id} "
+                        f"DynamicCP schedule contains unknown sample_id={unknown_sample_ids[0]} "
                         f"wave={wave_index}"
                     )
-                if sample_id in seen:
-                    raise RuntimeError(
-                        f"DynamicCP sample_id={sample_id} appears in waves "
-                        f"{seen[sample_id]} and {wave_index}"
-                    )
-
                 cp_size = len(ranks)
-                required = self.gpus_needed(expected_lengths[sample_id])
                 contiguous = ranks == list(range(ranks[0], ranks[0] + cp_size))
                 power_of_two = cp_size > 0 and cp_size & (cp_size - 1) == 0
-                if not contiguous or not power_of_two or cp_size < required:
+                required_sizes = {
+                    self.gpus_needed(expected_lengths[sample_id]) for sample_id in payload
+                }
+                padded_tokens = sum(padded_seqlens[sample_id] for sample_id in payload)
+                if (
+                    not contiguous
+                    or not power_of_two
+                    or len(required_sizes) != 1
+                    or cp_size < max(required_sizes)
+                    or padded_tokens > cp_size * self.max_seq_len_per_rank
+                ):
                     raise RuntimeError(
                         "DynamicCP invalid subgroup: "
-                        f"wave={wave_index} sample_id={sample_id} ranks={ranks} "
-                        f"cp_size={cp_size} required={required}"
+                        f"wave={wave_index} payload={list(payload)} ranks={ranks} "
+                        f"cp_size={cp_size} required={sorted(required_sizes)} "
+                        f"padded_tokens={padded_tokens}"
                     )
-                seen[sample_id] = wave_index
+
+                for sample_id in payload:
+                    if sample_id not in expected_lengths:
+                        raise RuntimeError(
+                            f"DynamicCP schedule contains unknown sample_id={sample_id} "
+                            f"wave={wave_index}"
+                        )
+                    if sample_id in seen:
+                        raise RuntimeError(
+                            f"DynamicCP sample_id={sample_id} appears in waves "
+                            f"{seen[sample_id]} and {wave_index}"
+                        )
+                    seen[sample_id] = wave_index
 
         missing = sorted(set(expected_lengths) - set(seen))
         if missing:
             raise RuntimeError(f"DynamicCP schedule omitted sample_ids={missing}")
 
-    def get_groups_and_subsamples(self, sample_id_seqlens, config):
+    def get_groups_and_subsamples(
+        self,
+        sample_id_seqlens,
+        config,
+        *,
+        padded_seqlens: Mapping[int, int] | None = None,
+        pack_payloads: bool = False,
+    ):
         """
         This function recursively forms groups of sub-samples such that all DPxCP ranks
         have a roughly balanced workload in the group.
@@ -672,18 +746,38 @@ class BalancedCPScheduler:
         groups = []
         sample_id_groups = []
         all_sample_id_seqlens = list(sample_id_seqlens)
+        padded_seqlens = (
+            dict(all_sample_id_seqlens) if padded_seqlens is None else dict(padded_seqlens)
+        )
+        missing_padded_lengths = sorted(
+            set(dict(all_sample_id_seqlens)) - set(padded_seqlens)
+        )
+        if missing_padded_lengths:
+            raise ValueError(
+                "DynamicCP padded lengths are missing "
+                f"sample_ids={missing_padded_lengths}"
+            )
         # We assign a sample_id to each sub-sample in order to track assignment to each GPU.
         sample_id_seqlens = sorted(sample_id_seqlens, key=lambda x: x[1], reverse=True)
         while sample_id_seqlens:
             mb, sample_id_seqlens, exec_times, sample_ids = self.next_hdp_group(
-                sample_id_seqlens, self.get_total_workload, self.total_hdp_gpus
+                sample_id_seqlens,
+                self.get_total_workload,
+                self.total_hdp_gpus,
+                padded_seqlens=padded_seqlens,
+                pack_payloads=pack_payloads,
             )
             groups.append(mb)
             if len(sample_ids) < self.total_hdp_gpus:
                 sample_ids.extend([] * (self.total_hdp_gpus - len(sample_ids)))
             sample_id_groups.append(sample_ids)
 
-        self.validate_collective_safe_groups(all_sample_id_seqlens, sample_id_groups)
+        self.validate_collective_safe_groups(
+            all_sample_id_seqlens,
+            sample_id_groups,
+            padded_seqlens=padded_seqlens,
+            pack_payloads=pack_payloads,
+        )
         return groups, sample_id_groups
 
 
