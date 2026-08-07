@@ -13,6 +13,7 @@ from megatron.core.pipeline_parallel.hybrid_cp_schedule import (
     summarize_hybrid_cp_schedule,
 )
 from megatron.core.process_groups_config import ProcessGroupCollection
+from megatron.core.rerun_state_machine import RerunDataIterator
 
 
 def _hybrid_cp_debug(message: str) -> None:
@@ -40,6 +41,37 @@ def collect_hybrid_cp_microbatches(data_iterator, num_microbatches: int) -> list
     if num_microbatches < 1:
         raise ValueError(f"num_microbatches must be positive, got {num_microbatches}")
     return [next(data_iterator) for _ in range(num_microbatches)]
+
+
+def get_hybrid_cp_sample_lengths(
+    samples: Sequence[Mapping[str, Any]],
+) -> tuple[list[int], list[int]]:
+    """Return aligned real and padded lengths for scheduled logical samples."""
+
+    real_lengths: list[int] = []
+    padded_lengths: list[int] = []
+    for sample in samples:
+        cu_seqlens = _require_tensor(sample, "cu_seqlens")
+        cu_seqlens_padded = sample.get("cu_seqlens_padded", cu_seqlens)
+        if not isinstance(cu_seqlens_padded, torch.Tensor):
+            raise ValueError("multimodal HybridCP cu_seqlens_padded must be a tensor")
+        if cu_seqlens.shape != cu_seqlens_padded.shape:
+            raise ValueError("HybridCP real and padded sequence boundaries must have equal shapes")
+        for index in range(cu_seqlens.numel() - 1):
+            real_length = int(cu_seqlens[index + 1].item() - cu_seqlens[index].item())
+            if real_length == 0:
+                continue
+            padded_length = int(
+                cu_seqlens_padded[index + 1].item() - cu_seqlens_padded[index].item()
+            )
+            if padded_length < real_length:
+                raise ValueError(
+                    f"HybridCP padded length {padded_length} is smaller than "
+                    f"real length {real_length}"
+                )
+            real_lengths.append(real_length)
+            padded_lengths.append(padded_length)
+    return real_lengths, padded_lengths
 
 
 def summarize_hybrid_cp_multimodal_samples(
@@ -238,7 +270,7 @@ def unpack_multimodal_batch(batch: Mapping[str, Any]) -> list[dict[str, torch.Te
 
     samples: list[dict[str, torch.Tensor]] = []
     for sample_index in range(len(sample_image_counts)):
-        start = int(cu_lengths[0, sample_index].item())
+        start = int(cu_lengths_padded[0, sample_index].item())
         end = int(cu_lengths[0, sample_index + 1].item())
         padded_end = int(cu_lengths_padded[0, sample_index + 1].item())
         if end < start or padded_end < end:
@@ -287,7 +319,6 @@ def unpack_multimodal_batch(batch: Mapping[str, Any]) -> list[dict[str, torch.Te
             sample["vision_cu_lengths"] = torch.tensor([0], dtype=torch.int32)
             sample["vision_max_lengths"] = torch.tensor([0], dtype=torch.int32)
 
-        media_start, media_end = _sample_media_offsets(sample_num_tiles, sample_index)
         sample["num_tiles"] = torch.tensor(
             sample_num_tiles[sample_index] or [0], dtype=torch.int32
         )
@@ -305,7 +336,12 @@ def unpack_multimodal_batch(batch: Mapping[str, Any]) -> list[dict[str, torch.Te
             sample["sound_clips"] = sound_clips[clip_start:clip_end].contiguous()
             sample["sound_length"] = sound_length[clip_start:clip_end].contiguous()
             sample["sound_timestamps"] = sound_timestamps[clip_start:clip_end].contiguous()
-            sample["num_sound_clips"] = num_sound_clips[media_start:media_end].contiguous()
+            audio_start, audio_end = _sample_media_offsets(
+                sample_num_sound_clips_rows, sample_index
+            )
+            sample["num_sound_clips"] = num_sound_clips[
+                audio_start:audio_end
+            ].contiguous()
         else:
             sample["sound_clips"] = torch.tensor([[0]], dtype=torch.float32)
             sample["sound_length"] = torch.tensor([[0]], dtype=torch.int64)
@@ -342,13 +378,18 @@ def pack_multimodal_hybrid_cp_samples(
     restored["labels"] = torch.cat(
         [samples[0]["labels"][:1], *[sample["labels"][1:] for sample in samples]]
     ).unsqueeze(0)
+    padded_boundaries = [0, *accumulate(padded_lengths)]
+    real_boundaries = [
+        padded_boundaries[index] + real_length
+        for index, real_length in enumerate(real_lengths)
+    ]
     restored["cu_lengths"] = torch.tensor(
-        [0, *accumulate(real_lengths)],
+        [0, *real_boundaries],
         dtype=samples[0]["cu_seqlens"].dtype,
         device=samples[0]["cu_seqlens"].device,
     ).unsqueeze(0)
     restored["cu_lengths_padded"] = torch.tensor(
-        [0, *accumulate(padded_lengths)],
+        padded_boundaries,
         dtype=samples[0]["cu_seqlens_padded"].dtype,
         device=samples[0]["cu_seqlens_padded"].device,
     ).unsqueeze(0)
@@ -450,6 +491,27 @@ def restore_multimodal_hybrid_cp_sample(
     return pack_multimodal_hybrid_cp_samples(
         [sample], local_cp_size=1 if local_cp_size is None else local_cp_size
     )
+
+
+def prepare_hybrid_cp_payload_iterator(
+    batch: Mapping[int, Mapping[str, torch.Tensor]],
+    sample_ids: Sequence[int],
+    local_cp_size: int,
+    max_padded_tokens: int,
+) -> RerunDataIterator:
+    """Create one replayable iterator item for a rank's scheduled Omni payload."""
+
+    if not sample_ids:
+        raise ValueError("HybridCP rank payload must contain at least one sample ID")
+    missing_sample_ids = [sample_id for sample_id in sample_ids if sample_id not in batch]
+    if missing_sample_ids:
+        raise ValueError(f"HybridCP rank payload is missing sample_ids={missing_sample_ids}")
+    payload = pack_multimodal_hybrid_cp_samples(
+        [batch[sample_id] for sample_id in sample_ids],
+        local_cp_size=local_cp_size,
+        max_padded_tokens=max_padded_tokens,
+    )
+    return RerunDataIterator(iter([payload]))
 
 
 class HybridCPDataLoaderWrapper:
@@ -897,31 +959,42 @@ class HybridCPDataLoaderWrapper:
             else:
                 batch.extend(raw_batch)
 
-        subsample_seqlens = []
-        for sample in batch:
-            subsample_seqlens.extend(
-                [
-                    int(sample["cu_seqlens"][i + 1] - sample["cu_seqlens"][i])
-                    for i in range(0, sample["cu_seqlens"].shape[0] - 1)
-                ]
-            )
-        subsample_seqlens = torch.tensor(subsample_seqlens, dtype=torch.int32).cuda()
-        subsample_seqlens = subsample_seqlens[subsample_seqlens != 0]
+        local_real_lengths, local_padded_lengths = get_hybrid_cp_sample_lengths(batch)
+        subsample_seqlens = torch.tensor(local_real_lengths, dtype=torch.int32).cuda()
+        subsample_padded_seqlens = torch.tensor(
+            local_padded_lengths, dtype=torch.int32
+        ).cuda()
         _hybrid_cp_debug(
             f"loader local_samples={len(batch)} local_nonzero_samples={subsample_seqlens.numel()} "
             f"local_seqlens={subsample_seqlens.detach().cpu().tolist()} multimodal={is_multimodal}"
         )
 
         seqlens_gathered, offsets = self.get_global_seqlens(subsample_seqlens)
+        padded_seqlens_gathered, padded_offsets = self.get_global_seqlens(
+            subsample_padded_seqlens
+        )
+        if not torch.equal(offsets, padded_offsets):
+            raise RuntimeError("HybridCP real and padded sequence gathers disagree on rank offsets")
 
         global_id_seqlens, global_ids_this_rank = self.get_global_id_seqlens(
             subsample_seqlens.shape[0], offsets, seqlens_gathered
         )
+        global_id_padded_seqlens = {
+            sample_id: int(padded_length)
+            for sample_id, padded_length in enumerate(padded_seqlens_gathered)
+        }
 
         groups, sample_id_groups = self.cp_balancing_scheduler.get_groups_and_subsamples(
-            global_id_seqlens, self.config
+            global_id_seqlens,
+            self.config,
+            padded_seqlens=global_id_padded_seqlens,
+            pack_payloads=is_multimodal,
         )
-        schedule_stats = summarize_hybrid_cp_schedule(global_id_seqlens, sample_id_groups)
+        schedule_stats = summarize_hybrid_cp_schedule(
+            global_id_seqlens,
+            sample_id_groups,
+            padded_seqlens=global_id_padded_seqlens,
+        )
         multimodal_stats = summarize_hybrid_cp_multimodal_samples(batch if is_multimodal else [])
         multimodal_keys = tuple(multimodal_stats)
         multimodal_values = torch.tensor(

@@ -2,7 +2,7 @@
 
 import os
 from collections import deque
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from functools import lru_cache
 from math import ceil, log2
 from typing import Callable, List, Optional, Tuple
@@ -31,6 +31,11 @@ HYBRID_CP_LOG_STAT_KEYS = (
     "hybrid_cp/estimated_rank_work_mean",
     "hybrid_cp/estimated_rank_work_max",
     "hybrid_cp/estimated_rank_work_imbalance",
+    "hybrid_cp/packed_calls",
+    "hybrid_cp/logical_samples_per_call_mean",
+    "hybrid_cp/logical_samples_per_call_max",
+    "hybrid_cp/padded_language_tokens",
+    "hybrid_cp/language_packing_efficiency",
     "hybrid_cp/samples_with_vision",
     "hybrid_cp/samples_with_video",
     "hybrid_cp/samples_with_audio",
@@ -56,12 +61,15 @@ def _hybrid_cp_debug(message: str) -> None:
 def summarize_hybrid_cp_schedule(
     sample_id_seqlens: List[Tuple[int, int]],
     sample_id_groups: List[List[List[int]]],
+    padded_seqlens: Mapping[int, int] | None = None,
 ) -> dict[str, float]:
     """Summarize unique DynamicCP work without counting CP participants as samples."""
 
     expected_lengths = dict(sample_id_seqlens)
+    padded_seqlens = expected_lengths if padded_seqlens is None else dict(padded_seqlens)
     cp_sizes: dict[int, int] = {}
     rank_work = [0.0 for _ in sample_id_groups[0]] if sample_id_groups else []
+    logical_samples_per_call: list[int] = []
 
     for wave_index, wave in enumerate(sample_id_groups):
         if len(wave) != len(rank_work):
@@ -69,9 +77,12 @@ def summarize_hybrid_cp_schedule(
                 f"DynamicCP wave {wave_index} has {len(wave)} ranks, expected {len(rank_work)}"
             )
         participants: dict[int, list[int]] = {}
+        wave_payloads: set[tuple[int, ...]] = set()
         for rank, sample_ids in enumerate(wave):
+            wave_payloads.add(tuple(sample_ids))
             for sample_id in sample_ids:
                 participants.setdefault(sample_id, []).append(rank)
+        logical_samples_per_call.extend(len(payload) for payload in wave_payloads)
 
         for sample_id, ranks in participants.items():
             if sample_id not in expected_lengths:
@@ -94,6 +105,7 @@ def summarize_hybrid_cp_schedule(
     }
     local_cp_sizes = list(cp_sizes.values())
     rank_work_mean = sum(rank_work) / len(rank_work) if rank_work else 0.0
+    padded_language_tokens = sum(padded_seqlens[sample_id] for sample_id in expected_lengths)
     stats = {
         "hybrid_cp/unique_samples": float(len(expected_lengths)),
         "hybrid_cp/total_real_tokens": float(sum(expected_lengths.values())),
@@ -112,6 +124,21 @@ def summarize_hybrid_cp_schedule(
         "hybrid_cp/estimated_rank_work_imbalance": (
             float(max(rank_work) / rank_work_mean) if rank_work_mean else 0.0
         ),
+        "hybrid_cp/packed_calls": float(len(logical_samples_per_call)),
+        "hybrid_cp/logical_samples_per_call_mean": (
+            float(sum(logical_samples_per_call) / len(logical_samples_per_call))
+            if logical_samples_per_call
+            else 0.0
+        ),
+        "hybrid_cp/logical_samples_per_call_max": float(
+            max(logical_samples_per_call, default=0)
+        ),
+        "hybrid_cp/padded_language_tokens": float(padded_language_tokens),
+        "hybrid_cp/language_packing_efficiency": (
+            float(sum(expected_lengths.values()) / padded_language_tokens)
+            if padded_language_tokens
+            else 0.0
+        ),
     }
     stats.update(
         {
@@ -120,6 +147,26 @@ def summarize_hybrid_cp_schedule(
         }
     )
     return stats
+
+
+def iter_hybrid_cp_rank_waves(
+    sample_id_groups: List[List[List[int]]], hdp_rank: int
+) -> Iterator[tuple[list[int], int]]:
+    """Yield one ordered payload and its active CP size for each global wave."""
+
+    for wave_index, wave in enumerate(sample_id_groups):
+        if hdp_rank < 0 or hdp_rank >= len(wave):
+            raise ValueError(
+                f"DynamicCP rank {hdp_rank} is outside wave {wave_index} with {len(wave)} ranks"
+            )
+        payload = list(wave[hdp_rank])
+        if not payload:
+            raise RuntimeError(
+                f"DynamicCP rank {hdp_rank} has an empty payload in wave {wave_index}"
+            )
+        payload_key = tuple(payload)
+        cp_size = sum(tuple(rank_payload) == payload_key for rank_payload in wave)
+        yield payload, cp_size
 
 
 def record_hybrid_cp_iteration_stats(stats: dict[str, float]) -> None:
@@ -838,24 +885,17 @@ def hybrid_context_parallel_forward_backward(
             raise RuntimeError(f"HybridCP scheduled an invalid CP group size: {cp_group_size}")
         return cp_group_size
 
-    def _broadcast_num_samples_this_group(num_samples_this_group):
-        dev = torch.cuda.current_device()
-        torch.distributed.barrier()
-
-        n = 0 if num_samples_this_group is None else int(num_samples_this_group.numel())
-        n = torch.tensor([n], dtype=torch.int64, device=dev)
-
-        _broadcast(n)
-        n = int(n.item())
-
-        assert n > 0, "there should be at least 1 sub samples in the group"
-        num_samples_this_group_broadcast = (
-            torch.empty(n, dtype=torch.int32, device=dev)
-            if num_samples_this_group is None
-            else num_samples_this_group
+    def _broadcast_num_waves(num_waves):
+        value = torch.tensor(
+            [0 if num_waves is None else int(num_waves)],
+            dtype=torch.int32,
+            device=torch.cuda.current_device(),
         )
-        _broadcast(num_samples_this_group_broadcast)
-        return num_samples_this_group_broadcast
+        _broadcast(value)
+        num_waves = int(value.item())
+        if num_waves < 1:
+            raise RuntimeError("HybridCP schedule must contain at least one wave")
+        return num_waves
 
     def _broadcast_global_sample_count(global_sample_count):
         """Broadcast the unique sample count for this scheduled global batch."""
@@ -888,26 +928,30 @@ def hybrid_context_parallel_forward_backward(
             for index, key in enumerate(HYBRID_CP_LOG_STAT_KEYS)
         }
 
-    def _get_new_data_iterator(sample_id_in_group, group_id):
-        if is_first_tp_rank:
-            sub_sample_id = sample_ids_this_group[sample_id_in_group]
-            sample = batch[sub_sample_id]
-            partner_cp_size = len(
-                [True for sample_ids in sample_id_groups[group_id] if sub_sample_id in sample_ids]
-            )
-            if "cu_seqlens" in sample and "imgs" in sample:
-                # Energon multimodal samples are routed in a tensor-only wire
-                # format. Restore the batch-shaped dict expected by
-                # examples/multimodal/train.py only after scheduling/routing.
-                from megatron.core.datasets.data_schedule import restore_multimodal_hybrid_cp_sample
-
-                sample = restore_multimodal_hybrid_cp_sample(sample, partner_cp_size)
-            else:
-                sample["local_cp_size"] = torch.tensor(partner_cp_size, dtype=torch.int32)
-            new_data_iterator = RerunDataIterator(iter([sample]))
-            return new_data_iterator
-        else:
+    def _get_new_data_iterator(sample_ids, partner_cp_size):
+        if not is_first_tp_rank:
             return None
+        if not sample_ids:
+            raise RuntimeError("HybridCP TP source received an empty rank payload")
+        sample = batch[sample_ids[0]]
+        if "cu_seqlens" in sample and "imgs" in sample:
+            from megatron.core.datasets.data_schedule import prepare_hybrid_cp_payload_iterator
+
+            return prepare_hybrid_cp_payload_iterator(
+                batch,
+                sample_ids,
+                local_cp_size=partner_cp_size,
+                max_padded_tokens=(
+                    partner_cp_size * config.max_seqlen_per_dp_cp_rank
+                ),
+            )
+        if len(sample_ids) != 1:
+            raise RuntimeError(
+                "HybridCP non-multimodal payloads do not support multiple sample IDs"
+            )
+        sample = dict(sample)
+        sample["local_cp_size"] = torch.tensor(partner_cp_size, dtype=torch.int32)
+        return RerunDataIterator(iter([sample]))
 
     # We get data once per global batch and schedule the sub-samples.
     # TODO(pmannan): Should we wrap the data_iterator here instead of the training.py file?
@@ -937,190 +981,65 @@ def hybrid_context_parallel_forward_backward(
     global_sample_count = _broadcast_global_sample_count(global_sample_count)
     record_hybrid_cp_iteration_stats(_broadcast_iteration_stats(iteration_stats))
 
-    num_samples_this_group = None
-    if is_first_tp_rank:
-        num_samples_this_group = torch.tensor(
-            [len(group[hdp_rank]) for group in sample_id_groups], dtype=torch.int32, device='cuda'
-        )
-
-    num_samples_this_group = _broadcast_num_samples_this_group(num_samples_this_group)
-    num_samples_this_group = num_samples_this_group.cpu().numpy()
-    num_total_groups = num_samples_this_group.shape[0]
-    _hybrid_cp_debug(
-        f"schedule group_counts={num_samples_this_group.tolist()} num_total_groups={num_total_groups}"
-    )
-
-    current_microbatch = 0
-
-    # Upto last group, we don't need any sync.
-    with no_sync_func():
-        for j in range(num_total_groups - 1):
-            sample_ids_this_group = sample_id_groups[j][hdp_rank] if is_first_tp_rank else None
-            for i in range(num_samples_this_group[j]):
-                # Call forward step for each sub-sample
-                new_data_iterator = _get_new_data_iterator(i, j)
-                sub_sample_id = sample_ids_this_group[i] if is_first_tp_rank else None
-                partner_cp_size = (
-                    len(
-                        [
-                            True
-                            for sample_ids in sample_id_groups[j]
-                            if sub_sample_id in sample_ids
-                        ]
-                    )
-                    if is_first_tp_rank
-                    else None
-                )
-                active_cp_group_size = _broadcast_cp_group_size(partner_cp_size)
-                _hybrid_cp_debug(
-                    f"before_forward group={j} index={i} gid={sub_sample_id} "
-                    f"cp_size={active_cp_group_size} current_microbatch={current_microbatch}"
-                )
-                # TODO: Find the usage of current_microbatch and is_first_microbatch and
-                # how that may affect my usage.
-                output_tensor, num_tokens = forward_step(
-                    forward_step_func,
-                    new_data_iterator,
-                    model,
-                    num_microbatches,
-                    input_tensor,
-                    forward_data_store,
-                    config,
-                    cp_group_size=active_cp_group_size,
-                    collect_non_loss_data=collect_non_loss_data,
-                    is_first_microbatch=check_first_val_step(
-                        first_val_step, forward_only, current_microbatch == 0
-                    ),
-                    current_microbatch=current_microbatch,
-                )
-                _hybrid_cp_debug(
-                    f"after_forward group={j} index={i} gid={sub_sample_id} "
-                    f"num_tokens={int(num_tokens.item())} loss_entries={len(forward_data_store)}"
-                )
-                current_microbatch += 1
-                total_num_tokens += num_tokens.item()
-                if not forward_only:
-                    _hybrid_cp_debug(
-                        f"before_backward group={j} index={i} gid={sub_sample_id}"
-                    )
-                    backward_step(
-                        input_tensor, output_tensor, output_tensor_grad, config
-                    )
-                    _hybrid_cp_debug(
-                        f"after_backward group={j} index={i} gid={sub_sample_id}"
-                    )
-
-            # Create a barrier at end of each group.
-            # This barrier ensures that all ranks are prepared to change assigned CP group sizes and
-            # no rank is starting a sub-sample ahead of it's partner ranks.
-            _hybrid_cp_debug(f"before_barrier group={j}")
-            torch.distributed.barrier(
-                parallel_state.get_data_parallel_group(with_context_parallel=True)
-            )
-            _hybrid_cp_debug(f"after_barrier group={j}")
-
-    # For the last group, we need to run the last sub-sample out of the context handler.
-    with no_sync_func():
-        sample_ids_this_group = sample_id_groups[-1][hdp_rank] if is_first_tp_rank else None
-        for i in range(num_samples_this_group[-1] - 1):
-            new_data_iterator = _get_new_data_iterator(i, -1)
-            sub_sample_id = sample_ids_this_group[i] if is_first_tp_rank else None
-            partner_cp_size = (
-                len(
-                    [
-                        True
-                        for sample_ids in sample_id_groups[-1]
-                        if sub_sample_id in sample_ids
-                    ]
-                )
-                if is_first_tp_rank
-                else None
-            )
-            active_cp_group_size = _broadcast_cp_group_size(partner_cp_size)
-            _hybrid_cp_debug(
-                f"before_forward group={num_total_groups - 1} index={i} gid={sub_sample_id} "
-                f"cp_size={active_cp_group_size} current_microbatch={current_microbatch}"
-            )
-            # Call forward step for each sub-sample
-            output_tensor, num_tokens = forward_step(
-                forward_step_func,
-                new_data_iterator,
-                model,
-                num_microbatches,
-                input_tensor,
-                forward_data_store,
-                config,
-                cp_group_size=active_cp_group_size,
-                collect_non_loss_data=collect_non_loss_data,
-                is_first_microbatch=check_first_val_step(
-                    first_val_step, forward_only, current_microbatch == 0
-                ),
-                current_microbatch=current_microbatch,
-            )
-            _hybrid_cp_debug(
-                f"after_forward group={num_total_groups - 1} index={i} gid={sub_sample_id} "
-                f"num_tokens={int(num_tokens.item())} loss_entries={len(forward_data_store)}"
-            )
-            current_microbatch += 1
-            total_num_tokens += num_tokens.item()
-            if not forward_only:
-                _hybrid_cp_debug(
-                    f"before_backward group={num_total_groups - 1} index={i} gid={sub_sample_id}"
-                )
-                backward_step(input_tensor, output_tensor, output_tensor_grad, config)
-                _hybrid_cp_debug(
-                    f"after_backward group={num_total_groups - 1} index={i} gid={sub_sample_id}"
-                )
-
-    # The last sub-sample of the last group of the last microbatch is
-    # run out of the context handler.
-    new_data_iterator = _get_new_data_iterator(-1, -1)
-    sub_sample_id = sample_ids_this_group[-1] if is_first_tp_rank else None
-    partner_cp_size = (
-        len(
-            [
-                True
-                for sample_ids in sample_id_groups[-1]
-                if sub_sample_id in sample_ids
-            ]
-        )
+    rank_waves = (
+        list(iter_hybrid_cp_rank_waves(sample_id_groups, hdp_rank))
         if is_first_tp_rank
         else None
     )
-    active_cp_group_size = _broadcast_cp_group_size(partner_cp_size)
-    _hybrid_cp_debug(
-        f"before_forward group={num_total_groups - 1} index=last gid={sub_sample_id} "
-        f"cp_size={active_cp_group_size} current_microbatch={current_microbatch}"
+    num_total_waves = _broadcast_num_waves(
+        len(rank_waves) if rank_waves is not None else None
     )
-    # Call forward step for each sub-sample
-    output_tensor, num_tokens = forward_step(
-        forward_step_func,
-        new_data_iterator,
-        model,
-        num_microbatches,
-        input_tensor,
-        forward_data_store,
-        config,
-        cp_group_size=active_cp_group_size,
-        collect_non_loss_data=collect_non_loss_data,
-        is_first_microbatch=check_first_val_step(
-            first_val_step, forward_only, current_microbatch == 0
-        ),
-        current_microbatch=current_microbatch,
-    )
-    _hybrid_cp_debug(
-        f"after_forward group={num_total_groups - 1} index=last gid={sub_sample_id} "
-        f"num_tokens={int(num_tokens.item())} loss_entries={len(forward_data_store)}"
-    )
+    _hybrid_cp_debug(f"schedule num_total_waves={num_total_waves}")
+
+    def _run_wave(wave_index, current_microbatch):
+        sample_ids, partner_cp_size = (
+            rank_waves[wave_index] if rank_waves is not None else (None, None)
+        )
+        active_cp_group_size = _broadcast_cp_group_size(partner_cp_size)
+        new_data_iterator = _get_new_data_iterator(sample_ids, active_cp_group_size)
+        _hybrid_cp_debug(
+            f"before_forward wave={wave_index} payload={sample_ids} "
+            f"cp_size={active_cp_group_size} current_microbatch={current_microbatch}"
+        )
+        output_tensor, num_tokens = forward_step(
+            forward_step_func,
+            new_data_iterator,
+            model,
+            num_microbatches,
+            input_tensor,
+            forward_data_store,
+            config,
+            cp_group_size=active_cp_group_size,
+            collect_non_loss_data=collect_non_loss_data,
+            is_first_microbatch=check_first_val_step(
+                first_val_step, forward_only, current_microbatch == 0
+            ),
+            current_microbatch=current_microbatch,
+        )
+        _hybrid_cp_debug(
+            f"after_forward wave={wave_index} payload={sample_ids} "
+            f"num_tokens={int(num_tokens.item())} loss_entries={len(forward_data_store)}"
+        )
+        if not forward_only:
+            _hybrid_cp_debug(f"before_backward wave={wave_index} payload={sample_ids}")
+            backward_step(input_tensor, output_tensor, output_tensor_grad, config)
+            _hybrid_cp_debug(f"after_backward wave={wave_index} payload={sample_ids}")
+        return num_tokens
+
+    current_microbatch = 0
+    with no_sync_func():
+        for wave_index in range(num_total_waves - 1):
+            num_tokens = _run_wave(wave_index, current_microbatch)
+            current_microbatch += 1
+            total_num_tokens += num_tokens.item()
+            _hybrid_cp_debug(f"before_barrier wave={wave_index}")
+            torch.distributed.barrier(
+                parallel_state.get_data_parallel_group(with_context_parallel=True)
+            )
+            _hybrid_cp_debug(f"after_barrier wave={wave_index}")
+
+    num_tokens = _run_wave(num_total_waves - 1, current_microbatch)
     total_num_tokens += num_tokens.item()
-    if not forward_only:
-        _hybrid_cp_debug(
-            f"before_backward group={num_total_groups - 1} index=last gid={sub_sample_id}"
-        )
-        backward_step(input_tensor, output_tensor, output_tensor_grad, config)
-        _hybrid_cp_debug(
-            f"after_backward group={num_total_groups - 1} index=last gid={sub_sample_id}"
-        )
 
     # Every rank may execute a different CP group's sample, so the local
     # ``_samples_seen`` list is not a reliable global-batch count.  Preserve

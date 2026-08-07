@@ -3,7 +3,9 @@ import torch
 
 from megatron.core.datasets.data_schedule import (
     collect_hybrid_cp_microbatches,
+    get_hybrid_cp_sample_lengths,
     pack_multimodal_hybrid_cp_samples,
+    prepare_hybrid_cp_payload_iterator,
     restore_multimodal_hybrid_cp_sample,
     summarize_hybrid_cp_multimodal_samples,
     unpack_multimodal_batch,
@@ -45,6 +47,34 @@ def test_unpack_multimodal_batch_preserves_text_and_vision_boundaries():
     assert samples[1]["tokens"].tolist() == [12, 13, 14, 15]
     assert samples[1]["imgs"].squeeze(-1).tolist() == [3.0, 4.0]
     assert samples[1]["vision_cu_lengths"].tolist() == [0, 2]
+
+
+def test_unpack_audio_only_sample_preserves_clip_counts():
+    batch = _packed_batch()
+    batch.update(
+        {
+            "imgs": torch.tensor([[[0.0]]]),
+            "imgs_sizes": torch.tensor([[0, 0]], dtype=torch.int32),
+            "vision_cu_lengths": torch.tensor([[0]], dtype=torch.int32),
+            "vision_max_lengths": torch.tensor([0], dtype=torch.int32),
+            "num_tiles": torch.tensor([0], dtype=torch.int32),
+            "num_frames": torch.tensor([0], dtype=torch.int32),
+            "sample_image_counts": [[0, 0]],
+            "sample_num_tiles": [[[], []]],
+            "sample_num_frames": [[[], []]],
+            "sound_clips": torch.tensor([[1.0, 2.0]], dtype=torch.float32),
+            "sound_length": torch.tensor([2], dtype=torch.int64),
+            "sound_timestamps": torch.tensor([[0.0, 1.0]], dtype=torch.float32),
+            "num_sound_clips": torch.tensor([1], dtype=torch.int64),
+            "sample_num_sound_clips": [[[1], []]],
+        }
+    )
+
+    samples = unpack_multimodal_batch(batch)
+
+    assert samples[0]["sound_clips"].tolist() == [[1.0, 2.0]]
+    assert samples[0]["num_sound_clips"].tolist() == [1]
+    assert samples[1]["num_sound_clips"].tolist() == [[0]]
 
 
 def test_multimodal_summary_counts_media_without_dummy_placeholders():
@@ -94,6 +124,30 @@ def test_pack_multimodal_hybrid_cp_samples_preserves_text_boundaries():
     assert packed["max_lengths"].tolist() == [3]
     assert packed["samples_seen"].item() == 2
     assert packed["local_cp_size"].item() == 2
+
+
+def test_packed_payload_offsets_real_boundaries_after_internal_padding():
+    batch = _packed_batch()
+    batch["tokens"] = torch.tensor(
+        [[10, 11, 0, 0, 12, 13, 14, 15]], dtype=torch.int64
+    )
+    batch["labels"] = torch.tensor(
+        [[99, 20, -100, -100, 21, 22, 23, 24, 25]], dtype=torch.int64
+    )
+    batch["cu_lengths"] = torch.tensor([[0, 2, 7]], dtype=torch.int32)
+    batch["cu_lengths_padded"] = torch.tensor([[0, 4, 8]], dtype=torch.int32)
+
+    samples = unpack_multimodal_batch(batch)
+
+    packed = pack_multimodal_hybrid_cp_samples(samples, local_cp_size=2)
+
+    assert samples[1]["tokens"].tolist() == [12, 13, 14, 15]
+    assert samples[1]["cu_seqlens"].tolist() == [0, 3]
+    assert samples[1]["cu_seqlens_padded"].tolist() == [0, 4]
+    assert packed["tokens"].tolist() == [[10, 11, 0, 0, 12, 13, 14, 15]]
+    assert packed["labels"].tolist() == [[99, 20, -100, -100, 21, 22, 23, 24, 25]]
+    assert packed["cu_lengths"].tolist() == [[0, 2, 7]]
+    assert packed["cu_lengths_padded"].tolist() == [[0, 4, 8]]
 
 
 def test_packed_payload_rebuilds_vision_boundaries():
@@ -210,6 +264,32 @@ def test_packed_payload_rejects_padded_token_capacity_overflow():
         pack_multimodal_hybrid_cp_samples(
             samples, local_cp_size=2, max_padded_tokens=5
         )
+
+
+def test_prepare_hybrid_cp_payload_iterator_emits_one_packed_item():
+    samples = unpack_multimodal_batch(_packed_batch())
+
+    data_iterator = prepare_hybrid_cp_payload_iterator(
+        {10: samples[0], 11: samples[1]},
+        sample_ids=[10, 11],
+        local_cp_size=2,
+        max_padded_tokens=6,
+    )
+
+    packed = next(data_iterator)
+    assert packed["tokens"].tolist() == [[10, 11, 12, 13, 14, 15]]
+    assert packed["cu_lengths"].tolist() == [[0, 2, 5]]
+    with pytest.raises(StopIteration):
+        next(data_iterator)
+
+
+def test_get_hybrid_cp_sample_lengths_keeps_real_and_padded_lengths_separate():
+    samples = unpack_multimodal_batch(_packed_batch())
+
+    real_lengths, padded_lengths = get_hybrid_cp_sample_lengths(samples)
+
+    assert real_lengths == [2, 3]
+    assert padded_lengths == [2, 4]
 
 
 def test_unpack_multimodal_batch_requires_per_sample_media_metadata():
