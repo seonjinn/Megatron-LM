@@ -148,10 +148,42 @@ def update_multimodal_packed_seq_params(
     cu_seqlens = packed_seq_params.cu_seqlens_q
     if cu_seqlens is None:
         raise ValueError("THD packed metadata requires cu_seqlens_q")
-    if sequence_lengths.numel() != cu_seqlens.numel() - 1:
+    packed_sequence_count = cu_seqlens.numel() - 1
+    if sequence_lengths.numel() == 1 and packed_sequence_count > 1:
+        # Packed multimodal training represents multiple logical samples in
+        # one batch row.  The dataloader boundaries already include media
+        # expansion and per-sample padding, while LLaVA can only report the
+        # aggregate length for that row.  Preserve those authoritative
+        # boundaries after validating the physical token surface.
+        old_padded = packed_seq_params.cu_seqlens_q_padded
+        expected_total = int(
+            packed_seq_params.total_tokens
+            if packed_seq_params.total_tokens is not None
+            else (old_padded[-1] if old_padded is not None else cu_seqlens[-1]).item()
+        )
+        observed_total = int(sequence_lengths[0].item())
+        if observed_total != expected_total:
+            raise ValueError(
+                "aggregate multimodal length does not match packed token surface: "
+                f"{observed_total} != {expected_total}"
+            )
+        for name in (
+            "cu_seqlens_q",
+            "cu_seqlens_kv",
+            "cu_seqlens_q_padded",
+            "cu_seqlens_kv_padded",
+        ):
+            boundaries = getattr(packed_seq_params, name)
+            if boundaries is not None:
+                setattr(packed_seq_params, name, boundaries.to(dtype=torch.int32))
+        packed_seq_params.total_tokens = expected_total
+        packed_seq_params.seq_idx = None
+        packed_seq_params.__post_init__()
+        return packed_seq_params
+    if sequence_lengths.numel() != packed_sequence_count:
         raise ValueError(
             "multimodal packed sequence count does not match cu_seqlens_q: "
-            f"{sequence_lengths.numel()} != {cu_seqlens.numel() - 1}"
+            f"{sequence_lengths.numel()} != {packed_sequence_count}"
         )
 
     # Transformer Engine requires every THD boundary tensor (including the

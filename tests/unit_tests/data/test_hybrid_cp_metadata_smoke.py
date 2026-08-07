@@ -4,10 +4,10 @@ import unittest
 
 import torch
 
-from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.models.multimodal.llava_model import (
     update_multimodal_packed_seq_params,
 )
+from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.ssm.mamba_mixer import _slice_packed_seq_idx_for_sequence_parallel
 from megatron.core.utils import (
     set_hybrid_cp_metadata,
@@ -80,6 +80,42 @@ class HybridCPMetadataTest(unittest.TestCase):
             "cu_seqlens_kv_padded",
         ):
             self.assertEqual(getattr(params, name).dtype, torch.int32)
+
+    def test_packed_wave_preserves_authoritative_multimodal_boundaries(self):
+        params = PackedSeqParams(
+            qkv_format="thd",
+            cu_seqlens_q=torch.tensor([0, 5, 13], dtype=torch.int32),
+            cu_seqlens_kv=torch.tensor([0, 5, 13], dtype=torch.int32),
+            cu_seqlens_q_padded=torch.tensor([0, 8, 16], dtype=torch.int32),
+            cu_seqlens_kv_padded=torch.tensor([0, 8, 16], dtype=torch.int32),
+            total_tokens=16,
+        )
+        set_hybrid_cp_metadata(params, 1)
+
+        update_multimodal_packed_seq_params(params, torch.tensor([16], dtype=torch.int32))
+
+        self.assertEqual(params.cu_seqlens_q.tolist(), [0, 5, 13])
+        self.assertEqual(params.cu_seqlens_q_padded.tolist(), [0, 8, 16])
+        self.assertEqual(params.total_tokens, 16)
+        self.assertEqual(params.seq_idx.shape, (1, 16))
+
+    def test_packed_wave_rejects_inconsistent_aggregate_length(self):
+        params = PackedSeqParams(
+            qkv_format="thd",
+            cu_seqlens_q=torch.tensor([0, 5, 13], dtype=torch.int32),
+            cu_seqlens_kv=torch.tensor([0, 5, 13], dtype=torch.int32),
+            cu_seqlens_q_padded=torch.tensor([0, 8, 16], dtype=torch.int32),
+            cu_seqlens_kv_padded=torch.tensor([0, 8, 16], dtype=torch.int32),
+            total_tokens=16,
+        )
+        set_hybrid_cp_metadata(params, 1)
+
+        with self.assertRaisesRegex(
+            ValueError, "aggregate multimodal length does not match packed token surface: 17 != 16"
+        ):
+            update_multimodal_packed_seq_params(
+                params, torch.tensor([17], dtype=torch.int32)
+            )
 
     def test_hybrid_cp_mamba_accepts_single_sample_media_expansion(self):
         seq_idx = torch.zeros((1, 4), dtype=torch.int32)
