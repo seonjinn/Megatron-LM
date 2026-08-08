@@ -19,7 +19,11 @@ from multimodal_args import add_multimodal_extra_args
 from megatron.core import mpu, parallel_state, tensor_parallel
 from megatron.core.enums import ModelType
 from megatron.core.models.multimodal import context_parallel
-from megatron.core.models.multimodal.llava_model import IGNORE_INDEX, LLaVAModel
+from megatron.core.models.multimodal.llava_model import (
+    IGNORE_INDEX,
+    LLaVAModel,
+    compact_packed_multimodal_graph_inputs,
+)
 from megatron.core.packed_seq_params import (
     PackedSeqParams,
     get_thd_padding_kwargs,
@@ -136,6 +140,20 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
             timers('dataloader-next').stop()
     else:
         data = None
+
+    cuda_graph_static = (
+        getattr(args, "cuda_graph_impl", "none") != "none"
+        and getattr(args, "pad_packed_seq_alignment", None) is not None
+    )
+    if cuda_graph_static and get_tensor_model_parallel_rank() == 0 and data is not None:
+        if "sample_token_lengths" not in data:
+            raise ValueError(
+                "Static multimodal CUDA Graph batches require sample_token_lengths "
+                "metadata from the task encoder"
+            )
+        data["tokens"], data["labels"] = compact_packed_multimodal_graph_inputs(
+            data["tokens"], data["labels"], data["sample_token_lengths"]
+        )
 
     data_text = _broadcast_data(["tokens"], data, torch.int64, args.optimize_broadcast)["tokens"]
     labels = _broadcast_data(["labels"], data, torch.int64, args.optimize_broadcast)["labels"]
@@ -342,33 +360,49 @@ def get_batch(data_iterator, image_token_index, img_seq_len):
             and getattr(args, "cuda_graph_impl", "none") != "none"
             and getattr(args, "thd_overflow_policy", "error") == "eager"
         ):
-            (
-                tokens,
-                labels,
-                loss_mask,
-                position_ids,
-                packed_seq_params,
-                padding_mask,
-            ) = pad_sequence_for_thd(
-                tokens,
-                labels,
-                loss_mask,
-                position_ids,
-                packed_seq_params,
-                alignment=alignment,
-                target_len=target_len,
-                max_num_seqs=max_num_seqs,
-                tail_padding_policy=resolve_thd_tail_padding_policy(args),
-                # Padding is applied to the global batch before LLaVA expands
-                # multimodal tokens and before CP partitions the language input.
-                cp_size=1,
-            )
-            if tokens is not None:
-                tokens = tokens.masked_fill(padding_mask, tokenizer.pad)
-            if labels is not None:
-                labels = labels.masked_fill(padding_mask, IGNORE_INDEX)
-            if loss_mask is not None:
-                loss_mask = loss_mask.masked_fill(padding_mask, 0)
+            if cuda_graph_static:
+                # LLaVA must see the compact raw-token row: media replacement
+                # expands it into the fixed language surface and then appends
+                # neutral graph tail slots.  Pad only THD metadata here so TE
+                # receives a stable number of boundaries on every replay.
+                _, _, _, _, packed_seq_params, _ = pad_sequence_for_thd(
+                    None,
+                    None,
+                    None,
+                    None,
+                    packed_seq_params,
+                    alignment=alignment,
+                    target_len=target_len,
+                    max_num_seqs=max_num_seqs,
+                    tail_padding_policy=resolve_thd_tail_padding_policy(args),
+                    cp_size=1,
+                )
+            else:
+                (
+                    tokens,
+                    labels,
+                    loss_mask,
+                    position_ids,
+                    packed_seq_params,
+                    padding_mask,
+                ) = pad_sequence_for_thd(
+                    tokens,
+                    labels,
+                    loss_mask,
+                    position_ids,
+                    packed_seq_params,
+                    alignment=alignment,
+                    target_len=target_len,
+                    max_num_seqs=max_num_seqs,
+                    tail_padding_policy=resolve_thd_tail_padding_policy(args),
+                    cp_size=1,
+                )
+                if tokens is not None:
+                    tokens = tokens.masked_fill(padding_mask, tokenizer.pad)
+                if labels is not None:
+                    labels = labels.masked_fill(padding_mask, IGNORE_INDEX)
+                if loss_mask is not None:
+                    loss_mask = loss_mask.masked_fill(padding_mask, 0)
             packed_seq_params.tokens_per_sample = packed_seq_params.total_tokens
         elif overflow:
             # Keep the original dynamic metadata and make the graph bypass

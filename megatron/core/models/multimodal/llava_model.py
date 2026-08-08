@@ -6,7 +6,7 @@ from collections import namedtuple
 from copy import deepcopy
 from functools import partial
 from itertools import chain
-from typing import List, Optional, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 import torch
 
@@ -62,6 +62,61 @@ DEFAULT_SOUND_TOKEN_INDEX = -300
 IMAGE_TOKEN = "<image>"
 VIDEO_TOKEN = "<video>"
 SOUND_TOKEN = "<so_embedding>"
+
+
+def compact_packed_multimodal_graph_inputs(
+    tokens: torch.Tensor,
+    labels: torch.Tensor,
+    sample_token_lengths: Sequence[Sequence[int]] | torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Remove the unused raw-token tail before media expansion for a fixed graph.
+
+    Packed multimodal boundaries are expressed after image/video placeholders
+    expand into language embeddings.  The raw token row therefore needs fewer
+    slots than the final THD graph surface.  ``sample_token_lengths`` preserves
+    that raw coordinate system and includes only the row padding needed for the
+    post-media surface.
+    """
+    if tokens.ndim != 2 or labels.ndim != 2:
+        raise ValueError("packed multimodal graph tokens and labels must be 2-D")
+    if labels.shape[0] != tokens.shape[0] or labels.shape[1] != tokens.shape[1] + 1:
+        raise ValueError(
+            "packed multimodal graph labels must have one more token than tokens"
+        )
+    if tokens.shape[0] != 1:
+        raise ValueError(
+            "packed multimodal graph compaction currently requires micro-batch-size 1"
+        )
+
+    if isinstance(sample_token_lengths, torch.Tensor):
+        if sample_token_lengths.ndim != 2 or sample_token_lengths.shape[0] != 1:
+            raise ValueError(
+                "packed multimodal graph sample_token_lengths must have shape [1, N]"
+            )
+        raw_lengths = sample_token_lengths[0].tolist()
+    else:
+        if len(sample_token_lengths) != 1:
+            raise ValueError(
+                "packed multimodal graph sample_token_lengths must contain one row"
+            )
+        raw_lengths = list(sample_token_lengths[0])
+
+    if not raw_lengths:
+        raise ValueError("packed multimodal graph sample_token_lengths cannot be empty")
+    raw_lengths = [int(length) for length in raw_lengths]
+    if any(length <= 0 for length in raw_lengths):
+        raise ValueError("packed multimodal graph sample_token_lengths must be positive")
+
+    raw_token_count = sum(raw_lengths)
+    if raw_token_count > tokens.shape[1]:
+        raise ValueError(
+            "packed multimodal graph sample_token_lengths exceed the raw token width: "
+            f"{raw_token_count} > {tokens.shape[1]}"
+        )
+    return (
+        tokens[:, :raw_token_count].contiguous(),
+        labels[:, : raw_token_count + 1].contiguous(),
+    )
 
 
 def _split_image_tiles_by_sample(
