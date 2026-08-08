@@ -129,7 +129,11 @@ def _pop_int_packing_algorithm_parameter(
 
 
 def _extend_final_sample_token_length(
-    sample_token_lengths: list[int], target_width: int
+    sample_token_lengths: list[int],
+    *,
+    original_expanded_width: int,
+    target_expanded_width: int,
+    raw_tensor_width: int,
 ) -> list[int]:
     """Assign row-level token padding to the final packed sub-sample."""
 
@@ -138,13 +142,19 @@ def _extend_final_sample_token_length(
         raise ValueError("sample_token_lengths must contain at least one length")
     if any(length <= 0 for length in row_lengths):
         raise ValueError("sample_token_lengths must be positive")
-    raw_width = sum(row_lengths)
-    if raw_width > target_width:
+    additional_padding = target_expanded_width - original_expanded_width
+    if additional_padding < 0:
+        raise ValueError(
+            "batched expanded token width cannot truncate packed samples: "
+            f"{target_expanded_width} < {original_expanded_width}"
+        )
+    row_lengths[-1] += additional_padding
+    routed_raw_width = sum(row_lengths)
+    if routed_raw_width > raw_tensor_width:
         raise ValueError(
             "sample_token_lengths exceed the batched raw token width: "
-            f"{raw_width} > {target_width}"
+            f"{routed_raw_width} > {raw_tensor_width}"
         )
-    row_lengths[-1] += target_width - raw_width
     return row_lengths
 
 
@@ -1613,10 +1623,13 @@ class MultiModalTaskEncoder(
                 max_lengths = torch.max(max_lengths, new_max_length)
 
         sample_token_lengths = []
-        for sample in samples:
+        for row_index, sample in enumerate(samples):
             sample_token_lengths.append(
                 _extend_final_sample_token_length(
-                    sample.sample_token_lengths, target_width=tokens.shape[1]
+                    sample.sample_token_lengths,
+                    original_expanded_width=int(sample.cu_lengths_padded[-1]),
+                    target_expanded_width=int(cu_lengths_padded[row_index, -1]),
+                    raw_tensor_width=tokens.shape[1],
                 )
             )
 

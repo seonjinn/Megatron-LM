@@ -238,7 +238,7 @@ def unpack_multimodal_batch(batch: Mapping[str, Any]) -> list[dict[str, torch.Te
     if any(length <= 0 for length in sample_token_lengths):
         raise ValueError("multimodal HybridCP sample_token_lengths must be positive")
     raw_token_total = sum(sample_token_lengths)
-    if raw_token_total != tokens.shape[1]:
+    if raw_token_total > tokens.shape[1]:
         raise ValueError(
             "multimodal HybridCP sample_token_lengths sum to "
             f"{raw_token_total}, but tokens has width {tokens.shape[1]}"

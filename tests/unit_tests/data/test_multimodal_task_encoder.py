@@ -21,12 +21,22 @@ def _encoder(thread_count=8):
 
 
 def test_extend_final_sample_token_length_assigns_dataloader_tail():
-    assert _extend_final_sample_token_length([4, 7], target_width=16) == [4, 12]
+    assert _extend_final_sample_token_length(
+        [4, 7],
+        original_expanded_width=19,
+        target_expanded_width=24,
+        raw_tensor_width=24,
+    ) == [4, 12]
 
 
 def test_extend_final_sample_token_length_rejects_truncated_boundaries():
     with pytest.raises(ValueError, match="exceed the batched raw token width"):
-        _extend_final_sample_token_length([4, 7], target_width=10)
+        _extend_final_sample_token_length(
+            [4, 7],
+            original_expanded_width=19,
+            target_expanded_width=24,
+            raw_tensor_width=15,
+        )
 
 
 @pytest.mark.parametrize(

@@ -63,9 +63,10 @@ def _media_expanded_packed_batch(*, vision_first: bool):
     image_token = 18
     vision_tokens = [image_token, 11, 12, 0]
     text_tokens = [21, 22, 23, 0]
-    ordered_tokens = (
+    routed_tokens = (
         vision_tokens + text_tokens if vision_first else text_tokens + vision_tokens
     )
+    ordered_tokens = [*routed_tokens, *([0] * 8)]
     image_counts = [1, 0] if vision_first else [0, 1]
     per_sample_tiles = [[1], []] if vision_first else [[], [1]]
     per_sample_frames = [[1], []] if vision_first else [[], [1]]
@@ -137,8 +138,8 @@ def test_media_expanded_batch_round_trip_preserves_both_boundary_domains():
 
     packed = pack_multimodal_hybrid_cp_samples(samples, local_cp_size=2)
 
-    assert packed["tokens"].tolist() == batch["tokens"].tolist()
-    assert packed["labels"].tolist() == batch["labels"].tolist()
+    assert packed["tokens"].tolist() == [batch["tokens"][0, :8].tolist()]
+    assert packed["labels"].tolist() == [batch["labels"][0, :9].tolist()]
     assert packed["cu_lengths"].tolist() == batch["cu_lengths"].tolist()
     assert packed["cu_lengths_padded"].tolist() == batch[
         "cu_lengths_padded"
@@ -153,11 +154,11 @@ def test_unpack_rejects_missing_raw_token_boundaries():
         unpack_multimodal_batch(batch)
 
 
-def test_unpack_rejects_raw_token_boundaries_with_wrong_total():
+def test_unpack_rejects_raw_token_boundaries_exceeding_tensor_width():
     batch = _packed_batch()
-    batch["sample_token_lengths"] = [[2, 3]]
+    batch["sample_token_lengths"] = [[2, 5]]
 
-    with pytest.raises(ValueError, match="sum to 5, but tokens has width 6"):
+    with pytest.raises(ValueError, match="sum to 7, but tokens has width 6"):
         unpack_multimodal_batch(batch)
 
 
