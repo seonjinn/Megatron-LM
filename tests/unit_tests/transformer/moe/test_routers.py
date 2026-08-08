@@ -463,6 +463,25 @@ class TestAuxLossFreeTop2Router:
         # Print some debug info
         print("Updated bias after first forward pass:", updated_bias)
 
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+    def test_expert_bias_ignores_padding_tokens(self):
+        self.router = self.router.cuda()
+        seq_len = 16
+        batch_size = 2
+        hidden_states = torch.randn(
+            (seq_len, batch_size, self.router.config.hidden_size), device="cuda"
+        ).bfloat16()
+        padding_mask = torch.zeros((seq_len, batch_size), dtype=torch.bool, device="cuda")
+        padding_mask[seq_len // 2 :, :] = True
+
+        _, routing_map = self.router(hidden_states, padding_mask=padding_mask)
+
+        expected_tokens_per_expert = routing_map[~padding_mask.reshape(-1)].sum(dim=0)
+        torch.testing.assert_close(
+            self.router.local_tokens_per_expert,
+            expected_tokens_per_expert,
+        )
+
     @pytest.mark.internal
     @pytest.mark.skipif(
         not torch.cuda.is_available() or not HAVE_ROUTER_FUSION,
