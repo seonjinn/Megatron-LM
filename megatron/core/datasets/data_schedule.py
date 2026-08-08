@@ -223,6 +223,7 @@ def unpack_multimodal_batch(batch: Mapping[str, Any]) -> list[dict[str, torch.Te
         raise ValueError("sample_image_counts does not match cu_lengths")
     if len(sample_num_tiles) != len(sample_image_counts) or len(sample_num_frames) != len(sample_image_counts):
         raise ValueError("per-sample media metadata does not match cu_lengths")
+    total_image_count = sum(sample_image_counts)
 
     sample_num_sound_clips = batch.get("sample_num_sound_clips")
     if sample_num_sound_clips is None:
@@ -259,6 +260,27 @@ def unpack_multimodal_batch(batch: Mapping[str, Any]) -> list[dict[str, torch.Te
         raise ValueError("multimodal HybridCP batch key 'has_pad_img' must be a scalar tensor")
     else:
         has_pad_img = has_pad_img.reshape(()).to(dtype=torch.bool)
+    if bool(has_pad_img.item()):
+        raise ValueError(
+            "multimodal HybridCP does not support FP8 padded vision images"
+        )
+
+    if vision_offsets is not None:
+        if vision_offsets.numel() == 0:
+            raise ValueError("multimodal HybridCP vision_cu_lengths cannot be empty")
+        if int(vision_offsets[0].item()) != 0:
+            raise ValueError("multimodal HybridCP vision_cu_lengths must start at zero")
+        if vision_offsets.numel() > 1:
+            expected_offset_count = total_image_count + 1
+            if vision_offsets.numel() != expected_offset_count:
+                raise ValueError(
+                    "multimodal HybridCP vision_cu_lengths has "
+                    f"{vision_offsets.numel()} offsets for {total_image_count} images"
+                )
+            if bool(torch.any(vision_offsets[1:] <= vision_offsets[:-1]).item()):
+                raise ValueError(
+                    "multimodal HybridCP vision_cu_lengths must be strictly increasing"
+                )
 
     sound_clips = batch.get("sound_clips")
     sound_length = batch.get("sound_length")
@@ -296,7 +318,7 @@ def unpack_multimodal_batch(batch: Mapping[str, Any]) -> list[dict[str, torch.Te
                 sample[key] = value
 
         image_start, image_end = _sample_image_offsets(sample_image_counts, sample_index)
-        if vision_offsets is not None and image_end > image_start:
+        if vision_offsets is not None and vision_offsets.numel() > 1 and image_end > image_start:
             vision_start = int(vision_offsets[image_start].item())
             vision_end = int(vision_offsets[image_end].item())
             if imgs is not None:
@@ -313,6 +335,23 @@ def unpack_multimodal_batch(batch: Mapping[str, Any]) -> list[dict[str, torch.Te
                 int((vision_offsets[image_start + 1 : image_end + 1] - vision_offsets[image_start:image_end]).max().item()),
                 dtype=torch.int32,
             )
+        elif image_end > image_start:
+            if imgs is None or image_end > imgs.shape[0]:
+                available_images = 0 if imgs is None else int(imgs.shape[0])
+                raise ValueError(
+                    "multimodal HybridCP fixed-resolution batch requires "
+                    f"{image_end} images, received {available_images}"
+                )
+            if imgs_sizes is None or image_end > imgs_sizes.shape[0]:
+                available_sizes = 0 if imgs_sizes is None else int(imgs_sizes.shape[0])
+                raise ValueError(
+                    "multimodal HybridCP fixed-resolution batch requires "
+                    f"{image_end} image sizes, received {available_sizes}"
+                )
+            sample["imgs"] = imgs[image_start:image_end].contiguous()
+            sample["imgs_sizes"] = imgs_sizes[image_start:image_end].contiguous()
+            sample["vision_cu_lengths"] = torch.tensor([0], dtype=torch.int32)
+            sample["vision_max_lengths"] = torch.tensor([0], dtype=torch.int32)
         else:
             sample["imgs"] = torch.tensor([[0]], dtype=torch.float32)
             sample["imgs_sizes"] = torch.tensor([[0, 0]], dtype=torch.int32)
@@ -416,7 +455,7 @@ def pack_multimodal_hybrid_cp_samples(
             restored[key] = torch.cat([sample[key] for sample in samples], dim=0)
 
     vision_samples = [
-        sample for sample in samples if sample["vision_cu_lengths"].numel() > 1
+        sample for sample in samples if bool(torch.any(sample["num_tiles"] > 0).item())
     ]
     if vision_samples:
         packed_imgs = torch.cat([sample["imgs"] for sample in vision_samples], dim=0)

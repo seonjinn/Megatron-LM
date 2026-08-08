@@ -34,6 +34,30 @@ def _packed_batch():
     }
 
 
+def _fixed_resolution_packed_batch():
+    batch = _packed_batch()
+    batch.update(
+        {
+            "imgs": torch.tensor(
+                [[[[1.0]]], [[[2.0]]], [[[3.0]]], [[[4.0]]]],
+                dtype=torch.float32,
+            ),
+            "imgs_sizes": torch.tensor(
+                [[16, 16], [16, 16], [32, 32], [32, 32]],
+                dtype=torch.int32,
+            ),
+            "vision_cu_lengths": torch.tensor([[0]], dtype=torch.int32),
+            "vision_max_lengths": torch.tensor([0], dtype=torch.int32),
+            "num_tiles": torch.tensor([2, 2], dtype=torch.int32),
+            "num_frames": torch.tensor([1, 1], dtype=torch.int32),
+            "sample_image_counts": [[2, 2]],
+            "sample_num_tiles": [[[2], [2]]],
+            "sample_num_frames": [[[1], [1]]],
+        }
+    )
+    return batch
+
+
 def test_unpack_multimodal_batch_preserves_text_and_vision_boundaries():
     samples = unpack_multimodal_batch(_packed_batch())
 
@@ -47,6 +71,79 @@ def test_unpack_multimodal_batch_preserves_text_and_vision_boundaries():
     assert samples[1]["tokens"].tolist() == [12, 13, 14, 15]
     assert samples[1]["imgs"].squeeze(-1).tolist() == [3.0, 4.0]
     assert samples[1]["vision_cu_lengths"].tolist() == [0, 2]
+
+
+def test_unpack_multimodal_batch_slices_fixed_resolution_images():
+    samples = unpack_multimodal_batch(_fixed_resolution_packed_batch())
+
+    assert samples[0]["imgs"].flatten().tolist() == [1.0, 2.0]
+    assert samples[0]["imgs_sizes"].tolist() == [[16, 16], [16, 16]]
+    assert samples[0]["vision_cu_lengths"].tolist() == [0]
+    assert samples[0]["vision_max_lengths"].item() == 0
+    assert samples[1]["imgs"].flatten().tolist() == [3.0, 4.0]
+    assert samples[1]["imgs_sizes"].tolist() == [[32, 32], [32, 32]]
+
+
+def test_fixed_resolution_vision_survives_unpack_pack_round_trip():
+    samples = unpack_multimodal_batch(_fixed_resolution_packed_batch())
+
+    packed = pack_multimodal_hybrid_cp_samples(samples, local_cp_size=2)
+
+    assert packed["imgs"].flatten().tolist() == [1.0, 2.0, 3.0, 4.0]
+    assert packed["imgs_sizes"].tolist() == [
+        [16, 16],
+        [16, 16],
+        [32, 32],
+        [32, 32],
+    ]
+    assert packed["num_tiles"].tolist() == [2, 2]
+    assert packed["num_frames"].tolist() == [1, 1]
+    assert packed["vision_cu_lengths"].tolist() == [[0]]
+    assert packed["vision_max_lengths"].tolist() == [0]
+
+
+def test_unpack_multimodal_batch_rejects_short_dynamic_vision_offsets():
+    batch = _fixed_resolution_packed_batch()
+    batch["vision_cu_lengths"] = torch.tensor([[0, 1]], dtype=torch.int32)
+
+    with pytest.raises(
+        ValueError,
+        match="vision_cu_lengths has 2 offsets for 4 images",
+    ):
+        unpack_multimodal_batch(batch)
+
+
+def test_unpack_multimodal_batch_rejects_surplus_dynamic_vision_offsets():
+    batch = _packed_batch()
+    batch["vision_cu_lengths"] = torch.tensor([[0, 1, 2, 3]], dtype=torch.int32)
+
+    with pytest.raises(
+        ValueError,
+        match="vision_cu_lengths has 4 offsets for 2 images",
+    ):
+        unpack_multimodal_batch(batch)
+
+
+def test_unpack_multimodal_batch_rejects_duplicate_dynamic_vision_offsets():
+    batch = _packed_batch()
+    batch["vision_cu_lengths"] = torch.tensor([[0, 2, 2]], dtype=torch.int32)
+
+    with pytest.raises(
+        ValueError,
+        match="vision_cu_lengths must be strictly increasing",
+    ):
+        unpack_multimodal_batch(batch)
+
+
+def test_unpack_multimodal_batch_rejects_fp8_padded_vision_image():
+    batch = _packed_batch()
+    batch["has_pad_img"] = torch.tensor(True)
+
+    with pytest.raises(
+        ValueError,
+        match="does not support FP8 padded vision images",
+    ):
+        unpack_multimodal_batch(batch)
 
 
 def test_unpack_audio_only_sample_preserves_clip_counts():
