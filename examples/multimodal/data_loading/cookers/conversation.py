@@ -257,6 +257,17 @@ def cook_conversation(
                                 f"metadata, slow metadata for {media_path}: {e!r}"
                             )
                             warn_about_slow_media_loading[current_media_source.get_path()] = False
+                if frag.metadata is None:
+                    media_value = cache.get(current_media_source, media_path)
+                    if isinstance(frag, ImageMedia):
+                        frag.metadata = {
+                            "width": media_value.width,
+                            "height": media_value.height,
+                            "format": media_value.format,
+                            "mode": media_value.mode,
+                        }
+                    else:
+                        frag.metadata = dataclasses.asdict(media_value.get_metadata())
                 cs.__sources__ = (
                     *cs.__sources__,
                     SourceInfo(
