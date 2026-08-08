@@ -2526,10 +2526,10 @@ class TECudaGraphHelper:
 
         self._capture_finished = True
 
-    def _synchronize_te_capture_ranks(
+    def _synchronize_after_te_warmup(
         self, existing_hook: Optional[Callable[[], None]] = None
     ) -> None:
-        """Synchronize ranks that share TP/CP collectives around graph capture."""
+        """Synchronize ranks that share TP/CP collectives before graph capture."""
         if existing_hook is not None:
             existing_hook()
         torch.cuda.synchronize()
@@ -2561,7 +2561,7 @@ class TECudaGraphHelper:
             sample_args, kwargs = self._get_cuda_graph_input_data()
             if self.config.context_parallel_size > 1 and is_te_min_version('2.14.0'):
                 kwargs['post_warmup_hook'] = partial(
-                    self._synchronize_te_capture_ranks, kwargs.get('post_warmup_hook')
+                    self._synchronize_after_te_warmup, kwargs.get('post_warmup_hook')
                 )
             if self.config.sequence_parallel:
                 rng_context = get_cuda_rng_tracker().fork()
@@ -2571,8 +2571,6 @@ class TECudaGraphHelper:
                 graphs = make_graphed_callables(
                     tuple(self.flattened_callables), sample_args, **kwargs
                 )
-            if self.config.context_parallel_size > 1 and is_te_min_version('2.14.0'):
-                self._synchronize_te_capture_ranks()
 
             # Push the captured graphs to the corresponding TransformerBlock.
             num_layers_accumulated = 0

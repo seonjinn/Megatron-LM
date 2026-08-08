@@ -10,7 +10,7 @@ from megatron.core.transformer import cuda_graphs as cuda_graphs_module
 from megatron.core.transformer.cuda_graphs import TECudaGraphHelper
 
 
-def test_te_capture_synchronizes_ranks_before_and_after_te_capture(
+def test_te_capture_synchronizes_ranks_after_te_warmup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     events: list[tuple[str, object | None]] = []
@@ -29,11 +29,9 @@ def test_te_capture_synchronizes_ranks_before_and_after_te_capture(
     cuda_graph_helper.pg_collection = SimpleNamespace(tp_cp=tp_cp_group)
     cuda_graph_helper._graphs_created = False
     cuda_graph_helper._graph_count = 0
-    cuda_graph_helper._start_capturing = lambda: events.append(("capture_start", None)) or 0.0
+    cuda_graph_helper._start_capturing = lambda: 0.0
     cuda_graph_helper._get_cuda_graph_input_data = lambda: ((object(),), {})
-    cuda_graph_helper._finish_capturing = lambda start_time: events.append(
-        ("capture_finish", None)
-    )
+    cuda_graph_helper._finish_capturing = lambda start_time: None
 
     monkeypatch.setattr(
         torch.cuda,
@@ -59,9 +57,6 @@ def test_te_capture_synchronizes_ranks_before_and_after_te_capture(
         callables: tuple[Any, ...], sample_args: tuple[Any, ...], **kwargs: Any
     ) -> tuple[object, ...]:
         captured_kwargs.update(kwargs)
-        events.append(("make_graphed_callables_start", None))
-        kwargs["post_warmup_hook"]()
-        events.append(("make_graphed_callables_end", None))
         return (object(),)
 
     monkeypatch.setattr(cuda_graphs_module, "make_graphed_callables", capture, raising=False)
@@ -69,18 +64,16 @@ def test_te_capture_synchronizes_ranks_before_and_after_te_capture(
     cuda_graph_helper.create_cudagraphs()
 
     post_warmup_hook = captured_kwargs.get("post_warmup_hook")
-    assert (callable(post_warmup_hook), events) == (
+    events_before_hook = tuple(events)
+    if callable(post_warmup_hook):
+        post_warmup_hook()
+
+    assert (callable(post_warmup_hook), events_before_hook, events) == (
         True,
+        (),
         [
-            ("capture_start", None),
-            ("make_graphed_callables_start", None),
             ("cuda_synchronize", None),
             ("distributed_barrier", tp_cp_group),
             ("cuda_synchronize", None),
-            ("make_graphed_callables_end", None),
-            ("cuda_synchronize", None),
-            ("distributed_barrier", tp_cp_group),
-            ("cuda_synchronize", None),
-            ("capture_finish", None),
         ],
     )
