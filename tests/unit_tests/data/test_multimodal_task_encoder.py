@@ -1,5 +1,6 @@
 # Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
 
+import dataclasses
 import importlib
 import io
 from types import SimpleNamespace
@@ -7,11 +8,82 @@ from types import SimpleNamespace
 import pytest
 
 from examples.multimodal.data_loading import task_encoder
+from examples.multimodal.data_loading.cookers import conversation as conversation_cooker
 from examples.multimodal.data_loading.task_encoder import (
     MultiModalTaskEncoder,
     _extend_final_sample_token_length,
     _normalize_thinking_trace,
 )
+
+
+@dataclasses.dataclass
+class _FakeVideoMetadata:
+    video_duration: float = 2.0
+    video_num_frames: int = 4
+    video_fps: float = 2.0
+    video_width: int = 64
+    video_height: int = 32
+
+
+class _MissingMetadataSource:
+    def get_media_metadata(self, path):
+        raise RuntimeError(f"metadata unavailable for {path}")
+
+    def get_path(self):
+        return "dss://missing-video-metadata@v0"
+
+
+class _MetadataFallbackCache:
+    def __init__(self):
+        self.get_calls = []
+        self.get_lazy_calls = []
+        self.lazy = object()
+        self.decoder = SimpleNamespace(get_metadata=lambda: _FakeVideoMetadata())
+
+    def get(self, source, path, sample=None):
+        self.get_calls.append((source, path, sample))
+        return self.decoder
+
+    def get_lazy(self, source, path):
+        self.get_lazy_calls.append((source, path))
+        return self.lazy
+
+
+def test_conversation_cooker_falls_back_to_decoded_video_metadata(monkeypatch):
+    monkeypatch.setattr(
+        conversation_cooker,
+        "_basic_sample_keys_with_json_dataset",
+        lambda sample, data: {
+            "__key__": "sample-0",
+            "__restore_key__": (),
+            "__subflavors__": {},
+            "__sources__": (),
+        },
+    )
+    cache = _MetadataFallbackCache()
+    source = _MissingMetadataSource()
+    sample = {
+        "json": {
+            "conversation": [
+                {
+                    "sender": "user",
+                    "fragments": [{"t": "video", "value": "clip.mp4"}],
+                }
+            ]
+        }
+    }
+
+    cooked = conversation_cooker.cook_conversation(
+        sample,
+        cache=cache,
+        media_source=source,
+    )
+
+    video = cooked.conversation[0].fragments[0]
+    assert video.metadata == dataclasses.asdict(_FakeVideoMetadata())
+    assert video.value is cache.lazy
+    assert cache.get_calls == [(source, "clip.mp4", None)]
+    assert cache.get_lazy_calls == [(source, "clip.mp4")]
 
 
 def _encoder(thread_count=8):
