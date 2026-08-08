@@ -22,7 +22,9 @@ def test_te_capture_synchronizes_ranks_after_te_warmup(
     cuda_graph_helper.callables_per_chunk = [[layer]]
     cuda_graph_helper.num_microbatches = 1
     cuda_graph_helper.config = SimpleNamespace(
-        sequence_parallel=False, overlap_moe_expert_parallel_comm=False
+        context_parallel_size=16,
+        sequence_parallel=False,
+        overlap_moe_expert_parallel_comm=False,
     )
     cuda_graph_helper.pg_collection = SimpleNamespace(tp_cp=tp_cp_group)
     cuda_graph_helper._graphs_created = False
@@ -36,6 +38,7 @@ def test_te_capture_synchronizes_ranks_after_te_warmup(
         "synchronize",
         lambda *args, **kwargs: events.append(("cuda_synchronize", None)),
     )
+    monkeypatch.setattr(torch.cuda, "current_device", lambda: 3)
 
     def record_barrier(*args: Any, **kwargs: Any) -> None:
         group = kwargs.get("group", args[0] if args else None)
@@ -48,6 +51,7 @@ def test_te_capture_synchronizes_ranks_after_te_warmup(
     )
     monkeypatch.setattr(torch.distributed, "is_available", lambda: True)
     monkeypatch.setattr(torch.distributed, "is_initialized", lambda: True)
+    monkeypatch.setattr(cuda_graphs_module, "is_te_min_version", lambda version: True)
 
     def capture(
         callables: tuple[Any, ...], sample_args: tuple[Any, ...], **kwargs: Any

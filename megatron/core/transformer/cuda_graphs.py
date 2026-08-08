@@ -16,7 +16,7 @@ from enum import Enum
 from functools import partial
 from itertools import chain, zip_longest
 from math import ceil
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 import torch
 from torch.utils._pytree import tree_map as tree_map_pyt
@@ -2526,6 +2526,24 @@ class TECudaGraphHelper:
 
         self._capture_finished = True
 
+    def _synchronize_after_te_warmup(
+        self, existing_hook: Optional[Callable[[], None]] = None
+    ) -> None:
+        """Synchronize ranks that share TP/CP collectives before graph capture."""
+        if existing_hook is not None:
+            existing_hook()
+        torch.cuda.synchronize()
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            tp_cp_group = getattr(self.pg_collection, 'tp_cp', None)
+            if tp_cp_group is None:
+                raise RuntimeError(
+                    'TE CUDA Graph warmup synchronization requires a TP/CP process group.'
+                )
+            torch.distributed.barrier(
+                group=tp_cp_group, device_ids=[torch.cuda.current_device()]
+            )
+        torch.cuda.synchronize()
+
     def create_cudagraphs(self):
         """
         Capture CUDA Graphs per TransformerLayer per microbatch.
@@ -2541,6 +2559,10 @@ class TECudaGraphHelper:
         else:
             # Prepare CUDA Graph capturing input data and call `make_graphed_callables`.
             sample_args, kwargs = self._get_cuda_graph_input_data()
+            if self.config.context_parallel_size > 1 and is_te_min_version('2.14.0'):
+                kwargs['post_warmup_hook'] = partial(
+                    self._synchronize_after_te_warmup, kwargs.get('post_warmup_hook')
+                )
             if self.config.sequence_parallel:
                 rng_context = get_cuda_rng_tracker().fork()
             else:
