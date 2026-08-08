@@ -15,6 +15,7 @@ from megatron.core.models.gpt.gpt_layer_specs import (
 from megatron.core.models.multimodal import context_parallel
 from megatron.core.models.multimodal.llava_model import (
     LLaVAModel,
+    _split_image_tiles_by_sample,
     pad_sequence_lengths_for_context_parallel,
 )
 from megatron.core.packed_seq_params import PackedSeqParams
@@ -39,6 +40,28 @@ def test_pad_sequence_lengths_for_context_parallel_rounds_each_sample():
     assert torch.equal(padded, torch.tensor([16, 16, 24], dtype=torch.int32))
     assert padded.dtype == lengths.dtype
     assert padded.device == lengths.device
+
+
+@pytest.mark.internal
+def test_split_image_tiles_by_sample_preserves_marker_alignment():
+    per_sample = _split_image_tiles_by_sample(
+        torch.tensor([2, 1, 3], dtype=torch.int32),
+        torch.tensor([1, 2], dtype=torch.int64),
+    )
+
+    assert [tiles.tolist() for tiles in per_sample] == [[2], [1, 3]]
+
+
+@pytest.mark.internal
+def test_split_image_tiles_by_sample_rejects_misaligned_metadata():
+    with pytest.raises(
+        ValueError,
+        match="3 num_image_tiles entries for 2 image markers",
+    ):
+        _split_image_tiles_by_sample(
+            torch.tensor([2, 1, 3], dtype=torch.int32),
+            torch.tensor([1, 1], dtype=torch.int64),
+        )
 
 
 @pytest.mark.internal

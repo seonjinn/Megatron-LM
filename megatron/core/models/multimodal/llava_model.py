@@ -64,6 +64,22 @@ VIDEO_TOKEN = "<video>"
 SOUND_TOKEN = "<so_embedding>"
 
 
+def _split_image_tiles_by_sample(
+    num_image_tiles: torch.Tensor, num_images_per_sample: torch.Tensor
+) -> tuple[torch.Tensor, ...]:
+    """Split image metadata only when it exactly matches token markers."""
+
+    marker_count = int(num_images_per_sample.sum().item())
+    tile_entry_count = int(num_image_tiles.numel())
+    if tile_entry_count != marker_count:
+        raise ValueError(
+            "Packed multimodal token/media mismatch: received "
+            f"{tile_entry_count} num_image_tiles entries for {marker_count} image markers. "
+            "Raw token boundaries and media-expanded cu_seqlens must be tracked separately."
+        )
+    return num_image_tiles.split(num_images_per_sample.tolist(), dim=0)
+
+
 def _hybrid_cp_debug(message: str) -> None:
     """Emit rank-local LLaVA diagnostics when explicitly enabled."""
 
@@ -898,7 +914,9 @@ class LLaVAModel(MegatronModule):
             num_images_per_sample = torch.sum(image_token_mask, dim=-1)
 
             # Number of tiles per sample.
-            num_image_tiles_batch = num_image_tiles.split(num_images_per_sample.tolist(), dim=0)
+            num_image_tiles_batch = _split_image_tiles_by_sample(
+                num_image_tiles, num_images_per_sample
+            )
             num_image_tiles_batch = torch.tensor(
                 [x.sum() for x in num_image_tiles_batch], device=input_ids.device
             )

@@ -199,8 +199,16 @@ def unpack_multimodal_batch(batch: Mapping[str, Any]) -> list[dict[str, torch.Te
         raise ValueError("multimodal HybridCP cu_lengths tensors must be 2-D")
     if tokens.dim() != 2 or labels.dim() != 2:
         raise ValueError("multimodal HybridCP tokens and labels tensors must be 2-D")
-    if cu_lengths.shape != cu_lengths_padded.shape or cu_lengths.shape[0] != tokens.shape[0]:
+    if (
+        cu_lengths.shape != cu_lengths_padded.shape
+        or cu_lengths.shape[0] != tokens.shape[0]
+        or labels.shape[0] != tokens.shape[0]
+    ):
         raise ValueError("multimodal HybridCP batch dimensions are inconsistent")
+    if labels.shape[1] != tokens.shape[1] + 1:
+        raise ValueError(
+            "multimodal HybridCP labels must have one more token than tokens"
+        )
 
     batch_size = int(cu_lengths.shape[0])
     if batch_size != 1:
@@ -208,6 +216,34 @@ def unpack_multimodal_batch(batch: Mapping[str, Any]) -> list[dict[str, torch.Te
             "multimodal HybridCP currently requires micro-batch-size 1; "
             f"received {batch_size} packed rows"
         )
+
+    sample_token_lengths_raw = batch.get("sample_token_lengths")
+    if not isinstance(sample_token_lengths_raw, Sequence) or isinstance(
+        sample_token_lengths_raw, (str, bytes, bytearray)
+    ):
+        raise ValueError(
+            "multimodal HybridCP requires sample_token_lengths metadata from the task encoder"
+        )
+    if len(sample_token_lengths_raw) != batch_size:
+        raise ValueError(
+            "multimodal HybridCP sample_token_lengths has "
+            f"{len(sample_token_lengths_raw)} rows, expected {batch_size}"
+        )
+    raw_length_row = sample_token_lengths_raw[0]
+    if not isinstance(raw_length_row, Sequence) or isinstance(
+        raw_length_row, (str, bytes, bytearray)
+    ):
+        raise ValueError("multimodal HybridCP sample_token_lengths has an invalid row")
+    sample_token_lengths = [int(length) for length in raw_length_row]
+    if any(length <= 0 for length in sample_token_lengths):
+        raise ValueError("multimodal HybridCP sample_token_lengths must be positive")
+    raw_token_total = sum(sample_token_lengths)
+    if raw_token_total != tokens.shape[1]:
+        raise ValueError(
+            "multimodal HybridCP sample_token_lengths sum to "
+            f"{raw_token_total}, but tokens has width {tokens.shape[1]}"
+        )
+    raw_token_offsets = [0, *accumulate(sample_token_lengths)]
 
     sample_image_counts_raw = batch.get("sample_image_counts")
     if not isinstance(sample_image_counts_raw, Sequence) or isinstance(
@@ -221,6 +257,8 @@ def unpack_multimodal_batch(batch: Mapping[str, Any]) -> list[dict[str, torch.Te
     sample_num_frames = _nested_int_metadata(batch, "sample_num_frames", batch_size)[0]
     if len(sample_image_counts) != cu_lengths.shape[1] - 1:
         raise ValueError("sample_image_counts does not match cu_lengths")
+    if len(sample_token_lengths) != len(sample_image_counts):
+        raise ValueError("sample_token_lengths does not match cu_lengths")
     if len(sample_num_tiles) != len(sample_image_counts) or len(sample_num_frames) != len(sample_image_counts):
         raise ValueError("per-sample media metadata does not match cu_lengths")
     total_image_count = sum(sample_image_counts)
@@ -292,28 +330,37 @@ def unpack_multimodal_batch(batch: Mapping[str, Any]) -> list[dict[str, torch.Te
 
     samples: list[dict[str, torch.Tensor]] = []
     for sample_index in range(len(sample_image_counts)):
-        start = int(cu_lengths_padded[0, sample_index].item())
-        end = int(cu_lengths[0, sample_index + 1].item())
-        padded_end = int(cu_lengths_padded[0, sample_index + 1].item())
-        if end < start or padded_end < end:
+        expanded_start = int(cu_lengths_padded[0, sample_index].item())
+        expanded_end = int(cu_lengths[0, sample_index + 1].item())
+        expanded_padded_end = int(cu_lengths_padded[0, sample_index + 1].item())
+        if expanded_end < expanded_start or expanded_padded_end < expanded_end:
             raise ValueError("multimodal HybridCP cu_lengths are not monotonic")
+        raw_start = raw_token_offsets[sample_index]
+        raw_end = raw_token_offsets[sample_index + 1]
 
         sample: dict[str, torch.Tensor] = {
-            "tokens": tokens[0, start:padded_end].contiguous(),
-            "labels": labels[0, start : padded_end + 1].contiguous(),
-            "cu_seqlens": torch.tensor([0, end - start], dtype=cu_lengths.dtype),
-            "cu_seqlens_padded": torch.tensor(
-                [0, padded_end - start], dtype=cu_lengths_padded.dtype
+            "tokens": tokens[0, raw_start:raw_end].contiguous(),
+            "labels": labels[0, raw_start : raw_end + 1].contiguous(),
+            "cu_seqlens": torch.tensor(
+                [0, expanded_end - expanded_start], dtype=cu_lengths.dtype
             ),
-            "max_seqlen": torch.tensor(padded_end - start, dtype=torch.int32),
-            "sample_lengths": torch.tensor([end - start], dtype=torch.int32),
+            "cu_seqlens_padded": torch.tensor(
+                [0, expanded_padded_end - expanded_start],
+                dtype=cu_lengths_padded.dtype,
+            ),
+            "max_seqlen": torch.tensor(
+                expanded_padded_end - expanded_start, dtype=torch.int32
+            ),
+            "sample_lengths": torch.tensor(
+                [expanded_end - expanded_start], dtype=torch.int32
+            ),
             "samples_seen": torch.tensor(1, dtype=torch.int32),
             # Preserve the scalar expected by examples/multimodal/train.py.
             "has_pad_img": has_pad_img.clone(),
         }
 
         for key in ("position_ids", "loss_mask", "attention_mask"):
-            value = _slice_optional_tensor(batch, key, 0, start, padded_end)
+            value = _slice_optional_tensor(batch, key, 0, raw_start, raw_end)
             if value is not None:
                 sample[key] = value
 

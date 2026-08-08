@@ -128,6 +128,26 @@ def _pop_int_packing_algorithm_parameter(
     return value
 
 
+def _extend_final_sample_token_length(
+    sample_token_lengths: list[int], target_width: int
+) -> list[int]:
+    """Assign row-level token padding to the final packed sub-sample."""
+
+    row_lengths = [int(length) for length in sample_token_lengths]
+    if not row_lengths:
+        raise ValueError("sample_token_lengths must contain at least one length")
+    if any(length <= 0 for length in row_lengths):
+        raise ValueError("sample_token_lengths must be positive")
+    raw_width = sum(row_lengths)
+    if raw_width > target_width:
+        raise ValueError(
+            "sample_token_lengths exceed the batched raw token width: "
+            f"{raw_width} > {target_width}"
+        )
+    row_lengths[-1] += target_width - raw_width
+    return row_lengths
+
+
 def _clean_think(match: re.Match, *, newline_before_close: bool) -> str:
     """Strip whitespace inside <think> tags and format a non-empty trace."""
     clean_content = match.group(1).strip()
@@ -245,6 +265,9 @@ class PackedTaskSample(Sample):
     cu_lengths: list[int]
     # Cumulative length of each sub-sample in this packed sample incl. text and image tokens (P,)
     cu_lengths_padded: list[int]
+    # Raw token-array width of each sub-sample. Unlike cu_lengths, these lengths
+    # exclude media embedding expansion and therefore form physical tensor offsets.
+    sample_token_lengths: list[int]
 
     # Input images
     imgs: list[torch.Tensor]
@@ -295,6 +318,8 @@ class BatchedPackedTaskSample(Batch):
     cu_lengths: list[list[int]]
     # Cumulative length of each sub-sample in each packed sample of the batch (N, P)
     cu_lengths_padded: list[list[int]]
+    # Raw token-array width of each sub-sample, including final row padding (N, P).
+    sample_token_lengths: list[list[int]]
 
     # All image tiles stacked into a single tensor (num_tiles, C, H, W)
     imgs: torch.Tensor
@@ -1150,6 +1175,12 @@ class MultiModalTaskEncoder(
                 max_length=sample.max_length,
                 cu_lengths=sample.cu_lengths,
                 cu_lengths_padded=sample.cu_lengths_padded,
+                sample_token_lengths=[
+                    int(end - start)
+                    for start, end in zip(
+                        sample.cu_lengths[:-1], sample.cu_lengths[1:]
+                    )
+                ],
                 sound_clips=[],
                 sound_length=[],
                 sound_timestamps=[],
@@ -1217,6 +1248,7 @@ class MultiModalTaskEncoder(
             cu_lengths_padded=torch.tensor(
                 [0, sample.total_len_padded], dtype=torch.int32
             ),
+            sample_token_lengths=[len(sample.tokens)],
             sound_clips=sound_clips,
             sound_length=sound_length,
             sound_timestamps=sound_timestamp,
@@ -1436,6 +1468,9 @@ class MultiModalTaskEncoder(
             imgs=[img for sample in samples for img in sample.imgs],
             cu_lengths=torch.tensor(cu_lengths, dtype=torch.int32),
             cu_lengths_padded=torch.tensor(cu_lengths_padded, dtype=torch.int32),
+            sample_token_lengths=[
+                length for sample in samples for length in sample.sample_token_lengths
+            ],
             max_length=max_length,
             num_tiles=[n for s in samples for n in s.num_tiles],
             num_frames=[n for s in samples for n in s.num_frames],
@@ -1577,6 +1612,14 @@ class MultiModalTaskEncoder(
                 new_max_length = cu_lengths_padded[0][-1] - cu_lengths[0][-2]
                 max_lengths = torch.max(max_lengths, new_max_length)
 
+        sample_token_lengths = []
+        for sample in samples:
+            sample_token_lengths.append(
+                _extend_final_sample_token_length(
+                    sample.sample_token_lengths, target_width=tokens.shape[1]
+                )
+            )
+
 
         sound_clips = torch.tensor([[0]], dtype=torch.float32)
         sound_length = torch.tensor([[0]], dtype=torch.int64)
@@ -1608,6 +1651,7 @@ class MultiModalTaskEncoder(
             num_frames=num_frames,
             cu_lengths=cu_lengths,
             cu_lengths_padded=cu_lengths_padded,
+            sample_token_lengths=sample_token_lengths,
             max_lengths=max_lengths,
             imgs_sizes=imgs_sizes,
             vision_cu_lengths=vision_cu_lengths,

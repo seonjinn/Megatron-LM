@@ -20,6 +20,7 @@ def _packed_batch():
         "labels": torch.tensor([[99, 20, 21, 22, 23, 24, 25]], dtype=torch.int64),
         "cu_lengths": torch.tensor([[0, 2, 5]], dtype=torch.int32),
         "cu_lengths_padded": torch.tensor([[0, 2, 6]], dtype=torch.int32),
+        "sample_token_lengths": [[2, 4]],
         "max_lengths": torch.tensor([4], dtype=torch.int32),
         "imgs": torch.tensor([[[1.0], [2.0], [3.0], [4.0]]]),
         "imgs_sizes": torch.tensor([[16, 16], [32, 32]], dtype=torch.int32),
@@ -58,6 +59,37 @@ def _fixed_resolution_packed_batch():
     return batch
 
 
+def _media_expanded_packed_batch(*, vision_first: bool):
+    image_token = 18
+    vision_tokens = [image_token, 11, 12, 0]
+    text_tokens = [21, 22, 23, 0]
+    ordered_tokens = (
+        vision_tokens + text_tokens if vision_first else text_tokens + vision_tokens
+    )
+    image_counts = [1, 0] if vision_first else [0, 1]
+    per_sample_tiles = [[1], []] if vision_first else [[], [1]]
+    per_sample_frames = [[1], []] if vision_first else [[], [1]]
+    return {
+        "tokens": torch.tensor([ordered_tokens], dtype=torch.int64),
+        "labels": torch.tensor([[99, *ordered_tokens]], dtype=torch.int64),
+        # These are media-expanded LM boundaries, not raw token-array offsets.
+        "cu_lengths": torch.tensor([[0, 7, 13]], dtype=torch.int32),
+        "cu_lengths_padded": torch.tensor([[0, 8, 16]], dtype=torch.int32),
+        "sample_token_lengths": [[4, 4]],
+        "max_lengths": torch.tensor([8], dtype=torch.int32),
+        "imgs": torch.tensor([[[[1.0]]]], dtype=torch.float32),
+        "imgs_sizes": torch.tensor([[16, 16]], dtype=torch.int32),
+        "vision_cu_lengths": torch.tensor([[0]], dtype=torch.int32),
+        "vision_max_lengths": torch.tensor([0], dtype=torch.int32),
+        "num_tiles": torch.tensor([1], dtype=torch.int32),
+        "num_frames": torch.tensor([1], dtype=torch.int32),
+        "sample_image_counts": [image_counts],
+        "sample_num_tiles": [[*per_sample_tiles]],
+        "sample_num_frames": [[*per_sample_frames]],
+        "has_pad_img": torch.tensor(False),
+    }
+
+
 def test_unpack_multimodal_batch_preserves_text_and_vision_boundaries():
     samples = unpack_multimodal_batch(_packed_batch())
 
@@ -71,6 +103,62 @@ def test_unpack_multimodal_batch_preserves_text_and_vision_boundaries():
     assert samples[1]["tokens"].tolist() == [12, 13, 14, 15]
     assert samples[1]["imgs"].squeeze(-1).tolist() == [3.0, 4.0]
     assert samples[1]["vision_cu_lengths"].tolist() == [0, 2]
+
+
+def test_unpack_uses_raw_token_boundaries_when_vision_precedes_text():
+    samples = unpack_multimodal_batch(
+        _media_expanded_packed_batch(vision_first=True)
+    )
+
+    assert samples[0]["tokens"].tolist() == [18, 11, 12, 0]
+    assert samples[1]["tokens"].tolist() == [21, 22, 23, 0]
+    assert int((samples[0]["tokens"] == 18).sum().item()) == len(
+        samples[0]["num_tiles"]
+    )
+    assert int((samples[1]["tokens"] == 18).sum().item()) == 0
+
+
+def test_unpack_uses_raw_token_boundaries_when_text_precedes_vision():
+    samples = unpack_multimodal_batch(
+        _media_expanded_packed_batch(vision_first=False)
+    )
+
+    assert samples[0]["tokens"].tolist() == [21, 22, 23, 0]
+    assert samples[1]["tokens"].tolist() == [18, 11, 12, 0]
+    assert int((samples[0]["tokens"] == 18).sum().item()) == 0
+    assert int((samples[1]["tokens"] == 18).sum().item()) == len(
+        samples[1]["num_tiles"]
+    )
+
+
+def test_media_expanded_batch_round_trip_preserves_both_boundary_domains():
+    batch = _media_expanded_packed_batch(vision_first=True)
+    samples = unpack_multimodal_batch(batch)
+
+    packed = pack_multimodal_hybrid_cp_samples(samples, local_cp_size=2)
+
+    assert packed["tokens"].tolist() == batch["tokens"].tolist()
+    assert packed["labels"].tolist() == batch["labels"].tolist()
+    assert packed["cu_lengths"].tolist() == batch["cu_lengths"].tolist()
+    assert packed["cu_lengths_padded"].tolist() == batch[
+        "cu_lengths_padded"
+    ].tolist()
+
+
+def test_unpack_rejects_missing_raw_token_boundaries():
+    batch = _packed_batch()
+    del batch["sample_token_lengths"]
+
+    with pytest.raises(ValueError, match="sample_token_lengths"):
+        unpack_multimodal_batch(batch)
+
+
+def test_unpack_rejects_raw_token_boundaries_with_wrong_total():
+    batch = _packed_batch()
+    batch["sample_token_lengths"] = [[2, 3]]
+
+    with pytest.raises(ValueError, match="sum to 5, but tokens has width 6"):
+        unpack_multimodal_batch(batch)
 
 
 def test_unpack_multimodal_batch_slices_fixed_resolution_images():
@@ -233,6 +321,7 @@ def test_packed_payload_offsets_real_boundaries_after_internal_padding():
     )
     batch["cu_lengths"] = torch.tensor([[0, 2, 7]], dtype=torch.int32)
     batch["cu_lengths_padded"] = torch.tensor([[0, 4, 8]], dtype=torch.int32)
+    batch["sample_token_lengths"] = [[4, 4]]
 
     samples = unpack_multimodal_batch(batch)
 

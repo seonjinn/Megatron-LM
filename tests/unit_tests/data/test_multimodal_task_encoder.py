@@ -9,6 +9,7 @@ import pytest
 from examples.multimodal.data_loading import task_encoder
 from examples.multimodal.data_loading.task_encoder import (
     MultiModalTaskEncoder,
+    _extend_final_sample_token_length,
     _normalize_thinking_trace,
 )
 
@@ -17,6 +18,15 @@ def _encoder(thread_count=8):
     encoder = object.__new__(MultiModalTaskEncoder)
     encoder.args = SimpleNamespace(video_decode_thread_count=thread_count)
     return encoder
+
+
+def test_extend_final_sample_token_length_assigns_dataloader_tail():
+    assert _extend_final_sample_token_length([4, 7], target_width=16) == [4, 12]
+
+
+def test_extend_final_sample_token_length_rejects_truncated_boundaries():
+    with pytest.raises(ValueError, match="exceed the batched raw token width"):
+        _extend_final_sample_token_length([4, 7], target_width=10)
 
 
 @pytest.mark.parametrize(
