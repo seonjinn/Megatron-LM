@@ -476,7 +476,9 @@ class TestAuxLossFreeTop2Router:
 
         _, routing_map = self.router(hidden_states, padding_mask=padding_mask)
 
-        expected_tokens_per_expert = routing_map[~padding_mask.reshape(-1)].sum(dim=0)
+        expected_tokens_per_expert = routing_map[~padding_mask.reshape(-1)].sum(dim=0).to(
+            self.router.local_tokens_per_expert.dtype
+        )
         torch.testing.assert_close(
             self.router.local_tokens_per_expert,
             expected_tokens_per_expert,
