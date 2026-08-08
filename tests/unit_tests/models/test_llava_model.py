@@ -12,13 +12,13 @@ from megatron.core.inference.utils import InferenceMode
 from megatron.core.models.gpt.gpt_layer_specs import (
     get_gpt_layer_with_transformer_engine_submodules,
 )
-from megatron.core.models.multimodal import context_parallel
+from megatron.core.models.multimodal import context_parallel, llava_model
 from megatron.core.models.multimodal.llava_model import (
     LLaVAModel,
     _split_image_tiles_by_sample,
     pad_sequence_lengths_for_context_parallel,
 )
-from megatron.core.packed_seq_params import PackedSeqParams
+from megatron.core.packed_seq_params import PackedSeqParams, pad_sequence_for_thd
 from megatron.core.tensor_parallel.random import model_parallel_cuda_manual_seed
 from megatron.core.transformer.enums import AttnMaskType
 from megatron.core.transformer.mlp import MLPSubmodules
@@ -93,6 +93,103 @@ def test_process_embedding_token_parallel_keeps_standard_cp1_layout(monkeypatch)
     )
 
     assert result[0].shape == (8, 2, 4)
+
+
+@pytest.mark.internal
+def test_compact_packed_media_graph_inputs_removes_only_raw_token_tail():
+    tokens = torch.arange(8, dtype=torch.int64).unsqueeze(0)
+    labels = torch.arange(100, 109, dtype=torch.int64).unsqueeze(0)
+    original_tokens = tokens.clone()
+    original_labels = labels.clone()
+
+    compact_tokens, compact_labels = llava_model.compact_packed_multimodal_graph_inputs(
+        tokens,
+        labels,
+        [[2, 2]],
+    )
+
+    assert {
+        "tokens": compact_tokens.tolist(),
+        "labels": compact_labels.tolist(),
+        "tokens_contiguous": compact_tokens.is_contiguous(),
+        "labels_contiguous": compact_labels.is_contiguous(),
+        "caller_tokens": tokens.tolist(),
+        "caller_labels": labels.tolist(),
+    } == {
+        "tokens": [[0, 1, 2, 3]],
+        "labels": [[100, 101, 102, 103, 104]],
+        "tokens_contiguous": True,
+        "labels_contiguous": True,
+        "caller_tokens": original_tokens.tolist(),
+        "caller_labels": original_labels.tolist(),
+    }
+
+
+@pytest.mark.internal
+@pytest.mark.parametrize(
+    "token_shape,label_shape,sample_token_lengths,error_match",
+    [
+        ((1, 8), (1, 9), [[]], "cannot be empty"),
+        ((1, 8), (1, 9), [[2, 0]], "must be positive"),
+        ((1, 8), (1, 9), [[5, 4]], "exceed the raw token width"),
+        ((1, 8), (1, 8), [[2, 2]], "one more token than tokens"),
+    ],
+)
+def test_compact_packed_media_graph_inputs_rejects_invalid_raw_boundaries(
+    token_shape: tuple[int, int],
+    label_shape: tuple[int, int],
+    sample_token_lengths: list[list[int]],
+    error_match: str,
+):
+    with pytest.raises(ValueError, match=error_match):
+        llava_model.compact_packed_multimodal_graph_inputs(
+            torch.zeros(token_shape, dtype=torch.int64),
+            torch.zeros(label_shape, dtype=torch.int64),
+            sample_token_lengths,
+        )
+
+
+@pytest.mark.internal
+def test_metadata_only_static_padding_retains_compact_media_inputs():
+    compact_cu_seqlens = torch.tensor([0, 6], dtype=torch.int32)
+    packed_seq_params = PackedSeqParams(
+        qkv_format="thd",
+        cu_seqlens_q=compact_cu_seqlens,
+        cu_seqlens_kv=compact_cu_seqlens.clone(),
+        cu_seqlens_q_padded=compact_cu_seqlens.clone(),
+        cu_seqlens_kv_padded=compact_cu_seqlens.clone(),
+        max_seqlen_q=6,
+        max_seqlen_kv=6,
+        total_tokens=6,
+    )
+
+    tokens, labels, loss_mask, position_ids, padded, padding_mask = pad_sequence_for_thd(
+        None,
+        None,
+        None,
+        None,
+        packed_seq_params,
+        target_len=8,
+        max_num_seqs=3,
+        tail_padding_policy="extend_last",
+        cp_size=1,
+    )
+
+    assert {
+        "token_tensors": (tokens, labels, loss_mask, position_ids),
+        "cu_seqlens_q": padded.cu_seqlens_q.tolist(),
+        "cu_seqlens_q_padded": padded.cu_seqlens_q_padded.tolist(),
+        "total_tokens": padded.total_tokens,
+        "seq_idx_tokens": padded.seq_idx.numel(),
+        "padding_mask": padding_mask.tolist(),
+    } == {
+        "token_tensors": (None, None, None, None),
+        "cu_seqlens_q": [0, 6, 6, 6],
+        "cu_seqlens_q_padded": [0, 8, 8, 8],
+        "total_tokens": 8,
+        "seq_idx_tokens": 8,
+        "padding_mask": [[False, False, False, False, False, False, True, True]],
+    }
 
 
 class TestLLaVAModel:
