@@ -202,6 +202,7 @@ def _make_config(case: _TopologyCase, *, graph: bool) -> TransformerConfig:
         ffn_hidden_size=64,
         tensor_model_parallel_size=case.tensor_parallel_size,
         pipeline_model_parallel_size=case.pipeline_parallel_size,
+        pipeline_dtype=torch.bfloat16,
         context_parallel_size=case.context_parallel_size,
         expert_model_parallel_size=case.expert_parallel_size,
         expert_tensor_parallel_size=1,
