@@ -58,6 +58,7 @@ CHANGED_ROUTE_REPLAYS = 20
 HIDDEN_SIZE = 32
 SEQUENCE_LENGTH = 16
 MICRO_BATCH_SIZE = 1
+DISABLE_NANO_SHARED_EXPERT_ENV = "MCORE_TEST_DISABLE_NANO_SHARED_EXPERT"
 
 
 @dataclass(frozen=True)
@@ -644,6 +645,15 @@ def _assert_structural_padding_is_zero(
 @pytest.mark.internal
 @pytest.mark.parametrize("case", CASES, ids=lambda case: case.row_id)
 def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> None:
+    if os.environ.get(DISABLE_NANO_SHARED_EXPERT_ENV) == "1":
+        if case.row_id != "dropless_hybridep_nano16":
+            pytest.fail(
+                f"{DISABLE_NANO_SHARED_EXPERT_ENV}=1 only supports "
+                "dropless_hybridep_nano16",
+                pytrace=False,
+            )
+        case = replace(case, has_shared_expert=False)
+
     if int(os.environ.get("WORLD_SIZE", "1")) != case.world_size:
         pytest.skip(f"{case.row_id} requires exactly {case.world_size} ranks")
     if not torch.cuda.is_available():
