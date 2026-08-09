@@ -74,6 +74,8 @@ ZERO_GRAD_BEFORE_CAPTURE_ENV = "MCORE_TEST_ZERO_GRAD_BEFORE_CAPTURE"
 SKIP_MODEL_WARMUP_ENV = "MCORE_TEST_SKIP_MODEL_WARMUP"
 RELEASE_WARMUP_GRAPH_ENV = "MCORE_TEST_RELEASE_WARMUP_GRAPH"
 RESET_HYBRIDEP_BEFORE_CAPTURE_ENV = "MCORE_TEST_RESET_HYBRIDEP_BEFORE_CAPTURE"
+FORWARD_ONLY_MODEL_WARMUP_ENV = "MCORE_TEST_FORWARD_ONLY_MODEL_WARMUP"
+LINEAR_MODEL_WARMUP_ENV = "MCORE_TEST_LINEAR_MODEL_WARMUP"
 
 
 def _autograd_router_linear(
@@ -764,6 +766,7 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
         )
         eager_model = _make_model(case, eager_config)
         graph_model = _make_model(case, graph_config)
+        probe_submodule: torch.nn.Module | None = None
         selected_submodule = os.environ.get(NANO_CG_SUBMODULE_ENV)
         if selected_submodule is not None:
             if case.row_id != "dropless_hybridep_nano16":
@@ -786,6 +789,7 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
                         dtype=torch.bfloat16,
                     )
                 ]
+                probe_submodule = submodules[0]
             else:
                 pytest.fail(
                     f"{NANO_CG_SUBMODULE_ENV} must be router, layernorm, or linear",
@@ -813,19 +817,38 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
             0 if os.environ.get(SKIP_MODEL_WARMUP_ENV) == "1" else CAPTURE_WARMUPS
         )
         for warmup in range(model_warmups):
-            graph_model.zero_grad(set_to_none=True)
-            capacity_tracker.reset()
-            output = graph_model(
-                route_inputs[warmup % 2],
-                padding_mask=padding_mask,
-                packed_seq_params=packed_seq_params,
-            )
-            output.float().square().mean().backward()
-            _assert_capacity_is_zero()
+            if os.environ.get(LINEAR_MODEL_WARMUP_ENV) == "1":
+                assert probe_submodule is not None
+                probe_submodule.zero_grad(set_to_none=True)
+                probe_input = torch.randn(
+                    SEQUENCE_LENGTH // case.context_parallel_size,
+                    MICRO_BATCH_SIZE,
+                    HIDDEN_SIZE,
+                    dtype=torch.bfloat16,
+                    device=torch.device("cuda", torch.cuda.current_device()),
+                    requires_grad=True,
+                )
+                output = probe_submodule(probe_input)
+            else:
+                graph_model.zero_grad(set_to_none=True)
+                capacity_tracker.reset()
+                output = graph_model(
+                    route_inputs[warmup % 2],
+                    padding_mask=padding_mask,
+                    packed_seq_params=packed_seq_params,
+                )
+            if os.environ.get(FORWARD_ONLY_MODEL_WARMUP_ENV) != "1":
+                output.float().square().mean().backward()
+            if os.environ.get(LINEAR_MODEL_WARMUP_ENV) != "1":
+                _assert_capacity_is_zero()
 
         if model_warmups and os.environ.get(RELEASE_WARMUP_GRAPH_ENV) == "1":
             del output
+            if os.environ.get(LINEAR_MODEL_WARMUP_ENV) == "1":
+                del probe_input
             graph_model.zero_grad(set_to_none=True)
+            if probe_submodule is not None:
+                probe_submodule.zero_grad(set_to_none=True)
             gc.collect()
         if os.environ.get(RESET_HYBRIDEP_BEFORE_CAPTURE_ENV) == "1":
             torch.cuda.synchronize()
