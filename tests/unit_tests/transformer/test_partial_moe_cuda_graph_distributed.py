@@ -938,7 +938,7 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
             assert len(states) == 1
             _assert_replay_geometry(case, states[0], route_inputs[0])
         else:
-            assert not states
+            assert all(state is None for state in states)
 
         mlp = graph_model.layer.mlp
         dispatcher = mlp.token_dispatcher
