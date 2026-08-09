@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import os
 import traceback
 from dataclasses import dataclass, replace
@@ -71,6 +72,8 @@ NANO_CG_SUBMODULE_ENV = "MCORE_TEST_NANO_CG_SUBMODULE"
 CAPTURE_ONLY_ENV = "MCORE_TEST_CAPTURE_ONLY"
 ZERO_GRAD_BEFORE_CAPTURE_ENV = "MCORE_TEST_ZERO_GRAD_BEFORE_CAPTURE"
 SKIP_MODEL_WARMUP_ENV = "MCORE_TEST_SKIP_MODEL_WARMUP"
+RELEASE_WARMUP_GRAPH_ENV = "MCORE_TEST_RELEASE_WARMUP_GRAPH"
+RESET_HYBRIDEP_BEFORE_CAPTURE_ENV = "MCORE_TEST_RESET_HYBRIDEP_BEFORE_CAPTURE"
 
 
 def _autograd_router_linear(
@@ -819,6 +822,15 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
             )
             output.float().square().mean().backward()
             _assert_capacity_is_zero()
+
+        if model_warmups and os.environ.get(RELEASE_WARMUP_GRAPH_ENV) == "1":
+            del output
+            graph_model.zero_grad(set_to_none=True)
+            gc.collect()
+        if os.environ.get(RESET_HYBRIDEP_BEFORE_CAPTURE_ENV) == "1":
+            torch.cuda.synchronize()
+            reset_hybrid_ep_buffer()
+            gc.collect()
 
         if os.environ.get(ZERO_GRAD_BEFORE_CAPTURE_ENV) == "1":
             graph_model.zero_grad(set_to_none=True)
