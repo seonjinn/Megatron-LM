@@ -17,12 +17,28 @@ class Split(Enum):
     test = 2
 
 
-def compile_helpers():
-    """Compile C++ helper functions at runtime. Make sure this is invoked on a single process."""
+def compile_helpers() -> None:
+    """Ensure the C++ dataset helper functions are available."""
+    import importlib
     import os
     import subprocess
 
-    command = ["make", "-C", os.path.abspath(os.path.dirname(__file__))]
+    dataset_dir = os.path.abspath(os.path.dirname(__file__))
+    if not os.path.isfile(os.path.join(dataset_dir, "Makefile")):
+        try:
+            importlib.import_module("megatron.core.datasets.helpers_cpp")
+        except ImportError:
+            import sys
+
+            log_single_rank(
+                logger,
+                logging.ERROR,
+                "Dataset helper Makefile is missing and the prebuilt C++ extension is unavailable",
+            )
+            sys.exit(1)
+        return
+
+    command = ["make", "-C", dataset_dir]
     if subprocess.run(command).returncode != 0:
         import sys
 
