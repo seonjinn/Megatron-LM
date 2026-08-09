@@ -825,10 +825,14 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
                     "dropless_hybridep_nano16",
                     pytrace=False,
                 )
-            if hybridep_warmup_stage not in {"preprocess", "dispatch_combine"}:
+            if hybridep_warmup_stage not in {
+                "route",
+                "preprocess",
+                "dispatch_combine",
+            }:
                 pytest.fail(
-                    f"{HYBRIDEP_MODEL_WARMUP_STAGE_ENV} must be preprocess or "
-                    "dispatch_combine",
+                    f"{HYBRIDEP_MODEL_WARMUP_STAGE_ENV} must be route, preprocess, "
+                    "or dispatch_combine",
                     pytrace=False,
                 )
         for warmup in range(model_warmups):
@@ -850,7 +854,9 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
                 probs, routing_map = mlp.route(
                     hidden_states, padding_mask.transpose(0, 1).bool()
                 )
-                output, probs = mlp.preprocess(hidden_states, probs, routing_map)
+                output = probs
+                if hybridep_warmup_stage != "route":
+                    output, probs = mlp.preprocess(hidden_states, probs, routing_map)
                 if hybridep_warmup_stage == "dispatch_combine":
                     output, probs = mlp.dispatch(output, probs)
                     output = mlp.combine(output)
@@ -871,6 +877,8 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
             del output
             if os.environ.get(LINEAR_MODEL_WARMUP_ENV) == "1":
                 del probe_input
+            if hybridep_warmup_stage is not None:
+                del hidden_states, probs, routing_map
             graph_model.zero_grad(set_to_none=True)
             if probe_submodule is not None:
                 probe_submodule.zero_grad(set_to_none=True)
