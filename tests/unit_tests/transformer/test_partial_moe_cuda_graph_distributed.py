@@ -70,6 +70,7 @@ USE_AUTOGRAD_ROUTER_LINEAR_ENV = "MCORE_TEST_USE_AUTOGRAD_ROUTER_LINEAR"
 NANO_CG_SUBMODULE_ENV = "MCORE_TEST_NANO_CG_SUBMODULE"
 CAPTURE_ONLY_ENV = "MCORE_TEST_CAPTURE_ONLY"
 ZERO_GRAD_BEFORE_CAPTURE_ENV = "MCORE_TEST_ZERO_GRAD_BEFORE_CAPTURE"
+SKIP_MODEL_WARMUP_ENV = "MCORE_TEST_SKIP_MODEL_WARMUP"
 
 
 def _autograd_router_linear(
@@ -772,9 +773,19 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
                 submodules = [graph_model.layer.mlp.router]
             elif selected_submodule == "layernorm":
                 submodules = [graph_model.layer.pre_mlp_layernorm]
+            elif selected_submodule == "linear":
+                submodules = [
+                    torch.nn.Linear(
+                        HIDDEN_SIZE,
+                        HIDDEN_SIZE,
+                        bias=False,
+                        device=torch.device("cuda", torch.cuda.current_device()),
+                        dtype=torch.bfloat16,
+                    )
+                ]
             else:
                 pytest.fail(
-                    f"{NANO_CG_SUBMODULE_ENV} must be router or layernorm",
+                    f"{NANO_CG_SUBMODULE_ENV} must be router, layernorm, or linear",
                     pytrace=False,
                 )
             graph_model.layer._get_submodules_under_cudagraphs = MethodType(
@@ -795,7 +806,10 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
 
         capacity_tracker = get_moe_capacity_tracker()
         capacity_tracker.initialize(torch.device("cuda", local_rank))
-        for warmup in range(CAPTURE_WARMUPS):
+        model_warmups = (
+            0 if os.environ.get(SKIP_MODEL_WARMUP_ENV) == "1" else CAPTURE_WARMUPS
+        )
+        for warmup in range(model_warmups):
             graph_model.zero_grad(set_to_none=True)
             capacity_tracker.reset()
             output = graph_model(
