@@ -36,6 +36,7 @@ from megatron.core.transformer.moe.cuda_graph_replay import (
     HybridEPCudaGraphState,
     MoECudaGraphReplayState,
 )
+from megatron.core.transformer.moe import moe_utils
 from megatron.core.transformer.moe.fused_a2a import (
     HAVE_HYBRIDEP,
     reset_hybrid_ep_buffer,
@@ -62,6 +63,8 @@ DISABLE_NANO_SHARED_EXPERT_ENV = "MCORE_TEST_DISABLE_NANO_SHARED_EXPERT"
 IDENTITY_NANO_PRE_MLP_LAYERNORM_ENV = (
     "MCORE_TEST_IDENTITY_NANO_PRE_MLP_LAYERNORM"
 )
+NANO_TP1_ENV = "MCORE_TEST_NANO_TP1"
+DISABLE_ROUTER_TE_GENERAL_GEMM_ENV = "MCORE_TEST_DISABLE_ROUTER_TE_GENERAL_GEMM"
 
 
 @dataclass(frozen=True)
@@ -664,6 +667,17 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
                 pytrace=False,
             )
         case = replace(case, has_shared_expert=False)
+    if os.environ.get(NANO_TP1_ENV) == "1":
+        if case.row_id != "dropless_hybridep_nano16":
+            pytest.fail(
+                f"{NANO_TP1_ENV}=1 only supports dropless_hybridep_nano16",
+                pytrace=False,
+            )
+        case = replace(
+            case,
+            tensor_parallel_size=1,
+            pipeline_parallel_size=1,
+        )
 
     if int(os.environ.get("WORLD_SIZE", "1")) != case.world_size:
         pytest.skip(f"{case.row_id} requires exactly {case.world_size} ranks")
@@ -685,6 +699,9 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
     os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
     helper: TECudaGraphHelper | None = None
     groups: ProcessGroupCollection | None = None
+    original_te_general_gemm = moe_utils.te_general_gemm
+    if os.environ.get(DISABLE_ROUTER_TE_GENERAL_GEMM_ENV) == "1":
+        moe_utils.te_general_gemm = None
     counters = {
         "router": 0,
         "preprocess": 0,
@@ -982,6 +999,7 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
         traceback.print_exception(error)
         raise
     finally:
+        moe_utils.te_general_gemm = original_te_general_gemm
         if helper is not None and helper.graphs_created():
             helper.delete_cuda_graphs()
         destroy_moe_capacity_tracker()
