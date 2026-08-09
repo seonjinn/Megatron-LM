@@ -481,6 +481,12 @@ def _assert_capacity_is_zero() -> None:
         assert value.item() == 0
 
 
+def _destroy_hybridep_process_group(groups: ProcessGroupCollection) -> None:
+    process_group = groups.tp_ep
+    torch.distributed.barrier(group=process_group)
+    torch.distributed.destroy_process_group(process_group)
+
+
 def _count_method(owner: object, name: str, counters: dict[str, int], key: str) -> None:
     original = getattr(owner, name)
 
@@ -638,6 +644,7 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
     Utils.world_size = case.world_size
     Utils.rank = global_rank
     helper: TECudaGraphHelper | None = None
+    groups: ProcessGroupCollection | None = None
     counters = {
         "router": 0,
         "preprocess": 0,
@@ -933,4 +940,6 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
         destroy_num_microbatches_calculator()
         if case.dispatcher == "hybridep":
             reset_hybrid_ep_buffer()
+            if groups is not None and torch.distributed.is_initialized():
+                _destroy_hybridep_process_group(groups)
         Utils.destroy_model_parallel()
