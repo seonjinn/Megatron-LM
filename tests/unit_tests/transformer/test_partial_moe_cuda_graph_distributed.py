@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import traceback
 from dataclasses import dataclass, replace
+from pathlib import Path
 
 import pytest
 import torch
@@ -490,6 +491,19 @@ def _abort_all_process_groups() -> None:
     abort_process_group()
 
 
+def _write_failure_trace(global_rank: int, error: BaseException) -> None:
+    trace_root = Path(os.environ.get("RUN_LOG_ROOT", "/tmp"))
+    trace_dir = trace_root / "mcore-distributed-failure-traces" / os.environ.get(
+        "SLURM_JOB_ID", "local"
+    )
+    trace_dir.mkdir(parents=True, exist_ok=True)
+    trace_path = trace_dir / f"rank-{global_rank}.log"
+    trace_path.write_text(
+        f"rank={global_rank} failed before distributed teardown\n"
+        + "".join(traceback.format_exception(error))
+    )
+
+
 def _count_method(owner: object, name: str, counters: dict[str, int], key: str) -> None:
     original = getattr(owner, name)
 
@@ -939,6 +953,7 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
             "token_combine": CHANGED_ROUTE_REPLAYS,
         }
     except BaseException as error:
+        _write_failure_trace(global_rank, error)
         print(
             f"rank={global_rank} failed before distributed teardown",
             flush=True,
