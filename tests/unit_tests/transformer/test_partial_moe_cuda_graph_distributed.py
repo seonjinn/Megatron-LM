@@ -1082,7 +1082,7 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
             assert not graph_input_gradient.reshape(-1, HIDDEN_SIZE)[
                 ~valid_tokens
             ].any()
-            if states:
+            if states and states[0] is not None:
                 graph_model.layer.mlp.token_dispatcher.validate_cudagraph_continuation(
                     states[0], graph_output
                 )
