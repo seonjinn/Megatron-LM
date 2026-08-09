@@ -6,6 +6,7 @@ import os
 import traceback
 from dataclasses import dataclass, replace
 from pathlib import Path
+from types import MethodType
 
 import pytest
 import torch
@@ -66,6 +67,8 @@ IDENTITY_NANO_PRE_MLP_LAYERNORM_ENV = (
 NANO_TP1_ENV = "MCORE_TEST_NANO_TP1"
 DISABLE_ROUTER_TE_GENERAL_GEMM_ENV = "MCORE_TEST_DISABLE_ROUTER_TE_GENERAL_GEMM"
 USE_AUTOGRAD_ROUTER_LINEAR_ENV = "MCORE_TEST_USE_AUTOGRAD_ROUTER_LINEAR"
+NANO_CG_SUBMODULE_ENV = "MCORE_TEST_NANO_CG_SUBMODULE"
+CAPTURE_ONLY_ENV = "MCORE_TEST_CAPTURE_ONLY"
 
 
 def _autograd_router_linear(
@@ -756,6 +759,27 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
         )
         eager_model = _make_model(case, eager_config)
         graph_model = _make_model(case, graph_config)
+        selected_submodule = os.environ.get(NANO_CG_SUBMODULE_ENV)
+        if selected_submodule is not None:
+            if case.row_id != "dropless_hybridep_nano16":
+                pytest.fail(
+                    f"{NANO_CG_SUBMODULE_ENV} only supports "
+                    "dropless_hybridep_nano16",
+                    pytrace=False,
+                )
+            if selected_submodule == "router":
+                submodules = [graph_model.layer.mlp.router]
+            elif selected_submodule == "layernorm":
+                submodules = [graph_model.layer.pre_mlp_layernorm]
+            else:
+                pytest.fail(
+                    f"{NANO_CG_SUBMODULE_ENV} must be router or layernorm",
+                    pytrace=False,
+                )
+            graph_model.layer._get_submodules_under_cudagraphs = MethodType(
+                lambda _: submodules,
+                graph_model.layer,
+            )
         graph_model.load_state_dict(eager_model.state_dict())
         _set_deterministic_router(eager_model, case)
         _set_deterministic_router(graph_model, case)
@@ -792,6 +816,8 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
         )
         helper.create_cudagraphs()
         assert helper.graphs_created()
+        if os.environ.get(CAPTURE_ONLY_ENV) == "1":
+            return
         assert helper._compatibility_bank_manager is not None
         manager = helper._compatibility_bank_manager
         counter_start = manager.snapshot_execution_counters()
