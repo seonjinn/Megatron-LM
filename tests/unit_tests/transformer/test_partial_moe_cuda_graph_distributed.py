@@ -59,6 +59,9 @@ HIDDEN_SIZE = 32
 SEQUENCE_LENGTH = 16
 MICRO_BATCH_SIZE = 1
 DISABLE_NANO_SHARED_EXPERT_ENV = "MCORE_TEST_DISABLE_NANO_SHARED_EXPERT"
+IDENTITY_NANO_PRE_MLP_LAYERNORM_ENV = (
+    "MCORE_TEST_IDENTITY_NANO_PRE_MLP_LAYERNORM"
+)
 
 
 @dataclass(frozen=True)
@@ -245,6 +248,14 @@ def _make_model(case: _TopologyCase, config: TransformerConfig) -> _PartialMoEMo
         num_experts=case.num_experts,
         moe_grouped_gemm=False,
     )
+    pre_mlp_layernorm = full_submodules.pre_mlp_layernorm
+    if os.environ.get(IDENTITY_NANO_PRE_MLP_LAYERNORM_ENV) == "1":
+        if case.row_id != "dropless_hybridep_nano16":
+            raise ValueError(
+                f"{IDENTITY_NANO_PRE_MLP_LAYERNORM_ENV}=1 only supports "
+                "dropless_hybridep_nano16"
+            )
+        pre_mlp_layernorm = IdentityOp
     submodules = TransformerLayerSubmodules(
         input_layernorm=IdentityOp,
         self_attention=IdentityOp,
@@ -252,7 +263,7 @@ def _make_model(case: _TopologyCase, config: TransformerConfig) -> _PartialMoEMo
         pre_cross_attn_layernorm=IdentityOp,
         cross_attention=IdentityOp,
         cross_attn_bda=IdentityFuncOp,
-        pre_mlp_layernorm=full_submodules.pre_mlp_layernorm,
+        pre_mlp_layernorm=pre_mlp_layernorm,
         mlp=full_submodules.mlp,
         mlp_bda=full_submodules.mlp_bda,
     )
