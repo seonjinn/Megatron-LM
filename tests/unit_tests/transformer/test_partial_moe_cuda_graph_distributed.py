@@ -80,6 +80,9 @@ HYBRIDEP_MODEL_WARMUP_STAGE_ENV = "MCORE_TEST_HYBRIDEP_MODEL_WARMUP_STAGE"
 DETACH_HYBRIDEP_TOKEN_PROBS_BEFORE_CAPTURE_ENV = (
     "MCORE_TEST_DETACH_HYBRIDEP_TOKEN_PROBS_BEFORE_CAPTURE"
 )
+DETACH_HYBRIDEP_DISPATCHED_PROBS_BEFORE_CAPTURE_ENV = (
+    "MCORE_TEST_DETACH_HYBRIDEP_DISPATCHED_PROBS_BEFORE_CAPTURE"
+)
 
 
 def _autograd_router_linear(
@@ -892,6 +895,16 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
                 manager = graph_model.layer.mlp.token_dispatcher._comm_manager
                 assert manager.token_probs is not None
                 manager.token_probs = manager.token_probs.detach()
+            if os.environ.get(DETACH_HYBRIDEP_DISPATCHED_PROBS_BEFORE_CAPTURE_ENV) == "1":
+                if hybridep_warmup_stage != "dispatch_combine":
+                    pytest.fail(
+                        f"{DETACH_HYBRIDEP_DISPATCHED_PROBS_BEFORE_CAPTURE_ENV}=1 "
+                        "requires a HybridEP dispatch_combine warmup",
+                        pytrace=False,
+                    )
+                manager = graph_model.layer.mlp.token_dispatcher._comm_manager
+                assert manager.dispatched_probs is not None
+                manager.dispatched_probs = manager.dispatched_probs.detach()
             graph_model.zero_grad(set_to_none=True)
             if probe_submodule is not None:
                 probe_submodule.zero_grad(set_to_none=True)
