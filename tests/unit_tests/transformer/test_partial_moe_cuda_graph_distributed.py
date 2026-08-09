@@ -481,22 +481,12 @@ def _assert_capacity_is_zero() -> None:
         assert value.item() == 0
 
 
-def _destroy_non_default_process_groups() -> None:
-    distributed_world = torch.distributed.distributed_c10d._world
-    default_group = torch.distributed.group.WORLD
-    process_groups = sorted(
-        (
-            process_group
-            for process_group in distributed_world.pg_names
-            if process_group is not default_group
-            and process_group in distributed_world.pg_map
-        ),
-        key=lambda process_group: distributed_world.pg_names[process_group],
-        reverse=True,
+def _abort_all_process_groups() -> None:
+    abort_process_group = getattr(
+        torch.distributed.distributed_c10d, "_abort_process_group", None
     )
-    for process_group in process_groups:
-        torch.distributed.barrier(group=process_group)
-        torch.distributed.destroy_process_group(process_group)
+    assert abort_process_group is not None
+    abort_process_group()
 
 
 def _count_method(owner: object, name: str, counters: dict[str, int], key: str) -> None:
@@ -655,6 +645,8 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
     torch.cuda.set_device(local_rank)
     Utils.world_size = case.world_size
     Utils.rank = global_rank
+    previous_async_error_handling = os.environ.get("TORCH_NCCL_ASYNC_ERROR_HANDLING")
+    os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
     helper: TECudaGraphHelper | None = None
     groups: ProcessGroupCollection | None = None
     counters = {
@@ -954,4 +946,10 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
             reset_hybrid_ep_buffer()
         Utils.destroy_model_parallel()
         if torch.distributed.is_initialized():
-            _destroy_non_default_process_groups()
+            _abort_all_process_groups()
+        if previous_async_error_handling is None:
+            os.environ.pop("TORCH_NCCL_ASYNC_ERROR_HANDLING", None)
+        else:
+            os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = (
+                previous_async_error_handling
+            )
