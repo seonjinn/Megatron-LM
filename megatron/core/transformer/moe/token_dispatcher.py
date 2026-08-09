@@ -1393,6 +1393,9 @@ class _HybridEPManager(_DispatchManager):
                 num_sms_preprocessing_api=self.config.moe_hybridep_num_sms_preprocessing,
             )
         )
+        # HybridEP's autograd output owns the router-gradient edge after dispatch. Keep only
+        # a value view here so this long-lived manager does not retain the completed route graph.
+        self.token_probs = self.token_probs.detach()
         if self.moe_expert_rank_capacity_factor is not None:
             # Static-budget path only: handle[-1] is HybridEP overflow_flag when tokens were
             # dropped because permuted count exceeded num_permuted_tokens from setup_metadata.
@@ -1439,6 +1442,9 @@ class _HybridEPManager(_DispatchManager):
             self.num_permuted_tokens = None
         self._original_num_tokens = None
         self._padded_num_tokens = None
+        # The caller keeps the attached probabilities used by expert computation. The manager
+        # only needs their values after combine and must not retain the completed dispatch graph.
+        self.dispatched_probs = self.dispatched_probs.detach()
         return hidden_states
 
     def get_permuted_hidden_states_by_experts(self, hidden_states: torch.Tensor) -> torch.Tensor:

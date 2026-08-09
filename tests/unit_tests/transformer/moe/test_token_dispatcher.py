@@ -609,6 +609,52 @@ def test_hybridep_dropless_capacity_tracker_preserves_dynamic_allocation(
     assert snapshot.rank_overflow_events == 0
 
 
+def test_hybridep_manager_releases_completed_forward_autograd_references(
+    monkeypatch, capacity_tracker
+) -> None:
+    manager = _make_hybridep_capacity_manager(rank_capacity_factor=None)
+    manager._original_num_tokens = 2
+    source_probs = torch.arange(4, dtype=torch.float32, requires_grad=True)
+    manager.token_probs = (source_probs + 1).reshape(2, 2)
+    expected_token_probs = manager.token_probs.detach().clone()
+    hidden_states = torch.ones((2, 4), dtype=torch.float32, requires_grad=True)
+
+    def fake_hybrid_ep_dispatch(**kwargs):
+        dispatched_hidden = kwargs["x"] * 2
+        dispatched_probs = kwargs["probs"].flatten() * 3
+        return dispatched_hidden, dispatched_probs, None, torch.tensor([1, 3]), object()
+
+    def fake_hybrid_ep_combine(**kwargs):
+        return kwargs["x"] * 5
+
+    monkeypatch.setattr(
+        "megatron.core.transformer.moe.token_dispatcher.hybrid_ep_dispatch",
+        fake_hybrid_ep_dispatch,
+    )
+    monkeypatch.setattr(
+        "megatron.core.transformer.moe.token_dispatcher.hybrid_ep_combine",
+        fake_hybrid_ep_combine,
+    )
+
+    dispatched_hidden = manager.dispatch(hidden_states)
+    downstream_probs = manager.dispatched_probs
+
+    torch.testing.assert_close(manager.token_probs, expected_token_probs)
+    assert not manager.token_probs.requires_grad
+    assert manager.token_probs.grad_fn is None
+    assert downstream_probs.requires_grad
+
+    combined_hidden = manager.combine(dispatched_hidden)
+
+    torch.testing.assert_close(manager.dispatched_probs, downstream_probs.detach())
+    assert not manager.dispatched_probs.requires_grad
+    assert manager.dispatched_probs.grad_fn is None
+
+    (combined_hidden.sum() + downstream_probs.sum()).backward()
+    torch.testing.assert_close(hidden_states.grad, torch.full_like(hidden_states, 10))
+    torch.testing.assert_close(source_probs.grad, torch.full_like(source_probs, 3))
+
+
 def test_hybridep_pad_uneven_dispatch_inputs_metadata(monkeypatch):
     manager = _HybridEPManager.__new__(_HybridEPManager)
     manager.group = object()
