@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import traceback
 from dataclasses import dataclass, replace
 
 import pytest
@@ -937,6 +938,13 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
             "token_dispatch": CHANGED_ROUTE_REPLAYS,
             "token_combine": CHANGED_ROUTE_REPLAYS,
         }
+    except BaseException as error:
+        print(
+            f"rank={global_rank} failed before distributed teardown",
+            flush=True,
+        )
+        traceback.print_exception(error)
+        raise
     finally:
         if helper is not None and helper.graphs_created():
             helper.delete_cuda_graphs()
