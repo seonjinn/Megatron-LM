@@ -76,6 +76,7 @@ RELEASE_WARMUP_GRAPH_ENV = "MCORE_TEST_RELEASE_WARMUP_GRAPH"
 RESET_HYBRIDEP_BEFORE_CAPTURE_ENV = "MCORE_TEST_RESET_HYBRIDEP_BEFORE_CAPTURE"
 FORWARD_ONLY_MODEL_WARMUP_ENV = "MCORE_TEST_FORWARD_ONLY_MODEL_WARMUP"
 LINEAR_MODEL_WARMUP_ENV = "MCORE_TEST_LINEAR_MODEL_WARMUP"
+HYBRIDEP_MODEL_WARMUP_STAGE_ENV = "MCORE_TEST_HYBRIDEP_MODEL_WARMUP_STAGE"
 
 
 def _autograd_router_linear(
@@ -816,6 +817,20 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
         model_warmups = (
             0 if os.environ.get(SKIP_MODEL_WARMUP_ENV) == "1" else CAPTURE_WARMUPS
         )
+        hybridep_warmup_stage = os.environ.get(HYBRIDEP_MODEL_WARMUP_STAGE_ENV)
+        if hybridep_warmup_stage is not None:
+            if case.row_id != "dropless_hybridep_nano16":
+                pytest.fail(
+                    f"{HYBRIDEP_MODEL_WARMUP_STAGE_ENV} only supports "
+                    "dropless_hybridep_nano16",
+                    pytrace=False,
+                )
+            if hybridep_warmup_stage not in {"preprocess", "dispatch_combine"}:
+                pytest.fail(
+                    f"{HYBRIDEP_MODEL_WARMUP_STAGE_ENV} must be preprocess or "
+                    "dispatch_combine",
+                    pytrace=False,
+                )
         for warmup in range(model_warmups):
             if os.environ.get(LINEAR_MODEL_WARMUP_ENV) == "1":
                 assert probe_submodule is not None
@@ -829,6 +844,16 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
                     requires_grad=True,
                 )
                 output = probe_submodule(probe_input)
+            elif hybridep_warmup_stage is not None:
+                mlp = graph_model.layer.mlp
+                hidden_states = route_inputs[warmup % 2]
+                probs, routing_map = mlp.route(
+                    hidden_states, padding_mask.transpose(0, 1).bool()
+                )
+                output, probs = mlp.preprocess(hidden_states, probs, routing_map)
+                if hybridep_warmup_stage == "dispatch_combine":
+                    output, probs = mlp.dispatch(output, probs)
+                    output = mlp.combine(output)
             else:
                 graph_model.zero_grad(set_to_none=True)
                 capacity_tracker.reset()
