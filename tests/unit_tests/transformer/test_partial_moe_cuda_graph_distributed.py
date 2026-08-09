@@ -69,6 +69,7 @@ DISABLE_ROUTER_TE_GENERAL_GEMM_ENV = "MCORE_TEST_DISABLE_ROUTER_TE_GENERAL_GEMM"
 USE_AUTOGRAD_ROUTER_LINEAR_ENV = "MCORE_TEST_USE_AUTOGRAD_ROUTER_LINEAR"
 NANO_CG_SUBMODULE_ENV = "MCORE_TEST_NANO_CG_SUBMODULE"
 CAPTURE_ONLY_ENV = "MCORE_TEST_CAPTURE_ONLY"
+ZERO_GRAD_BEFORE_CAPTURE_ENV = "MCORE_TEST_ZERO_GRAD_BEFORE_CAPTURE"
 
 
 def _autograd_router_linear(
@@ -804,6 +805,9 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
             )
             output.float().square().mean().backward()
             _assert_capacity_is_zero()
+
+        if os.environ.get(ZERO_GRAD_BEFORE_CAPTURE_ENV) == "1":
+            graph_model.zero_grad(set_to_none=True)
 
         helper = TECudaGraphHelper(
             model=[graph_model],
