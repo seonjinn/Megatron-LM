@@ -36,7 +36,7 @@ from megatron.core.transformer.moe.cuda_graph_replay import (
     HybridEPCudaGraphState,
     MoECudaGraphReplayState,
 )
-from megatron.core.transformer.moe import moe_utils
+from megatron.core.transformer.moe import moe_utils, router as router_module
 from megatron.core.transformer.moe.fused_a2a import (
     HAVE_HYBRIDEP,
     reset_hybrid_ep_buffer,
@@ -65,6 +65,20 @@ IDENTITY_NANO_PRE_MLP_LAYERNORM_ENV = (
 )
 NANO_TP1_ENV = "MCORE_TEST_NANO_TP1"
 DISABLE_ROUTER_TE_GENERAL_GEMM_ENV = "MCORE_TEST_DISABLE_ROUTER_TE_GENERAL_GEMM"
+USE_AUTOGRAD_ROUTER_LINEAR_ENV = "MCORE_TEST_USE_AUTOGRAD_ROUTER_LINEAR"
+
+
+def _autograd_router_linear(
+    inp: torch.Tensor,
+    weight: torch.Tensor,
+    bias: torch.Tensor | None,
+    router_dtype: torch.dtype,
+) -> torch.Tensor:
+    return F.linear(
+        inp.to(router_dtype),
+        weight.to(router_dtype),
+        None if bias is None else bias.to(router_dtype),
+    )
 
 
 @dataclass(frozen=True)
@@ -700,8 +714,11 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
     helper: TECudaGraphHelper | None = None
     groups: ProcessGroupCollection | None = None
     original_te_general_gemm = moe_utils.te_general_gemm
+    original_router_gating_linear = router_module.router_gating_linear
     if os.environ.get(DISABLE_ROUTER_TE_GENERAL_GEMM_ENV) == "1":
         moe_utils.te_general_gemm = None
+    if os.environ.get(USE_AUTOGRAD_ROUTER_LINEAR_ENV) == "1":
+        router_module.router_gating_linear = _autograd_router_linear
     counters = {
         "router": 0,
         "preprocess": 0,
@@ -1000,6 +1017,7 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
         raise
     finally:
         moe_utils.te_general_gemm = original_te_general_gemm
+        router_module.router_gating_linear = original_router_gating_linear
         if helper is not None and helper.graphs_created():
             helper.delete_cuda_graphs()
         destroy_moe_capacity_tracker()
