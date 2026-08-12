@@ -4,6 +4,7 @@ import gc
 import json
 import os
 import sys
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -3366,6 +3367,86 @@ def test_moe_partial_te_replay_rejects_overlap_before_capture() -> None:
 
     with pytest.raises(RuntimeError, match="overlap_moe_expert_parallel_comm"):
         layer._validate_te_cuda_graph_dispatcher_replay_capability()
+
+
+def _make_hybridep_drain_layer() -> tuple[TransformerLayer, SimpleNamespace]:
+    from megatron.core.transformer.identity_op import IdentityOp
+
+    manager = SimpleNamespace(
+        handle=None,
+        _buffer=None,
+        token_probs=None,
+        dispatched_probs=None,
+    )
+    layer = TransformerLayer.__new__(TransformerLayer)
+    torch.nn.Module.__init__(layer)
+    layer.config = SimpleNamespace(moe_shared_expert_overlap=False)
+    layer.is_moe_layer = True
+    layer.self_attention = IdentityOp()
+    layer.cuda_graphs = []
+    layer.mlp = SimpleNamespace(
+        cudagraph_tensor_store=SimpleNamespace(
+            hidden_states=None,
+            probs=None,
+            routing_map=None,
+            shared_expert_output=None,
+        ),
+        token_dispatcher=SimpleNamespace(
+            handle=None,
+            _buffer=None,
+            config=SimpleNamespace(moe_flex_dispatcher_backend="hybridep"),
+            _comm_manager=manager,
+        ),
+        experts=None,
+    )
+    return layer, manager
+
+
+@pytest.mark.parametrize("field_name", ("token_probs", "dispatched_probs"))
+def test_transformer_layer_drain_rejects_hybridep_autograd_references(
+    field_name: str,
+) -> None:
+    layer, manager = _make_hybridep_drain_layer()
+    source = torch.ones(2, requires_grad=True)
+    retained = source * 2
+    setattr(manager, field_name, retained)
+
+    with pytest.raises(RuntimeError, match=rf"{field_name}.*retains autograd state"):
+        layer.assert_te_cuda_graph_bank_drained()
+
+    setattr(manager, field_name, retained.detach())
+    layer.assert_te_cuda_graph_bank_drained()
+
+
+def test_te_bank_capture_rejects_hybridep_autograd_before_helper_capture() -> None:
+    from megatron.core.transformer.te_cuda_graph_bank import TECudaGraphBankManager
+
+    layer, hybridep_manager = _make_hybridep_drain_layer()
+    source = torch.ones(2, requires_grad=True)
+    hybridep_manager.token_probs = source * 2
+    capture_calls: list[int] = []
+    helper = SimpleNamespace(
+        flattened_callables=[layer],
+        config=SimpleNamespace(cuda_graph_modules=()),
+        _capture_attempted=False,
+        _capture_finished=False,
+        _capture_cuda_graph_lists=lambda *, num_microbatches: capture_calls.append(
+            num_microbatches
+        ),
+    )
+    manager = TECudaGraphBankManager(
+        [layer],
+        graph_reset_supported=False,
+        synchronize=lambda: None,
+        runtime_num_microbatches=lambda: 1,
+    )
+
+    with pytest.raises(RuntimeError, match="token_probs.*retains autograd state"):
+        manager.capture(helper, num_microbatches=1)
+
+    assert capture_calls == []
+    assert helper._capture_attempted is False
+    manager.close()
 
 
 def test_transformer_layer_drain_check_rejects_pending_backward_dw_and_allows_idle() -> None:

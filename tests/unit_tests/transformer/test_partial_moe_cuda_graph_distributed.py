@@ -56,6 +56,8 @@ from megatron.core.transformer.transformer_layer import (
 from megatron.core.utils import is_te_min_version
 from tests.unit_tests.test_utilities import Utils
 
+pytestmark = pytest.mark.no_unit_test_data
+
 CAPTURE_WARMUPS = 3
 CHANGED_ROUTE_REPLAYS = 20
 HIDDEN_SIZE = 32

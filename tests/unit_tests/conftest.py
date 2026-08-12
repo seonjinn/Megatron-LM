@@ -1,7 +1,9 @@
 # Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 import os
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Protocol
 
 import pytest
 import torch
@@ -12,6 +14,12 @@ from megatron.core.utils import is_te_min_version
 from tests.test_utils.python_scripts.download_unit_tests_dataset import download_and_extract_asset
 from tests.unit_tests.dist_checkpointing import TempNamedDir
 from tests.unit_tests.test_utilities import Utils
+
+
+class _MarkedTestItem(Protocol):
+    """Minimal pytest item surface used by the test-data selection gate."""
+
+    def get_closest_marker(self, name: str) -> object | None: ...
 
 
 def pytest_configure(config):
@@ -93,9 +101,18 @@ def tmp_path_dist_ckpt(tmp_path_factory) -> Path:
         yield tmp_dir
 
 
+def _selected_tests_require_unit_test_data(items: Sequence[_MarkedTestItem]) -> bool:
+    """Return whether any selected test lacks the data-independent marker."""
+    return any(item.get_closest_marker("no_unit_test_data") is None for item in items)
+
+
 @pytest.fixture(scope="session", autouse=True)
-def ensure_test_data():
+def ensure_test_data(request: pytest.FixtureRequest) -> None:
     """Ensure test data is available at /opt/data by downloading if necessary."""
+    if not _selected_tests_require_unit_test_data(request.session.items):
+        print("Selected tests do not require /opt/data")
+        return
+
     data_path = Path("/opt/data")
 
     # Check if data directory exists and has content

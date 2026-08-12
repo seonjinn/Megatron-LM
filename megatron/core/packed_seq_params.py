@@ -50,6 +50,7 @@ MOE_PACKED_SEQ_PARAMS_CUDA_GRAPH_TENSOR_FIELDS = (
 
 MOE_PACKED_SEQ_PARAMS_CUDA_GRAPH_STATIC_FIELDS = (
     "seq_aux_loss_max_samples",
+    "tokens_per_sample",
 )
 
 

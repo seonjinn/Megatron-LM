@@ -18,6 +18,8 @@ from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.transformer.transformer_layer import TransformerLayer
 from tests.unit_tests.test_utilities import Utils
 
+pytestmark = pytest.mark.no_unit_test_data
+
 HIDDEN_SIZE = 1024
 SIMILARITY_THRESHOLD = 0.999
 

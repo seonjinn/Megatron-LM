@@ -1339,15 +1339,36 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                 raise RuntimeError(f"MoE CUDA graph tensor store field {field_name} is still live")
 
         token_dispatcher = self.mlp.token_dispatcher
+        comm_manager = getattr(token_dispatcher, "_comm_manager", None)
         for owner_name, owner in (
             ("token dispatcher", token_dispatcher),
-            ("Flex communication manager", getattr(token_dispatcher, "_comm_manager", None)),
+            ("Flex communication manager", comm_manager),
         ):
             if owner is None:
                 continue
             for field_name in ("handle", "_buffer"):
                 if getattr(owner, field_name, None) is not None:
                     raise RuntimeError(f"MoE {owner_name} field {field_name} is still live")
+
+        dispatcher_config = getattr(token_dispatcher, "config", None)
+        if (
+            comm_manager is not None
+            and getattr(dispatcher_config, "moe_flex_dispatcher_backend", None) == "hybridep"
+        ):
+            for field_name in ("token_probs", "dispatched_probs"):
+                value = getattr(comm_manager, field_name, None)
+                if isinstance(value, Tensor) and (
+                    value.requires_grad or value.grad_fn is not None
+                ):
+                    grad_fn_name = (
+                        None if value.grad_fn is None else type(value.grad_fn).__name__
+                    )
+                    raise RuntimeError(
+                        "MoE HybridEP communication manager field "
+                        f"{field_name} retains autograd state at the graph bank boundary: "
+                        f"shape={tuple(value.shape)}, dtype={value.dtype}, device={value.device}, "
+                        f"requires_grad={value.requires_grad}, grad_fn={grad_fn_name}"
+                    )
 
         experts = getattr(self.mlp, "experts", None)
         activation_checkpoint = getattr(experts, "activation_checkpoint", None)
@@ -1402,11 +1423,12 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
     def _validate_te_cuda_graph_packed_seq_params_static_metadata(self, static_metadata):
         """Validate that replay uses the same static packed-sequence contract as capture."""
         expected_static_metadata = self._get_te_cuda_graph_packed_seq_params_static_metadata()
-        assert expected_static_metadata is not None, (
-            "TE CUDA graph replay received packed_seq_params, but the graph was captured without "
-            "packed-sequence sample inputs. Recapture the graph with matching PackedSeqParams "
-            "static metadata."
-        )
+        if expected_static_metadata is None:
+            raise ValueError(
+                "TE CUDA graph replay received packed_seq_params, but the graph was captured "
+                "without packed-sequence sample inputs. Recapture the graph with matching "
+                "PackedSeqParams static metadata."
+            )
 
         mismatched_fields = []
         for field_name in sorted(set(expected_static_metadata) | set(static_metadata)):
@@ -1417,11 +1439,12 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             if expected_value != actual_value:
                 mismatched_fields.append(field_name)
 
-        assert not mismatched_fields, (
-            "TE CUDA graph replay received PackedSeqParams with static metadata that differs "
-            "from capture. Recapture the graph for changed fields: "
-            f"{', '.join(mismatched_fields)}."
-        )
+        if mismatched_fields:
+            raise ValueError(
+                "TE CUDA graph replay received PackedSeqParams with static metadata that differs "
+                "from capture. Recapture the graph for changed fields: "
+                f"{', '.join(mismatched_fields)}."
+            )
 
     def _get_te_cuda_graph_packed_seq_params_tensor_kwarg_names(self):
         """Return flattened ``PackedSeqParams`` Tensor kwargs used for this TE graph."""
@@ -1437,26 +1460,29 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
         actual_names = set(tensor_kwargs)
         missing_names = sorted(expected_names - actual_names)
         extra_names = sorted(actual_names - expected_names)
-        assert not missing_names and not extra_names, (
-            "TE CUDA graph replay received PackedSeqParams with Tensor fields that differ "
-            "from capture. Recapture the graph for missing fields "
-            f"{missing_names} and extra fields {extra_names}."
-        )
+        if missing_names or extra_names:
+            raise ValueError(
+                "TE CUDA graph replay received PackedSeqParams with Tensor fields that differ "
+                "from capture. Recapture the graph for missing fields "
+                f"{missing_names} and extra fields {extra_names}."
+            )
 
     def _rebuild_te_cuda_graph_packed_seq_params(self, kwargs):
         """Rebuild ``PackedSeqParams`` from flattened TE graph capture kwargs."""
         if not has_packed_seq_params_cuda_graph_kwargs(kwargs):
             return
 
-        assert kwargs.get('packed_seq_params') is None, (
-            "PackedSeqParams must be passed either as flattened TE CUDA graph kwargs or as "
-            "packed_seq_params, but not both."
-        )
+        if kwargs.get('packed_seq_params') is not None:
+            raise ValueError(
+                "PackedSeqParams must be passed either as flattened TE CUDA graph kwargs or as "
+                "packed_seq_params, but not both."
+            )
         static_metadata = self._get_te_cuda_graph_packed_seq_params_static_metadata()
-        assert static_metadata is not None, (
-            "Flattened PackedSeqParams Tensor fields require static metadata captured on the "
-            "TransformerLayer."
-        )
+        if static_metadata is None:
+            raise ValueError(
+                "Flattened PackedSeqParams Tensor fields require static metadata captured on the "
+                "TransformerLayer."
+            )
         tensor_kwargs = {
             key: value
             for key, value in kwargs.items()
@@ -1473,10 +1499,11 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
         packed_seq_params = kwargs.pop('packed_seq_params', None)
         expected_static_metadata = self._get_te_cuda_graph_packed_seq_params_static_metadata()
         if packed_seq_params is None:
-            assert expected_static_metadata is None, (
-                "TE CUDA graph was captured with packed_seq_params, so replay must also pass "
-                "packed_seq_params with matching static metadata."
-            )
+            if expected_static_metadata is not None:
+                raise ValueError(
+                    "TE CUDA graph was captured with packed_seq_params, so replay must also pass "
+                    "packed_seq_params with matching static metadata."
+                )
             return
 
         tensor_kwargs, static_metadata = split_packed_seq_params_for_cuda_graph(packed_seq_params)
@@ -1484,11 +1511,21 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
         self._validate_te_cuda_graph_packed_seq_params_tensor_kwargs(tensor_kwargs)
 
         duplicate_keys = set(kwargs) & set(tensor_kwargs)
-        assert not duplicate_keys, (
-            "PackedSeqParams CUDA graph Tensor kwargs overlap with existing replay kwargs: "
-            f"{', '.join(sorted(duplicate_keys))}."
-        )
+        if duplicate_keys:
+            raise ValueError(
+                "PackedSeqParams CUDA graph Tensor kwargs overlap with existing replay kwargs: "
+                f"{', '.join(sorted(duplicate_keys))}."
+            )
         kwargs.update(tensor_kwargs)
+
+    def _te_cuda_graph_owns_packed_seq_params(self) -> bool:
+        """Return whether this graph leaf owns Transformer Engine attention metadata."""
+
+        self_attention = getattr(self, "self_attention", None)
+        if self_attention is None or isinstance(self_attention, IdentityOp):
+            return False
+        cuda_graph_modules = self.config.cuda_graph_modules
+        return not cuda_graph_modules or CudaGraphModule.attn in cuda_graph_modules
 
     def _te_cuda_graph_owns_moe_packed_seq_params(self) -> bool:
         """Return whether this Transformer leaf captures the MoE routing boundary."""
@@ -1518,24 +1555,39 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             return
 
         static_metadata = dict(static_metadata)
-        expected_static_names = {"seq_aux_loss_max_samples"}
+        expected_static_names = {"seq_aux_loss_max_samples", "tokens_per_sample"}
         if set(static_metadata) != expected_static_names:
             raise ValueError(
                 "MoE PackedSeqParams static fields must be exactly "
                 f"{sorted(expected_static_names)}, got {sorted(static_metadata)}"
             )
         max_samples = static_metadata["seq_aux_loss_max_samples"]
-        if isinstance(max_samples, bool) or not isinstance(max_samples, int) or max_samples < 1:
-            raise ValueError("seq_aux_loss_max_samples must be a positive Python int")
+        tokens_per_sample = static_metadata["tokens_per_sample"]
+        if tokens_per_sample is not None and (
+            isinstance(tokens_per_sample, bool)
+            or not isinstance(tokens_per_sample, int)
+            or tokens_per_sample < 1
+        ):
+            raise ValueError("tokens_per_sample must be a positive Python int or None")
 
         tensor_kwargs = dict(tensor_kwargs or {})
         actual_names = set(tensor_kwargs)
-        missing_names = sorted(_MOE_CUDA_GRAPH_PACKED_SEQ_PARAMS_TENSOR_KEYS - actual_names)
-        extra_names = sorted(actual_names - _MOE_CUDA_GRAPH_PACKED_SEQ_PARAMS_TENSOR_KEYS)
-        if missing_names or extra_names:
+        owns_seq_aux_loss = max_samples is not None or bool(actual_names)
+        expected_names = _MOE_CUDA_GRAPH_PACKED_SEQ_PARAMS_TENSOR_KEYS if owns_seq_aux_loss else set()
+        missing_names = sorted(expected_names - actual_names)
+        extra_names = sorted(actual_names - expected_names)
+        if missing_names or extra_names or (
+            owns_seq_aux_loss
+            and (
+                isinstance(max_samples, bool)
+                or not isinstance(max_samples, int)
+                or max_samples < 1
+            )
+        ):
             raise ValueError(
-                "MoE PackedSeqParams Tensor fields differ from the fixed graph contract: "
-                f"missing {missing_names}, unexpected {extra_names}"
+                "MoE PackedSeqParams sequence-auxiliary-loss fields differ from the fixed graph "
+                f"contract: missing {missing_names}, unexpected {extra_names}, "
+                f"seq_aux_loss_max_samples={max_samples!r}"
             )
         if any(not isinstance(value, Tensor) for value in tensor_kwargs.values()):
             raise ValueError("MoE PackedSeqParams graph inputs must be Tensors")
@@ -1699,6 +1751,7 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                         "seq_aux_loss_sample_ids",
                         "seq_aux_loss_num_samples",
                         "seq_aux_loss_max_samples",
+                        "tokens_per_sample",
                     )
                 )
             ):
@@ -1842,6 +1895,22 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                 kwargs["padding_mask"] = padding_mask
         else:
             if self._get_te_cuda_graph_packed_seq_params_static_metadata() is None:
+                if (
+                    producer_packed_seq_params is not None
+                    and self._te_cuda_graph_owns_packed_seq_params()
+                ):
+                    tensor_kwargs, static_metadata = split_packed_seq_params_for_cuda_graph(
+                        producer_packed_seq_params
+                    )
+                    has_generic_payload = bool(tensor_kwargs) or any(
+                        value is not None for value in static_metadata.values()
+                    )
+                    if has_generic_payload:
+                        raise ValueError(
+                            "TE attention graph was captured without packed-sequence inputs, "
+                            "but replay received generic PackedSeqParams metadata. Recapture "
+                            "the graph with the matching packed-sequence contract."
+                        )
                 kwargs.pop("packed_seq_params", None)
             else:
                 self._flatten_te_cuda_graph_packed_seq_params(kwargs)

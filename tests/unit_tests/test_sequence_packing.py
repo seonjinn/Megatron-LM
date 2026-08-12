@@ -71,6 +71,7 @@ def test_moe_packed_seq_params_cuda_graph_has_independent_namespace() -> None:
         ),
         seq_aux_loss_num_samples=torch.tensor(2, dtype=torch.int64),
         seq_aux_loss_max_samples=3,
+        tokens_per_sample=4,
     )
 
     tensor_kwargs, static = split_moe_packed_seq_params_for_cuda_graph(source)
@@ -79,7 +80,7 @@ def test_moe_packed_seq_params_cuda_graph_has_independent_namespace() -> None:
         "_moe_packed_seq_params_seq_aux_loss_sample_ids",
         "_moe_packed_seq_params_seq_aux_loss_num_samples",
     }
-    assert static == {"seq_aux_loss_max_samples": 3}
+    assert static == {"seq_aux_loss_max_samples": 3, "tokens_per_sample": 4}
 
     generic_tensor_kwargs, generic_static = split_packed_seq_params_for_cuda_graph(source)
     assert all(
@@ -100,6 +101,7 @@ def test_moe_packed_seq_params_cuda_graph_has_independent_namespace() -> None:
     assert rebuilt.seq_aux_loss_sample_ids is source.seq_aux_loss_sample_ids
     assert rebuilt.seq_aux_loss_num_samples is source.seq_aux_loss_num_samples
     assert rebuilt.seq_aux_loss_max_samples == 3
+    assert rebuilt.tokens_per_sample == 4
 
     source_sample_ids = source.seq_aux_loss_sample_ids
     source_num_samples = source.seq_aux_loss_num_samples
@@ -127,6 +129,7 @@ def test_moe_packed_seq_params_cuda_graph_has_independent_namespace() -> None:
             "seq_aux_loss_sample_ids",
         ),
         ({}, {"seq_aux_loss_max_samples": torch.tensor(3)}, "seq_aux_loss_max_samples"),
+        ({}, {"tokens_per_sample": torch.tensor(4)}, "tokens_per_sample"),
     ),
 )
 def test_merge_moe_packed_seq_params_rejects_invalid_field_types(

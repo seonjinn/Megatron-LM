@@ -69,6 +69,9 @@ class _TransformerLayerCudaGraphStub:
     _te_cuda_graph_owns_moe_packed_seq_params = (
         TransformerLayer._te_cuda_graph_owns_moe_packed_seq_params
     )
+    _te_cuda_graph_owns_packed_seq_params = (
+        TransformerLayer._te_cuda_graph_owns_packed_seq_params
+    )
     _te_cuda_graph_capture = TransformerLayer._te_cuda_graph_capture
     _te_cuda_graph_replay = TransformerLayer._te_cuda_graph_replay
 
@@ -364,6 +367,7 @@ def test_attention_only_replay_passes_packed_metadata_and_padding_mask_to_mlp(mo
 
 def test_non_attention_moe_replay_preserves_padding_and_graph_owned_sample_inputs() -> None:
     captured = _make_seq_aux_loss_packed_seq_params()
+    captured.tokens_per_sample = 4
 
     class _RouterReplayLayer(_TransformerLayerCudaGraphStub):
         def __init__(self) -> None:
@@ -371,6 +375,7 @@ def test_non_attention_moe_replay_preserves_padding_and_graph_owned_sample_input
                 cuda_graph_modules=[CudaGraphModule.moe_router],
                 delay_offload_until_cuda_graph=False,
             )
+            self.self_attention = IdentityOp()
             self.is_moe_layer = True
             self.attention_inputs = None
             self.replay_inputs = None
@@ -385,12 +390,16 @@ def test_non_attention_moe_replay_preserves_padding_and_graph_owned_sample_input
             self, args, kwargs, context, *, eager_packed_seq_params=None
         ):
             self.graph_calls += 1
+            eager_mlp_kwargs = dict(kwargs)
+            self._rebuild_te_cuda_graph_moe_packed_seq_params(eager_mlp_kwargs)
             self.replay_inputs = (args, kwargs, context, eager_packed_seq_params)
+            self.rebuilt_packed_seq_params = eager_mlp_kwargs["packed_seq_params"]
             return args[0]
 
     layer = _RouterReplayLayer()
     _install_moe_graph_contract(layer, captured)
     replay = _make_seq_aux_loss_packed_seq_params(num_samples=1)
+    replay.tokens_per_sample = 4
     replay.seq_aux_loss_sample_ids.zero_()
     padding_mask = torch.ones((1, 8), dtype=torch.bool)
     hidden_states = torch.zeros((8, 1, 4))
@@ -412,6 +421,13 @@ def test_non_attention_moe_replay_preserves_padding_and_graph_owned_sample_input
         f"{MOE_CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX}seq_aux_loss_num_samples"
     ] is replay.seq_aux_loss_num_samples
     assert replay.seq_aux_loss_num_samples.item() == 1
+    assert layer._get_te_cuda_graph_moe_packed_seq_params_static_metadata()[
+        "tokens_per_sample"
+    ] == 4
+    assert layer.rebuilt_packed_seq_params.tokens_per_sample == 4
+    assert layer.rebuilt_packed_seq_params.seq_aux_loss_sample_ids is (
+        replay.seq_aux_loss_sample_ids
+    )
     assert not replay.seq_aux_loss_sample_ids.any()
     assert graph_kwargs["padding_mask"].all()
     assert "packed_seq_params" not in graph_kwargs
@@ -419,8 +435,81 @@ def test_non_attention_moe_replay_preserves_padding_and_graph_owned_sample_input
     assert layer.fallback_calls == 0
 
 
+def test_identity_attention_moe_rebuild_preserves_captured_tokens_per_sample() -> None:
+    captured = _make_seq_aux_loss_packed_seq_params()
+    captured.tokens_per_sample = 4
+    replay = _make_seq_aux_loss_packed_seq_params(num_samples=1)
+    replay.tokens_per_sample = 4
+    replay.seq_aux_loss_sample_ids.zero_()
+
+    class _CaptureLayer(_TransformerLayerCudaGraphStub):
+        def __init__(self) -> None:
+            self.config = SimpleNamespace(cuda_graph_modules=[CudaGraphModule.moe_router])
+            self.offload_module_in_cuda_graph = False
+            self.self_attention = IdentityOp()
+            self.is_moe_layer = True
+            self.mlp_kwargs = None
+
+        def _forward_mlp(self, hidden_states, padding_mask=None, packed_seq_params=None):
+            self.mlp_kwargs = packed_seq_params
+            return hidden_states
+
+    layer = _CaptureLayer()
+    _install_moe_graph_contract(layer, captured)
+    moe_tensor_kwargs, _ = split_moe_packed_seq_params_for_cuda_graph(replay)
+
+    layer._te_cuda_graph_capture(torch.ones(8, 1, 4), **moe_tensor_kwargs)
+
+    assert layer.mlp_kwargs.tokens_per_sample == 4
+    assert layer.mlp_kwargs.seq_aux_loss_sample_ids is replay.seq_aux_loss_sample_ids
+
+
 @pytest.mark.parametrize(
-    "ownership", ["complete", "sample_ids_only", "num_samples_only", "capacity_only"]
+    "cuda_graph_modules",
+    (
+        [CudaGraphModule.moe_router],
+        [CudaGraphModule.moe_router, CudaGraphModule.moe_preprocess],
+    ),
+)
+def test_identity_attention_moe_replay_rejects_uncaptured_tokens_per_sample(
+    cuda_graph_modules: list[CudaGraphModule],
+) -> None:
+    class _RejectingReplayLayer(_TransformerLayerCudaGraphStub):
+        def __init__(self) -> None:
+            self.config = SimpleNamespace(
+                cuda_graph_modules=cuda_graph_modules,
+                delay_offload_until_cuda_graph=False,
+            )
+            self.self_attention = IdentityOp()
+            self.is_moe_layer = True
+            self.attention_calls = 0
+            self.graph_calls = 0
+
+        def _forward_attention(self, hidden_states, **_kwargs):
+            self.attention_calls += 1
+            return hidden_states, None
+
+        def _te_cuda_graph_replay_impl(
+            self, args, kwargs, context, *, eager_packed_seq_params=None
+        ):
+            self.graph_calls += 1
+            return args[0]
+
+    layer = _RejectingReplayLayer()
+
+    with pytest.raises(ValueError, match="captured without MoE.*ownership"):
+        layer._te_cuda_graph_replay(
+            torch.zeros((8, 1, 4)),
+            packed_seq_params=PackedSeqParams(tokens_per_sample=4),
+        )
+
+    assert layer.attention_calls == 0
+    assert layer.graph_calls == 0
+
+
+@pytest.mark.parametrize(
+    "ownership",
+    ["complete", "sample_ids_only", "num_samples_only", "capacity_only", "tokens_per_sample_only"],
 )
 def test_moe_owning_replay_rejects_ownership_without_captured_contract_before_execution(
     ownership: str,
@@ -452,8 +541,10 @@ def test_moe_owning_replay_rejects_ownership_without_captured_contract_before_ex
         replay = PackedSeqParams(seq_aux_loss_sample_ids=torch.zeros(8, dtype=torch.int64))
     elif ownership == "num_samples_only":
         replay = PackedSeqParams(seq_aux_loss_num_samples=torch.tensor(1, dtype=torch.int64))
-    else:
+    elif ownership == "capacity_only":
         replay = PackedSeqParams(seq_aux_loss_max_samples=4)
+    else:
+        replay = PackedSeqParams(tokens_per_sample=4)
 
     with pytest.raises(ValueError, match="captured without MoE.*ownership"):
         layer._te_cuda_graph_replay(
@@ -749,7 +840,7 @@ def test_packed_graph_rejects_changed_static_pad_between_seqs() -> None:
     layer._set_te_cuda_graph_packed_seq_params_static_metadata(static, tensor_kwargs)
     replay = PackedSeqParams(qkv_format="thd", pad_between_seqs=False, tokens_per_sample=8)
 
-    with pytest.raises(AssertionError, match="pad_between_seqs"):
+    with pytest.raises(ValueError, match="pad_between_seqs"):
         layer._flatten_te_cuda_graph_packed_seq_params({"packed_seq_params": replay})
 
 
@@ -760,7 +851,7 @@ def test_packed_graph_rejects_changed_static_tokens_per_sample() -> None:
     layer._set_te_cuda_graph_packed_seq_params_static_metadata(static, tensor_kwargs)
     replay = PackedSeqParams(qkv_format="thd", pad_between_seqs=True, tokens_per_sample=16)
 
-    with pytest.raises(AssertionError, match="tokens_per_sample"):
+    with pytest.raises(ValueError, match="tokens_per_sample"):
         layer._flatten_te_cuda_graph_packed_seq_params({"packed_seq_params": replay})
 
 
@@ -971,7 +1062,7 @@ def test_transformer_layer_rejects_replay_without_captured_packed_seq_params():
     _, static_metadata = split_packed_seq_params_for_cuda_graph(_make_packed_seq_params())
     layer._set_te_cuda_graph_packed_seq_params_static_metadata(static_metadata)
 
-    with pytest.raises(AssertionError, match="captured with packed_seq_params"):
+    with pytest.raises(ValueError, match="captured with packed_seq_params"):
         layer._flatten_te_cuda_graph_packed_seq_params({"hidden_states": torch.ones(2, 1, 4)})
 
 
@@ -982,7 +1073,7 @@ def test_transformer_layer_rejects_changed_packed_seq_params_static_metadata():
     layer._set_te_cuda_graph_packed_seq_params_static_metadata(static_metadata)
     packed_seq_params.max_seqlen_q = 4
 
-    with pytest.raises(AssertionError, match="max_seqlen_q"):
+    with pytest.raises(ValueError, match="max_seqlen_q"):
         layer._flatten_te_cuda_graph_packed_seq_params({"packed_seq_params": packed_seq_params})
 
 
@@ -993,7 +1084,7 @@ def test_transformer_layer_rejects_changed_packed_seq_params_tensor_fields():
     layer._set_te_cuda_graph_packed_seq_params_static_metadata(static_metadata, tensor_kwargs)
     packed_seq_params.cu_seqlens_q_padded = None
 
-    with pytest.raises(AssertionError, match="Tensor fields"):
+    with pytest.raises(ValueError, match="Tensor fields"):
         layer._flatten_te_cuda_graph_packed_seq_params({"packed_seq_params": packed_seq_params})
 
 
@@ -1004,10 +1095,30 @@ def test_transformer_layer_rejects_replay_with_overlapping_flattened_kwargs():
     layer._set_te_cuda_graph_packed_seq_params_static_metadata(static_metadata, tensor_kwargs)
     existing_key = f"{CUDA_GRAPH_PACKED_SEQ_PARAMS_PREFIX}cu_seqlens_q"
 
-    with pytest.raises(AssertionError, match="overlap"):
+    with pytest.raises(ValueError, match="overlap"):
         layer._flatten_te_cuda_graph_packed_seq_params(
             {existing_key: torch.IntTensor([0]), "packed_seq_params": packed_seq_params}
         )
+
+
+def test_transformer_layer_rebuild_rejects_flattened_and_object_payload() -> None:
+    layer = _TransformerLayerCudaGraphStub()
+    packed_seq_params = _make_packed_seq_params()
+    tensor_kwargs, static_metadata = split_packed_seq_params_for_cuda_graph(packed_seq_params)
+    layer._set_te_cuda_graph_packed_seq_params_static_metadata(static_metadata, tensor_kwargs)
+
+    with pytest.raises(ValueError, match="either as flattened"):
+        layer._rebuild_te_cuda_graph_packed_seq_params(
+            {**tensor_kwargs, "packed_seq_params": packed_seq_params}
+        )
+
+
+def test_transformer_layer_rebuild_rejects_flattened_payload_without_static_contract() -> None:
+    layer = _TransformerLayerCudaGraphStub()
+    tensor_kwargs, _ = split_packed_seq_params_for_cuda_graph(_make_packed_seq_params())
+
+    with pytest.raises(ValueError, match="require static metadata"):
+        layer._rebuild_te_cuda_graph_packed_seq_params(tensor_kwargs)
 
 
 def test_te_cuda_graph_sample_kwargs_include_flattened_packed_seq_params():
@@ -1051,6 +1162,109 @@ def test_te_cuda_graph_sample_kwargs_reject_overlapping_flattened_keys():
         _add_packed_seq_params_to_te_cuda_graph_sample_kwargs(
             layer, sample_kwargs, packed_seq_params
         )
+
+
+_GENERIC_PACKED_FIELD_VALUES = {
+    "cu_seqlens_q": torch.IntTensor([0, 1]),
+    "cu_seqlens_kv": torch.IntTensor([0, 1]),
+    "cu_seqlens_q_padded": torch.IntTensor([0, 1]),
+    "cu_seqlens_kv_padded": torch.IntTensor([0, 1]),
+    "qkv_format": "thd",
+    "max_seqlen_q": 1,
+    "max_seqlen_kv": 1,
+    "local_cp_size": 1,
+    "cp_group": object(),
+    "pad_between_seqs": True,
+    "tokens_per_sample": 1,
+}
+
+
+@pytest.mark.parametrize("cuda_graph_modules", ([], [CudaGraphModule.attn]))
+@pytest.mark.parametrize(
+    "field_name",
+    PACKED_SEQ_PARAMS_CUDA_GRAPH_TENSOR_FIELDS + PACKED_SEQ_PARAMS_CUDA_GRAPH_STATIC_FIELDS,
+)
+def test_attention_replay_rejects_uncaptured_generic_packed_payload_before_execution(
+    cuda_graph_modules: list[CudaGraphModule], field_name: str
+) -> None:
+    class _RejectingReplayLayer(_TransformerLayerCudaGraphStub):
+        def __init__(self) -> None:
+            self.config = SimpleNamespace(
+                cuda_graph_modules=cuda_graph_modules,
+                delay_offload_until_cuda_graph=False,
+            )
+            self.self_attention = torch.nn.Identity()
+            self.is_moe_layer = False
+            self.graph_calls = 0
+
+        def _te_cuda_graph_replay_impl(
+            self, args, kwargs, context, *, eager_packed_seq_params=None
+        ):
+            self.graph_calls += 1
+            return args[0]
+
+    layer = _RejectingReplayLayer()
+    packed_seq_params = PackedSeqParams(
+        **{field_name: _GENERIC_PACKED_FIELD_VALUES[field_name]}
+    )
+
+    with pytest.raises(ValueError, match="attention graph was captured without"):
+        layer._te_cuda_graph_replay(
+            torch.ones(1, 1, 4), packed_seq_params=packed_seq_params
+        )
+
+    assert layer.graph_calls == 0
+
+
+@pytest.mark.parametrize(
+    "self_attention,packed_seq_params",
+    (
+        (
+            IdentityOp(),
+            PackedSeqParams(
+                qkv_format="thd",
+                cu_seqlens_q=torch.IntTensor([0, 1]),
+                cu_seqlens_kv=torch.IntTensor([0, 1]),
+                max_seqlen_q=1,
+                max_seqlen_kv=1,
+            ),
+        ),
+        (
+            torch.nn.Identity(),
+            PackedSeqParams(total_tokens=1, seq_idx=torch.IntTensor([[0]])),
+        ),
+    ),
+    ids=("identity-attention", "mamba-only"),
+)
+def test_attention_replay_without_generic_contract_accepts_unowned_packed_payload(
+    self_attention: torch.nn.Module, packed_seq_params: PackedSeqParams
+) -> None:
+    class _AcceptingReplayLayer(_TransformerLayerCudaGraphStub):
+        def __init__(self) -> None:
+            self.config = SimpleNamespace(
+                cuda_graph_modules=[CudaGraphModule.attn],
+                delay_offload_until_cuda_graph=False,
+            )
+            self.self_attention = self_attention
+            self.is_moe_layer = False
+            self.graph_calls = 0
+
+        def _te_cuda_graph_replay_impl(
+            self, args, kwargs, context, *, eager_packed_seq_params=None
+        ):
+            self.graph_calls += 1
+            assert "packed_seq_params" not in kwargs
+            return args[0]
+
+    layer = _AcceptingReplayLayer()
+    hidden_states = torch.ones(1, 1, 4)
+
+    output = layer._te_cuda_graph_replay(
+        hidden_states, packed_seq_params=packed_seq_params
+    )
+
+    assert output is hidden_states
+    assert layer.graph_calls == 1
 
 
 def test_te_cuda_graph_partial_attn_only_flow():

@@ -269,10 +269,12 @@ def _install_fake_moe_packed_contract(
     sample_ids: torch.Tensor,
     num_samples: torch.Tensor,
     max_samples: int,
+    tokens_per_sample: int | None = None,
 ) -> None:
     tensor_signature = _load_bank_module().tensor_signature
     layer._te_cuda_graph_moe_packed_seq_params_static_metadata = {
-        "seq_aux_loss_max_samples": max_samples
+        "seq_aux_loss_max_samples": max_samples,
+        "tokens_per_sample": tokens_per_sample,
     }
     layer._te_cuda_graph_moe_packed_seq_params_tensor_signatures = {
         "_moe_packed_seq_params_seq_aux_loss_sample_ids": tensor_signature(sample_ids),
@@ -352,7 +354,7 @@ def test_graph_bank_fingerprints_and_installs_moe_sample_ownership() -> None:
     assert packed_signature == (
         (
             "moe",
-            (("seq_aux_loss_max_samples", 3),),
+            (("seq_aux_loss_max_samples", 3), ("tokens_per_sample", None)),
             (
                 (
                     "_moe_packed_seq_params_seq_aux_loss_num_samples",
@@ -369,7 +371,8 @@ def test_graph_bank_fingerprints_and_installs_moe_sample_ownership() -> None:
     bank.activate()
 
     assert layer._te_cuda_graph_moe_packed_seq_params_static_metadata == {
-        "seq_aux_loss_max_samples": 3
+        "seq_aux_loss_max_samples": 3,
+        "tokens_per_sample": None,
     }
     assert layer._te_cuda_graph_moe_packed_seq_params_tensor_signatures[
         "_moe_packed_seq_params_seq_aux_loss_sample_ids"
