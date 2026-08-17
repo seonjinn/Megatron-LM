@@ -4094,6 +4094,64 @@ def test_set_current_microbatch_targets_each_hybrid_mtp_leaf_graph(monkeypatch) 
         manager.close()
 
 
+def test_router_replay_te_input_uses_stable_static_address_for_dynamic_values() -> None:
+    from megatron.core.transformer.module import GraphableMegatronModule
+    from megatron.core.transformer.moe.router_replay import (
+        ROUTER_REPLAY_CUDA_GRAPH_INPUT_KWARG,
+    )
+
+    sample = torch.tensor([[0, 1], [0, 1]], dtype=torch.long)
+    first = torch.tensor([[0, 2], [1, 3]], dtype=torch.long)
+    second = torch.tensor([[2, 3], [0, 1]], dtype=torch.long)
+
+    class FakeGraphedCallable:
+        def __init__(self, sample_kwargs):
+            self.capture_count = 1
+            self.static_route_input = sample_kwargs[ROUTER_REPLAY_CUDA_GRAPH_INPUT_KWARG]
+            self.sample_address = self.static_route_input.data_ptr()
+            self.static_addresses = []
+            self.replay_values = []
+
+        def __call__(self, *_args, **kwargs):
+            self.static_route_input.copy_(kwargs[ROUTER_REPLAY_CUDA_GRAPH_INPUT_KWARG])
+            self.static_addresses.append(self.static_route_input.data_ptr())
+            self.replay_values.append(self.static_route_input.clone())
+            return (torch.ones(1),)
+
+    graph = FakeGraphedCallable({ROUTER_REPLAY_CUDA_GRAPH_INPUT_KWARG: sample})
+    layer = SimpleNamespace(
+        config=SimpleNamespace(fine_grained_activation_offloading=False),
+        cuda_graph_manual_hooks=[],
+        cuda_graphs=[],
+        current_microbatch=0,
+    )
+    layer._get_te_cuda_graph_replay_args = lambda *args, **kwargs: (args, kwargs)
+    manager, bank, _ = _make_task9_active_bank(
+        layer, [graph], cuda_graph_modules=(CudaGraphModule.moe_router,)
+    )
+
+    first_output = GraphableMegatronModule._te_cuda_graph_replay(
+        layer, torch.ones(1), **{ROUTER_REPLAY_CUDA_GRAPH_INPUT_KWARG: first}
+    )
+    first_record = layer._te_cuda_graph_last_launch_record
+    second_output = GraphableMegatronModule._te_cuda_graph_replay(
+        layer, torch.ones(1), **{ROUTER_REPLAY_CUDA_GRAPH_INPUT_KWARG: second}
+    )
+    second_record = layer._te_cuda_graph_last_launch_record
+
+    assert len(first_output) == len(second_output) == 1
+    assert graph.capture_count == 1
+    assert graph.static_addresses == [graph.sample_address, graph.sample_address]
+    assert torch.equal(graph.replay_values[0], first)
+    assert torch.equal(graph.replay_values[1], second)
+    assert first_record.bank_id == second_record.bank_id == id(bank)
+    assert first_record.graph_index == second_record.graph_index == 0
+    assert second_record.copy_generation == first_record.copy_generation + 1
+
+    bank.reset()
+    manager.close()
+
+
 def _make_simple_module(config):
     return _SimpleModule(config).cuda().eval()
 

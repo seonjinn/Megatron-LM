@@ -1,8 +1,95 @@
 # Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+from contextlib import contextmanager
+from dataclasses import dataclass
 from enum import Enum
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, Iterator, List, Optional, Tuple
 
 import torch
+
+ROUTER_REPLAY_CUDA_GRAPH_INPUT_CAPABILITY = "r3_router_cuda_graph_input_v1"
+ROUTER_REPLAY_CUDA_GRAPH_INPUT_KWARG = "router_replay_indices"
+
+
+@dataclass(frozen=True)
+class RouterReplayCudaGraphInputSignature:
+    """Describes a validated RouterReplay CUDA graph input tensor."""
+
+    shape: tuple[int, int]
+    dtype: torch.dtype
+    device_type: str
+    topk: int
+    num_experts: int
+
+
+def validate_router_replay_cuda_graph_input(
+    indices: torch.Tensor,
+    *,
+    structural_padding_mask: torch.Tensor,
+    expected_tokens: int,
+    topk: int,
+    num_experts: int,
+) -> RouterReplayCudaGraphInputSignature:
+    """Validates fixed-capacity router indices supplied to a CUDA graph.
+
+    Structural padding must occupy a contiguous tail and use the canonical
+    ``arange(topk)`` route. Missing routes are invalid in graph mode.
+    """
+    if not isinstance(indices, torch.Tensor):
+        raise TypeError("Router replay CUDA graph indices must be a torch.Tensor.")
+    if indices.dtype != torch.long:
+        raise TypeError("Router replay CUDA graph indices must use torch.long dtype.")
+    if not indices.is_contiguous():
+        raise ValueError("Router replay CUDA graph indices must be contiguous.")
+    if indices.ndim != 2:
+        raise ValueError("Router replay CUDA graph indices must be two-dimensional.")
+    if expected_tokens < 0:
+        raise ValueError("Router replay CUDA graph expected_tokens must be non-negative.")
+    if topk <= 0:
+        raise ValueError("Router replay CUDA graph topk must be positive.")
+    if num_experts <= 0:
+        raise ValueError("Router replay CUDA graph num_experts must be positive.")
+    if indices.shape != (expected_tokens, topk):
+        raise ValueError(
+            "Router replay CUDA graph indices shape must equal "
+            f"({expected_tokens}, {topk}), got {tuple(indices.shape)}."
+        )
+    if not isinstance(structural_padding_mask, torch.Tensor):
+        raise TypeError("Router replay structural padding mask must be a torch.Tensor.")
+    if structural_padding_mask.dtype != torch.bool:
+        raise TypeError("Router replay structural padding mask must use torch.bool dtype.")
+    if structural_padding_mask.shape != (expected_tokens,):
+        raise ValueError(
+            "Router replay structural padding mask shape must equal "
+            f"({expected_tokens},), got {tuple(structural_padding_mask.shape)}."
+        )
+    if structural_padding_mask.device != indices.device:
+        raise ValueError("Router replay structural padding mask must be on the indices device.")
+    if (indices < 0).any():
+        raise ValueError("Router replay CUDA graph indices contain a missing-route sentinel.")
+    if (indices >= num_experts).any():
+        raise ValueError("Router replay CUDA graph indices are outside the expert range.")
+    sorted_indices, _ = torch.sort(indices, dim=1)
+    if (sorted_indices[:, 1:] == sorted_indices[:, :-1]).any():
+        raise ValueError("Router replay CUDA graph indices contain duplicate experts.")
+
+    if structural_padding_mask.any():
+        first_structural_token = int(structural_padding_mask.nonzero()[0].item())
+        if structural_padding_mask[:first_structural_token].any() or not structural_padding_mask[
+            first_structural_token:
+        ].all():
+            raise ValueError("Router replay structural padding must form a fixed-capacity tail.")
+        structural_indices = indices[structural_padding_mask]
+        structural_dummy = torch.arange(topk, device=indices.device, dtype=indices.dtype)
+        if not torch.equal(structural_indices, structural_dummy.expand_as(structural_indices)):
+            raise ValueError("Router replay structural dummy routes must equal arange(topk).")
+
+    return RouterReplayCudaGraphInputSignature(
+        shape=(expected_tokens, topk),
+        dtype=indices.dtype,
+        device_type=indices.device.type,
+        topk=topk,
+        num_experts=num_experts,
+    )
 
 
 class RouterReplayAction(Enum):
@@ -133,6 +220,19 @@ class RouterReplay:
     def clear_router_replay_action(self):
         """Clears the router replay action for this layer."""
         self.router_replay_action = None
+
+    @contextmanager
+    def use_cuda_graph_input(self, indices: torch.Tensor) -> Iterator[None]:
+        """Temporarily replays graph-owned router indices during capture."""
+        previous_target = self.target_topk_idx
+        previous_action = self.router_replay_action
+        self.target_topk_idx = indices
+        self.router_replay_action = RouterReplayAction.REPLAY_FORWARD
+        try:
+            yield
+        finally:
+            self.target_topk_idx = previous_target
+            self.router_replay_action = previous_action
 
     def get_replay_topk(
         self,

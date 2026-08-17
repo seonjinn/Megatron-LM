@@ -414,7 +414,14 @@ class GraphableMegatronModule(MegatronModule):
             _validate_and_record_te_cuda_graph_launch(
                 self, self.cuda_graphs, cg_index, record=not internal_te_call
             )
-        return self.cuda_graphs[cg_index](*cudagraph_args, **cudagraph_kwargs)
+        graph_output = self.cuda_graphs[cg_index](*cudagraph_args, **cudagraph_kwargs)
+        if not internal_te_call or guard_present:
+            from megatron.core.transformer.te_cuda_graph_bank import (
+                _record_te_cuda_graph_launch_success,
+            )
+
+            _record_te_cuda_graph_launch_success(self, self.cuda_graphs, cg_index)
+        return graph_output
 
     def _get_te_cuda_graph_replay_args(self, *args, **kwargs):
         """Helper function to get tensor arguments for TE CUDA graph."""
