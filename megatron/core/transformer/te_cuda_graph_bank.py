@@ -16,9 +16,7 @@ if TYPE_CHECKING:
         MoECudaGraphReplayState,
         TensorReplaySignature,
     )
-    from megatron.core.transformer.moe.router_replay import (
-        RouterReplayCudaGraphInputSignature,
-    )
+    from megatron.core.transformer.moe.router_replay import RouterReplayCudaGraphInputSignature
 
 
 _PACKED_REPLAY_ATTRIBUTES = (

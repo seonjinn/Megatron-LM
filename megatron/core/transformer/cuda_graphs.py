@@ -34,9 +34,7 @@ from megatron.core.tensor_parallel.random import (
 )
 from megatron.core.transformer.enums import CudaGraphModule
 from megatron.core.transformer.module import GraphableMegatronModule, MegatronModule
-from megatron.core.transformer.moe.router_replay import (
-    ROUTER_REPLAY_CUDA_GRAPH_INPUT_KWARG,
-)
+from megatron.core.transformer.moe.router_replay import ROUTER_REPLAY_CUDA_GRAPH_INPUT_KWARG
 from megatron.core.transformer.te_cuda_graph_bank import (
     TECudaGraphBank,
     TECudaGraphBankManager,

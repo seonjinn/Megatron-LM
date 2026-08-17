@@ -25,6 +25,8 @@ def layer() -> TransformerLayer:
         cuda_graph_impl="transformer_engine",
         cuda_graph_modules=[CudaGraphModule.moe_router],
         delay_offload_until_cuda_graph=False,
+        fp4=None,
+        fp8=None,
         hidden_size=8,
         moe_enable_routing_replay=True,
         moe_router_fusion=False,
@@ -155,3 +157,54 @@ def test_router_replay_cuda_graph_rejects_fused_router(layer: TransformerLayer) 
 
     with pytest.raises(ValueError, match="moe_router_fusion"):
         layer._validate_te_cuda_graph_router_replay_scope()
+
+
+def test_router_replay_cuda_graph_accepts_hybrid_attention_mamba_router_scope(
+    layer: TransformerLayer,
+) -> None:
+    layer.config.cuda_graph_modules = [
+        CudaGraphModule.attn,
+        CudaGraphModule.mamba,
+        CudaGraphModule.moe_router,
+    ]
+
+    layer._validate_te_cuda_graph_router_replay_scope()
+
+    assert layer._te_cuda_graph_owns_router_replay_input()
+
+
+@pytest.mark.parametrize(
+    ("precision_field", "precision_value", "error_match"),
+    [("fp8", "hybrid", "FP8"), ("fp4", "e2m1", "NVFP4")],
+    ids=["fp8", "nvfp4"],
+)
+def test_router_replay_cuda_graph_rejects_low_precision_before_graph_work(
+    layer: TransformerLayer,
+    monkeypatch: pytest.MonkeyPatch,
+    precision_field: str,
+    precision_value: str,
+    error_match: str,
+) -> None:
+    calls = {"hook": 0, "graph": 0}
+    setattr(layer.config, precision_field, precision_value)
+    layer.mlp.router.router_replay.target_topk_idx = torch.tensor(
+        [[0, 1], [2, 3]], dtype=torch.long
+    )
+    layer.cuda_graph_manual_hooks = [
+        (lambda: calls.__setitem__("hook", calls["hook"] + 1), ())
+    ]
+    layer.cuda_graphs = [
+        lambda *args, **kwargs: calls.__setitem__("graph", calls["graph"] + 1)
+    ]
+
+    def replay(_self, *args, **kwargs):
+        for hook, hook_args in layer.cuda_graph_manual_hooks:
+            hook(*hook_args)
+        return layer.cuda_graphs[0](*args, **kwargs)
+
+    monkeypatch.setattr(GraphableMegatronModule, "_te_cuda_graph_replay", replay)
+
+    with pytest.raises(ValueError, match=error_match):
+        layer._te_cuda_graph_replay(hidden_states=torch.randn(2, 1, 8))
+
+    assert calls == {"hook": 0, "graph": 0}
