@@ -40,6 +40,31 @@ MoECudaGraphReplayState = _REPLAY.MoECudaGraphReplayState
 TensorReplaySignature = _REPLAY.TensorReplaySignature
 
 
+def _load_router_replay_module() -> ModuleType:
+    module_name = "_standalone_router_replay"
+    if module_name in sys.modules:
+        return sys.modules[module_name]
+    module_path = (
+        Path(__file__).resolve().parents[3]
+        / "megatron"
+        / "core"
+        / "transformer"
+        / "moe"
+        / "router_replay.py"
+    )
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+RouterReplayCudaGraphInputSignature = (
+    _load_router_replay_module().RouterReplayCudaGraphInputSignature
+)
+
+
 def _load_enums_module() -> ModuleType:
     module_name = "_standalone_transformer_enums"
     if module_name in sys.modules:
@@ -282,6 +307,71 @@ def _install_fake_moe_packed_contract(
     }
 
 
+def _router_replay_signature(tokens: int) -> object:
+    return RouterReplayCudaGraphInputSignature(
+        shape=(tokens, 2),
+        dtype=torch.long,
+        device_type="cpu",
+        topk=2,
+        num_experts=4,
+    )
+
+
+def test_graph_bank_fingerprint_owns_router_replay_input_signature() -> None:
+    layer = _FakeLayer("router")
+    signature = _router_replay_signature(8)
+
+    def setup() -> None:
+        layer._te_cuda_graph_router_replay_input_signature = signature
+
+    manager = _make_manager([layer], modules=("moe_router",))
+    bank = manager.capture(
+        _FakeHelper([layer], _graphs("router", 2), modules=("moe_router",), setup=setup),
+        num_microbatches=2,
+    )
+
+    assert bank.fingerprint.router_replay_input_signatures == ((id(layer), signature),)
+    assert not hasattr(layer, "_te_cuda_graph_router_replay_input_signature")
+
+    bank.activate()
+
+    assert layer._te_cuda_graph_router_replay_input_signature is signature
+
+    bank.reset()
+
+    assert not hasattr(layer, "_te_cuda_graph_router_replay_input_signature")
+
+
+def test_activation_records_post_success_graph_identity_and_copy_generation() -> None:
+    bank_module = _load_bank_module()
+    layer = _FakeLayer("router")
+    graph = _FakeGraph("router")
+    manager = _make_manager([layer], modules=("moe_router",), runtime_num_microbatches=lambda: 1)
+    bank = manager.capture(
+        _FakeHelper([layer], [[graph]], modules=("moe_router",)), num_microbatches=1
+    )
+    bank.activate()
+
+    bank_module._validate_and_record_te_cuda_graph_launch(
+        layer, layer.cuda_graphs, 0, record=True
+    )
+    graph()
+    first = bank_module._record_te_cuda_graph_launch_success(layer, layer.cuda_graphs, 0)
+    bank_module._validate_and_record_te_cuda_graph_launch(
+        layer, layer.cuda_graphs, 0, record=True
+    )
+    graph()
+    second = bank_module._record_te_cuda_graph_launch_success(layer, layer.cuda_graphs, 0)
+
+    assert first.bank_id == second.bank_id == id(bank)
+    assert first.graph_index == second.graph_index == 0
+    assert second.copy_generation == first.copy_generation + 1
+    assert layer._te_cuda_graph_last_launch_record is second
+
+    bank.reset()
+    manager.close()
+
+
 def test_graph_bank_capture_owns_exact_lists_and_contracts() -> None:
     generic = _FakeLayer("attention")
     mamba = _FakeLayer("mamba")
@@ -400,6 +490,7 @@ def test_failed_activation_restores_padding_dispatcher_and_moe_contract() -> Non
         layer._te_cuda_graph_padding_mask_signature = _load_bank_module().tensor_signature(
             torch.zeros((1, 4), dtype=torch.bool)
         )
+        layer._te_cuda_graph_router_replay_input_signature = _router_replay_signature(4)
 
     def setup_second() -> None:
         _install_fake_moe_packed_contract(
@@ -411,6 +502,7 @@ def test_failed_activation_restores_padding_dispatcher_and_moe_contract() -> Non
         layer._te_cuda_graph_padding_mask_signature = _load_bank_module().tensor_signature(
             torch.zeros((1, 8), dtype=torch.bool)
         )
+        layer._te_cuda_graph_router_replay_input_signature = _router_replay_signature(8)
 
     first = manager.capture(
         _FakeHelper(
@@ -429,6 +521,7 @@ def test_failed_activation_restores_padding_dispatcher_and_moe_contract() -> Non
         layer.cuda_graphs,
         layer.cuda_graph_manual_hooks,
         layer._te_cuda_graph_padding_mask_signature,
+        layer._te_cuda_graph_router_replay_input_signature,
         layer._te_cuda_graph_dispatcher_replay_states,
         layer._te_cuda_graph_moe_packed_seq_params_static_metadata,
         layer._te_cuda_graph_moe_packed_seq_params_tensor_signatures,
@@ -449,6 +542,7 @@ def test_failed_activation_restores_padding_dispatcher_and_moe_contract() -> Non
         layer.cuda_graphs,
         layer.cuda_graph_manual_hooks,
         layer._te_cuda_graph_padding_mask_signature,
+        layer._te_cuda_graph_router_replay_input_signature,
         layer._te_cuda_graph_dispatcher_replay_states,
         layer._te_cuda_graph_moe_packed_seq_params_static_metadata,
         layer._te_cuda_graph_moe_packed_seq_params_tensor_signatures,
@@ -560,12 +654,17 @@ def test_capture_failure_restores_every_active_contract() -> None:
     layer = _FakeMoELayer("moe")
     states = tuple(_make_alltoall_state(8) for _ in range(2))
     manager = _make_manager([layer], modules=("moe_router", "moe_preprocess"))
+
+    def setup() -> None:
+        layer._te_cuda_graph_dispatcher_replay_states = states
+        layer._te_cuda_graph_router_replay_input_signature = _router_replay_signature(8)
+
     active = manager.capture(
         _FakeHelper(
             [layer],
             _graphs("active", 2),
             modules=("moe_router", "moe_preprocess"),
-            setup=lambda: setattr(layer, "_te_cuda_graph_dispatcher_replay_states", states),
+            setup=setup,
         ),
         num_microbatches=2,
     )
@@ -573,6 +672,7 @@ def test_capture_failure_restores_every_active_contract() -> None:
     installation = (
         layer.cuda_graphs,
         layer.cuda_graph_manual_hooks,
+        layer._te_cuda_graph_router_replay_input_signature,
         layer._te_cuda_graph_dispatcher_replay_states,
         layer._te_cuda_graph_bank_replay_guard,
     )
@@ -587,6 +687,7 @@ def test_capture_failure_restores_every_active_contract() -> None:
     assert (
         layer.cuda_graphs,
         layer.cuda_graph_manual_hooks,
+        layer._te_cuda_graph_router_replay_input_signature,
         layer._te_cuda_graph_dispatcher_replay_states,
         layer._te_cuda_graph_bank_replay_guard,
     ) == installation

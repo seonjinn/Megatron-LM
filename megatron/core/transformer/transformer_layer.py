@@ -34,8 +34,17 @@ from megatron.core.transformer.identity_op import IdentityFuncOp, IdentityOp
 from megatron.core.transformer.mlp import MLP
 from megatron.core.transformer.module import GraphableMegatronModule
 from megatron.core.transformer.moe.cuda_graph_replay import MoECudaGraphReplayState
+from megatron.core.transformer.moe.router_replay import (
+    ROUTER_REPLAY_CUDA_GRAPH_INPUT_KWARG,
+    RouterReplay,
+    RouterReplayCudaGraphInputSignature,
+    validate_router_replay_cuda_graph_input,
+)
 from megatron.core.transformer.spec_utils import ModuleSpec, build_module
-from megatron.core.transformer.te_cuda_graph_bank import tensor_signature
+from megatron.core.transformer.te_cuda_graph_bank import (
+    TECudaGraphLaunchRecord,
+    tensor_signature,
+)
 from megatron.core.transformer.torch_norm import LayerNormBuilder
 from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.typed_torch import apply_module, copy_signature
@@ -468,6 +477,7 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
         self.mlp_bda = build_module(submodules.mlp_bda)
 
         self.is_moe_layer = isinstance(self.mlp, MoELayer)
+        self._validate_te_cuda_graph_router_replay_scope()
         self._te_cuda_graph_dispatcher_replay_states = ()
         if (
             self.is_moe_layer
@@ -595,6 +605,41 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             raise RuntimeError(
                 "Partial TE HybridEP uneven-input padding requires a GPU-to-host maximum-token "
                 "read during metadata setup and is unsafe inside actual stream capture."
+            )
+
+    def _validate_te_cuda_graph_router_replay_scope(self) -> None:
+        """Reject graph scopes that cannot consume replay routes through one Tensor input."""
+
+        if (
+            not getattr(self, "is_moe_layer", False)
+            or not getattr(self.config, "moe_enable_routing_replay", False)
+            or self.config.cuda_graph_impl != "transformer_engine"
+        ):
+            return
+        if self.config.moe_router_fusion:
+            raise ValueError(
+                "router replay TE CUDA graph input does not support moe_router_fusion because "
+                "the fused route bypasses RouterReplay"
+            )
+        modules = frozenset(self.config.cuda_graph_modules)
+        router_owning = not modules or any(
+            module in modules
+            for module in (
+                CudaGraphModule.moe,
+                CudaGraphModule.moe_router,
+                CudaGraphModule.moe_preprocess,
+            )
+        )
+        if not router_owning:
+            return
+        supported_scopes = (
+            frozenset((CudaGraphModule.moe_router,)),
+            frozenset((CudaGraphModule.attn, CudaGraphModule.moe_router)),
+        )
+        if modules not in supported_scopes:
+            raise ValueError(
+                "router replay supports only the moe_router or attn+moe_router TE CUDA graph "
+                "scope; whole-MoE, moe_preprocess, and whole-layer scopes are unsupported"
             )
 
     def _record_te_cuda_graph_dispatcher_replay_state(
@@ -1224,6 +1269,20 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
         """
         static_inputs = super().get_layer_static_inputs(seq_length, micro_batch_size)
 
+        if self._te_cuda_graph_owns_router_replay_input():
+            slen_per_cp = seq_length // self.config.context_parallel_size
+            slen_per_cptp = (
+                slen_per_cp // self.config.tensor_model_parallel_size
+                if self.config.sequence_parallel
+                else slen_per_cp
+            )
+            local_tokens = micro_batch_size * slen_per_cptp
+            static_inputs[ROUTER_REPLAY_CUDA_GRAPH_INPUT_KWARG] = torch.arange(
+                self.config.moe_router_topk,
+                dtype=torch.long,
+                device=torch.cuda.current_device(),
+            ).expand(local_tokens, -1).clone()
+
         if getattr(self.config, "thd_max_packed_sequences", None) is not None:
             slen_per_cp = seq_length // self.config.context_parallel_size
             slen_per_cptp = (
@@ -1542,6 +1601,91 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             )
         )
 
+    def _te_cuda_graph_owns_router_replay_input(self) -> bool:
+        """Return whether this exact graph leaf owns replayed router decisions."""
+
+        if (
+            not getattr(self, "is_moe_layer", False)
+            or not getattr(self.config, "moe_enable_routing_replay", False)
+            or self.config.cuda_graph_impl != "transformer_engine"
+        ):
+            return False
+        modules = frozenset(self.config.cuda_graph_modules)
+        return modules in (
+            frozenset((CudaGraphModule.moe_router,)),
+            frozenset((CudaGraphModule.attn, CudaGraphModule.moe_router)),
+        )
+
+    def _router_replay_for_te_cuda_graph(self) -> RouterReplay:
+        """Return the graph-owned RouterReplay instance or fail closed."""
+
+        router = getattr(getattr(self, "mlp", None), "router", None)
+        router_replay = getattr(router, "router_replay", None)
+        if router_replay is None:
+            raise RuntimeError(
+                "router replay CUDA graph input requires a layer-local RouterReplay instance"
+            )
+        return router_replay
+
+    def _validate_te_cuda_graph_router_replay_input(
+        self,
+        indices: Tensor,
+        *,
+        hidden_states: Tensor | None = None,
+        padding_mask: Tensor | None = None,
+    ) -> RouterReplayCudaGraphInputSignature:
+        """Validate one dynamic route value against the captured physical contract."""
+
+        if hidden_states is None:
+            expected_tokens = indices.shape[0] if isinstance(indices, Tensor) else -1
+            input_device = indices.device if isinstance(indices, Tensor) else None
+        else:
+            if not isinstance(hidden_states, Tensor) or hidden_states.ndim < 2:
+                raise ValueError(
+                    "router replay CUDA graph hidden_states must have sequence and batch dimensions"
+                )
+            expected_tokens = hidden_states.shape[0] * hidden_states.shape[1]
+            input_device = hidden_states.device
+        if isinstance(indices, Tensor) and input_device is not None and indices.device != input_device:
+            raise ValueError(
+                "router replay CUDA graph input must be on the hidden_states device"
+            )
+        if padding_mask is None:
+            mask_device = indices.device if isinstance(indices, Tensor) else input_device
+            structural_padding_mask = torch.zeros(
+                expected_tokens, dtype=torch.bool, device=mask_device
+            )
+        else:
+            structural_padding_mask = padding_mask.reshape(-1)
+
+        signature = validate_router_replay_cuda_graph_input(
+            indices,
+            structural_padding_mask=structural_padding_mask,
+            expected_tokens=expected_tokens,
+            topk=self.config.moe_router_topk,
+            num_experts=self.config.num_moe_experts,
+        )
+        captured_signature = getattr(
+            self, "_te_cuda_graph_router_replay_input_signature", None
+        )
+        if captured_signature is not None and signature != captured_signature:
+            raise ValueError(
+                "router replay CUDA graph input signature differs from the active graph bank"
+            )
+        return signature
+
+    def _record_te_cuda_graph_router_replay_launch(
+        self, record: TECudaGraphLaunchRecord
+    ) -> None:
+        """Publish one post-success route-copy record without exposing static addresses."""
+
+        self._te_cuda_graph_router_replay_launch_record = record
+        router_replay = self._router_replay_for_te_cuda_graph()
+        router_replay.graph_input_launch_record = record
+        router_replay.graph_input_bank_id = record.bank_id
+        router_replay.graph_input_graph_index = record.graph_index
+        router_replay.graph_input_copy_generation = record.copy_generation
+
     def _set_te_cuda_graph_moe_packed_seq_params_static_metadata(
         self, static_metadata, tensor_kwargs=None
     ) -> None:
@@ -1789,6 +1933,19 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
            attribute can be set to control the scope of the CUDA graph.
         2. If context is None, it cannot be returned as output.
         """
+        router_replay_indices = kwargs.pop(ROUTER_REPLAY_CUDA_GRAPH_INPUT_KWARG, None)
+        owns_router_replay_input = self._te_cuda_graph_owns_router_replay_input()
+        if owns_router_replay_input:
+            if router_replay_indices is None:
+                raise RuntimeError("missing router replay CUDA graph input during capture")
+            graph_hidden_states = args[0] if args else kwargs.get("hidden_states")
+            self._validate_te_cuda_graph_router_replay_input(
+                router_replay_indices,
+                hidden_states=graph_hidden_states,
+                padding_mask=kwargs.get("padding_mask"),
+            )
+        elif router_replay_indices is not None:
+            raise ValueError("router replay CUDA graph input was provided to a non-owning scope")
         self._validate_te_cuda_graph_moe_packed_seq_params_kwargs(kwargs)
         capture_index = None
         capture_count = getattr(self, "_te_cuda_graph_capture_num_microbatches", None)
@@ -1842,9 +1999,18 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                 )
             )
         ):
-            hidden_states = self._forward_mlp(
-                hidden_states, padding_mask=padding_mask, packed_seq_params=packed_seq_params
-            )
+            if owns_router_replay_input:
+                router_replay = self._router_replay_for_te_cuda_graph()
+                with router_replay.use_cuda_graph_input(router_replay_indices):
+                    hidden_states = self._forward_mlp(
+                        hidden_states,
+                        padding_mask=padding_mask,
+                        packed_seq_params=packed_seq_params,
+                    )
+            else:
+                hidden_states = self._forward_mlp(
+                    hidden_states, padding_mask=padding_mask, packed_seq_params=packed_seq_params
+                )
             if (
                 capture_index is not None
                 and self.is_moe_layer
@@ -1875,6 +2041,17 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
         Hence, `inference_context` is excluded from input list. `packed_seq_params` is split
         into Tensor graph inputs and static metadata when attention is in the graph scope.
         """
+        router_replay_indices = None
+        if self._te_cuda_graph_owns_router_replay_input():
+            router_replay_indices = self._router_replay_for_te_cuda_graph().target_topk_idx
+            if router_replay_indices is None:
+                raise RuntimeError("missing router replay CUDA graph input for the current layer")
+            graph_hidden_states = args[0] if args else kwargs.get("hidden_states")
+            self._validate_te_cuda_graph_router_replay_input(
+                router_replay_indices,
+                hidden_states=graph_hidden_states,
+                padding_mask=kwargs.get("padding_mask"),
+            )
         self._validate_te_cuda_graph_moe_packed_seq_params_kwargs(kwargs)
         producer_packed_seq_params = kwargs.get("packed_seq_params")
         moe_graph_kwargs = {}
@@ -1921,6 +2098,11 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                     f"{sorted(duplicate_keys)}"
                 )
             kwargs.update(moe_graph_kwargs)
+
+        if router_replay_indices is not None:
+            if ROUTER_REPLAY_CUDA_GRAPH_INPUT_KWARG in kwargs:
+                raise ValueError("router replay CUDA graph input kwarg was supplied more than once")
+            kwargs[ROUTER_REPLAY_CUDA_GRAPH_INPUT_KWARG] = router_replay_indices
 
         assert kwargs.get('inference_context') is None, (
             "CUDA graph accepts only Tensor inputs. "

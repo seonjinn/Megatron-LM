@@ -16,6 +16,9 @@ if TYPE_CHECKING:
         MoECudaGraphReplayState,
         TensorReplaySignature,
     )
+    from megatron.core.transformer.moe.router_replay import (
+        RouterReplayCudaGraphInputSignature,
+    )
 
 
 _PACKED_REPLAY_ATTRIBUTES = (
@@ -27,6 +30,9 @@ _PACKED_REPLAY_ATTRIBUTES = (
     "_te_cuda_graph_moe_packed_seq_params_tensor_signatures",
 )
 _PADDING_MASK_SIGNATURE_ATTRIBUTE = "_te_cuda_graph_padding_mask_signature"
+_ROUTER_REPLAY_INPUT_SIGNATURE_ATTRIBUTE = (
+    "_te_cuda_graph_router_replay_input_signature"
+)
 _DISPATCHER_STATES_ATTRIBUTE = "_te_cuda_graph_dispatcher_replay_states"
 _EXECUTION_COUNTER_ATTRIBUTE = "_te_cuda_graph_execution_counter"
 
@@ -73,6 +79,9 @@ class TECudaGraphBankFingerprint:
     cuda_graph_modules: tuple[str, ...]
     packed_input_signatures: tuple[tuple[int, tuple[object, ...]], ...]
     padding_mask_signatures: tuple[tuple[int, TensorReplaySignature | None], ...]
+    router_replay_input_signatures: tuple[
+        tuple[int, RouterReplayCudaGraphInputSignature | None], ...
+    ]
     moe_attribute_schema: tuple[tuple[int, tuple[str, ...]], ...]
     dispatcher_state_signatures: tuple[tuple[int, tuple[MoECudaGraphReplayState | None, ...]], ...]
 
@@ -84,6 +93,15 @@ class TECudaGraphExecutionCounterSnapshot:
     eligible_calls: int
     graph_calls: int
     _owner: object = field(repr=False)
+
+
+@dataclass(frozen=True)
+class TECudaGraphLaunchRecord:
+    """Identify one successful graph launch without exposing TE-owned buffers."""
+
+    bank_id: int
+    graph_index: int
+    copy_generation: int
 
 
 class _TECudaGraphExecutionCounter:
@@ -109,6 +127,7 @@ class _LayerReplayContract:
     manual_hooks: object
     packed_attributes: tuple[tuple[str, bool, object], ...]
     padding_mask_signature: TensorReplaySignature | None
+    router_replay_input_signature: RouterReplayCudaGraphInputSignature | None
     dispatcher_states: tuple[MoECudaGraphReplayState | None, ...]
 
 
@@ -119,6 +138,8 @@ class _LayerInstallation:
     packed_attributes: tuple[tuple[str, bool, object], ...]
     padding_mask_signature_present: bool
     padding_mask_signature: object
+    router_replay_input_signature_present: bool
+    router_replay_input_signature: object
     dispatcher_states_present: bool
     dispatcher_states: object
     replay_guard_present: bool
@@ -214,6 +235,43 @@ def _validate_and_record_te_cuda_graph_launch(
         )
 
 
+def _record_te_cuda_graph_launch_success(
+    layer: object, installed_graph_list: list[object], selected_index: int
+) -> TECudaGraphLaunchRecord:
+    """Record a successful launch after revalidating its exact bank ownership."""
+
+    replay_guard = getattr(layer, "_te_cuda_graph_bank_replay_guard", None)
+    execution_counter = getattr(layer, _EXECUTION_COUNTER_ATTRIBUTE, None)
+    if (
+        type(replay_guard) is not _BankReplayGuard
+        or type(execution_counter) is not _TECudaGraphExecutionCounter
+    ):
+        raise RuntimeError(
+            "TE CUDA graph launch success requires its exact bank guard and execution counter"
+        )
+    manager = replay_guard._manager
+    if type(manager) is not TECudaGraphBankManager:
+        raise RuntimeError("TE CUDA graph launch success requires its exact graph bank manager")
+    record = TECudaGraphBankManager._record_graph_launch_success(
+        manager,
+        replay_guard._bank,
+        replay_guard,
+        layer,
+        installed_graph_list,
+        selected_index,
+        execution_counter,
+    )
+    layer._te_cuda_graph_last_launch_record = record
+    record_router_launch = getattr(
+        layer, "_record_te_cuda_graph_router_replay_launch", None
+    )
+    if callable(record_router_launch) and getattr(
+        layer, _ROUTER_REPLAY_INPUT_SIGNATURE_ATTRIBUTE, None
+    ) is not None:
+        record_router_launch(record)
+    return record
+
+
 @dataclass(eq=False)
 class TECudaGraphBank:
     """One terminally-owned set of TE graph callables for a schedule geometry."""
@@ -268,6 +326,7 @@ class TECudaGraphBankManager:
         self._terminal_banks: WeakSet[TECudaGraphBank] = WeakSet()
         self.active_bank: TECudaGraphBank | None = None
         self._execution_counter = _TECudaGraphExecutionCounter(self)
+        self._copy_generation = 0
         self._execution_counter_closed = False
         self._attach_execution_counter()
 
@@ -408,6 +467,10 @@ class TECudaGraphBankManager:
                     (id(layer), contract.padding_mask_signature)
                     for layer, contract in zip(self.layers, contracts)
                 ),
+                router_replay_input_signatures=tuple(
+                    (id(layer), contract.router_replay_input_signature)
+                    for layer, contract in zip(self.layers, contracts)
+                ),
                 moe_attribute_schema=self._moe_attribute_schema(require_tensors=True),
                 dispatcher_state_signatures=tuple(
                     (id(layer), contract.dispatcher_states)
@@ -536,6 +599,7 @@ class TECudaGraphBankManager:
                 manual_hooks=layer.cuda_graph_manual_hooks,
                 packed_attributes=contract.packed_attributes,
                 padding_mask_signature=contract.padding_mask_signature,
+                router_replay_input_signature=contract.router_replay_input_signature,
                 dispatcher_states=contract.dispatcher_states,
             )
             for layer, contract in zip(self.layers, registration.contracts)
@@ -625,6 +689,31 @@ class TECudaGraphBankManager:
             self, bank, replay_guard, layer, installed_graph_list, selected_index, counter
         )
         _TECudaGraphExecutionCounter.record_graph_call(self._execution_counter)
+
+    def _record_graph_launch_success(
+        self,
+        bank: TECudaGraphBank,
+        replay_guard: _BankReplayGuard,
+        layer: object,
+        installed_graph_list: list[object],
+        selected_index: int,
+        counter: object,
+    ) -> TECudaGraphLaunchRecord:
+        TECudaGraphBankManager._validate_graph_call(
+            self,
+            bank,
+            replay_guard,
+            layer,
+            installed_graph_list,
+            selected_index,
+            counter,
+        )
+        self._copy_generation += 1
+        return TECudaGraphLaunchRecord(
+            bank_id=id(bank),
+            graph_index=selected_index,
+            copy_generation=self._copy_generation,
+        )
 
     def _validate_graph_call(
         self,
@@ -801,6 +890,12 @@ class TECudaGraphBankManager:
         )
         if fingerprint.padding_mask_signatures != padding:
             raise ValueError("padding_mask_signatures differ from bank contracts")
+        router_replay = tuple(
+            (id(layer), contract.router_replay_input_signature)
+            for layer, contract in zip(self.layers, contracts)
+        )
+        if fingerprint.router_replay_input_signatures != router_replay:
+            raise ValueError("router_replay_input_signatures differ from bank contracts")
         if fingerprint.moe_attribute_schema != self._moe_attribute_schema(require_tensors=False):
             raise ValueError("moe_attribute_schema differs from the current ordered schema")
         dispatcher = tuple(
@@ -876,6 +971,12 @@ class TECudaGraphBankManager:
                         layer, _PADDING_MASK_SIGNATURE_ATTRIBUTE
                     ),
                     padding_mask_signature=getattr(layer, _PADDING_MASK_SIGNATURE_ATTRIBUTE, None),
+                    router_replay_input_signature_present=hasattr(
+                        layer, _ROUTER_REPLAY_INPUT_SIGNATURE_ATTRIBUTE
+                    ),
+                    router_replay_input_signature=getattr(
+                        layer, _ROUTER_REPLAY_INPUT_SIGNATURE_ATTRIBUTE, None
+                    ),
                     dispatcher_states_present=hasattr(layer, _DISPATCHER_STATES_ATTRIBUTE),
                     dispatcher_states=getattr(layer, _DISPATCHER_STATES_ATTRIBUTE, None),
                     replay_guard_present=hasattr(layer, "_te_cuda_graph_bank_replay_guard"),
@@ -894,6 +995,12 @@ class TECudaGraphBankManager:
                 _PADDING_MASK_SIGNATURE_ATTRIBUTE,
                 installation.padding_mask_signature_present,
                 installation.padding_mask_signature,
+            )
+            self._restore_optional_attribute(
+                layer,
+                _ROUTER_REPLAY_INPUT_SIGNATURE_ATTRIBUTE,
+                installation.router_replay_input_signature_present,
+                installation.router_replay_input_signature,
             )
             self._restore_optional_attribute(
                 layer,
@@ -944,6 +1051,9 @@ class TECudaGraphBankManager:
             manual_hooks=manual_hooks,
             packed_attributes=self._snapshot_packed_attributes(layer),
             padding_mask_signature=getattr(layer, _PADDING_MASK_SIGNATURE_ATTRIBUTE, None),
+            router_replay_input_signature=getattr(
+                layer, _ROUTER_REPLAY_INPUT_SIGNATURE_ATTRIBUTE, None
+            ),
             dispatcher_states=dispatcher_states,
         )
 
@@ -972,7 +1082,11 @@ class TECudaGraphBankManager:
 
     @staticmethod
     def _clear_replay_contract(layer: object) -> None:
-        for attribute in (*_PACKED_REPLAY_ATTRIBUTES, _PADDING_MASK_SIGNATURE_ATTRIBUTE):
+        for attribute in (
+            *_PACKED_REPLAY_ATTRIBUTES,
+            _PADDING_MASK_SIGNATURE_ATTRIBUTE,
+            _ROUTER_REPLAY_INPUT_SIGNATURE_ATTRIBUTE,
+        ):
             if hasattr(layer, attribute):
                 delattr(layer, attribute)
         if hasattr(layer, _DISPATCHER_STATES_ATTRIBUTE):
@@ -1058,6 +1172,12 @@ class TECudaGraphBankManager:
                 _PADDING_MASK_SIGNATURE_ATTRIBUTE,
                 contract.padding_mask_signature is not None,
                 contract.padding_mask_signature,
+            )
+            self._restore_optional_attribute(
+                layer,
+                _ROUTER_REPLAY_INPUT_SIGNATURE_ATTRIBUTE,
+                contract.router_replay_input_signature is not None,
+                contract.router_replay_input_signature,
             )
             if hasattr(layer, _DISPATCHER_STATES_ATTRIBUTE) or any(
                 state is not None for state in contract.dispatcher_states

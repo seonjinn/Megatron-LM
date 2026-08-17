@@ -34,6 +34,9 @@ from megatron.core.tensor_parallel.random import (
 )
 from megatron.core.transformer.enums import CudaGraphModule
 from megatron.core.transformer.module import GraphableMegatronModule, MegatronModule
+from megatron.core.transformer.moe.router_replay import (
+    ROUTER_REPLAY_CUDA_GRAPH_INPUT_KWARG,
+)
 from megatron.core.transformer.te_cuda_graph_bank import (
     TECudaGraphBank,
     TECudaGraphBankManager,
@@ -2173,6 +2176,39 @@ def _add_packed_seq_params_to_te_cuda_graph_sample_kwargs(
     sample_kwargs.update(tensor_kwargs)
 
 
+def _record_router_replay_te_cuda_graph_sample_contract(
+    layer: object, static_inputs: Dict[str, torch.Tensor]
+) -> None:
+    """Bind one graph-owned route signature without including its dynamic values."""
+
+    owns_router_input = getattr(layer, "_te_cuda_graph_owns_router_replay_input", None)
+    owns_router_input = callable(owns_router_input) and owns_router_input()
+    route_input = static_inputs.get(ROUTER_REPLAY_CUDA_GRAPH_INPUT_KWARG)
+    if not owns_router_input:
+        if route_input is not None:
+            raise ValueError("A non-owning TE CUDA graph leaf exposed a router replay input")
+        return
+    if route_input is None:
+        raise RuntimeError("A graph-owned router replay input is missing from static inputs")
+    if not is_te_min_version("1.10.0"):
+        raise RuntimeError(
+            "router replay CUDA graph input requires Transformer Engine >= 1.10.0"
+        )
+    signature = layer._validate_te_cuda_graph_router_replay_input(
+        route_input,
+        hidden_states=static_inputs.get("hidden_states"),
+        padding_mask=static_inputs.get("padding_mask"),
+    )
+    previous_signature = getattr(
+        layer, "_te_cuda_graph_router_replay_input_signature", signature
+    )
+    if previous_signature != signature:
+        raise ValueError(
+            "One TE CUDA graph bank requires one exact per-layer router replay input surface"
+        )
+    layer._te_cuda_graph_router_replay_input_signature = signature
+
+
 def _te_descriptor_owns_moe_packed_seq_params(
     descriptor: _GraphableTELayerDescriptor, config: TransformerConfig
 ) -> bool:
@@ -2556,6 +2592,7 @@ class TECudaGraphHelper:
                 static_inputs = layer.get_layer_static_inputs(
                     self.seq_length, self.micro_batch_size
                 )
+            _record_router_replay_te_cuda_graph_sample_contract(layer, static_inputs)
             if "padding_mask" in static_inputs:
                 padding_mask_signature = tensor_signature(static_inputs["padding_mask"])
                 previous_signature = getattr(
