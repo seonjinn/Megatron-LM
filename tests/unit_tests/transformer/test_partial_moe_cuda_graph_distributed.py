@@ -6,6 +6,7 @@ import gc
 import os
 import traceback
 from dataclasses import dataclass, replace
+from enum import Enum
 from pathlib import Path
 from types import MethodType
 
@@ -29,6 +30,7 @@ from megatron.core.tensor_parallel.random import (
 from megatron.core.transformer.cuda_graphs import TECudaGraphHelper
 from megatron.core.transformer.enums import CudaGraphModule
 from megatron.core.transformer.identity_op import IdentityFuncOp, IdentityOp
+from megatron.core.transformer.module import GraphableMegatronModule
 from megatron.core.transformer.moe.capacity_tracker import (
     destroy_moe_capacity_tracker,
     get_moe_capacity_tracker,
@@ -47,6 +49,7 @@ from megatron.core.transformer.moe.token_dispatcher import (
     MoEAlltoAllTokenDispatcher,
     MoEFlexTokenDispatcher,
 )
+from megatron.core.transformer.te_cuda_graph_bank import TECudaGraphLaunchRecord
 from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.transformer.transformer_layer import (
     MoETransformerLayer,
@@ -64,9 +67,7 @@ HIDDEN_SIZE = 32
 SEQUENCE_LENGTH = 16
 MICRO_BATCH_SIZE = 1
 DISABLE_NANO_SHARED_EXPERT_ENV = "MCORE_TEST_DISABLE_NANO_SHARED_EXPERT"
-IDENTITY_NANO_PRE_MLP_LAYERNORM_ENV = (
-    "MCORE_TEST_IDENTITY_NANO_PRE_MLP_LAYERNORM"
-)
+IDENTITY_NANO_PRE_MLP_LAYERNORM_ENV = "MCORE_TEST_IDENTITY_NANO_PRE_MLP_LAYERNORM"
 NANO_TP1_ENV = "MCORE_TEST_NANO_TP1"
 DISABLE_ROUTER_TE_GENERAL_GEMM_ENV = "MCORE_TEST_DISABLE_ROUTER_TE_GENERAL_GEMM"
 USE_AUTOGRAD_ROUTER_LINEAR_ENV = "MCORE_TEST_USE_AUTOGRAD_ROUTER_LINEAR"
@@ -84,6 +85,24 @@ DETACH_HYBRIDEP_TOKEN_PROBS_BEFORE_CAPTURE_ENV = (
 )
 DETACH_HYBRIDEP_DISPATCHED_PROBS_BEFORE_CAPTURE_ENV = (
     "MCORE_TEST_DETACH_HYBRIDEP_DISPATCHED_PROBS_BEFORE_CAPTURE"
+)
+DIAGNOSTIC_ENVS = (
+    DISABLE_NANO_SHARED_EXPERT_ENV,
+    IDENTITY_NANO_PRE_MLP_LAYERNORM_ENV,
+    NANO_TP1_ENV,
+    DISABLE_ROUTER_TE_GENERAL_GEMM_ENV,
+    USE_AUTOGRAD_ROUTER_LINEAR_ENV,
+    NANO_CG_SUBMODULE_ENV,
+    CAPTURE_ONLY_ENV,
+    ZERO_GRAD_BEFORE_CAPTURE_ENV,
+    SKIP_MODEL_WARMUP_ENV,
+    RELEASE_WARMUP_GRAPH_ENV,
+    RESET_HYBRIDEP_BEFORE_CAPTURE_ENV,
+    FORWARD_ONLY_MODEL_WARMUP_ENV,
+    LINEAR_MODEL_WARMUP_ENV,
+    HYBRIDEP_MODEL_WARMUP_STAGE_ENV,
+    DETACH_HYBRIDEP_TOKEN_PROBS_BEFORE_CAPTURE_ENV,
+    DETACH_HYBRIDEP_DISPATCHED_PROBS_BEFORE_CAPTURE_ENV,
 )
 
 
@@ -115,6 +134,7 @@ class _TopologyCase:
     layer_type: type[TransformerLayer]
     has_shared_expert: bool
     moe_latent_size: int | None = None
+    router_replay: bool = False
 
 
 CASES = (
@@ -183,12 +203,42 @@ CASES = (
     ),
 )
 
+R3_ROUTER_GRAPH_CASE = _TopologyCase(
+    row_id="dropless_hybridep_nano16_r3_router_graph",
+    world_size=16,
+    tensor_parallel_size=2,
+    pipeline_parallel_size=2,
+    context_parallel_size=2,
+    expert_parallel_size=8,
+    num_experts=8,
+    router_topk=6,
+    dispatcher="hybridep",
+    cuda_graph_modules=(CudaGraphModule.moe_router,),
+    layer_type=MoETransformerLayer,
+    has_shared_expert=True,
+    router_replay=True,
+)
+
+
+class _R3RouteFailure(Enum):
+    MISSING = "missing"
+    DUPLICATE = "duplicate"
+    OUT_OF_RANGE = "out-of-range"
+    WRONG_TOKEN_CAPACITY = "wrong-token-capacity"
+
 
 @dataclass(frozen=True)
 class _RouteSnapshot:
     probabilities: torch.Tensor
     expert_ids: torch.Tensor
     expert_counts: torch.Tensor
+
+
+@dataclass(frozen=True)
+class _GraphCounters:
+    eligible_calls: int
+    graph_calls: int
+    fallback_count: int
 
 
 class _Decoder(torch.nn.Module):
@@ -265,6 +315,7 @@ def _make_config(case: _TopologyCase, *, graph: bool) -> TransformerConfig:
         moe_router_load_balancing_type="none",
         moe_aux_loss_coeff=0.0,
         moe_z_loss_coeff=0.0,
+        moe_enable_routing_replay=case.router_replay,
         moe_expert_capacity_factor=None,
         moe_expert_rank_capacity_factor=None,
         moe_pad_expert_input_to_capacity=False,
@@ -497,6 +548,80 @@ def _set_deterministic_router(model: _PartialMoEModel, case: _TopologyCase) -> N
             weight[expert, expert] = 4.0
 
 
+def _make_r3_route_indices(
+    hidden_states: torch.Tensor,
+    padding_mask: torch.Tensor,
+    case: _TopologyCase,
+    replay: int,
+) -> torch.Tensor:
+    assert case.router_replay
+    flat_hidden_states = hidden_states.reshape(-1, hidden_states.shape[-1])
+    token_identity = flat_hidden_states[:, : case.num_experts].argmax(dim=-1)
+    stride = (1, 3, 5, 7)[replay % 4]
+    offset = replay // 4
+    slots = torch.arange(
+        case.router_topk,
+        dtype=torch.long,
+        device=hidden_states.device,
+    )
+    route_indices = (
+        token_identity[:, None] + offset + stride * slots[None, :]
+    ) % case.num_experts
+    structural_padding = padding_mask.reshape(-1)
+    route_indices[structural_padding] = slots
+    return route_indices.contiguous()
+
+
+def _forward_with_r3_routes(
+    model: _PartialMoEModel,
+    hidden_states: torch.Tensor,
+    *,
+    padding_mask: torch.Tensor,
+    packed_seq_params: PackedSeqParams,
+    route_indices: torch.Tensor | None,
+    graph: bool,
+) -> torch.Tensor:
+    if route_indices is None:
+        return model(
+            hidden_states,
+            padding_mask=padding_mask,
+            packed_seq_params=packed_seq_params,
+        )
+    router_replay = model.layer.mlp.router.router_replay
+    if graph:
+        router_replay.target_topk_idx = route_indices
+        return model(
+            hidden_states,
+            padding_mask=padding_mask,
+            packed_seq_params=packed_seq_params,
+        )
+    with router_replay.use_cuda_graph_input(route_indices):
+        return model(
+            hidden_states,
+            padding_mask=padding_mask,
+            packed_seq_params=packed_seq_params,
+        )
+
+
+def _invalid_r3_route_indices(
+    valid: torch.Tensor,
+    failure: _R3RouteFailure,
+    case: _TopologyCase,
+) -> tuple[torch.Tensor, str]:
+    invalid = valid.clone()
+    if failure is _R3RouteFailure.MISSING:
+        invalid[0, 0] = -1
+        return invalid, "missing-route sentinel"
+    if failure is _R3RouteFailure.DUPLICATE:
+        invalid[0, 1] = invalid[0, 0]
+        return invalid, "duplicate experts"
+    if failure is _R3RouteFailure.OUT_OF_RANGE:
+        invalid[0, 0] = case.num_experts
+        return invalid, "outside the expert range"
+    assert failure is _R3RouteFailure.WRONG_TOKEN_CAPACITY
+    return invalid[:-1].contiguous(), "indices shape"
+
+
 def _route_snapshot(model: _PartialMoEModel) -> _RouteSnapshot:
     dispatcher = model.layer.mlp.token_dispatcher
     if isinstance(dispatcher, MoEAlltoAllTokenDispatcher):
@@ -541,8 +666,10 @@ def _abort_all_process_groups() -> None:
 
 def _write_failure_trace(global_rank: int, error: BaseException) -> None:
     trace_root = Path(os.environ.get("RUN_LOG_ROOT", "/tmp"))
-    trace_dir = trace_root / "mcore-distributed-failure-traces" / os.environ.get(
-        "SLURM_JOB_ID", "local"
+    trace_dir = (
+        trace_root
+        / "mcore-distributed-failure-traces"
+        / os.environ.get("SLURM_JOB_ID", "local")
     )
     trace_dir.mkdir(parents=True, exist_ok=True)
     trace_path = trace_dir / f"rank-{global_rank}.log"
@@ -689,9 +816,25 @@ def _assert_structural_padding_is_zero(
     assert snapshot.expert_ids[padding_tokens].eq(-1).all()
 
 
-@pytest.mark.internal
-@pytest.mark.parametrize("case", CASES, ids=lambda case: case.row_id)
-def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> None:
+def _run_dropless_partial_moe_cuda_graph_distributed(
+    case: _TopologyCase,
+    *,
+    invalid_route_failure: _R3RouteFailure | None = None,
+    monkeypatch: pytest.MonkeyPatch | None = None,
+) -> None:
+    if invalid_route_failure is not None:
+        assert case.router_replay
+        assert monkeypatch is not None
+    if case.router_replay:
+        ambient_diagnostics = tuple(
+            name for name in DIAGNOSTIC_ENVS if os.environ.get(name) is not None
+        )
+        if ambient_diagnostics:
+            pytest.fail(
+                "the typed R3 router graph row forbids ambient diagnostic flags: "
+                f"{ambient_diagnostics}",
+                pytrace=False,
+            )
     if os.environ.get(DISABLE_NANO_SHARED_EXPERT_ENV) == "1":
         if case.row_id != "dropless_hybridep_nano16":
             pytest.fail(
@@ -780,8 +923,7 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
         if selected_submodule is not None:
             if case.row_id != "dropless_hybridep_nano16":
                 pytest.fail(
-                    f"{NANO_CG_SUBMODULE_ENV} only supports "
-                    "dropless_hybridep_nano16",
+                    f"{NANO_CG_SUBMODULE_ENV} only supports dropless_hybridep_nano16",
                     pytrace=False,
                 )
             if selected_submodule == "router":
@@ -871,10 +1013,24 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
             else:
                 graph_model.zero_grad(set_to_none=True)
                 capacity_tracker.reset()
-                output = graph_model(
-                    route_inputs[warmup % 2],
+                warmup_hidden_states = route_inputs[warmup % 2]
+                warmup_route_indices = (
+                    _make_r3_route_indices(
+                        warmup_hidden_states,
+                        padding_mask,
+                        case,
+                        warmup,
+                    )
+                    if case.router_replay
+                    else None
+                )
+                output = _forward_with_r3_routes(
+                    graph_model,
+                    warmup_hidden_states,
                     padding_mask=padding_mask,
                     packed_seq_params=packed_seq_params,
+                    route_indices=warmup_route_indices,
+                    graph=False,
                 )
             if os.environ.get(FORWARD_ONLY_MODEL_WARMUP_ENV) != "1":
                 output.float().square().mean().backward()
@@ -897,7 +1053,10 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
                 manager = graph_model.layer.mlp.token_dispatcher._comm_manager
                 assert manager.token_probs is not None
                 manager.token_probs = manager.token_probs.detach()
-            if os.environ.get(DETACH_HYBRIDEP_DISPATCHED_PROBS_BEFORE_CAPTURE_ENV) == "1":
+            if (
+                os.environ.get(DETACH_HYBRIDEP_DISPATCHED_PROBS_BEFORE_CAPTURE_ENV)
+                == "1"
+            ):
                 if hybridep_warmup_stage != "dispatch_combine":
                     pytest.fail(
                         f"{DETACH_HYBRIDEP_DISPATCHED_PROBS_BEFORE_CAPTURE_ENV}=1 "
@@ -930,6 +1089,9 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
         )
         helper.create_cudagraphs()
         assert helper.graphs_created()
+        if case.router_replay:
+            assert model_warmups == CAPTURE_WARMUPS
+            assert len(graph_model.layer.cuda_graphs) == 1
         if os.environ.get(CAPTURE_ONLY_ENV) == "1":
             return
         assert helper._compatibility_bank_manager is not None
@@ -941,6 +1103,48 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
             _assert_replay_geometry(case, states[0], route_inputs[0])
         else:
             assert all(state is None for state in states)
+
+        if invalid_route_failure is not None:
+            assert monkeypatch is not None
+            graph_calls = 0
+            graph_replay = GraphableMegatronModule._te_cuda_graph_replay
+
+            def graph_call_spy(
+                module: GraphableMegatronModule,
+                *args: object,
+                **kwargs: object,
+            ) -> object:
+                nonlocal graph_calls
+                graph_calls += 1
+                return graph_replay(module, *args, **kwargs)
+
+            monkeypatch.setattr(
+                GraphableMegatronModule,
+                "_te_cuda_graph_replay",
+                graph_call_spy,
+            )
+            valid_route_indices = _make_r3_route_indices(
+                route_inputs[0], padding_mask, case, 0
+            )
+            invalid_route_indices, error_match = _invalid_r3_route_indices(
+                valid_route_indices,
+                invalid_route_failure,
+                case,
+            )
+            graph_model.layer.mlp.router.router_replay.target_topk_idx = (
+                invalid_route_indices
+            )
+            with pytest.raises(ValueError, match=error_match):
+                graph_model(
+                    route_inputs[0],
+                    padding_mask=padding_mask,
+                    packed_seq_params=packed_seq_params,
+                )
+            counter_delta = manager.execution_counter_delta(counter_start)
+            assert graph_calls == 0
+            assert counter_delta.eligible_calls == 0
+            assert counter_delta.graph_calls == 0
+            return
 
         mlp = graph_model.layer.mlp
         dispatcher = mlp.token_dispatcher
@@ -955,6 +1159,8 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
 
         observed_routes: dict[int, torch.Tensor] = {}
         route_history: list[torch.Tensor] = []
+        route_input_history: list[torch.Tensor] = []
+        graph_launch_records: list[TECudaGraphLaunchRecord] = []
         valid_tokens = ~padding_mask.reshape(-1)
         logical_tokens = SEQUENCE_LENGTH - 2 * case.context_parallel_size
         last_fixed_reduced_gradients: dict[str, torch.Tensor] | None = None
@@ -970,13 +1176,54 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
             graph_hidden_states = (
                 route_inputs[route_index].detach().clone().requires_grad_(True)
             )
+            compact_route_indices = (
+                _make_r3_route_indices(
+                    compact_hidden_states,
+                    compact_padding_mask,
+                    case,
+                    replay,
+                )
+                if case.router_replay
+                else None
+            )
+            fixed_route_indices = (
+                _make_r3_route_indices(
+                    fixed_hidden_states,
+                    padding_mask,
+                    case,
+                    replay,
+                )
+                if case.router_replay
+                else None
+            )
+            graph_route_indices = (
+                _make_r3_route_indices(
+                    graph_hidden_states,
+                    padding_mask,
+                    case,
+                    replay,
+                )
+                if case.router_replay
+                else None
+            )
+            if case.router_replay:
+                assert fixed_route_indices is not None
+                assert graph_route_indices is not None
+                assert fixed_route_indices.shape == graph_route_indices.shape
+                assert fixed_route_indices.dtype == graph_route_indices.dtype
+                assert fixed_route_indices.stride() == graph_route_indices.stride()
+                assert torch.equal(fixed_route_indices, graph_route_indices)
+                route_input_history.append(graph_route_indices.detach().clone())
 
             eager_model.zero_grad(set_to_none=True)
             capacity_tracker.reset()
-            compact_output = eager_model(
+            compact_output = _forward_with_r3_routes(
+                eager_model,
                 compact_hidden_states,
                 padding_mask=compact_padding_mask,
                 packed_seq_params=compact_packed_seq_params,
+                route_indices=compact_route_indices,
+                graph=False,
             )
             compact_routes = _route_snapshot(eager_model)
             compact_flat_output = compact_output.reshape(-1, HIDDEN_SIZE)
@@ -991,10 +1238,13 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
 
             eager_model.zero_grad(set_to_none=True)
             capacity_tracker.reset()
-            fixed_output = eager_model(
+            fixed_output = _forward_with_r3_routes(
+                eager_model,
                 fixed_hidden_states,
                 padding_mask=padding_mask,
                 packed_seq_params=packed_seq_params,
+                route_indices=fixed_route_indices,
+                graph=False,
             )
             fixed_routes = _route_snapshot(eager_model)
             fixed_flat_output = fixed_output.reshape(-1, HIDDEN_SIZE)
@@ -1010,11 +1260,20 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
 
             graph_model.zero_grad(set_to_none=True)
             capacity_tracker.reset()
-            graph_output = graph_model(
+            graph_output = _forward_with_r3_routes(
+                graph_model,
                 graph_hidden_states,
                 padding_mask=padding_mask,
                 packed_seq_params=packed_seq_params,
+                route_indices=graph_route_indices,
+                graph=case.router_replay,
             )
+            if case.router_replay:
+                launch_record = (
+                    graph_model.layer._te_cuda_graph_router_replay_launch_record
+                )
+                assert isinstance(launch_record, TECudaGraphLaunchRecord)
+                graph_launch_records.append(launch_record)
             graph_routes = _route_snapshot(graph_model)
             graph_flat_output = graph_output.reshape(-1, HIDDEN_SIZE)
             graph_valid_output = graph_flat_output[valid_tokens]
@@ -1112,8 +1371,37 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
             last_fixed_reduced_gradients = fixed_reduced_gradients
             last_graph_reduced_gradients = graph_reduced_gradients
 
-        assert not torch.equal(observed_routes[0], observed_routes[1])
-        assert torch.equal(route_history[0], route_history[2])
+        if case.router_replay:
+            assert len(route_input_history) == CHANGED_ROUTE_REPLAYS
+            assert all(
+                route.shape == route_input_history[0].shape
+                and route.dtype == route_input_history[0].dtype
+                and route.device == route_input_history[0].device
+                and route.stride() == route_input_history[0].stride()
+                for route in route_input_history
+            )
+            assert all(
+                not torch.equal(first, second)
+                for index, first in enumerate(route_input_history)
+                for second in route_input_history[index + 1 :]
+            )
+            assert len(graph_launch_records) == CHANGED_ROUTE_REPLAYS
+            assert all(
+                record.bank_id == graph_launch_records[0].bank_id
+                and record.graph_index == graph_launch_records[0].graph_index
+                for record in graph_launch_records
+            )
+            assert all(
+                current.copy_generation == previous.copy_generation + 1
+                for previous, current in zip(
+                    graph_launch_records,
+                    graph_launch_records[1:],
+                    strict=False,
+                )
+            )
+        else:
+            assert not torch.equal(observed_routes[0], observed_routes[1])
+            assert torch.equal(route_history[0], route_history[2])
         assert last_fixed_reduced_gradients is not None
         assert last_graph_reduced_gradients is not None
         eager_parameters = dict(eager_model.named_parameters())
@@ -1130,9 +1418,16 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
                 graph_parameter.add_(graph_delta.to(graph_parameter.dtype))
                 _assert_tensor_parity(graph_parameter, eager_parameter)
         counter_delta = manager.execution_counter_delta(counter_start)
-        assert counter_delta.eligible_calls == CHANGED_ROUTE_REPLAYS
-        assert counter_delta.graph_calls == CHANGED_ROUTE_REPLAYS
-        assert counter_delta.graph_calls > 0
+        graph_counters = _GraphCounters(
+            eligible_calls=counter_delta.eligible_calls,
+            graph_calls=counter_delta.graph_calls,
+            fallback_count=counter_delta.eligible_calls - counter_delta.graph_calls,
+        )
+        assert graph_counters.eligible_calls == CHANGED_ROUTE_REPLAYS
+        assert graph_counters.graph_calls == CHANGED_ROUTE_REPLAYS
+        assert graph_counters.fallback_count == 0
+        assert graph_counters.graph_calls == graph_counters.eligible_calls
+        assert graph_counters.graph_calls > 0
         assert counters == {
             "router": 0,
             "preprocess": (
@@ -1173,3 +1468,39 @@ def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> Non
             os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = (
                 previous_async_error_handling
             )
+
+
+@pytest.mark.internal
+@pytest.mark.parametrize("case", CASES, ids=lambda case: case.row_id)
+def test_dropless_partial_moe_cuda_graph_distributed(case: _TopologyCase) -> None:
+    _run_dropless_partial_moe_cuda_graph_distributed(case)
+
+
+@pytest.mark.internal
+@pytest.mark.parametrize(
+    "has_shared_expert",
+    (True, False),
+    ids=("shared-expert-on", "shared-expert-off"),
+)
+def test_dropless_hybridep_nano16_r3_router_graph(
+    has_shared_expert: bool,
+) -> None:
+    case = replace(R3_ROUTER_GRAPH_CASE, has_shared_expert=has_shared_expert)
+    _run_dropless_partial_moe_cuda_graph_distributed(case)
+
+
+@pytest.mark.internal
+@pytest.mark.parametrize(
+    "invalid_route_failure",
+    tuple(_R3RouteFailure),
+    ids=lambda failure: failure.value,
+)
+def test_dropless_hybridep_nano16_r3_router_graph_rejects_invalid_route(
+    invalid_route_failure: _R3RouteFailure,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _run_dropless_partial_moe_cuda_graph_distributed(
+        R3_ROUTER_GRAPH_CASE,
+        invalid_route_failure=invalid_route_failure,
+        monkeypatch=monkeypatch,
+    )
