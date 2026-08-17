@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gc
+import itertools
 import os
 import traceback
 from dataclasses import dataclass, replace
@@ -556,20 +557,42 @@ def _make_r3_route_indices(
 ) -> torch.Tensor:
     assert case.router_replay
     flat_hidden_states = hidden_states.reshape(-1, hidden_states.shape[-1])
-    token_identity = flat_hidden_states[:, : case.num_experts].argmax(dim=-1)
-    stride = (1, 3, 5, 7)[replay % 4]
-    offset = replay // 4
-    slots = torch.arange(
+    route_patterns = tuple(
+        itertools.combinations(range(case.num_experts), case.router_topk)
+    )
+    route_pattern = torch.tensor(
+        route_patterns[replay % len(route_patterns)],
+        dtype=torch.long,
+        device=hidden_states.device,
+    )
+    route_indices = route_pattern.expand(flat_hidden_states.shape[0], -1).clone()
+    structural_padding = padding_mask.reshape(-1)
+    route_indices[structural_padding] = torch.arange(
         case.router_topk,
         dtype=torch.long,
         device=hidden_states.device,
     )
-    route_indices = (
-        token_identity[:, None] + offset + stride * slots[None, :]
-    ) % case.num_experts
-    structural_padding = padding_mask.reshape(-1)
-    route_indices[structural_padding] = slots
     return route_indices.contiguous()
+
+
+def _expected_route_expert_ids(
+    route_indices: torch.Tensor,
+    padding_mask: torch.Tensor,
+    num_experts: int,
+) -> torch.Tensor:
+    membership = torch.zeros(
+        (route_indices.shape[0], num_experts),
+        dtype=torch.bool,
+        device=route_indices.device,
+    )
+    membership.scatter_(1, route_indices, True)
+    membership[padding_mask.reshape(-1)] = False
+    expert_axis = torch.arange(
+        num_experts,
+        dtype=torch.long,
+        device=route_indices.device,
+    )
+    return torch.where(membership, expert_axis, -1)
 
 
 def _forward_with_r3_routes(
@@ -1142,7 +1165,8 @@ def _run_dropless_partial_moe_cuda_graph_distributed(
                 )
             counter_delta = manager.execution_counter_delta(counter_start)
             assert graph_calls == 0
-            assert counter_delta.eligible_calls == 0
+            # The common __call__ records eligibility before subclass input validation.
+            assert counter_delta.eligible_calls == 1
             assert counter_delta.graph_calls == 0
             return
 
@@ -1159,6 +1183,8 @@ def _run_dropless_partial_moe_cuda_graph_distributed(
 
         observed_routes: dict[int, torch.Tensor] = {}
         route_history: list[torch.Tensor] = []
+        eager_route_history: list[torch.Tensor] = []
+        expected_route_history: list[torch.Tensor] = []
         route_input_history: list[torch.Tensor] = []
         graph_launch_records: list[TECudaGraphLaunchRecord] = []
         valid_tokens = ~padding_mask.reshape(-1)
@@ -1327,6 +1353,29 @@ def _run_dropless_partial_moe_cuda_graph_distributed(
             graph_global_routes = _assert_global_route_parity(
                 graph_routes, fixed_routes, case, groups, logical_tokens
             )
+            if case.router_replay:
+                assert fixed_route_indices is not None
+                expected_route_ids = _expected_route_expert_ids(
+                    fixed_route_indices,
+                    padding_mask,
+                    case.num_experts,
+                )
+                expected_global_routes = _gather_logical_tokens(
+                    expected_route_ids,
+                    case,
+                    groups,
+                    logical_tokens,
+                )
+                eager_global_routes = _gather_logical_tokens(
+                    fixed_routes.expert_ids,
+                    case,
+                    groups,
+                    logical_tokens,
+                )
+                assert torch.equal(eager_global_routes, expected_global_routes)
+                assert torch.equal(graph_global_routes, expected_global_routes)
+                eager_route_history.append(eager_global_routes)
+                expected_route_history.append(expected_global_routes)
             assert graph_routes.probabilities.dtype == torch.float32
             if case.dispatcher == "hybridep":
                 _assert_structural_padding_is_zero(graph_routes, valid_tokens)
@@ -1385,6 +1434,17 @@ def _run_dropless_partial_moe_cuda_graph_distributed(
                 for index, first in enumerate(route_input_history)
                 for second in route_input_history[index + 1 :]
             )
+            for observed_history in (
+                expected_route_history,
+                eager_route_history,
+                route_history,
+            ):
+                assert len(observed_history) == CHANGED_ROUTE_REPLAYS
+                assert all(
+                    not torch.equal(first, second)
+                    for index, first in enumerate(observed_history)
+                    for second in observed_history[index + 1 :]
+                )
             assert len(graph_launch_records) == CHANGED_ROUTE_REPLAYS
             assert all(
                 record.bank_id == graph_launch_records[0].bank_id
