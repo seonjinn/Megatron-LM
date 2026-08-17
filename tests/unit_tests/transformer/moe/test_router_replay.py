@@ -3,7 +3,11 @@ import pytest
 import torch
 
 from megatron.core.transformer.moe.moe_utils import topk_routing_with_score_function
-from megatron.core.transformer.moe.router_replay import RouterReplay, RouterReplayAction
+from megatron.core.transformer.moe.router_replay import (
+    RouterReplay,
+    RouterReplayAction,
+    validate_router_replay_cuda_graph_input,
+)
 
 
 def setup_function():
@@ -93,3 +97,56 @@ def test_set_replay_data_length_mismatch():
         RouterReplay.set_replay_data(
             [torch.tensor([[0, 1]], dtype=torch.long), torch.tensor([[1, 0]], dtype=torch.long)]
         )
+
+
+def test_validate_router_replay_cuda_graph_input_accepts_exact_contract():
+    indices = torch.tensor([[0, 3], [1, 2], [0, 1]], dtype=torch.long)
+    structural = torch.tensor([False, False, True])
+    signature = validate_router_replay_cuda_graph_input(
+        indices,
+        structural_padding_mask=structural,
+        expected_tokens=3,
+        topk=2,
+        num_experts=4,
+    )
+    assert signature.shape == (3, 2)
+    assert signature.topk == 2
+
+
+@pytest.mark.parametrize(
+    ("indices", "message"),
+    [
+        (torch.tensor([[0, 0], [0, 1]]), "duplicate"),
+        (torch.tensor([[-1, -1], [0, 1]]), "missing-route"),
+        (torch.tensor([[0, 4], [0, 1]]), "outside"),
+        (torch.tensor([[0, 1], [1, 2]]), "structural dummy"),
+    ],
+)
+def test_validate_router_replay_cuda_graph_input_rejects_invalid_rows(indices, message):
+    with pytest.raises((TypeError, ValueError), match=message):
+        validate_router_replay_cuda_graph_input(
+            indices.long(),
+            structural_padding_mask=torch.tensor([False, True]),
+            expected_tokens=2,
+            topk=2,
+            num_experts=4,
+        )
+
+
+def test_cuda_graph_input_context_preserves_router_gradients_and_fifo():
+    replay = RouterReplay()
+    logits = torch.randn(3, 4, requires_grad=True)
+    routes = torch.tensor([[0, 2], [1, 3], [0, 1]])
+    before = list(replay.replay_backward_list)
+    with replay.use_cuda_graph_input(routes):
+        probs, _ = topk_routing_with_score_function(
+            logits=logits,
+            topk=2,
+            router_replay=replay,
+            score_function="softmax",
+        )
+        probs.sum().backward()
+    assert logits.grad is not None
+    assert replay.replay_backward_list == before
+    assert replay.target_topk_idx is None
+    assert replay.router_replay_action is None
