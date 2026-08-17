@@ -141,7 +141,12 @@ def test_router_replay_capture_uses_only_graph_kwarg_for_router(
 
 @pytest.mark.parametrize(
     "cuda_graph_modules",
-    [[], [CudaGraphModule.moe], [CudaGraphModule.moe_preprocess]],
+    [
+        [],
+        [CudaGraphModule.moe],
+        [CudaGraphModule.moe_preprocess],
+        [CudaGraphModule.attn, CudaGraphModule.moe_router],
+    ],
 )
 def test_router_replay_cuda_graph_rejects_unsupported_router_scope(
     layer: TransformerLayer, cuda_graph_modules: list[CudaGraphModule]
@@ -150,6 +155,18 @@ def test_router_replay_cuda_graph_rejects_unsupported_router_scope(
 
     with pytest.raises(ValueError, match="router replay.*CUDA graph scope"):
         layer._validate_te_cuda_graph_router_replay_scope()
+
+
+def test_router_replay_cuda_graph_does_not_own_attention_router_scope(
+    layer: TransformerLayer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    layer.config.cuda_graph_modules = [
+        CudaGraphModule.attn,
+        CudaGraphModule.moe_router,
+    ]
+    monkeypatch.setattr(layer, "_validate_te_cuda_graph_router_replay_scope", lambda: None)
+
+    assert not layer._te_cuda_graph_owns_router_replay_input()
 
 
 def test_router_replay_cuda_graph_rejects_fused_router(layer: TransformerLayer) -> None:

@@ -635,16 +635,14 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             return
         supported_scopes = (
             frozenset((CudaGraphModule.moe_router,)),
-            frozenset((CudaGraphModule.attn, CudaGraphModule.moe_router)),
             frozenset(
                 (CudaGraphModule.attn, CudaGraphModule.mamba, CudaGraphModule.moe_router)
             ),
         )
         if modules not in supported_scopes:
             raise ValueError(
-                "router replay supports only the moe_router, attn+moe_router, or "
-                "attn+mamba+moe_router TE CUDA graph scope; whole-MoE, moe_preprocess, and "
-                "whole-layer scopes are unsupported"
+                "router replay supports only the moe_router or attn+mamba+moe_router TE CUDA "
+                "graph scope; whole-MoE, moe_preprocess, and whole-layer scopes are unsupported"
             )
 
     def _record_te_cuda_graph_dispatcher_replay_state(
@@ -1619,7 +1617,6 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
         modules = frozenset(self.config.cuda_graph_modules)
         return modules in (
             frozenset((CudaGraphModule.moe_router,)),
-            frozenset((CudaGraphModule.attn, CudaGraphModule.moe_router)),
             frozenset(
                 (CudaGraphModule.attn, CudaGraphModule.mamba, CudaGraphModule.moe_router)
             ),
