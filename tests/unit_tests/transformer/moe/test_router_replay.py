@@ -5,6 +5,7 @@ import torch
 from megatron.core.transformer.moe.moe_utils import topk_routing_with_score_function
 from megatron.core.transformer.moe.router_replay import (
     ROUTER_REPLAY_CUDA_GRAPH_INPUT_CAPABILITY,
+    ROUTER_REPLAY_CUDA_GRAPH_INPUT_KWARG,
     RouterReplay,
     RouterReplayAction,
     validate_router_replay_cuda_graph_input,
@@ -104,6 +105,10 @@ def test_router_replay_cuda_graph_input_capability_is_versioned():
     assert ROUTER_REPLAY_CUDA_GRAPH_INPUT_CAPABILITY == "r3_router_cuda_graph_input_v1"
 
 
+def test_router_replay_cuda_graph_input_kwarg_is_versioned():
+    assert ROUTER_REPLAY_CUDA_GRAPH_INPUT_KWARG == "router_replay_indices"
+
+
 def test_validate_router_replay_cuda_graph_input_accepts_exact_contract():
     indices = torch.tensor([[0, 3], [1, 2], [0, 1]], dtype=torch.long)
     structural = torch.tensor([False, False, True])
@@ -115,6 +120,8 @@ def test_validate_router_replay_cuda_graph_input_accepts_exact_contract():
         num_experts=4,
     )
     assert signature.shape == (3, 2)
+    assert signature.dtype == torch.long
+    assert signature.device_type == "cpu"
     assert signature.topk == 2
 
 
@@ -133,6 +140,19 @@ def test_validate_router_replay_cuda_graph_input_rejects_invalid_rows(indices, m
             indices.long(),
             structural_padding_mask=torch.tensor([False, True]),
             expected_tokens=2,
+            topk=2,
+            num_experts=4,
+        )
+
+
+def test_validate_router_replay_cuda_graph_input_rejects_non_contiguous_indices():
+    indices = torch.tensor([[0, 1, 2], [1, 2, 3]], dtype=torch.long).transpose(0, 1)
+    assert not indices.is_contiguous()
+    with pytest.raises(ValueError, match="contiguous"):
+        validate_router_replay_cuda_graph_input(
+            indices,
+            structural_padding_mask=torch.tensor([False, False, False]),
+            expected_tokens=3,
             topk=2,
             num_experts=4,
         )

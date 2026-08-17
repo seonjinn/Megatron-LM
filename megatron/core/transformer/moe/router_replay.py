@@ -6,16 +6,17 @@ from typing import Callable, Iterator, List, Optional, Tuple
 
 import torch
 
-
 ROUTER_REPLAY_CUDA_GRAPH_INPUT_CAPABILITY = "r3_router_cuda_graph_input_v1"
-ROUTER_REPLAY_CUDA_GRAPH_INPUT_KWARG = "router_replay_cuda_graph_input"
+ROUTER_REPLAY_CUDA_GRAPH_INPUT_KWARG = "router_replay_indices"
 
 
 @dataclass(frozen=True)
 class RouterReplayCudaGraphInputSignature:
     """Describes a validated RouterReplay CUDA graph input tensor."""
 
-    shape: Tuple[int, int]
+    shape: tuple[int, int]
+    dtype: torch.dtype
+    device_type: str
     topk: int
     num_experts: int
 
@@ -37,6 +38,8 @@ def validate_router_replay_cuda_graph_input(
         raise TypeError("Router replay CUDA graph indices must be a torch.Tensor.")
     if indices.dtype != torch.long:
         raise TypeError("Router replay CUDA graph indices must use torch.long dtype.")
+    if not indices.is_contiguous():
+        raise ValueError("Router replay CUDA graph indices must be contiguous.")
     if indices.ndim != 2:
         raise ValueError("Router replay CUDA graph indices must be two-dimensional.")
     if expected_tokens < 0:
@@ -81,7 +84,11 @@ def validate_router_replay_cuda_graph_input(
             raise ValueError("Router replay structural dummy routes must equal arange(topk).")
 
     return RouterReplayCudaGraphInputSignature(
-        shape=(expected_tokens, topk), topk=topk, num_experts=num_experts
+        shape=(expected_tokens, topk),
+        dtype=indices.dtype,
+        device_type=indices.device.type,
+        topk=topk,
+        num_experts=num_experts,
     )
 
 
