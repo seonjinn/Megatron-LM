@@ -7,7 +7,7 @@ from typing import Callable, Iterator, List, Optional, Tuple
 import torch
 
 
-ROUTER_REPLAY_CUDA_GRAPH_INPUT_CAPABILITY = "router_replay_cuda_graph_input"
+ROUTER_REPLAY_CUDA_GRAPH_INPUT_CAPABILITY = "r3_router_cuda_graph_input_v1"
 ROUTER_REPLAY_CUDA_GRAPH_INPUT_KWARG = "router_replay_cuda_graph_input"
 
 

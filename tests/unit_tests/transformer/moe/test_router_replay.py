@@ -4,6 +4,7 @@ import torch
 
 from megatron.core.transformer.moe.moe_utils import topk_routing_with_score_function
 from megatron.core.transformer.moe.router_replay import (
+    ROUTER_REPLAY_CUDA_GRAPH_INPUT_CAPABILITY,
     RouterReplay,
     RouterReplayAction,
     validate_router_replay_cuda_graph_input,
@@ -97,6 +98,10 @@ def test_set_replay_data_length_mismatch():
         RouterReplay.set_replay_data(
             [torch.tensor([[0, 1]], dtype=torch.long), torch.tensor([[1, 0]], dtype=torch.long)]
         )
+
+
+def test_router_replay_cuda_graph_input_capability_is_versioned():
+    assert ROUTER_REPLAY_CUDA_GRAPH_INPUT_CAPABILITY == "r3_router_cuda_graph_input_v1"
 
 
 def test_validate_router_replay_cuda_graph_input_accepts_exact_contract():
