@@ -771,9 +771,29 @@ class TopKRouter(Router):
         # Apply Z-Loss
         logits = self.apply_z_loss(logits, padding_mask=padding_mask)
 
+        # Dropless HybridEP consumes the sparse routing map directly, so exclude padding
+        # rows before dispatch. Other dispatchers retain their existing fixed-route
+        # assumptions until they support sparse routing maps end to end.
+        use_dropless_hybridep = (
+            self.config.moe_token_dispatcher_type == "flex"
+            and self.config.moe_flex_dispatcher_backend == "hybridep"
+            and self.config.moe_expert_capacity_factor is None
+            and self.config.moe_expert_rank_capacity_factor is None
+        )
+
         # Calculate probs and routing_map for token dispatching
         if self.routing_type == "sinkhorn":
-            probs, routing_map = self.sinkhorn_load_balancing(logits)
+            if padding_mask is not None and use_dropless_hybridep:
+                valid_tokens = ~padding_mask
+                valid_logits = logits[valid_tokens]
+                probs = torch.zeros_like(logits)
+                routing_map = torch.zeros_like(logits, dtype=torch.bool)
+                if valid_logits.shape[0] > 0:
+                    valid_probs, valid_routing_map = self.sinkhorn_load_balancing(valid_logits)
+                    probs[valid_tokens] = valid_probs
+                    routing_map[valid_tokens] = valid_routing_map
+            else:
+                probs, routing_map = self.sinkhorn_load_balancing(logits)
         elif self.routing_type == "quantile_balancing":
             assert (
                 padding_mask is None
@@ -793,15 +813,6 @@ class TopKRouter(Router):
                 router_replay=self.router_replay,
             )
 
-        # Dropless HybridEP consumes the sparse routing map directly, so exclude padding
-        # rows before dispatch. Other dispatchers retain their existing fixed-route
-        # assumptions until they support sparse routing maps end to end.
-        use_dropless_hybridep = (
-            self.config.moe_token_dispatcher_type == "flex"
-            and self.config.moe_flex_dispatcher_backend == "hybridep"
-            and self.config.moe_expert_capacity_factor is None
-            and self.config.moe_expert_rank_capacity_factor is None
-        )
         if padding_mask is not None and use_dropless_hybridep:
             valid_tokens = (~padding_mask).unsqueeze(-1)
             probs = probs * valid_tokens
