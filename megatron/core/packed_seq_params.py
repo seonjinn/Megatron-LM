@@ -77,6 +77,7 @@ class PackedSeqParams:
     seq_aux_loss_sample_ids: Tensor | None = None
     seq_aux_loss_num_samples: Tensor | None = None
     seq_aux_loss_max_samples: int | None = None
+    cp_scatter_cache: object = None
 
     def __post_init__(self):
         """Pre-compute seq_idx for Mamba mixer CUDA graph compatibility.

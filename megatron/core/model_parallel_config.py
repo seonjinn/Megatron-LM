@@ -114,7 +114,7 @@ class ModelParallelConfig:
     can handle without overflowing the memory. Typically, a good starting point is to set this
     to maximum sequence length / context parallel size.
     This is used to calculate the number and length of sub-samples assigned to 
-    each rank when using hybrid_context_parallel.
+    each rank when sequence_packing_scheduler is not None.
     """
 
     hybrid_context_parallel: bool = False
@@ -129,6 +129,12 @@ class ModelParallelConfig:
 
     pad_packed_seq_to: Optional[int] = None
     """Pad THD token-like tensors to this fixed CP-local length after packing."""
+
+    sequence_packing_scheduler: Optional[Literal['dp_balanced']] = None
+    """
+    Scheduler for sequence packing and hybrid context parallel.
+    dp_balanced: DP-balanced scheduler for sequence packing.
+    """
 
     expert_model_parallel_size: int = 1
     """Distributes Moe Experts across sub data parallel dimension."""
@@ -579,3 +585,18 @@ class ModelParallelConfig:
                     "Pipeline parallel communication overlapping in warmup and flush is only "
                     "compatible with overlap_p2p_comm but not batch_p2p_comm."
                 )
+
+        if self.sequence_packing_scheduler is not None:
+            supported_schedulers = ['dp_balanced']
+            if self.sequence_packing_scheduler not in supported_schedulers:
+                raise ValueError(
+                    f"Unsupported scheduler: {self.sequence_packing_scheduler}. "
+                    f"Available schedulers: {supported_schedulers}"
+                )
+            if self.max_seqlen_per_dp_cp_rank is None:
+                raise ValueError(
+                    "max_seqlen_per_dp_cp_rank must be set when sequence_packing_scheduler "
+                    "is not None."
+                )
+            # Needed for passing variable sequences between pp stages.
+            self.variable_seq_lengths = True

@@ -7,9 +7,7 @@ import torch
 
 from megatron.core.inference.utils import InferenceMode
 from megatron.core.jit import jit_fuser
-from megatron.core.tensor_parallel.mappings import (
-    reduce_from_tensor_model_parallel_region,
-)
+from megatron.core.tensor_parallel.mappings import reduce_from_tensor_model_parallel_region
 from megatron.core.transformer.custom_layers.batch_invariant_kernels import (
     is_batch_invariant_mode_enabled,
 )
@@ -74,6 +72,10 @@ class Router(ABC, MegatronModule):
             )
         else:
             self.bias = None
+        if self.config.moe_router_skip_muon:
+            setattr(self.weight, 'use_muon', False)
+            if self.bias is not None:
+                setattr(self.bias, 'use_muon', False)
         # If calculate per token loss, we need to scale up moe aux loss by the number of tokens.
         # So we need to know if the model is configured to calculate per token loss.
         self.calculate_per_token_loss = self.config.calculate_per_token_loss
@@ -853,6 +855,8 @@ class TopKRouter(Router):
             else:
                 logits = MoEAuxLossAutoScaler.apply(logits, z_loss)
 
+            # TODO: repeated-MTP z_loss is scaled after MoEAuxLossAutoScaler.apply(), so this
+            # adjusts logging only; move the scaling above the attach point if z_loss is used.
             # When using repeated MTP layers, the same MTP layer is called mtp_num_layers times.
             # To avoid accumulating the z_loss multiple times, we scale it by 1/mtp_num_layers
             # so the total loss is correct.
