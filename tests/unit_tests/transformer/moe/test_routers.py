@@ -251,6 +251,37 @@ class TestTop2Router:
 
     @pytest.mark.internal
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+    def test_sinkhorn_all_padding_preserves_autograd(self):
+        """Test that an all-padding HybridEP batch retains a zero-gradient path."""
+        config = dataclasses.replace(
+            self.transformer_config,
+            num_moe_experts=3,
+            moe_router_topk=1,
+            moe_router_load_balancing_type="sinkhorn",
+            moe_token_dispatcher_type="flex",
+            moe_flex_dispatcher_backend="hybridep",
+        )
+        submodules = get_submodules(
+            get_gpt_layer_local_submodules(
+                num_experts=config.num_moe_experts, moe_grouped_gemm=False
+            ).mlp
+        )
+        assert isinstance(submodules, MoESubmodules)
+        router = cast(Router, MoELayer(config, submodules).router).cuda().train()
+        logits = torch.randn((4, 1, config.num_moe_experts), device="cuda", requires_grad=True)
+        padding_mask = torch.ones((4, 1), dtype=torch.bool, device="cuda")
+
+        probs, routing_map = router.routing(logits, padding_mask=padding_mask)
+
+        assert probs.requires_grad
+        assert torch.count_nonzero(probs) == 0
+        assert not routing_map.any()
+        probs.sum().backward()
+        assert logits.grad is not None
+        assert torch.count_nonzero(logits.grad) == 0
+
+    @pytest.mark.internal
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
     @pytest.mark.parametrize(
         "dispatcher,backend,capacity_factor,rank_capacity_factor",
         [
