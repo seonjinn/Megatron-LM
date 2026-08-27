@@ -786,7 +786,7 @@ class TopKRouter(Router):
             if padding_mask is not None and use_dropless_hybridep:
                 valid_tokens = ~padding_mask
                 valid_logits = logits[valid_tokens]
-                probs = torch.zeros_like(logits)
+                probs = logits * 0.0
                 routing_map = torch.zeros_like(logits, dtype=torch.bool)
                 if valid_logits.shape[0] > 0:
                     valid_probs, valid_routing_map = self.sinkhorn_load_balancing(valid_logits)
