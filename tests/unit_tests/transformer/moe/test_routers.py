@@ -207,6 +207,50 @@ class TestTop2Router:
 
     @pytest.mark.internal
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+    def test_sinkhorn_padding_mask_preserves_valid_token_routes(self):
+        """Test that HybridEP padding does not affect valid-token Sinkhorn routing."""
+        config = dataclasses.replace(
+            self.transformer_config,
+            num_moe_experts=3,
+            moe_router_topk=1,
+            moe_router_load_balancing_type="sinkhorn",
+            moe_token_dispatcher_type="flex",
+            moe_flex_dispatcher_backend="hybridep",
+        )
+        submodules = get_submodules(
+            get_gpt_layer_local_submodules(
+                num_experts=config.num_moe_experts, moe_grouped_gemm=False
+            ).mlp
+        )
+        assert isinstance(submodules, MoESubmodules)
+        router = cast(Router, MoELayer(config, submodules).router).cuda().train()
+        logits = torch.tensor(
+            [
+                [-1.0643736, 0.7242222, 0.0676430],
+                [1.8677974, -0.9559088, 1.9799588],
+                [-1.5413524, 1.7065463, 1.2924150],
+                [1.9329547, 1.0092757, -1.7064022],
+                [-2.6680270, -1.0120644, -1.7305049],
+                [3.1055655, 0.4608094, -3.1546187],
+                [-2.7443874, 3.8480353, -3.8641527],
+            ],
+            dtype=torch.float32,
+            device="cuda",
+        ).unsqueeze(1)
+        padding_mask = torch.tensor(
+            [[False], [False], [False], [False], [True], [True], [True]], device="cuda"
+        )
+
+        valid_probs, valid_routing_map = router.routing(logits[:4])
+        padded_probs, padded_routing_map = router.routing(logits, padding_mask=padding_mask)
+
+        torch.testing.assert_close(padded_probs[:4], valid_probs)
+        assert torch.equal(padded_routing_map[:4], valid_routing_map)
+        assert torch.count_nonzero(padded_probs[4:]) == 0
+        assert not padded_routing_map[4:].any()
+
+    @pytest.mark.internal
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
     @pytest.mark.parametrize(
         "dispatcher,backend,capacity_factor,rank_capacity_factor",
         [
