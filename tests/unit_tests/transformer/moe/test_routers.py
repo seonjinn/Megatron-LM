@@ -237,17 +237,30 @@ class TestTop2Router:
             dtype=torch.float32,
             device="cuda",
         ).unsqueeze(1)
+        logits.requires_grad_()
+        valid_logits = logits[:4].detach().clone().requires_grad_()
         padding_mask = torch.tensor(
             [[False], [False], [False], [False], [True], [True], [True]], device="cuda"
         )
 
-        valid_probs, valid_routing_map = router.routing(logits[:4])
+        valid_probs, valid_routing_map = router.routing(valid_logits)
         padded_probs, padded_routing_map = router.routing(logits, padding_mask=padding_mask)
 
         torch.testing.assert_close(padded_probs[:4], valid_probs)
         assert torch.equal(padded_routing_map[:4], valid_routing_map)
         assert torch.count_nonzero(padded_probs[4:]) == 0
         assert not padded_routing_map[4:].any()
+
+        upstream = torch.arange(
+            1, padded_probs.numel() + 1, device="cuda", dtype=padded_probs.dtype
+        ).reshape_as(padded_probs)
+        (padded_probs * upstream).sum().backward()
+        (valid_probs * upstream[:4]).sum().backward()
+
+        assert logits.grad is not None
+        assert valid_logits.grad is not None
+        torch.testing.assert_close(logits.grad[:4], valid_logits.grad)
+        assert torch.count_nonzero(logits.grad[4:]) == 0
 
     @pytest.mark.internal
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
