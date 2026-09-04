@@ -1,5 +1,7 @@
 # Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
 
+from typing import Any
+
 import pytest
 
 from megatron.core.enums import Fp8Recipe
@@ -574,6 +576,75 @@ class TestGPTModelTEQuantizationConfig:
 
     def teardown_method(self, method):
         Utils.destroy_model_parallel()
+
+    def test_te_config_resolves_before_parameter_initialization(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import megatron.core.extensions.transformer_engine as transformer_engine
+
+        resolved_paths: list[str | None] = []
+        resolve_quant_config = transformer_engine.get_quant_config_or_none
+
+        def record_resolved_path(
+            module_path: str | None, recipe: RecipeConfig | None = None
+        ) -> Any:
+            resolved_paths.append(module_path)
+            return resolve_quant_config(module_path, recipe)
+
+        monkeypatch.setattr(
+            transformer_engine, "get_quant_config_or_none", record_resolved_path
+        )
+        transformer_config = TransformerConfig(
+            num_layers=2,
+            hidden_size=12,
+            num_attention_heads=4,
+            use_cpu_initialization=False,
+            gated_linear_unit=True,
+            bias_activation_fusion=True,
+            add_bias_linear=False,
+            quant_recipe=RecipeConfig.from_config_dict(
+                {
+                    "matchers": {
+                        "all": {
+                            "type": "glob",
+                            "enabled": True,
+                            "pattern": "*",
+                            "config": "mxfp8_params",
+                        }
+                    },
+                    "configs": {
+                        "mxfp8_params": {
+                            "transformer_engine_config_type": "TEQuantizationParams",
+                            "training_recipe": {
+                                "fp8_quantization_recipe": "mxfp8",
+                                "fp8_param": True,
+                            },
+                        }
+                    },
+                }
+            ),
+        )
+
+        GPTModel(
+            config=transformer_config,
+            transformer_layer_spec=get_gpt_decoder_block_spec(
+                config=transformer_config, use_transformer_engine=True
+            ),
+            vocab_size=512,
+            max_sequence_length=4096,
+        )
+
+        expected_paths = {
+            "decoder.layers.0.self_attention.linear_proj",
+            "decoder.layers.0.self_attention.linear_qkv",
+            "decoder.layers.0.mlp.linear_fc1",
+            "decoder.layers.0.mlp.linear_fc2",
+            "decoder.layers.1.self_attention.linear_proj",
+            "decoder.layers.1.self_attention.linear_qkv",
+            "decoder.layers.1.mlp.linear_fc1",
+            "decoder.layers.1.mlp.linear_fc2",
+        }
+        assert expected_paths.issubset(set(resolved_paths))
 
     def test_te_config_resolution_dense(self) -> None:
         from megatron.core.extensions.transformer_engine import (
