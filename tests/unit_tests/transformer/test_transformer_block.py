@@ -17,11 +17,44 @@ from megatron.core.tensor_parallel.random import model_parallel_cuda_manual_seed
 from megatron.core.transformer.attention import SelfAttention
 from megatron.core.transformer.enums import ModelType
 from megatron.core.transformer.pipeline_parallel_layer_layout import PipelineParallelLayerLayout
-from megatron.core.transformer.spec_utils import build_module
-from megatron.core.transformer.transformer_block import TransformerBlock, get_num_layers_to_build
+from megatron.core.transformer.spec_utils import ModuleSpec, build_module
+from megatron.core.transformer.transformer_block import (
+    TransformerBlock,
+    TransformerBlockSubmodules,
+    get_num_layers_to_build,
+)
 from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.transformer.transformer_layer import TransformerLayer
 from tests.unit_tests.test_utilities import Utils
+
+
+def test_transformer_block_propagates_layer_names():
+    class NamedLayer(torch.nn.Module):
+        def __init__(self, *, layer_number: int, name: str, **kwargs: object) -> None:
+            super().__init__()
+            self.layer_number = layer_number
+            self.name = name
+
+    Utils.initialize_model_parallel(1, 1)
+    try:
+        config = TransformerConfig(
+            num_layers=2, hidden_size=64, num_attention_heads=4, use_cpu_initialization=True
+        )
+        block = TransformerBlock(
+            config,
+            TransformerBlockSubmodules(
+                layer_specs=[ModuleSpec(module=NamedLayer)] * config.num_layers
+            ),
+            post_layer_norm=False,
+            name="decoder",
+        )
+    finally:
+        Utils.destroy_model_parallel()
+
+    assert [layer.name for layer in block.layers] == [
+        "decoder.layers.0",
+        "decoder.layers.1",
+    ]
 
 
 class TestParallelTransformerBlock:
