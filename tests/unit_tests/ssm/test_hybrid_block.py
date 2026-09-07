@@ -96,6 +96,9 @@ def test_all_layer_configs_route_to_matching_specs(monkeypatch, layer_pattern, e
     )
     expected_layer_numbers = list(range(6, 6 + len(layer_pattern)))
     assert [kwargs["layer_number"] for _, kwargs in build_calls] == expected_layer_numbers
+    assert [kwargs["name"] for _, kwargs in build_calls] == [
+        f"decoder.layers.{index}" for index in range(len(layer_pattern))
+    ]
     assert [layer.layer_number for layer in block.layers] == expected_layer_numbers
 
 

@@ -61,6 +61,39 @@ def test_transformer_block_propagates_local_module_names(monkeypatch):
     ]
 
 
+def test_transformer_block_keeps_legacy_layer_constructor_compatible():
+    class LegacyLayer(torch.nn.Module):
+        def __init__(
+            self,
+            *,
+            config: TransformerConfig,
+            layer_number: int,
+            pg_collection: ProcessGroupCollection,
+            vp_stage: int | None,
+        ) -> None:
+            super().__init__()
+            self.config = config
+            self.pg_collection = pg_collection
+            self.vp_stage = vp_stage
+            self.layer_number = layer_number
+
+    Utils.initialize_model_parallel(1, 1)
+    try:
+        config = TransformerConfig(
+            num_layers=1, hidden_size=64, num_attention_heads=4, use_cpu_initialization=True
+        )
+        block = TransformerBlock(
+            config,
+            TransformerBlockSubmodules(layer_specs=[ModuleSpec(module=LegacyLayer)]),
+            post_layer_norm=False,
+            name="decoder",
+        )
+    finally:
+        Utils.destroy_model_parallel()
+
+    assert block.layers[0].layer_number == 1
+
+
 class TestParallelTransformerBlock:
 
     def setup_method(self, method):
