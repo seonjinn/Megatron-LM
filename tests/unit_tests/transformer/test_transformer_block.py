@@ -28,7 +28,7 @@ from megatron.core.transformer.transformer_layer import TransformerLayer
 from tests.unit_tests.test_utilities import Utils
 
 
-def test_transformer_block_propagates_layer_names():
+def test_transformer_block_propagates_global_layer_names(monkeypatch):
     class NamedLayer(torch.nn.Module):
         def __init__(self, *, layer_number: int, name: str, **kwargs: object) -> None:
             super().__init__()
@@ -37,6 +37,10 @@ def test_transformer_block_propagates_layer_names():
 
     Utils.initialize_model_parallel(1, 1)
     try:
+        monkeypatch.setattr(
+            "megatron.core.transformer.transformer_block.get_transformer_layer_offset",
+            lambda *args: 4,
+        )
         config = TransformerConfig(
             num_layers=2, hidden_size=64, num_attention_heads=4, use_cpu_initialization=True
         )
@@ -52,8 +56,8 @@ def test_transformer_block_propagates_layer_names():
         Utils.destroy_model_parallel()
 
     assert [layer.name for layer in block.layers] == [
-        "decoder.layers.0",
-        "decoder.layers.1",
+        "decoder.layers.4",
+        "decoder.layers.5",
     ]
 
 
