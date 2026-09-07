@@ -30,7 +30,7 @@ from megatron.core.transformer.hyper_connection import (
     finalize_mhc_recompute_layer,
 )
 from megatron.core.transformer.module import GraphableMegatronModule, MegatronModule
-from megatron.core.transformer.spec_utils import ModuleSpec, build_module
+from megatron.core.transformer.spec_utils import ModuleSpec, build_module, get_module
 from megatron.core.transformer.torch_norm import LayerNormBuilder
 from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.transformer.transformer_layer import (
@@ -41,6 +41,7 @@ from megatron.core.transformer.utils import sharded_state_dict_default
 from megatron.core.typed_torch import apply_module, not_none
 from megatron.core.utils import (
     WrappedTensor,
+    accepts_parameter,
     deprecate_inference_params,
     get_pg_rank,
     make_viewless_tensor,
@@ -363,15 +364,18 @@ class TransformerBlock(GraphableMegatronModule, MegatronModule):
             else:
                 quantization_context = nullcontext()
 
+            layer_kwargs = {
+                "config": layer_config,
+                "layer_number": layer_number,
+                "pg_collection": self.pg_collection,
+                "vp_stage": self.vp_stage,
+            }
+            layer_name = (self.name + f".layers.{layer_number - 1}") if self.name else None
+            if layer_name is not None and accepts_parameter(get_module(layer_spec), "name"):
+                layer_kwargs["name"] = layer_name
+
             with quantization_context:
-                module = build_module(
-                    layer_spec,
-                    config=layer_config,
-                    layer_number=layer_number,
-                    pg_collection=self.pg_collection,
-                    vp_stage=self.vp_stage,
-                    name=(self.name + f".layers.{layer_number - 1}") if self.name else None,
-                )
+                module = build_module(layer_spec, **layer_kwargs)
             if layer_config.enable_mhc_connections and not getattr(
                 module, "supports_mhc_connections", False
             ):
