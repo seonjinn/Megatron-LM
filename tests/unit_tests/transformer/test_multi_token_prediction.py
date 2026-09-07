@@ -4,6 +4,7 @@ import itertools
 import os
 import sys
 import types
+from contextlib import nullcontext
 
 import pytest
 import torch
@@ -122,6 +123,34 @@ class TestMultiTokenPredictionLayer:
             config=config, spec=transformer_layer_spec, use_transformer_engine=use_te
         )
         return config, mtp_block_spec
+
+    def test_construction_names_match_zero_based_mtp_registration(self, monkeypatch):
+        class NamedLayer(torch.nn.Module):
+            def __init__(self, name):
+                super().__init__()
+                self.name = name
+
+        monkeypatch.setattr(mtp_module, "get_fp8_context", lambda *args, **kwargs: nullcontext())
+        monkeypatch.setattr(
+            mtp_module,
+            "build_module",
+            lambda _spec, **kwargs: NamedLayer(kwargs["name"]),
+        )
+
+        block = object.__new__(MultiTokenPredictionBlock)
+        torch.nn.Module.__init__(block)
+        block.config = types.SimpleNamespace(mtp_num_layers=2)
+        block.submodules = types.SimpleNamespace(layer_specs=[object(), object()])
+        block.mtp_num_depths = 0
+        block.mtp_layer_pattern = None
+        block.hybrid_submodules = None
+        block.mtp_use_repeated_layer = False
+        block.vp_stage = None
+        block.name = "mtp"
+
+        block._build_layers(pg_collection=object())
+
+        assert [layer.name for layer in block.layers] == ["mtp.layers.0", "mtp.layers.1"]
 
     def test_mtp_placement_uses_explicit_pipeline_group(self, monkeypatch):
         """An explicit PP group must avoid global MPU reads during model construction."""
