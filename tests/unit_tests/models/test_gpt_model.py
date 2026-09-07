@@ -74,6 +74,7 @@ class TestGPTModel:
         assert isinstance(self.gpt_model, GPTModel)
 
         assert self.gpt_model.max_sequence_length == 4
+        assert self.gpt_model.decoder.name == "decoder"
 
         num_weights = sum([p.numel() for p in self.gpt_model.parameters()])
         assert num_weights == 6240
