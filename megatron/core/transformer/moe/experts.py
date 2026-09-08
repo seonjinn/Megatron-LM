@@ -707,6 +707,31 @@ class TEGroupedMLP(MegatronModule):
         self._ensure_main_grad(self.linear_fc1)
         self._ensure_main_grad(self.linear_fc2)
 
+    def _pad_router_probabilities_for_quantization(
+        self,
+        permuted_probs: torch.Tensor,
+        unpadded_tokens_per_expert: list[int],
+        padded_tokens_per_expert: list[int],
+    ) -> torch.Tensor:
+        if permuted_probs.dtype != torch.float64:
+            padded_probs, _ = self.quantization_padding(permuted_probs, unpadded_tokens_per_expert)
+            return padded_probs
+
+        # Transformer Engine's fused padding kernel does not accept FP64. Pad row indices with
+        # its supported INT64 path, then gather the original probabilities without casting them.
+        source_rows = torch.arange(
+            1, permuted_probs.shape[0] + 1, dtype=torch.int64, device=permuted_probs.device
+        ).unsqueeze(-1)
+        padded_source_rows, probability_tokens_per_expert = self.quantization_padding(
+            source_rows, unpadded_tokens_per_expert
+        )
+        if probability_tokens_per_expert != padded_tokens_per_expert:
+            raise RuntimeError("Hidden states and router probabilities received different padding.")
+        probabilities_with_zero = torch.cat(
+            (permuted_probs.new_zeros((1, *permuted_probs.shape[1:])), permuted_probs), dim=0
+        )
+        return probabilities_with_zero.index_select(0, padded_source_rows.squeeze(-1))
+
     def _fused_forward(
         self,
         permuted_local_hidden_states: torch.Tensor,
@@ -748,8 +773,9 @@ class TEGroupedMLP(MegatronModule):
             permuted_local_hidden_states, tokens_per_expert = self.quantization_padding(
                 permuted_local_hidden_states, tokens_per_expert
             )
-            permuted_probs, _ = self.quantization_padding(
-                permuted_probs.unsqueeze(-1), unpadded_tokens_per_expert
+            permuted_probs = permuted_probs.unsqueeze(-1)
+            permuted_probs = self._pad_router_probabilities_for_quantization(
+                permuted_probs, unpadded_tokens_per_expert, tokens_per_expert
             )
             permuted_probs = permuted_probs.squeeze(-1)
             tokens_per_expert = torch.tensor(
@@ -908,8 +934,8 @@ class TEGroupedMLP(MegatronModule):
             permuted_local_hidden_states, tokens_per_expert = self.quantization_padding(
                 permuted_local_hidden_states, tokens_per_expert
             )
-            permuted_probs, _ = self.quantization_padding(
-                permuted_probs, unpadded_tokens_per_expert
+            permuted_probs = self._pad_router_probabilities_for_quantization(
+                permuted_probs, unpadded_tokens_per_expert, tokens_per_expert
             )
 
         if self._use_grouped_tensor:

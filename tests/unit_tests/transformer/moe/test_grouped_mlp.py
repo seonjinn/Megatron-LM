@@ -94,6 +94,30 @@ def test_remove_glu_interleaving_restores_contiguous_gate_and_linear_halves():
     torch.testing.assert_close(output, expected)
 
 
+def test_fp64_router_probability_padding_uses_int64_indices_and_preserves_gradients():
+    module = TEGroupedMLP.__new__(TEGroupedMLP)
+
+    def fake_padding(tensor, token_counts):
+        assert tensor.dtype == torch.int64
+        torch.testing.assert_close(tensor, torch.tensor([[1], [2], [3]], dtype=torch.int64))
+        assert token_counts == [2, 1]
+        return torch.tensor([[1], [2], [0], [0], [3], [0]], dtype=torch.int64), [4, 2]
+
+    module.quantization_padding = fake_padding
+    probabilities = torch.tensor([[0.125], [0.25], [0.5]], dtype=torch.float64, requires_grad=True)
+
+    padded = module._pad_router_probabilities_for_quantization(
+        probabilities, unpadded_tokens_per_expert=[2, 1], padded_tokens_per_expert=[4, 2]
+    )
+    padded.sum().backward()
+
+    torch.testing.assert_close(
+        padded, torch.tensor([[0.125], [0.25], [0.0], [0.0], [0.5], [0.0]], dtype=torch.float64)
+    )
+    assert padded.dtype == torch.float64
+    torch.testing.assert_close(probabilities.grad, torch.ones_like(probabilities))
+
+
 def test_make_fused_ops_reuses_grouped_linear_weights_on_meta_device(monkeypatch):
     class FakeGroupedLinear(torch.nn.Module):
         def __init__(
