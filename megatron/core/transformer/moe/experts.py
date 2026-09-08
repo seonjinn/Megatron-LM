@@ -291,9 +291,8 @@ class TEGroupedMLP(MegatronModule):
 
         # Fused implementation with Transformer Engine op fuser API
         if self.config.use_transformer_engine_op_fuser:
-            assert (
-                self._is_fused_impl_supported()
-            ), "Fused GroupedMLP is not supported for this configuration."
+            if not self._is_fused_impl_supported():
+                raise ValueError("Fused GroupedMLP is not supported for this configuration.")
         self._with_fused_impl: bool = self.config.use_transformer_engine_op_fuser
         self._fused_ops: Optional[Tuple[torch.nn.Module]] = None
         if (

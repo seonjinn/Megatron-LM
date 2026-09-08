@@ -3,6 +3,7 @@
 import argparse
 import sys
 from types import ModuleType, SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 import torch
@@ -100,22 +101,60 @@ def test_fp64_router_probability_padding_uses_int64_indices_and_preserves_gradie
     def fake_padding(tensor, token_counts):
         assert tensor.dtype == torch.int64
         torch.testing.assert_close(tensor, torch.tensor([[1], [2], [3]], dtype=torch.int64))
-        assert token_counts == [2, 1]
-        return torch.tensor([[1], [2], [0], [0], [3], [0]], dtype=torch.int64), [4, 2]
+        assert token_counts == [0, 2, 0, 1]
+        return torch.tensor([[1], [2], [0], [0], [3], [0], [0], [0]], dtype=torch.int64), [
+            0,
+            4,
+            0,
+            4,
+        ]
 
     module.quantization_padding = fake_padding
-    probabilities = torch.tensor([[0.125], [0.25], [0.5]], dtype=torch.float64, requires_grad=True)
+    precise_value = 1.0 + 2**-40
+    probabilities = torch.tensor(
+        [[precise_value], [0.25], [0.5]], dtype=torch.float64, requires_grad=True
+    )
 
     padded = module._pad_router_probabilities_for_quantization(
-        probabilities, unpadded_tokens_per_expert=[2, 1], padded_tokens_per_expert=[4, 2]
+        probabilities,
+        unpadded_tokens_per_expert=[0, 2, 0, 1],
+        padded_tokens_per_expert=[0, 4, 0, 4],
     )
     padded.sum().backward()
 
-    torch.testing.assert_close(
-        padded, torch.tensor([[0.125], [0.25], [0.0], [0.0], [0.5], [0.0]], dtype=torch.float64)
+    expected = torch.tensor(
+        [[precise_value], [0.25], [0.0], [0.0], [0.5], [0.0], [0.0], [0.0]], dtype=torch.float64
     )
+    torch.testing.assert_close(padded, expected, rtol=0, atol=0)
+    assert expected[0].item() != expected[0].float().double().item()
     assert padded.dtype == torch.float64
     torch.testing.assert_close(probabilities.grad, torch.ones_like(probabilities))
+
+
+@pytest.mark.parametrize("token_counts", ([0, 0], [1, 2]))
+def test_router_probability_padding_returns_aligned_input_without_te_call(token_counts):
+    module = TEGroupedMLP.__new__(TEGroupedMLP)
+    module.quantization_padding = Mock(side_effect=AssertionError("padding should be skipped"))
+    probabilities = torch.randn(sum(token_counts), 1, dtype=torch.float64, requires_grad=True)
+
+    padded = module._pad_router_probabilities_for_quantization(
+        probabilities, token_counts, token_counts
+    )
+
+    assert padded is probabilities
+    module.quantization_padding.assert_not_called()
+
+
+def test_router_probability_padding_delegates_non_fp64_to_te():
+    module = TEGroupedMLP.__new__(TEGroupedMLP)
+    probabilities = torch.randn(3, 1, dtype=torch.float32)
+    expected = torch.randn(8, 1, dtype=torch.float32)
+    module.quantization_padding = Mock(return_value=(expected, [4, 4]))
+
+    padded = module._pad_router_probabilities_for_quantization(probabilities, [2, 1], [4, 4])
+
+    assert padded is expected
+    module.quantization_padding.assert_called_once_with(probabilities, [2, 1])
 
 
 def test_make_fused_ops_reuses_grouped_linear_weights_on_meta_device(monkeypatch):
