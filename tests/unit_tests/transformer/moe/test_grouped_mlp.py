@@ -734,6 +734,7 @@ def _make_fused_impl_support_module(
         gated_linear_unit=gated_linear_unit,
         use_fused_weighted_squared_relu=use_fused_weighted_squared_relu,
         moe_apply_probs_on_input=False,
+        moe_router_dtype=None,
     )
     module.activation_func = object()
     module.tp_group = SimpleNamespace(size=lambda: 1)
@@ -762,6 +763,21 @@ def test_is_fused_impl_supported_uses_config_activation_for_swiglu(monkeypatch):
     )
 
     assert module._is_fused_impl_supported() is True
+
+
+def test_is_fused_impl_supported_rejects_fp64_router_probabilities(monkeypatch):
+    fake_te, FakeGroupedLinear = _make_fake_te_namespace()
+    monkeypatch.setattr(experts_module, "te", fake_te)
+    monkeypatch.setattr(experts_module, "HAVE_TE", True)
+    monkeypatch.setattr(experts_module, "is_te_min_version", lambda _: True)
+    _install_fake_te_ops_modules(monkeypatch, fake_te)
+
+    module = _make_fused_impl_support_module(
+        FakeGroupedLinear, activation_func=F.silu, gated_linear_unit=True
+    )
+    module.config.moe_router_dtype = "fp64"
+
+    assert module._is_fused_impl_supported() is False
 
 
 @pytest.mark.parametrize("activation_func_clamp_value", [None, 10.0], ids=("unclamped", "clamped"))

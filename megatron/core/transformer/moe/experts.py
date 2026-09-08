@@ -406,6 +406,8 @@ class TEGroupedMLP(MegatronModule):
             return False  # Selective expert_fc1/moe_act offload is only supported unfused.
         if self.config.moe_apply_probs_on_input:
             return False  # Pre-multiplying probs is not supported
+        if self.config.moe_router_dtype == "fp64":
+            return False  # TE op fuser casts router probabilities to the activation dtype
         if self.config.activation_func_tanh_clamp_scale is not None:
             # TanH clamp is not supported.
             return False
@@ -713,6 +715,8 @@ class TEGroupedMLP(MegatronModule):
         unpadded_tokens_per_expert: list[int],
         padded_tokens_per_expert: list[int],
     ) -> torch.Tensor:
+        if unpadded_tokens_per_expert == padded_tokens_per_expert:
+            return permuted_probs
         if permuted_probs.dtype != torch.float64:
             padded_probs, _ = self.quantization_padding(permuted_probs, unpadded_tokens_per_expert)
             return padded_probs
