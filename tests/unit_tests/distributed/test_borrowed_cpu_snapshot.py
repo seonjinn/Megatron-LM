@@ -101,6 +101,46 @@ class TestBorrowedCPUSnapshot(unittest.TestCase):
         with buffer.borrow_cpu_param_snapshot():
             pass
 
+    def test_first_borrow_creates_reusable_backup(self) -> None:
+        _, buffer = self.make_buffer()
+        self.assertIsNone(buffer.param_data_cpu)
+        with torch.no_grad():
+            buffer.param_data.fill_(31)
+        with buffer.borrow_cpu_param_snapshot() as views:
+            pointer = buffer.param_data_cpu.data_ptr()
+            for view in views.values():
+                self.assertEqual(view.untyped_storage().data_ptr(), pointer)
+                torch.testing.assert_close(view, torch.full_like(view, 31), rtol=0, atol=0)
+        with buffer.borrow_cpu_param_snapshot():
+            self.assertEqual(buffer.param_data_cpu.data_ptr(), pointer)
+
+    def test_offloaded_storage_rejected_without_locking(self) -> None:
+        _, buffer = self.make_buffer()
+        buffer.offload_to_cpu(move_grads=False)
+        torch.cuda.synchronize()
+        with self.assertRaisesRegex(RuntimeError, "resident parameter storage"):
+            with buffer.borrow_cpu_param_snapshot():
+                pass
+        buffer.reload_from_cpu(move_grads=False)
+        torch.cuda.synchronize()
+        with buffer.borrow_cpu_param_snapshot():
+            pass
+
+    def test_nondefault_stream_restore_finishes_before_release(self) -> None:
+        _, buffer = self.make_buffer(grouped=True)
+        stream = torch.cuda.Stream()
+        stream.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(stream), torch.no_grad():
+            buffer.param_data.fill_(37)
+            with buffer.borrow_cpu_param_snapshot() as views:
+                buffer.param_data.fill_(41)
+                for owner, view in views.items():
+                    owner.rowwise_data.copy_(view.flatten(), non_blocking=True)
+                restored = torch.cuda.Event()
+                restored.record(stream)
+        self.assertTrue(restored.query())
+        torch.testing.assert_close(buffer.param_data_cpu, buffer.param_data, rtol=0, atol=0)
+
 
 if __name__ == "__main__":
     unittest.main()
