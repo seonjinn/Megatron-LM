@@ -72,7 +72,7 @@ def test_gpt_mixed_scope_storage_matches_final_recipe(fp8_param: bool, moe: bool
             num_moe_experts=2 if moe else None,
             moe_grouped_gemm=moe,
             moe_shared_expert_intermediate_size=128 if moe else None,
-            moe_router_topk=1,
+            moe_router_topk=2,
             moe_token_dispatcher_type="alltoall",
             add_bias_linear=False,
         )
