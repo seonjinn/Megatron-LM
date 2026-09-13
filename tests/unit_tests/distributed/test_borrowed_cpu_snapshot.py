@@ -139,7 +139,7 @@ class TestBorrowedCPUSnapshot(unittest.TestCase):
                 restored = torch.cuda.Event()
                 restored.record(stream)
         self.assertTrue(restored.query())
-        torch.testing.assert_close(buffer.param_data_cpu, buffer.param_data, rtol=0, atol=0)
+        torch.testing.assert_close(buffer.param_data_cpu, buffer.param_data.cpu(), rtol=0, atol=0)
 
 
 if __name__ == "__main__":
