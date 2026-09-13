@@ -5,10 +5,10 @@ import functools
 import logging
 import math
 import warnings
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from enum import Enum
 from functools import partial
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple
 
 import torch
 from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
@@ -1243,6 +1243,7 @@ class _ParamAndGradBuffer:
         self.grad_data_size = 0
         self.param_data_size = 0
         self.param_data_cpu = None
+        self._cpu_snapshot_borrowed = False
 
         # Finally, map param.data and param.main_grad fields to buffers.
         def _create_bucket(bucket_id, bucket_params, bucket_params_with_extra_main_grads):
@@ -1668,10 +1669,74 @@ class _ParamAndGradBuffer:
         for grad in self.extra_main_grads:
             grad.zero_()
 
+    @contextmanager
+    def borrow_cpu_param_snapshot(self) -> Iterator[Dict[torch.nn.Parameter, torch.Tensor]]:
+        """Borrow fresh CPU views of resident high-precision parameter storage.
+
+        Callers must finish parameter gathers before entry and treat returned
+        views as read-only. Views expire on exit. GPU parameters and gradients
+        are not resized. Quantized representations need a separate snapshot.
+        """
+        if self._cpu_snapshot_borrowed:
+            raise RuntimeError("A CPU parameter snapshot is already borrowed")
+        if self.param_data is None or self.param_data.untyped_storage().nbytes() == 0:
+            raise RuntimeError("CPU snapshots require resident parameter storage")
+        if self.param_data.dtype not in (torch.float32, torch.float16, torch.bfloat16):
+            raise NotImplementedError("CPU snapshots require high-precision parameter storage")
+
+        for param in self.params:
+            if (
+                is_float8tensor(param)
+                or is_mxfp8tensor(param)
+                or is_nvfp4tensor(param)
+                or is_grouped_tensor_with_quantized_storage(param)
+            ):
+                raise NotImplementedError("Quantized parameters need a complete state snapshot")
+            start, end, _ = self.param_index_map[param]
+            live = param.rowwise_data if is_grouped_tensor(param) else param
+            expected = self.param_data[start:end]
+            if (
+                live.dtype != self.param_data.dtype
+                or live.numel() != end - start
+                or not live.is_contiguous()
+                or live.data_ptr() != expected.data_ptr()
+            ):
+                raise RuntimeError("Parameter does not alias its planned DDP storage slice")
+
+        if self.param_data_cpu is None:
+            self.param_data_cpu = torch.empty_like(
+                self.param_data, device="cpu", pin_memory=True
+            )
+        if (
+            self.param_data_cpu.shape != self.param_data.shape
+            or self.param_data_cpu.dtype != self.param_data.dtype
+            or not self.param_data_cpu.is_pinned()
+        ):
+            raise RuntimeError("Existing CPU backup is incompatible with parameter storage")
+
+        self._cpu_snapshot_borrowed = True
+        try:
+            with torch.no_grad():
+                self.param_data_cpu.copy_(self.param_data, non_blocking=True)
+            torch.cuda.synchronize(self.param_data.device)
+            views = {}
+            for param in self.params:
+                start, end, _ = self.param_index_map[param]
+                views[param] = self.param_data_cpu[start:end].view(param.shape)
+            yield views
+        finally:
+            # The CPU allocation cannot be reused while restoration reads it.
+            try:
+                torch.cuda.synchronize(self.param_data.device)
+            finally:
+                self._cpu_snapshot_borrowed = False
+
     def offload_to_cpu(self, move_params: bool = True, move_grads: bool = True) -> None:
         """
         Offload the buffers to CPU.
         """
+        if move_params and self._cpu_snapshot_borrowed:
+            raise RuntimeError("Cannot offload parameters while a CPU snapshot is borrowed")
         if move_grads and self.grad_data is not None and self.grad_data.storage().size() > 0:
             self.grad_data_size = self.grad_data.storage().size()
             self.grad_data.storage().resize_(0)
@@ -1687,6 +1752,8 @@ class _ParamAndGradBuffer:
         """
         Reload the buffers from CPU.
         """
+        if move_params and self._cpu_snapshot_borrowed:
+            raise RuntimeError("Cannot reload parameters while a CPU snapshot is borrowed")
         if (
             move_params
             and self.param_data is not None
