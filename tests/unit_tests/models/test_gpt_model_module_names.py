@@ -32,6 +32,76 @@ def test_gpt_model_propagates_decoder_root_name() -> None:
 
 
 @pytest.mark.parametrize("fp8_param", [False, True])
+def test_hybrid_boundary_experts_keep_bf16_storage(fp8_param: bool) -> None:
+    from transformer_engine.pytorch.tensor.mxfp8_tensor import MXFP8Tensor
+    from megatron.core.models.hybrid.hybrid_layer_specs import hybrid_stack_spec
+    from megatron.core.models.hybrid.hybrid_model import HybridModel
+    from megatron.core.quantization.quant_config import GlobMatcher, RecipeConfig
+    from megatron.core.tensor_parallel.random import model_parallel_cuda_manual_seed
+
+    pattern = "EEEM*EEEEEEE"
+    selected = {2, 5}
+    recipe = RecipeConfig(
+        matchers=[
+            *[
+                GlobMatcher(f"decoder.layers.{i}.mlp.experts.linear_fc*", "mxfp8")
+                for i in sorted(selected)
+            ],
+            GlobMatcher("*", "bf16"),
+        ],
+        config_dict={
+            "bf16": {
+                "transformer_engine_config_type": "TEQuantizationParams",
+                "training_recipe": {"override_quantized_autocast": True},
+            },
+            "mxfp8": {
+                "transformer_engine_config_type": "TEQuantizationParams",
+                "training_recipe": {
+                    "fp8_quantization_recipe": "mxfp8",
+                    "fp8_param": fp8_param,
+                    "override_quantized_autocast": True,
+                },
+            },
+        },
+    )
+    Utils.initialize_model_parallel(1, 1)
+    try:
+        model_parallel_cuda_manual_seed(123)
+        config = TransformerConfig(
+            num_layers=len(pattern), hidden_size=256, num_attention_heads=4,
+            ffn_hidden_size=512, params_dtype=torch.bfloat16, bf16=True,
+            fp8="e4m3", fp8_recipe="mxfp8", fp8_param=fp8_param,
+            quant_recipe=recipe, num_moe_experts=2, moe_grouped_gemm=True,
+            moe_shared_expert_intermediate_size=256, moe_router_topk=2,
+            moe_token_dispatcher_type="alltoall", add_bias_linear=False,
+        )
+        model = HybridModel(
+            config=config, hybrid_stack_spec=hybrid_stack_spec,
+            vocab_size=128, max_sequence_length=16,
+            hybrid_layer_pattern=pattern, position_embedding_type="none",
+        )
+        for index, kind in enumerate(pattern):
+            layer = model.decoder.layers[index]
+            if kind == "E":
+                for projection in (layer.mlp.experts.linear_fc1, layer.mlp.experts.linear_fc2):
+                    for expert in range(2):
+                        weight = getattr(projection, f"weight{expert}")
+                        assert isinstance(weight, MXFP8Tensor) == (fp8_param and index in selected)
+                        if not (fp8_param and index in selected):
+                            assert weight.dtype == torch.bfloat16
+                projections = (layer.mlp.shared_experts.linear_fc1, layer.mlp.shared_experts.linear_fc2)
+            elif kind == "M":
+                projections = (layer.mixer.in_proj, layer.mixer.out_proj)
+            else:
+                projections = (layer.self_attention.linear_qkv, layer.self_attention.linear_proj)
+            for projection in projections:
+                assert not isinstance(projection.weight, MXFP8Tensor)
+                assert projection.weight.dtype == torch.bfloat16
+        del model
+    finally:
+        Utils.destroy_model_parallel()
+
+@pytest.mark.parametrize("fp8_param", [False, True])
 @pytest.mark.parametrize("moe", [False, True])
 def test_gpt_mixed_scope_storage_matches_final_recipe(fp8_param: bool, moe: bool) -> None:
     from transformer_engine.pytorch.tensor.mxfp8_tensor import MXFP8Tensor
