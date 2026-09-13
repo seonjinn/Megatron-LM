@@ -2,6 +2,7 @@
 
 import tempfile
 import unittest
+import os
 
 import torch
 import torch.distributed as dist
@@ -14,6 +15,7 @@ from megatron.core.process_groups_config import ProcessGroupCollection
 class TestBorrowedCPUSnapshot(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
+        os.environ["NVTE_GROUPED_LINEAR_SINGLE_PARAM"] = "1"
         cls.directory = tempfile.TemporaryDirectory()
         dist.init_process_group("nccl", init_method=f"file://{cls.directory.name}/init", rank=0, world_size=1)
 
@@ -28,6 +30,7 @@ class TestBorrowedCPUSnapshot(unittest.TestCase):
 
             model = GroupedLinear(2, 128, 256, bias=False, single_grouped_weight=True,
                                   params_dtype=torch.bfloat16, device="cuda")
+            self.assertIsNotNone(getattr(model.weight, "rowwise_data", None))
         else:
             model = torch.nn.Linear(128, 256, bias=False, dtype=torch.bfloat16, device="cuda")
         pairs = list(model.named_parameters())
