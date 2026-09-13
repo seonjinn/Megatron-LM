@@ -69,6 +69,7 @@ def test_hybrid_boundary_experts_keep_bf16_storage(fp8_param: bool) -> None:
         model_parallel_cuda_manual_seed(123)
         config = TransformerConfig(
             num_layers=len(pattern), hidden_size=256, num_attention_heads=4,
+            mamba_num_heads=16,
             ffn_hidden_size=512, params_dtype=torch.bfloat16, bf16=True,
             fp8="e4m3", fp8_recipe="mxfp8", fp8_param=fp8_param,
             quant_recipe=recipe, num_moe_experts=2, moe_grouped_gemm=True,
